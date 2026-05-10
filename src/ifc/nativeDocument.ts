@@ -1,0 +1,805 @@
+import { createMinimalIfcProject } from './builder';
+
+export interface NativeIfcEntity {
+  id: number;
+  type: string;
+  args: string[];
+  globalId: string;
+  name: string;
+  description: string;
+}
+
+export interface NativeIfcRelationship {
+  id: number;
+  type: string;
+  family: string;
+  sourceIds: number[];
+  targetIds: number[];
+}
+
+export interface NativeIfcTreeNode {
+  id: number;
+  relation: string;
+  children: NativeIfcTreeNode[];
+}
+
+export interface NativeIfcPropertySet {
+  id: number;
+  kind: string;
+  name: string;
+  values: { id: number; name: string; value: string; type: string }[];
+}
+
+export interface NativeIfcDocument {
+  fileName: string;
+  schema: string;
+  headerText: string;
+  entities: NativeIfcEntity[];
+  entityById: Map<number, NativeIfcEntity>;
+  entitiesByType: Map<string, NativeIfcEntity[]>;
+  outgoingRefs: Map<number, number[]>;
+  incomingRefs: Map<number, NativeIfcEntity[]>;
+  relationships: NativeIfcRelationship[];
+  relationshipsByEntity: Map<number, NativeIfcRelationship[]>;
+  propertySetsByEntity: Map<number, NativeIfcPropertySet[]>;
+  resourcesByEntity: Map<number, string[]>;
+  units: string[];
+  spatialRoots: NativeIfcTreeNode[];
+  diagnostics: string[];
+}
+
+const RELATIONSHIP_FAMILIES: Record<string, string> = {
+  IFCRELAGGREGATES: 'aggregates',
+  IFCRELNESTS: 'nests',
+  IFCRELCONTAINEDINSPATIALSTRUCTURE: 'contains',
+  IFCRELREFERENCEDINSPATIALSTRUCTURE: 'references',
+  IFCRELDEFINESBYPROPERTIES: 'defines properties',
+  IFCRELDEFINESBYTYPE: 'defines type',
+  IFCRELASSOCIATESMATERIAL: 'material',
+  IFCRELASSOCIATESCLASSIFICATION: 'classification',
+  IFCRELASSOCIATESDOCUMENT: 'document',
+  IFCRELASSIGNSTOGROUP: 'group',
+};
+
+const QUANTITY_TYPES = new Set([
+  'IFCQUANTITYLENGTH',
+  'IFCQUANTITYAREA',
+  'IFCQUANTITYVOLUME',
+  'IFCQUANTITYCOUNT',
+  'IFCQUANTITYWEIGHT',
+  'IFCQUANTITYTIME',
+]);
+
+export function createNativeSampleDocument() {
+  return parseNativeIfcText(createMinimalIfcProject(), 'IFCnative Builder Sample.ifc');
+}
+
+export function parseNativeIfcText(text: string, fileName = 'Untitled.ifc'): NativeIfcDocument {
+  const diagnostics: string[] = [];
+  const headerText = readHeader(text);
+  const schema = readSchema(headerText) ?? 'UNKNOWN';
+  const entities = readEntities(text, diagnostics);
+  const entityById = new Map(entities.map((entity) => [entity.id, entity]));
+  const entitiesByType = new Map<string, NativeIfcEntity[]>();
+  const outgoingRefs = new Map<number, number[]>();
+  const incomingRefs = new Map<number, NativeIfcEntity[]>();
+
+  for (const entity of entities) {
+    entitiesByType.set(entity.type, [...(entitiesByType.get(entity.type) ?? []), entity]);
+    const refs = unique(entity.args.flatMap(readReferences));
+    outgoingRefs.set(entity.id, refs);
+    for (const ref of refs) {
+      incomingRefs.set(ref, [...(incomingRefs.get(ref) ?? []), entity]);
+    }
+  }
+
+  const relationships = readRelationships(entities);
+  const relationshipsByEntity = new Map<number, NativeIfcRelationship[]>();
+  for (const relationship of relationships) {
+    for (const id of unique([...relationship.sourceIds, ...relationship.targetIds])) {
+      relationshipsByEntity.set(id, [...(relationshipsByEntity.get(id) ?? []), relationship]);
+    }
+  }
+
+  const propertySetsByEntity = readPropertySets(entities, entityById);
+  const resourcesByEntity = readResources(entities, entityById);
+  const units = readUnits(entities, entityById);
+  const spatialRoots = buildSpatialRoots(entities, entityById, relationships);
+
+  diagnostics.push(`Loaded ${entities.length.toLocaleString()} STEP entities.`);
+  diagnostics.push(`Detected schema: ${schema}.`);
+  diagnostics.push(`Indexed ${relationships.length.toLocaleString()} relationships.`);
+
+  return {
+    diagnostics,
+    entities,
+    entitiesByType,
+    entityById,
+    fileName,
+    headerText,
+    incomingRefs,
+    outgoingRefs,
+    propertySetsByEntity,
+    relationships,
+    relationshipsByEntity,
+    resourcesByEntity,
+    schema,
+    spatialRoots,
+    units,
+  };
+}
+
+export function serializeNativeIfcDocument(document: NativeIfcDocument) {
+  return [
+    'ISO-10303-21;',
+    document.headerText.trim(),
+    'DATA;',
+    ...document.entities
+      .slice()
+      .sort((left, right) => left.id - right.id)
+      .map((entity) => `#${entity.id}= ${entity.type}(${entity.args.join(',')});`),
+    'ENDSEC;',
+    'END-ISO-10303-21;',
+    '',
+  ].join('\n');
+}
+
+export function updateNativeEntity(
+  document: NativeIfcDocument,
+  entityId: number,
+  updates: { type?: string; name?: string; description?: string; args?: string[] },
+) {
+  const next = cloneDocumentEntities(document);
+  const entity = next.find((item) => item.id === entityId);
+  if (!entity) {
+    return document;
+  }
+
+  if (updates.type) {
+    entity.type = normalizeType(updates.type);
+  }
+  if (updates.args) {
+    entity.args = updates.args;
+  }
+  if (updates.name != null) {
+    setArg(entity.args, 2, quoteOrDollar(updates.name));
+  }
+  if (updates.description != null) {
+    setArg(entity.args, 3, quoteOrDollar(updates.description));
+  }
+
+  return parseNativeIfcText(serializeEntities(document, next), document.fileName);
+}
+
+export function addNativeElement(
+  document: NativeIfcDocument,
+  parentId: number | undefined,
+  type: string,
+  name: string,
+) {
+  const next = cloneDocumentEntities(document);
+  const id = nextEntityId(next);
+  next.push({
+    args: [quote(createIfcGuid(id)), '$', quote(name), '$', '$', '$', '$', '$'],
+    description: '',
+    globalId: createIfcGuid(id),
+    id,
+    name,
+    type: normalizeType(type),
+  });
+
+  if (parentId && document.entityById.has(parentId)) {
+    const relId = nextEntityId(next);
+    next.push({
+      args: [quote(createIfcGuid(relId)), '$', '$', '$', `#${parentId}`, `(#${id})`],
+      description: '',
+      globalId: createIfcGuid(relId),
+      id: relId,
+      name: '',
+      type: 'IFCRELAGGREGATES',
+    });
+  }
+
+  return parseNativeIfcText(serializeEntities(document, next), document.fileName);
+}
+
+export function addNativeRelationship(
+  document: NativeIfcDocument,
+  type: string,
+  sourceId: number,
+  targetId: number,
+) {
+  const relationshipType = normalizeType(type);
+  const next = cloneDocumentEntities(document);
+  const id = nextEntityId(next);
+  const source = `#${sourceId}`;
+  const target = `(#${targetId})`;
+  const args =
+    relationshipType === 'IFCRELCONTAINEDINSPATIALSTRUCTURE'
+      ? [quote(createIfcGuid(id)), '$', '$', '$', target, source]
+      : [quote(createIfcGuid(id)), '$', '$', '$', source, target];
+  next.push({
+    args,
+    description: '',
+    globalId: createIfcGuid(id),
+    id,
+    name: '',
+    type: relationshipType,
+  });
+  return parseNativeIfcText(serializeEntities(document, next), document.fileName);
+}
+
+export function addNativePropertySet(
+  document: NativeIfcDocument,
+  entityId: number,
+  psetName: string,
+  propertyName: string,
+  propertyValue: string,
+  propertyValueType = 'IFCLABEL',
+) {
+  const next = cloneDocumentEntities(document);
+  const propertyId = nextEntityId(next);
+  next.push({
+    args: [quote(propertyName), '$', formatPropertyValue(propertyValueType, propertyValue), '$'],
+    description: '',
+    globalId: '',
+    id: propertyId,
+    name: propertyName,
+    type: 'IFCPROPERTYSINGLEVALUE',
+  });
+  const psetId = nextEntityId(next);
+  next.push({
+    args: [quote(createIfcGuid(psetId)), '$', quote(psetName), '$', `(#${propertyId})`],
+    description: '',
+    globalId: createIfcGuid(psetId),
+    id: psetId,
+    name: psetName,
+    type: 'IFCPROPERTYSET',
+  });
+  const relId = nextEntityId(next);
+  next.push({
+    args: [quote(createIfcGuid(relId)), '$', '$', '$', `(#${entityId})`, `#${psetId}`],
+    description: '',
+    globalId: createIfcGuid(relId),
+    id: relId,
+    name: '',
+    type: 'IFCRELDEFINESBYPROPERTIES',
+  });
+  return parseNativeIfcText(serializeEntities(document, next), document.fileName);
+}
+
+export function addNativeQuantitySet(
+  document: NativeIfcDocument,
+  entityId: number,
+  qtoName: string,
+  quantityName: string,
+  quantityValue: string,
+  quantityType = 'IFCQUANTITYLENGTH',
+) {
+  const next = cloneDocumentEntities(document);
+  const normalizedQuantityType = normalizeQuantityType(quantityType);
+  const quantityId = nextEntityId(next);
+  next.push({
+    args: [quote(quantityName), '$', '$', formatStepNumber(quantityValue), '$'],
+    description: '',
+    globalId: '',
+    id: quantityId,
+    name: quantityName,
+    type: normalizedQuantityType,
+  });
+  const qtoId = nextEntityId(next);
+  next.push({
+    args: [quote(createIfcGuid(qtoId)), '$', quote(qtoName), '$', 'IFCnative', `(#${quantityId})`],
+    description: '',
+    globalId: createIfcGuid(qtoId),
+    id: qtoId,
+    name: qtoName,
+    type: 'IFCELEMENTQUANTITY',
+  });
+  const relId = nextEntityId(next);
+  next.push({
+    args: [quote(createIfcGuid(relId)), '$', '$', '$', `(#${entityId})`, `#${qtoId}`],
+    description: '',
+    globalId: createIfcGuid(relId),
+    id: relId,
+    name: '',
+    type: 'IFCRELDEFINESBYPROPERTIES',
+  });
+  return parseNativeIfcText(serializeEntities(document, next), document.fileName);
+}
+
+export function updateNativePropertyValue(
+  document: NativeIfcDocument,
+  propertyId: number,
+  updates: { name?: string; value?: string; valueType?: string },
+) {
+  const next = cloneDocumentEntities(document);
+  const property = next.find((entity) => entity.id === propertyId);
+  if (!property || (property.type !== 'IFCPROPERTYSINGLEVALUE' && !isQuantityType(property.type))) {
+    return document;
+  }
+
+  if (updates.name != null) {
+    setArg(property.args, 0, quoteOrDollar(updates.name));
+  }
+  if (updates.value != null) {
+    if (isQuantityType(property.type)) {
+      property.type = normalizeQuantityType(updates.valueType ?? property.type);
+      setArg(property.args, 3, formatStepNumber(updates.value));
+    } else {
+      setArg(property.args, 2, formatPropertyValue(updates.valueType ?? readPropertyValueType(property.args[2]), updates.value));
+    }
+  }
+
+  return parseNativeIfcText(serializeEntities(document, next), document.fileName);
+}
+
+export function addNativeMaterial(
+  document: NativeIfcDocument,
+  entityId: number,
+  materialName: string,
+  materialCategory = '',
+) {
+  const next = cloneDocumentEntities(document);
+  const materialId = nextEntityId(next);
+  next.push({
+    args: [quote(materialName), '$', quoteOrDollar(materialCategory)],
+    description: '',
+    globalId: '',
+    id: materialId,
+    name: materialName,
+    type: 'IFCMATERIAL',
+  });
+  return addNativeAssociation(document, next, entityId, 'IFCRELASSOCIATESMATERIAL', 'Material', materialId);
+}
+
+export function addNativeClassification(
+  document: NativeIfcDocument,
+  entityId: number,
+  identification: string,
+  name: string,
+  location: string,
+) {
+  const next = cloneDocumentEntities(document);
+  const classificationId = nextEntityId(next);
+  next.push({
+    args: [quoteOrDollar(location), quoteOrDollar(identification), quoteOrDollar(name), '$', '$', '$'],
+    description: '',
+    globalId: '',
+    id: classificationId,
+    name,
+    type: 'IFCCLASSIFICATIONREFERENCE',
+  });
+  return addNativeAssociation(document, next, entityId, 'IFCRELASSOCIATESCLASSIFICATION', 'Classification', classificationId);
+}
+
+export function addNativeDocumentReference(
+  document: NativeIfcDocument,
+  entityId: number,
+  identification: string,
+  name: string,
+  location: string,
+) {
+  const next = cloneDocumentEntities(document);
+  const documentId = nextEntityId(next);
+  next.push({
+    args: [quoteOrDollar(location), quoteOrDollar(identification), quoteOrDollar(name), '$', '$'],
+    description: '',
+    globalId: '',
+    id: documentId,
+    name,
+    type: 'IFCDOCUMENTREFERENCE',
+  });
+  return addNativeAssociation(document, next, entityId, 'IFCRELASSOCIATESDOCUMENT', 'Document', documentId);
+}
+
+export function updateNativeRelationship(
+  document: NativeIfcDocument,
+  relationshipId: number,
+  updates: { type?: string; sourceId?: number; targetId?: number },
+) {
+  const next = cloneDocumentEntities(document);
+  const relationship = next.find((entity) => entity.id === relationshipId);
+  if (!relationship || !relationship.type.startsWith('IFCREL')) {
+    return document;
+  }
+
+  const currentEnds = relationshipEnds(relationship);
+  const relationshipType = normalizeType(updates.type ?? relationship.type);
+  const sourceId = updates.sourceId && document.entityById.has(updates.sourceId)
+    ? updates.sourceId
+    : currentEnds[0][0];
+  const targetId = updates.targetId && document.entityById.has(updates.targetId)
+    ? updates.targetId
+    : currentEnds[1][0];
+
+  if (!sourceId || !targetId) {
+    return document;
+  }
+
+  relationship.type = relationshipType;
+  setRelationshipArgs(relationship, relationshipType, sourceId, targetId);
+
+  return parseNativeIfcText(serializeEntities(document, next), document.fileName);
+}
+
+export function addNativeSiUnit(document: NativeIfcDocument, unitType: string, prefix: string, name: string) {
+  const next = cloneDocumentEntities(document);
+  const unitId = nextEntityId(next);
+  next.push({
+    args: ['*', enumValue(unitType), prefix === '$' ? '$' : enumValue(prefix), enumValue(name)],
+    description: '',
+    globalId: '',
+    id: unitId,
+    name,
+    type: 'IFCSIUNIT',
+  });
+  const assignment = next.find((entity) => entity.type === 'IFCUNITASSIGNMENT');
+  if (assignment) {
+    const refs = readReferences(assignment.args[0]);
+    refs.push(unitId);
+    assignment.args[0] = `(${unique(refs).map((id) => `#${id}`).join(',')})`;
+  }
+  return parseNativeIfcText(serializeEntities(document, next), document.fileName);
+}
+
+function addNativeAssociation(
+  document: NativeIfcDocument,
+  entities: NativeIfcEntity[],
+  entityId: number,
+  relationshipType: string,
+  relationshipName: string,
+  resourceId: number,
+) {
+  const relId = nextEntityId(entities);
+  entities.push({
+    args: [quote(createIfcGuid(relId)), '$', quote(relationshipName), '$', `(#${entityId})`, `#${resourceId}`],
+    description: '',
+    globalId: createIfcGuid(relId),
+    id: relId,
+    name: relationshipName,
+    type: relationshipType,
+  });
+  return parseNativeIfcText(serializeEntities(document, entities), document.fileName);
+}
+
+function readHeader(text: string) {
+  const match = text.match(/HEADER;([\s\S]*?)ENDSEC;/i);
+  return match ? `HEADER;${match[1]}ENDSEC;` : "HEADER;\nFILE_SCHEMA(('UNKNOWN'));\nENDSEC;";
+}
+
+function readSchema(headerText: string) {
+  return headerText.match(/FILE_SCHEMA\s*\(\s*\(\s*'([^']+)'/i)?.[1];
+}
+
+function readEntities(text: string, diagnostics: string[]) {
+  const entities: NativeIfcEntity[] = [];
+  const regex = /#(\d+)\s*=\s*([A-Z0-9_]+)\s*\(([\s\S]*?)\);/gi;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text))) {
+    const id = Number(match[1]);
+    const type = match[2].toUpperCase();
+    const args = splitTopLevel(match[3]);
+    entities.push({
+      args,
+      description: readEntityDescription(type, args),
+      globalId: unquote(args[0]) ?? '',
+      id,
+      name: readEntityName(type, args),
+      type,
+    });
+  }
+  if (entities.length === 0) {
+    diagnostics.push('No STEP entity lines found.');
+  }
+  return entities.sort((left, right) => left.id - right.id);
+}
+
+function readEntityName(type: string, args: string[]) {
+  if (type === 'IFCMATERIAL') {
+    return unquote(args[0]) ?? '';
+  }
+  if (type === 'IFCSIUNIT') {
+    return compactValue([args[1], args[2], args[3]].filter(Boolean).join(' '));
+  }
+  return unquote(args[2]) ?? '';
+}
+
+function readEntityDescription(type: string, args: string[]) {
+  if (type === 'IFCMATERIAL') {
+    return unquote(args[1]) ?? '';
+  }
+  return unquote(args[3]) ?? '';
+}
+
+function readRelationships(entities: NativeIfcEntity[]) {
+  return entities
+    .filter((entity) => entity.type.startsWith('IFCREL'))
+    .map((entity) => {
+      const [sourceIds, targetIds] = relationshipEnds(entity);
+      return {
+        family: RELATIONSHIP_FAMILIES[entity.type] ?? 'relationship',
+        id: entity.id,
+        sourceIds,
+        targetIds,
+        type: entity.type,
+      };
+    });
+}
+
+function relationshipEnds(entity: NativeIfcEntity): [number[], number[]] {
+  if (entity.type === 'IFCRELAGGREGATES' || entity.type === 'IFCRELNESTS') {
+    return [readReferences(entity.args[4]), readReferences(entity.args[5])];
+  }
+  if (entity.type === 'IFCRELCONTAINEDINSPATIALSTRUCTURE' || entity.type === 'IFCRELREFERENCEDINSPATIALSTRUCTURE') {
+    return [readReferences(entity.args[5]), readReferences(entity.args[4])];
+  }
+  if (entity.type.startsWith('IFCRELDEFINES')) {
+    return [readReferences(entity.args[4]), readReferences(entity.args[5])];
+  }
+  if (entity.type.startsWith('IFCRELASSOCIATES') || entity.type.startsWith('IFCRELASSIGNS')) {
+    return [readReferences(entity.args[4]), entity.args.slice(5).flatMap(readReferences)];
+  }
+  const refs = unique(entity.args.flatMap(readReferences));
+  return refs.length <= 1 ? [refs, []] : [[refs[0]], refs.slice(1)];
+}
+
+function readPropertySets(entities: NativeIfcEntity[], entityById: Map<number, NativeIfcEntity>) {
+  const result = new Map<number, NativeIfcPropertySet[]>();
+  for (const rel of entities.filter((entity) => entity.type === 'IFCRELDEFINESBYPROPERTIES')) {
+    const objectIds = readReferences(rel.args[4]);
+    const definitionId = readReferences(rel.args[5])[0];
+    const definition = entityById.get(definitionId);
+    const set = definition ? buildPropertySet(definition, entityById) : undefined;
+    if (!set) {
+      continue;
+    }
+    for (const objectId of objectIds) {
+      result.set(objectId, [...(result.get(objectId) ?? []), set]);
+    }
+  }
+  return result;
+}
+
+function buildPropertySet(entity: NativeIfcEntity, entityById: Map<number, NativeIfcEntity>): NativeIfcPropertySet | undefined {
+  if (entity.type !== 'IFCPROPERTYSET' && entity.type !== 'IFCELEMENTQUANTITY') {
+    return undefined;
+  }
+  const refIndex = entity.type === 'IFCELEMENTQUANTITY' ? 5 : 4;
+  return {
+    id: entity.id,
+    kind: entity.type === 'IFCELEMENTQUANTITY' ? 'Qto' : 'Pset',
+    name: entity.name || `#${entity.id}`,
+    values: readReferences(entity.args[refIndex]).flatMap((id) => {
+      const value = entityById.get(id);
+      if (!value) {
+        return [];
+      }
+      return [
+        {
+          id,
+          name: unquote(value.args[0]) ?? `#${id}`,
+          type: value.type,
+          value: compactValue(value.args[2] ?? value.args[3] ?? ''),
+        },
+      ];
+    }),
+  };
+}
+
+function readResources(entities: NativeIfcEntity[], entityById: Map<number, NativeIfcEntity>) {
+  const result = new Map<number, string[]>();
+  for (const rel of entities.filter((entity) => entity.type.startsWith('IFCRELASSOCIATES'))) {
+    const objectIds = readReferences(rel.args[4]);
+    const resources = rel.args.slice(5).flatMap(readReferences).map((id) => {
+      const resource = entityById.get(id);
+      return resource ? `${resource.type} #${id} ${resource.name || compactValue(resource.args.join(','))}` : `#${id}`;
+    });
+    for (const objectId of objectIds) {
+      result.set(objectId, [...(result.get(objectId) ?? []), ...resources]);
+    }
+  }
+  return result;
+}
+
+function readUnits(entities: NativeIfcEntity[], entityById: Map<number, NativeIfcEntity>) {
+  return entities
+    .filter((entity) => entity.type === 'IFCUNITASSIGNMENT')
+    .flatMap((assignment) => readReferences(assignment.args.join(',')).map((id) => entityById.get(id)))
+    .filter((unit): unit is NativeIfcEntity => Boolean(unit))
+    .map((unit) => `#${unit.id} ${unit.type}: ${unit.args.map(compactValue).join(' ')}`);
+}
+
+function buildSpatialRoots(
+  entities: NativeIfcEntity[],
+  entityById: Map<number, NativeIfcEntity>,
+  relationships: NativeIfcRelationship[],
+) {
+  const childrenByParent = new Map<number, { id: number; relation: string }[]>();
+  for (const rel of relationships.filter((item) => item.type === 'IFCRELAGGREGATES' || item.type === 'IFCRELCONTAINEDINSPATIALSTRUCTURE')) {
+    for (const source of rel.sourceIds) {
+      for (const target of rel.targetIds) {
+        childrenByParent.set(source, [...(childrenByParent.get(source) ?? []), { id: target, relation: rel.family }]);
+      }
+    }
+  }
+  const childIds = new Set([...childrenByParent.values()].flat().map((item) => item.id));
+  const roots = entities.filter((entity) => entity.type === 'IFCPROJECT' || (!childIds.has(entity.id) && isSpatial(entity.type)));
+  return roots.slice(0, 8).map((entity) => buildTreeNode(entity.id, entityById, childrenByParent, 'root'));
+}
+
+function buildTreeNode(
+  id: number,
+  entityById: Map<number, NativeIfcEntity>,
+  childrenByParent: Map<number, { id: number; relation: string }[]>,
+  relation: string,
+  visited = new Set<number>(),
+): NativeIfcTreeNode {
+  const nextVisited = new Set(visited).add(id);
+  return {
+    children: (childrenByParent.get(id) ?? [])
+      .filter((child) => entityById.has(child.id) && !nextVisited.has(child.id))
+      .map((child) => buildTreeNode(child.id, entityById, childrenByParent, child.relation, nextVisited)),
+    id,
+    relation,
+  };
+}
+
+export function splitTopLevel(value: string) {
+  const parts: string[] = [];
+  let current = '';
+  let depth = 0;
+  let quoted = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    current += char;
+    if (char === "'") {
+      if (value[index + 1] === "'") {
+        current += value[index + 1];
+        index += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (!quoted && char === '(') {
+      depth += 1;
+    } else if (!quoted && char === ')') {
+      depth = Math.max(0, depth - 1);
+    } else if (!quoted && depth === 0 && char === ',') {
+      parts.push(current.slice(0, -1).trim());
+      current = '';
+    }
+  }
+  if (current.trim()) {
+    parts.push(current.trim());
+  }
+  return parts;
+}
+
+export function readReferences(value = '') {
+  return [...value.matchAll(/#(\d+)/g)].map((match) => Number(match[1]));
+}
+
+export function unquote(value = '') {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("'") || !trimmed.endsWith("'")) {
+    return undefined;
+  }
+  return trimmed.slice(1, -1).replace(/''/g, "'");
+}
+
+export function quote(value: string) {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+function quoteOrDollar(value: string) {
+  return value.trim() ? quote(value.trim()) : '$';
+}
+
+function setArg(args: string[], index: number, value: string) {
+  while (args.length <= index) {
+    args.push('$');
+  }
+  args[index] = value;
+}
+
+function cloneDocumentEntities(document: NativeIfcDocument) {
+  return document.entities.map((entity) => ({
+    ...entity,
+    args: [...entity.args],
+  }));
+}
+
+function serializeEntities(document: NativeIfcDocument, entities: NativeIfcEntity[]) {
+  return [
+    'ISO-10303-21;',
+    document.headerText.trim(),
+    'DATA;',
+    ...entities
+      .slice()
+      .sort((left, right) => left.id - right.id)
+      .map((entity) => `#${entity.id}= ${entity.type}(${entity.args.join(',')});`),
+    'ENDSEC;',
+    'END-ISO-10303-21;',
+    '',
+  ].join('\n');
+}
+
+function nextEntityId(entities: NativeIfcEntity[]) {
+  return Math.max(0, ...entities.map((entity) => entity.id)) + 1;
+}
+
+function normalizeType(type: string) {
+  const normalized = type.trim().toUpperCase().replace(/[^A-Z0-9_]/g, '');
+  return normalized.startsWith('IFC') ? normalized : `IFC${normalized || 'BUILDINGELEMENTPROXY'}`;
+}
+
+function enumValue(value: string) {
+  const trimmed = value.trim().replace(/^\./, '').replace(/\.$/, '').toUpperCase();
+  return `.${trimmed}.`;
+}
+
+function formatPropertyValue(type: string, value: string) {
+  const normalized = normalizeType(type || 'IFCLABEL');
+  const trimmed = value.trim();
+  if (normalized === 'IFCBOOLEAN') {
+    return `IFCBOOLEAN(.${trimmed.toUpperCase() === 'FALSE' ? 'F' : 'T'}.)`;
+  }
+  if (normalized === 'IFCREAL' || normalized === 'IFCINTEGER') {
+    return `${normalized}(${Number(trimmed) || 0})`;
+  }
+  return `${normalized}(${quote(trimmed)})`;
+}
+
+function readPropertyValueType(value = '') {
+  return value.trim().match(/^([A-Z0-9_]+)\(/i)?.[1] ?? 'IFCLABEL';
+}
+
+function normalizeQuantityType(type: string) {
+  const normalized = normalizeType(type || 'IFCQUANTITYLENGTH');
+  return QUANTITY_TYPES.has(normalized) ? normalized : 'IFCQUANTITYLENGTH';
+}
+
+function isQuantityType(type: string) {
+  return QUANTITY_TYPES.has(type);
+}
+
+function formatStepNumber(value: string) {
+  const numeric = Number(value.trim().replace(',', '.'));
+  return Number.isFinite(numeric) ? String(numeric) : '0';
+}
+
+function setRelationshipArgs(entity: NativeIfcEntity, type: string, sourceId: number, targetId: number) {
+  setArg(entity.args, 0, entity.args[0] || quote(createIfcGuid(entity.id)));
+  setArg(entity.args, 1, entity.args[1] || '$');
+  setArg(entity.args, 2, entity.args[2] || '$');
+  setArg(entity.args, 3, entity.args[3] || '$');
+
+  if (type === 'IFCRELCONTAINEDINSPATIALSTRUCTURE' || type === 'IFCRELREFERENCEDINSPATIALSTRUCTURE') {
+    setArg(entity.args, 4, `(#${targetId})`);
+    setArg(entity.args, 5, `#${sourceId}`);
+    return;
+  }
+
+  setArg(entity.args, 4, type.startsWith('IFCRELASSOCIATES') || type.startsWith('IFCRELASSIGNS') || type.startsWith('IFCRELDEFINES')
+    ? `(#${sourceId})`
+    : `#${sourceId}`);
+  setArg(entity.args, 5, type.startsWith('IFCRELASSOCIATES') || type.startsWith('IFCRELASSIGNS')
+    ? `#${targetId}`
+    : `(#${targetId})`);
+}
+
+function createIfcGuid(seed: number) {
+  return `0IFCnative${String(seed).padStart(12, '0')}`.slice(0, 22);
+}
+
+function unique(values: number[]) {
+  return [...new Set(values.filter((value) => Number.isFinite(value) && value > 0))];
+}
+
+function isSpatial(type: string) {
+  return ['IFCSITE', 'IFCBUILDING', 'IFCBUILDINGSTOREY', 'IFCSPACE', 'IFCFACILITY'].includes(type);
+}
+
+function compactValue(value: string) {
+  return value.replace(/\s+/g, ' ').slice(0, 160) || '-';
+}

@@ -5,13 +5,11 @@ node_modules/
 bin/
 obj/
 
-# Expo
-.expo/
+# builds
 dist/
 release/
 native-release/
 web-build/
-expo-env.d.ts
 
 # Native
 .kotlin/
@@ -22,14 +20,10 @@ expo-env.d.ts
 *.key
 *.mobileprovision
 
-# Metro
-.metro-health-check*
-
 # debug
 npm-debug.*
 yarn-debug.*
 yarn-error.*
-.expo-web*.log
 
 # macOS
 .DS_Store

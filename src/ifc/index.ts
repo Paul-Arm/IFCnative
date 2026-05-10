@@ -2,6 +2,7 @@ export * from './builder';
 export * from './coverage';
 export * from './geometryIndex';
 export * from './graphIndex';
+export * from './nativeDocument';
 export * from './modelSession';
 export * from './preflight';
 export * from './propertyIndex';

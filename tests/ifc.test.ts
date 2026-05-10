@@ -5,6 +5,21 @@ import * as WebIFC from 'web-ifc';
 
 import { createMinimalIfcProject } from '../src/ifc/builder';
 import { buildGraphIndex, summarizeLine } from '../src/ifc/graphIndex';
+import {
+  addNativeElement,
+  addNativeClassification,
+  addNativeDocumentReference,
+  addNativeMaterial,
+  addNativePropertySet,
+  addNativeQuantitySet,
+  addNativeRelationship,
+  addNativeSiUnit,
+  createNativeSampleDocument,
+  parseNativeIfcText,
+  serializeNativeIfcDocument,
+  updateNativePropertyValue,
+  updateNativeRelationship,
+} from '../src/ifc/nativeDocument';
 import { preflightIfcText } from '../src/ifc/preflight';
 import { buildPropertyIndex } from '../src/ifc/propertyIndex';
 import type { IfcEntitySummary } from '../src/ifc/types';
@@ -59,6 +74,75 @@ test('web-ifc opens builder scaffold and graph indexes spatial hierarchy', async
   assert.ok(api.SaveModel(modelID).byteLength > 0);
 
   api.CloseModel(modelID);
+});
+
+test('native document edits keep indexes live', () => {
+  const sample = createNativeSampleDocument();
+  const storey = sample.entities.find((entity) => entity.type === 'IFCBUILDINGSTOREY');
+  assert.ok(storey);
+
+  const withElement = addNativeElement(sample, storey.id, 'IFCWALL', 'RN Wall');
+  const wall = withElement.entities.find((entity) => entity.type === 'IFCWALL' && entity.name === 'RN Wall');
+  assert.ok(wall);
+  assert.ok(withElement.relationshipsByEntity.get(wall.id)?.some((relationship) => relationship.type === 'IFCRELAGGREGATES'));
+
+  const withPset = addNativePropertySet(withElement, wall.id, 'Pset_RN', 'Status', 'Live');
+  assert.equal(withPset.propertySetsByEntity.get(wall.id)?.[0].values[0].value, "IFCLABEL('Live')");
+  const propertyId = withPset.propertySetsByEntity.get(wall.id)?.[0].values[0].id;
+  assert.ok(propertyId);
+  const withUpdatedProperty = updateNativePropertyValue(withPset, propertyId, {
+    name: 'StatusNote',
+    value: 'Reviewed',
+    valueType: 'IFCTEXT',
+  });
+  assert.equal(withUpdatedProperty.propertySetsByEntity.get(wall.id)?.[0].values[0].name, 'StatusNote');
+  assert.equal(withUpdatedProperty.propertySetsByEntity.get(wall.id)?.[0].values[0].value, "IFCTEXT('Reviewed')");
+
+  const withQuantity = addNativeQuantitySet(withUpdatedProperty, wall.id, 'Qto_RN', 'ObservedLength', '12.5');
+  assert.ok(
+    withQuantity.propertySetsByEntity
+      .get(wall.id)
+      ?.some((set) => set.kind === 'Qto' && set.values.some((value) => value.name === 'ObservedLength')),
+  );
+
+  const withMaterial = addNativeMaterial(withQuantity, wall.id, 'RN Concrete', 'Concrete');
+  assert.ok(withMaterial.resourcesByEntity.get(wall.id)?.some((resource) => resource.includes('RN Concrete')));
+  const withClassification = addNativeClassification(withMaterial, wall.id, 'RN-001', 'RN Class', 'https://ifcnative.local/rn');
+  assert.ok(withClassification.resourcesByEntity.get(wall.id)?.some((resource) => resource.includes('RN Class')));
+  const withDocument = addNativeDocumentReference(withClassification, wall.id, 'RN-DOC', 'RN Report', 'https://ifcnative.local/doc');
+  assert.ok(withDocument.resourcesByEntity.get(wall.id)?.some((resource) => resource.includes('RN Report')));
+
+  const project = withDocument.entities.find((entity) => entity.type === 'IFCPROJECT');
+  assert.ok(project);
+  const withRelation = addNativeRelationship(withDocument, 'IFCRELASSIGNSTOGROUP', project.id, wall.id);
+  assert.ok(
+    withRelation.relationshipsByEntity
+      .get(wall.id)
+      ?.some((relationship) => relationship.type === 'IFCRELASSIGNSTOGROUP'),
+  );
+  const groupRelationship = withRelation.relationshipsByEntity
+    .get(wall.id)
+    ?.find((relationship) => relationship.type === 'IFCRELASSIGNSTOGROUP');
+  assert.ok(groupRelationship);
+  const withUpdatedRelationship = updateNativeRelationship(withRelation, groupRelationship.id, {
+    sourceId: wall.id,
+    targetId: project.id,
+    type: 'IFCRELDEFINESBYTYPE',
+  });
+  assert.ok(
+    withUpdatedRelationship.relationshipsByEntity
+      .get(wall.id)
+      ?.some((relationship) => relationship.type === 'IFCRELDEFINESBYTYPE'),
+  );
+
+  const withUnit = addNativeSiUnit(withUpdatedRelationship, 'LENGTHUNIT', '$', 'METRE');
+  assert.ok(withUnit.units.some((unit) => unit.includes('LENGTHUNIT')));
+
+  const reopened = parseNativeIfcText(serializeNativeIfcDocument(withUnit), 'roundtrip.ifc');
+  assert.ok(reopened.entityById.has(wall.id));
+  assert.ok(reopened.propertySetsByEntity.get(wall.id)?.some((set) => set.name === 'Pset_RN'));
+  assert.ok(reopened.propertySetsByEntity.get(wall.id)?.some((set) => set.name === 'Qto_RN'));
+  assert.ok(reopened.resourcesByEntity.get(wall.id)?.some((resource) => resource.includes('RN Report')));
 });
 
 function readEntitySummaries(api: WebIFC.IfcAPI, modelID: number) {
