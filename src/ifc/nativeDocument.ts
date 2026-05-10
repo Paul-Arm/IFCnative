@@ -30,6 +30,19 @@ export interface NativeIfcPropertySet {
   values: { id: number; name: string; value: string; type: string }[];
 }
 
+export interface NativeBodyElementOptions {
+  type: string;
+  name: string;
+  parentId?: number;
+  width: number | string;
+  depth: number | string;
+  height: number | string;
+  x?: number | string;
+  y?: number | string;
+  z?: number | string;
+  tag?: string;
+}
+
 export interface NativeIfcDocument {
   fileName: string;
   schema: string;
@@ -199,6 +212,215 @@ export function addNativeElement(
       type: 'IFCRELAGGREGATES',
     });
   }
+
+  return parseNativeIfcText(serializeEntities(document, next), document.fileName);
+}
+
+export function addNativeBodyElement(document: NativeIfcDocument, options: NativeBodyElementOptions) {
+  const next = cloneDocumentEntities(document);
+  const productId = nextEntityId(next);
+  const placementId = productId + 1;
+  const placementAxisId = productId + 2;
+  const placementPointId = productId + 3;
+  const shapeId = productId + 4;
+  const representationId = productId + 5;
+  const solidId = productId + 6;
+  const solidAxisId = productId + 7;
+  const solidPointId = productId + 8;
+  const profileId = productId + 9;
+  const profileAxisId = productId + 10;
+  const profilePointId = productId + 11;
+  const extrusionDirectionId = productId + 12;
+  const profileDirectionId = productId + 13;
+  const relId = productId + 14;
+  const quantityId = productId + 15;
+  const heightQuantityId = productId + 16;
+  const areaQuantityId = productId + 17;
+  const volumeQuantityId = productId + 18;
+  const quantityRelId = productId + 19;
+  const parent = options.parentId ? document.entityById.get(options.parentId) : undefined;
+  const parentPlacementRef = parent?.args[5]?.startsWith('#') ? parent.args[5] : '$';
+  const contextRef = `#${document.entities.find((entity) => entity.type === 'IFCGEOMETRICREPRESENTATIONCONTEXT')?.id ?? 10}`;
+  const width = positiveStepNumber(options.width, 1);
+  const depth = positiveStepNumber(options.depth, 1);
+  const height = positiveStepNumber(options.height, 1);
+  const x = numericStepNumber(options.x, 0);
+  const y = numericStepNumber(options.y, 0);
+  const z = numericStepNumber(options.z, 0);
+  const productType = normalizeType(options.type || 'IFCBUILTELEMENT');
+  const name = options.name.trim() || 'New Body Element';
+  const tag = options.tag?.trim() || `IFCNATIVE-BODY-${productId}`;
+
+  next.push(
+    {
+      args: [quote(createIfcGuid(productId)), '$', quote(name), '$', '$', `#${placementId}`, `#${shapeId}`, quote(tag)],
+      description: '',
+      globalId: createIfcGuid(productId),
+      id: productId,
+      name,
+      type: productType,
+    },
+    {
+      args: [parentPlacementRef, `#${placementAxisId}`],
+      description: '',
+      globalId: '',
+      id: placementId,
+      name: '',
+      type: 'IFCLOCALPLACEMENT',
+    },
+    {
+      args: [`#${placementPointId}`, '$', '$'],
+      description: '',
+      globalId: '',
+      id: placementAxisId,
+      name: '',
+      type: 'IFCAXIS2PLACEMENT3D',
+    },
+    {
+      args: [`(${x},${y},${z})`],
+      description: '',
+      globalId: '',
+      id: placementPointId,
+      name: '',
+      type: 'IFCCARTESIANPOINT',
+    },
+    {
+      args: ['$', '$', `(#${representationId})`],
+      description: '',
+      globalId: '',
+      id: shapeId,
+      name: '',
+      type: 'IFCPRODUCTDEFINITIONSHAPE',
+    },
+    {
+      args: [contextRef, quote('Body'), quote('SweptSolid'), `(#${solidId})`],
+      description: '',
+      globalId: '',
+      id: representationId,
+      name: 'Body',
+      type: 'IFCSHAPEREPRESENTATION',
+    },
+    {
+      args: [`#${profileId}`, `#${solidAxisId}`, `#${extrusionDirectionId}`, height],
+      description: '',
+      globalId: '',
+      id: solidId,
+      name: '',
+      type: 'IFCEXTRUDEDAREASOLID',
+    },
+    {
+      args: [`#${solidPointId}`, '$', '$'],
+      description: '',
+      globalId: '',
+      id: solidAxisId,
+      name: '',
+      type: 'IFCAXIS2PLACEMENT3D',
+    },
+    {
+      args: ['(0.,0.,0.)'],
+      description: '',
+      globalId: '',
+      id: solidPointId,
+      name: '',
+      type: 'IFCCARTESIANPOINT',
+    },
+    {
+      args: ['.AREA.', quote('Rectangular Body'), `#${profileAxisId}`, width, depth],
+      description: '',
+      globalId: '',
+      id: profileId,
+      name: 'Rectangular Body',
+      type: 'IFCRECTANGLEPROFILEDEF',
+    },
+    {
+      args: [`#${profilePointId}`, `#${profileDirectionId}`],
+      description: '',
+      globalId: '',
+      id: profileAxisId,
+      name: '',
+      type: 'IFCAXIS2PLACEMENT2D',
+    },
+    {
+      args: ['(0.,0.)'],
+      description: '',
+      globalId: '',
+      id: profilePointId,
+      name: '',
+      type: 'IFCCARTESIANPOINT',
+    },
+    {
+      args: ['(0.,0.,1.)'],
+      description: '',
+      globalId: '',
+      id: extrusionDirectionId,
+      name: '',
+      type: 'IFCDIRECTION',
+    },
+    {
+      args: ['(1.,0.)'],
+      description: '',
+      globalId: '',
+      id: profileDirectionId,
+      name: '',
+      type: 'IFCDIRECTION',
+    },
+  );
+
+  if (parent) {
+    next.push({
+      args: isSpatial(parent.type)
+        ? [quote(createIfcGuid(relId)), '$', '$', '$', `(#${productId})`, `#${parent.id}`]
+        : [quote(createIfcGuid(relId)), '$', '$', '$', `#${parent.id}`, `(#${productId})`],
+      description: '',
+      globalId: createIfcGuid(relId),
+      id: relId,
+      name: '',
+      type: isSpatial(parent.type) ? 'IFCRELCONTAINEDINSPATIALSTRUCTURE' : 'IFCRELAGGREGATES',
+    });
+  }
+
+  next.push(
+    {
+      args: [quote(createIfcGuid(quantityId)), '$', quote('IFCnative_BaseQuantities'), '$', quote('BaseQuantities'), `(#${heightQuantityId},#${areaQuantityId},#${volumeQuantityId})`],
+      description: '',
+      globalId: createIfcGuid(quantityId),
+      id: quantityId,
+      name: 'IFCnative_BaseQuantities',
+      type: 'IFCELEMENTQUANTITY',
+    },
+    {
+      args: [quote('Height'), '$', '$', height, '$'],
+      description: '',
+      globalId: '',
+      id: heightQuantityId,
+      name: 'Height',
+      type: 'IFCQUANTITYLENGTH',
+    },
+    {
+      args: [quote('FootprintArea'), '$', '$', multiplyStepNumbers(width, depth), '$'],
+      description: '',
+      globalId: '',
+      id: areaQuantityId,
+      name: 'FootprintArea',
+      type: 'IFCQUANTITYAREA',
+    },
+    {
+      args: [quote('NetVolume'), '$', '$', multiplyStepNumbers(width, depth, height), '$'],
+      description: '',
+      globalId: '',
+      id: volumeQuantityId,
+      name: 'NetVolume',
+      type: 'IFCQUANTITYVOLUME',
+    },
+    {
+      args: [quote(createIfcGuid(quantityRelId)), '$', '$', '$', `(#${productId})`, `#${quantityId}`],
+      description: '',
+      globalId: createIfcGuid(quantityRelId),
+      id: quantityRelId,
+      name: '',
+      type: 'IFCRELDEFINESBYPROPERTIES',
+    },
+  );
 
   return parseNativeIfcText(serializeEntities(document, next), document.fileName);
 }
@@ -766,6 +988,25 @@ function isQuantityType(type: string) {
 function formatStepNumber(value: string) {
   const numeric = Number(value.trim().replace(',', '.'));
   return Number.isFinite(numeric) ? String(numeric) : '0';
+}
+
+function numericStepNumber(value: number | string | undefined, fallback: number) {
+  const numeric = typeof value === 'number' ? value : Number(String(value ?? '').trim().replace(',', '.'));
+  return formatDecimal(Number.isFinite(numeric) ? numeric : fallback);
+}
+
+function positiveStepNumber(value: number | string | undefined, fallback: number) {
+  const numeric = typeof value === 'number' ? value : Number(String(value ?? '').trim().replace(',', '.'));
+  return formatDecimal(Math.max(Number.isFinite(numeric) ? numeric : fallback, 0.05));
+}
+
+function multiplyStepNumbers(...values: string[]) {
+  return formatDecimal(values.reduce((product, value) => product * Number(value), 1));
+}
+
+function formatDecimal(value: number) {
+  const fixed = value.toFixed(4).replace(/0+$/g, '').replace(/\.$/g, '');
+  return fixed.includes('.') ? fixed : `${fixed}.`;
 }
 
 function setRelationshipArgs(entity: NativeIfcEntity, type: string, sourceId: number, targetId: number) {

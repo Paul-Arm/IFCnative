@@ -7,6 +7,7 @@ import { createMinimalIfcProject } from '../src/ifc/builder';
 import { buildGraphIndex, summarizeLine } from '../src/ifc/graphIndex';
 import {
   addNativeElement,
+  addNativeBodyElement,
   addNativeClassification,
   addNativeDocumentReference,
   addNativeMaterial,
@@ -143,6 +144,41 @@ test('native document edits keep indexes live', () => {
   assert.ok(reopened.propertySetsByEntity.get(wall.id)?.some((set) => set.name === 'Pset_RN'));
   assert.ok(reopened.propertySetsByEntity.get(wall.id)?.some((set) => set.name === 'Qto_RN'));
   assert.ok(reopened.resourcesByEntity.get(wall.id)?.some((resource) => resource.includes('RN Report')));
+});
+
+test('native body preset creates contained swept solid geometry', async () => {
+  const sample = createNativeSampleDocument();
+  const storey = sample.entities.find((entity) => entity.type === 'IFCBUILDINGSTOREY');
+  assert.ok(storey);
+
+  const withBody = addNativeBodyElement(sample, {
+    depth: '2.5',
+    height: '3',
+    name: 'Body Test Wall',
+    parentId: storey.id,
+    type: 'IFCWALL',
+    width: '5',
+    x: '1',
+    y: '2',
+    z: '0',
+  });
+  const wall = withBody.entities.find((entity) => entity.type === 'IFCWALL' && entity.name === 'Body Test Wall');
+  assert.ok(wall);
+  assert.equal(wall.args[5], `#${wall.id + 1}`);
+  assert.equal(wall.args[6], `#${wall.id + 4}`);
+  assert.ok(
+    withBody.relationshipsByEntity
+      .get(wall.id)
+      ?.some((relationship) => relationship.type === 'IFCRELCONTAINEDINSPATIALSTRUCTURE'),
+  );
+  assert.ok(withBody.propertySetsByEntity.get(wall.id)?.some((set) => set.kind === 'Qto'));
+
+  const api = new WebIFC.IfcAPI();
+  await api.Init();
+  const modelID = api.OpenModel(new TextEncoder().encode(serializeNativeIfcDocument(withBody)));
+  assert.ok(modelID >= 0);
+  assert.ok(streamGeometryVertexCount(api, modelID) > 0);
+  api.CloseModel(modelID);
 });
 
 function readEntitySummaries(api: WebIFC.IfcAPI, modelID: number) {

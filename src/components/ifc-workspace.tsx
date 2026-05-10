@@ -13,6 +13,7 @@ import {
 
 import {
   addNativeElement,
+  addNativeBodyElement,
   addNativeClassification,
   addNativeDocumentReference,
   addNativeMaterial,
@@ -324,6 +325,18 @@ export default function IfcWorkspace() {
     );
   };
 
+  const addBodyElement = (options: BodyElementDraft) => {
+    const previousMaxId = Math.max(...document.entities.map((entity) => entity.id), 0);
+    const next = addNativeBodyElement(document, options);
+    const added = next.entityById.get(previousMaxId + 1);
+    stageDocument(
+      next,
+      added?.id,
+      `Add ${options.type} body '${options.name}'${options.parentId ? ` under #${options.parentId}` : ''}`,
+      `addBodyElement({ class: '${options.type}', name: '${options.name}', width: ${options.width}, depth: ${options.depth}, height: ${options.height} });`,
+    );
+  };
+
   const addRelationship = (type: string, sourceId: number, targetId: number) => {
     const next = addNativeRelationship(document, type, sourceId, targetId);
     stageDocument(
@@ -531,6 +544,7 @@ export default function IfcWorkspace() {
               onAddClassification={addClassification}
               onAddDocumentReference={addDocumentReference}
               onAddElement={addElement}
+              onAddBodyElement={addBodyElement}
               onAddMaterial={addMaterial}
               onAddRelationship={addRelationship}
               onAddPset={addPset}
@@ -924,6 +938,19 @@ interface EntityEditDraft {
   name: string;
   description: string;
   rawArgs: string;
+}
+
+interface BodyElementDraft {
+  type: string;
+  name: string;
+  parentId?: number;
+  width: string;
+  depth: string;
+  height: string;
+  x: string;
+  y: string;
+  z: string;
+  tag?: string;
 }
 
 function InspectorPanel({
@@ -1384,6 +1411,7 @@ function BuilderPanel({
   selectedId,
   onAddClassification,
   onAddDocumentReference,
+  onAddBodyElement,
   onAddElement,
   onAddMaterial,
   onAddPset,
@@ -1395,6 +1423,7 @@ function BuilderPanel({
   selectedId: number;
   onAddClassification(identification: string, name: string, location: string): void;
   onAddDocumentReference(identification: string, name: string, location: string): void;
+  onAddBodyElement(options: BodyElementDraft): void;
   onAddElement(type: string, name: string, parentId?: number): void;
   onAddMaterial(materialName: string, materialCategory: string): void;
   onAddPset(psetName: string, propertyName: string, propertyValue: string, propertyValueType?: string): void;
@@ -1404,6 +1433,15 @@ function BuilderPanel({
 }) {
   const [type, setType] = useState('IFCBUILDINGELEMENTPROXY');
   const [name, setName] = useState('New Element');
+  const [bodyType, setBodyType] = useState('IFCBUILTELEMENT');
+  const [bodyName, setBodyName] = useState('New Body Element');
+  const [bodyWidth, setBodyWidth] = useState('4');
+  const [bodyDepth, setBodyDepth] = useState('2');
+  const [bodyHeight, setBodyHeight] = useState('1.5');
+  const [bodyX, setBodyX] = useState('0');
+  const [bodyY, setBodyY] = useState('0');
+  const [bodyZ, setBodyZ] = useState('0');
+  const [bodyTag, setBodyTag] = useState('IFCNATIVE-BODY');
   const [relType, setRelType] = useState('IFCRELAGGREGATES');
   const [sourceId, setSourceId] = useState(String(selectedId));
   const [targetId, setTargetId] = useState(String(selectedId));
@@ -1438,6 +1476,41 @@ function BuilderPanel({
       <DropdownField label="Element class" options={ENTITY_TYPES} value={type} onChange={setType} />
       <LabeledInput label="Element name" value={name} onChangeText={setName} />
       <Button label="+ Add Element under selected" primary onPress={() => onAddElement(type, name, selectedId)} />
+      <View style={styles.separator} />
+      <Text style={styles.sectionTitle}>Simple body preset</Text>
+      <DropdownField label="Body class" options={ENTITY_TYPES} value={bodyType} onChange={setBodyType} />
+      <LabeledInput label="Body name" value={bodyName} onChangeText={setBodyName} />
+      <View style={styles.row}>
+        <LabeledInput label="Width X" keyboardType="numeric" value={bodyWidth} onChangeText={setBodyWidth} />
+        <LabeledInput label="Depth Y" keyboardType="numeric" value={bodyDepth} onChangeText={setBodyDepth} />
+      </View>
+      <View style={styles.row}>
+        <LabeledInput label="Height Z" keyboardType="numeric" value={bodyHeight} onChangeText={setBodyHeight} />
+        <LabeledInput label="Tag" value={bodyTag} onChangeText={setBodyTag} />
+      </View>
+      <View style={styles.row}>
+        <LabeledInput label="X" keyboardType="numeric" value={bodyX} onChangeText={setBodyX} />
+        <LabeledInput label="Y" keyboardType="numeric" value={bodyY} onChangeText={setBodyY} />
+        <LabeledInput label="Z" keyboardType="numeric" value={bodyZ} onChangeText={setBodyZ} />
+      </View>
+      <Button
+        label="+ Add Rectangular Body under selected"
+        primary
+        onPress={() =>
+          onAddBodyElement({
+            depth: bodyDepth,
+            height: bodyHeight,
+            name: bodyName,
+            parentId: selectedId,
+            tag: bodyTag,
+            type: bodyType,
+            width: bodyWidth,
+            x: bodyX,
+            y: bodyY,
+            z: bodyZ,
+          })
+        }
+      />
       <View style={styles.separator} />
       <DropdownField label="Relationship" options={RELATION_TYPES} value={relType} onChange={setRelType} />
       <EntityDropdown label="Source object" document={document} value={sourceId} onChange={setSourceId} />
@@ -2260,6 +2333,11 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 0,
   },
+  row: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
   safeArea: {
     backgroundColor: '#eef1f4',
     flex: 1,
@@ -2296,6 +2374,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#e4e4e7',
     height: 1,
     marginVertical: 12,
+  },
+  sectionTitle: {
+    color: '#18181b',
+    fontSize: 13,
+    fontWeight: '900',
+    marginBottom: 8,
   },
   statusLine: {
     backgroundColor: '#eef1f4',
