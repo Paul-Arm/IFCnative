@@ -39,7 +39,7 @@ import ThatOpenViewer from './that-open-viewer';
 
 type StructureMode = 'tree' | 'graph';
 type InspectorMode = 'info' | 'edit' | 'psets' | 'relations' | 'resources' | 'refs' | 'units';
-type MosaicViewId = 'structure' | 'viewer' | 'inspector' | 'builder' | 'console' | 'diagnostics';
+type MosaicViewId = 'structure' | 'viewer' | 'inspector' | 'builder' | 'diff' | 'console' | 'diagnostics';
 
 const DEFAULT_MOSAIC_LAYOUT: MosaicNode<MosaicViewId> = {
   direction: 'row',
@@ -59,9 +59,14 @@ const DEFAULT_MOSAIC_LAYOUT: MosaicNode<MosaicViewId> = {
     },
     second: {
       direction: 'row',
-      first: 'console',
-      second: 'diagnostics',
-      splitPercentage: 56,
+      first: 'diff',
+      second: {
+        direction: 'row',
+        first: 'console',
+        second: 'diagnostics',
+        splitPercentage: 52,
+      },
+      splitPercentage: 42,
     },
     splitPercentage: 72,
   },
@@ -72,6 +77,7 @@ const MOSAIC_TITLES: Record<MosaicViewId, string> = {
   builder: 'Builder',
   console: 'JS Console',
   diagnostics: 'Diagnostics',
+  diff: 'IFC Diff / Review',
   inspector: 'Inspector',
   structure: 'Structure',
   viewer: '3D Viewer',
@@ -149,6 +155,8 @@ export default function IfcWorkspace() {
   const [graphExpanded, setGraphExpanded] = useState<Set<number>>(() => new Set());
   const [graphCollapsed, setGraphCollapsed] = useState<Set<number>>(() => new Set());
   const [graphPositions, setGraphPositions] = useState<Map<number, Point>>(() => new Map());
+  const [pendingDocument, setPendingDocument] = useState<NativeIfcDocument | null>(null);
+  const [pendingSummary, setPendingSummary] = useState('');
   const [consoleLines, setConsoleLines] = useState<string[]>(() => [
     `${new Date().toLocaleTimeString()}  ui.boot({ shell: 'vite-react' });`,
   ]);
@@ -156,6 +164,10 @@ export default function IfcWorkspace() {
 
   const selectedEntity = document.entityById.get(selectedId) ?? document.entities[0];
   const serializedIfcText = useMemo(() => serializeNativeIfcDocument(document), [document]);
+  const pendingIfcText = useMemo(
+    () => (pendingDocument ? serializeNativeIfcDocument(pendingDocument) : ''),
+    [pendingDocument],
+  );
   const metrics = useMemo(() => {
     const propertyCount = [...document.propertySetsByEntity.values()].reduce((sum, sets) => sum + sets.length, 0);
     return {
@@ -194,6 +206,8 @@ export default function IfcWorkspace() {
     nextGraphPositions?: Map<number, Point>,
   ) => {
     setDocument(next);
+    setPendingDocument(null);
+    setPendingSummary('');
     const fallbackId = next.spatialRoots[0]?.id ?? next.entities[0]?.id ?? 0;
     setSelectedId(next.entityById.has(nextSelectedId ?? 0) ? (nextSelectedId as number) : fallbackId);
     setGraphPositions(nextGraphPositions ?? new Map());
@@ -201,6 +215,46 @@ export default function IfcWorkspace() {
     if (log) {
       logAction(log);
     }
+  };
+
+  const stageDocument = (
+    next: NativeIfcDocument,
+    nextSelectedId: number | undefined,
+    summary: string,
+    log?: string,
+    nextGraphPositions?: Map<number, Point>,
+  ) => {
+    setPendingDocument(next);
+    setPendingSummary(summary);
+    const fallbackId = next.spatialRoots[0]?.id ?? next.entities[0]?.id ?? selectedId;
+    setSelectedId(next.entityById.has(nextSelectedId ?? 0) ? (nextSelectedId as number) : fallbackId);
+    if (nextGraphPositions) {
+      setGraphPositions(nextGraphPositions);
+    }
+    setMessage(`Review pending: ${summary}`);
+    if (log) {
+      logAction(`draft.${log}`);
+    }
+  };
+
+  const applyPendingDocument = () => {
+    if (!pendingDocument) {
+      return;
+    }
+    const appliedSummary = pendingSummary;
+    setDocument(pendingDocument);
+    setPendingDocument(null);
+    setPendingSummary('');
+    setMessage(`Applied: ${appliedSummary}`);
+    logAction(`draft.apply(${JSON.stringify(appliedSummary)});`);
+  };
+
+  const discardPendingDocument = () => {
+    const discardedSummary = pendingSummary;
+    setPendingDocument(null);
+    setPendingSummary('');
+    setMessage('Draft discarded. IFC unchanged.');
+    logAction(`draft.discard(${JSON.stringify(discardedSummary)});`);
   };
 
   const selectEntity = (id: number, source = 'ui') => {
@@ -250,19 +304,34 @@ export default function IfcWorkspace() {
       name: draft.name,
       type: draft.type,
     });
-    replaceDocument(next, selectedId, `ui.saveEdit({ id: ${selectedId}, class: '${draft.type}' });`);
+    stageDocument(
+      next,
+      selectedId,
+      `Edit #${selectedId} ${draft.type}`,
+      `saveEdit({ id: ${selectedId}, class: '${draft.type}' });`,
+    );
   };
 
   const addElement = (type: string, name: string, parentId?: number) => {
     const previousMaxId = Math.max(...document.entities.map((entity) => entity.id), 0);
     const next = addNativeElement(document, parentId, type, name);
     const added = next.entityById.get(previousMaxId + 1);
-    replaceDocument(next, added?.id, `builder.addElement({ class: '${type}', name: '${name}' });`);
+    stageDocument(
+      next,
+      added?.id,
+      `Add ${type} '${name}'${parentId ? ` under #${parentId}` : ''}`,
+      `addElement({ class: '${type}', name: '${name}' });`,
+    );
   };
 
   const addRelationship = (type: string, sourceId: number, targetId: number) => {
     const next = addNativeRelationship(document, type, sourceId, targetId);
-    replaceDocument(next, targetId, `builder.addRelationship({ class: '${type}', sourceId: ${sourceId}, targetId: ${targetId} });`);
+    stageDocument(
+      next,
+      targetId,
+      `Add ${type} from #${sourceId} to #${targetId}`,
+      `addRelationship({ class: '${type}', sourceId: ${sourceId}, targetId: ${targetId} });`,
+    );
   };
 
   const addGraphConnectedNode = (
@@ -278,9 +347,10 @@ export default function IfcWorkspace() {
     const next = addNativeRelationship(withElement, relationshipType, sourceId, addedId);
     const nextPositions = new Map(graphPositions);
     nextPositions.set(addedId, position);
-    replaceDocument(
+    stageDocument(
       next,
       addedId,
+      `Create ${type} '${name}' from graph and connect #${sourceId} -> #${addedId}`,
       `graph.addConnectedNode({ sourceId: ${sourceId}, class: '${type}', relationship: '${relationshipType}', targetId: ${addedId} });`,
       nextPositions,
     );
@@ -291,9 +361,10 @@ export default function IfcWorkspace() {
 
   const connectGraphNodes = (sourceId: number, targetId: number, relationshipType: string) => {
     const next = addNativeRelationship(document, relationshipType, sourceId, targetId);
-    replaceDocument(
+    stageDocument(
       next,
       targetId,
+      `Connect graph nodes #${sourceId} -> #${targetId} with ${relationshipType}`,
       `graph.addRelationship({ class: '${relationshipType}', sourceId: ${sourceId}, targetId: ${targetId} });`,
       new Map(graphPositions),
     );
@@ -304,27 +375,27 @@ export default function IfcWorkspace() {
 
   const addPset = (psetName: string, propertyName: string, propertyValue: string, propertyValueType = 'IFCLABEL') => {
     const next = addNativePropertySet(document, selectedId, psetName, propertyName, propertyValue, propertyValueType);
-    replaceDocument(next, selectedId, `builder.addPset({ objectId: ${selectedId}, name: '${psetName}' });`);
+    stageDocument(next, selectedId, `Add Pset '${psetName}' to #${selectedId}`, `addPset({ objectId: ${selectedId}, name: '${psetName}' });`);
   };
 
   const addQuantity = (qtoName: string, quantityName: string, quantityValue: string, quantityType = 'IFCQUANTITYLENGTH') => {
     const next = addNativeQuantitySet(document, selectedId, qtoName, quantityName, quantityValue, quantityType);
-    replaceDocument(next, selectedId, `builder.addQuantity({ objectId: ${selectedId}, name: '${quantityName}', type: '${quantityType}' });`);
+    stageDocument(next, selectedId, `Add quantity '${quantityName}' to #${selectedId}`, `addQuantity({ objectId: ${selectedId}, name: '${quantityName}', type: '${quantityType}' });`);
   };
 
   const addMaterial = (materialName: string, materialCategory: string) => {
     const next = addNativeMaterial(document, selectedId, materialName, materialCategory);
-    replaceDocument(next, selectedId, `builder.addMaterial({ objectId: ${selectedId}, name: '${materialName}' });`);
+    stageDocument(next, selectedId, `Assign material '${materialName}' to #${selectedId}`, `addMaterial({ objectId: ${selectedId}, name: '${materialName}' });`);
   };
 
   const addClassification = (identification: string, name: string, location: string) => {
     const next = addNativeClassification(document, selectedId, identification, name, location);
-    replaceDocument(next, selectedId, `builder.addClassification({ objectId: ${selectedId}, id: '${identification}' });`);
+    stageDocument(next, selectedId, `Assign classification '${identification}' to #${selectedId}`, `addClassification({ objectId: ${selectedId}, id: '${identification}' });`);
   };
 
   const addDocumentReference = (identification: string, name: string, location: string) => {
     const next = addNativeDocumentReference(document, selectedId, identification, name, location);
-    replaceDocument(next, selectedId, `builder.addDocumentReference({ objectId: ${selectedId}, id: '${identification}' });`);
+    stageDocument(next, selectedId, `Assign document '${identification}' to #${selectedId}`, `addDocumentReference({ objectId: ${selectedId}, id: '${identification}' });`);
   };
 
   const updatePsetProperty = (propertyId: number, propertyName: string, propertyValue: string, propertyValueType: string) => {
@@ -333,17 +404,17 @@ export default function IfcWorkspace() {
       value: propertyValue,
       valueType: propertyValueType,
     });
-    replaceDocument(next, selectedId, `builder.updateProperty({ id: ${propertyId}, name: '${propertyName}' });`);
+    stageDocument(next, selectedId, `Update property #${propertyId} '${propertyName}'`, `updateProperty({ id: ${propertyId}, name: '${propertyName}' });`);
   };
 
   const editRelationship = (relationshipId: number, type: string, sourceId: number, targetId: number) => {
     const next = updateNativeRelationship(document, relationshipId, { sourceId, targetId, type });
-    replaceDocument(next, selectedId, `builder.updateRelationship({ id: ${relationshipId}, class: '${type}' });`);
+    stageDocument(next, selectedId, `Update relationship #${relationshipId} ${type}`, `updateRelationship({ id: ${relationshipId}, class: '${type}' });`);
   };
 
   const addUnit = (unitType: string, unitName: string) => {
     const next = addNativeSiUnit(document, unitType, '$', unitName);
-    replaceDocument(next, selectedId, `builder.addUnit({ unitType: '${unitType}', name: '${unitName}' });`);
+    stageDocument(next, selectedId, `Add unit ${unitType} ${unitName}`, `addUnit({ unitType: '${unitType}', name: '${unitName}' });`);
   };
 
   const renderStructure = () => (
@@ -468,6 +539,18 @@ export default function IfcWorkspace() {
             />
           </View>
         );
+      case 'diff':
+        return (
+          <View style={styles.tileContent}>
+            <DiffPanel
+              currentText={serializedIfcText}
+              pendingSummary={pendingSummary}
+              pendingText={pendingIfcText}
+              onApply={applyPendingDocument}
+              onDiscard={discardPendingDocument}
+            />
+          </View>
+        );
       case 'console':
         return (
           <View style={styles.tileContent}>
@@ -503,7 +586,9 @@ export default function IfcWorkspace() {
         <View style={styles.actions}>
           <Button label="Open IFC" primary onPress={() => void openIfc()} />
           <Button label="Sample" onPress={loadSample} />
-          <Button label="Export IFC" onPress={() => void exportIfc()} />
+          <Button disabled={Boolean(pendingDocument)} label="Export IFC" onPress={() => void exportIfc()} />
+          <Button disabled={!pendingDocument} label="Apply Draft" primary onPress={applyPendingDocument} />
+          <Button disabled={!pendingDocument} label="Discard Draft" onPress={discardPendingDocument} />
           <Button label="Reset Layout" onPress={() => setMosaicValue(DEFAULT_MOSAIC_LAYOUT)} />
         </View>
       </View>
@@ -515,6 +600,7 @@ export default function IfcWorkspace() {
         <Text style={styles.statusText}>{metrics.types.toLocaleString()} types</Text>
         <Text style={styles.statusText}>{metrics.relationships.toLocaleString()} relationships</Text>
         <Text style={styles.statusText}>{metrics.properties.toLocaleString()} psets/qtos</Text>
+        {pendingDocument ? <Text style={styles.statusText}>draft pending - review before export</Text> : null}
       </View>
 
       <View style={styles.mosaicShell}>
@@ -1410,6 +1496,61 @@ function BuilderPanel({
   );
 }
 
+function DiffPanel({
+  currentText,
+  pendingSummary,
+  pendingText,
+  onApply,
+  onDiscard,
+}: {
+  currentText: string;
+  pendingSummary: string;
+  pendingText: string;
+  onApply(): void;
+  onDiscard(): void;
+}) {
+  const lines = useMemo(() => (pendingText ? previewDiffLines(currentText, pendingText) : []), [currentText, pendingText]);
+  const added = lines.filter((line) => line.kind === 'add').length;
+  const removed = lines.filter((line) => line.kind === 'remove').length;
+
+  if (!pendingText) {
+    return (
+      <View style={styles.diffEmpty}>
+        <Text style={styles.infoTitle}>No pending IFC changes</Text>
+        <Text style={styles.empty}>Builder, inspector and graph edits create a draft first. Review this diff, then apply it before export.</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.console}>
+      <View style={styles.diffHeader}>
+        <View style={styles.diffHeaderText}>
+          <Text style={styles.infoTitle}>{pendingSummary}</Text>
+          <Text style={styles.empty}>{added} additions / {removed} removals. IFC export stays disabled until this draft is applied or discarded.</Text>
+        </View>
+        <View style={styles.actions}>
+          <Button label="Apply" primary onPress={onApply} />
+          <Button label="Discard" onPress={onDiscard} />
+        </View>
+      </View>
+      <ScrollView style={styles.diffLines}>
+        {lines.map((line, index) => (
+          <Text
+            key={`${line.kind}-${index}-${line.text}`}
+            style={[
+              styles.diffLine,
+              line.kind === 'add' && styles.diffLineAdd,
+              line.kind === 'remove' && styles.diffLineRemove,
+            ]}>
+            {line.kind === 'add' ? '+' : line.kind === 'remove' ? '-' : ' '} {line.text}
+          </Text>
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
+
 function ConsolePanel({ lines, onClear }: { lines: string[]; onClear(): void }) {
   return (
     <View style={styles.console}>
@@ -1789,6 +1930,54 @@ function uniqueEdges(edges: { rel: number; source: number; target: number; label
   });
 }
 
+function previewDiffLines(beforeText: string, afterText: string) {
+  const before = beforeText.split('\n');
+  const after = afterText.split('\n');
+  const maxCommonPrefix = commonPrefixLength(before, after);
+  const maxCommonSuffix = commonSuffixLength(before, after, maxCommonPrefix);
+  const context = 4;
+  const start = Math.max(0, maxCommonPrefix - context);
+  const beforeEnd = before.length - maxCommonSuffix;
+  const afterEnd = after.length - maxCommonSuffix;
+  const result: { kind: 'context' | 'add' | 'remove'; text: string }[] = [];
+
+  for (let index = start; index < maxCommonPrefix; index += 1) {
+    result.push({ kind: 'context', text: before[index] ?? '' });
+  }
+  for (let index = maxCommonPrefix; index < beforeEnd; index += 1) {
+    result.push({ kind: 'remove', text: before[index] ?? '' });
+  }
+  for (let index = maxCommonPrefix; index < afterEnd; index += 1) {
+    result.push({ kind: 'add', text: after[index] ?? '' });
+  }
+  const suffixStart = Math.max(maxCommonPrefix, afterEnd);
+  for (let index = suffixStart; index < Math.min(after.length, suffixStart + context); index += 1) {
+    result.push({ kind: 'context', text: after[index] ?? '' });
+  }
+
+  return result.slice(0, 800);
+}
+
+function commonPrefixLength(left: string[], right: string[]) {
+  let index = 0;
+  while (index < left.length && index < right.length && left[index] === right[index]) {
+    index += 1;
+  }
+  return index;
+}
+
+function commonSuffixLength(left: string[], right: string[], prefixLength: number) {
+  let count = 0;
+  while (
+    count + prefixLength < left.length &&
+    count + prefixLength < right.length &&
+    left[left.length - 1 - count] === right[right.length - 1 - count]
+  ) {
+    count += 1;
+  }
+  return count;
+}
+
 function findTreePath(document: NativeIfcDocument, id: number) {
   const path: NativeIfcEntity[] = [];
   const visit = (node: NativeIfcTreeNode): boolean => {
@@ -1889,6 +2078,49 @@ const styles = StyleSheet.create({
   },
   disabled: {
     opacity: 0.45,
+  },
+  diffEmpty: {
+    alignItems: 'flex-start',
+    backgroundColor: '#f8fafc',
+    borderColor: '#dbe4ee',
+    borderRadius: 8,
+    borderWidth: 1,
+    flex: 1,
+    justifyContent: 'center',
+    padding: 14,
+  },
+  diffHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    justifyContent: 'space-between',
+  },
+  diffHeaderText: {
+    flex: 1,
+    minWidth: 220,
+  },
+  diffLine: {
+    color: '#334155',
+    fontFamily: Platform.select({ default: 'monospace', ios: 'Menlo' }),
+    fontSize: 11,
+    paddingHorizontal: 8,
+    paddingVertical: 1,
+  },
+  diffLineAdd: {
+    backgroundColor: '#dcfce7',
+    color: '#166534',
+  },
+  diffLineRemove: {
+    backgroundColor: '#fee2e2',
+    color: '#991b1b',
+  },
+  diffLines: {
+    backgroundColor: '#ffffff',
+    borderColor: '#e4e4e7',
+    borderRadius: 7,
+    borderWidth: 1,
+    minHeight: 190,
   },
   dropdownButton: {
     alignItems: 'center',
