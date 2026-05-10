@@ -33,3 +33,9 @@ Rules for follow-up agents:
 - Run `npm run test:ifc` and `npm run build` before each commit when practical.
 - Do not push unless Paul explicitly asks or GitHub auth is made available.
 - Avoid destructive git operations. If dirty state exists, inspect and continue carefully.
+
+## Scope update from Paul
+
+This should become a full IFC editor, not just a small viewer/builder. Use `IFC_EDITOR_SCOPE.md` as the working inventory of important IFC functions, classes, relationships, validation areas, and editor capabilities.
+
+Communication preference: do not send intermediate progress updates. Only notify Paul when blocked or when there is a real problem requiring a decision.
