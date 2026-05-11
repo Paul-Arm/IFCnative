@@ -4,6 +4,8 @@ Lightweight React/Vite IFC builder and viewer with Mosaic panes, React Flow rela
 
 ## Commands
 
+Use Node.js 22.13.0 or newer before installing dependencies.
+
 ```bash
 npm install
 npm run start

@@ -29,6 +29,6 @@
     "src/components/that-open-viewer.web.tsx",
     "src/ifc/**/*.ts",
     "tests/**/*.ts",
-    "vite.config.ts"
+    "vite.config.mts"
   ]
 }

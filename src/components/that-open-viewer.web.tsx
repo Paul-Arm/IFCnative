@@ -1,14 +1,17 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from "react";
 
-import type { ThatOpenViewerProps } from './that-open-viewer';
+import type { ThatOpenViewerProps } from "./that-open-viewer";
 
 type ViewerRuntime = Awaited<ReturnType<typeof createThatOpenRuntime>>;
 
 export default function ThatOpenViewer({
   fileName,
+  ifcBytes,
   ifcText,
   selectedId,
+  selectedName,
   onLog,
+  onMoveSelected,
   onSelect,
 }: ThatOpenViewerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -18,8 +21,8 @@ export default function ThatOpenViewer({
   const onSelectRef = useRef(onSelect);
   const [runtimeReady, setRuntimeReady] = useState(0);
   const [modelReady, setModelReady] = useState(0);
-  const [status, setStatus] = useState('Starting ThatOpen viewer...');
-  const [error, setError] = useState('');
+  const [status, setStatus] = useState("Starting ThatOpen viewer...");
+  const [error, setError] = useState("");
 
   selectedRef.current = selectedId;
   onLogRef.current = onLog;
@@ -32,12 +35,12 @@ export default function ThatOpenViewer({
       if (!containerRef.current) {
         return;
       }
-      setStatus('Initializing ThatOpen Components...');
+      setStatus("Initializing ThatOpen Components...");
       const runtime = await createThatOpenRuntime(containerRef.current, {
         getSelectedId: () => selectedRef.current,
         onError: (message) => {
           setError(message);
-          setStatus('ThatOpen viewer error');
+          setStatus("ThatOpen viewer error");
         },
         onLog: (line) => onLogRef.current?.(line),
         onSelect: (id, source) => onSelectRef.current(id, source),
@@ -54,7 +57,7 @@ export default function ThatOpenViewer({
     void init().catch((reason) => {
       const message = stringifyError(reason);
       setError(message);
-      setStatus('ThatOpen viewer failed to initialize');
+      setStatus("ThatOpen viewer failed to initialize");
       onLogRef.current?.(`viewer.error(${JSON.stringify(message)});`);
     });
 
@@ -74,10 +77,10 @@ export default function ThatOpenViewer({
       return;
     }
     let cancelled = false;
-    setError('');
-    setStatus('Converting IFC with ThatOpen...');
+    setError("");
+    setStatus("Converting IFC with ThatOpen...");
     void runtime
-      .load(ifcText, fileName)
+      .load(ifcText, fileName, ifcBytes)
       .then(async () => {
         if (cancelled) {
           return;
@@ -91,14 +94,14 @@ export default function ThatOpenViewer({
         }
         const message = stringifyError(reason);
         setError(message);
-        setStatus('ThatOpen IFC load failed');
+        setStatus("ThatOpen IFC load failed");
         onLogRef.current?.(`viewer.loadError(${JSON.stringify(message)});`);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [fileName, ifcText, runtimeReady]);
+  }, [fileName, ifcBytes, ifcText, runtimeReady]);
 
   useEffect(() => {
     const runtime = runtimeRef.current;
@@ -109,20 +112,78 @@ export default function ThatOpenViewer({
   }, [modelReady, selectedId]);
 
   return (
-    <div style={styles.shell}>
-      <div style={styles.toolbar}>
-        <div style={styles.actions}>
-          <button style={styles.button} type="button" onClick={() => void runtimeRef.current?.fit()}>
+    <div className="ifcnative-thatopen-shell">
+      <div className="ifcnative-thatopen-toolbar">
+        <div className="ifcnative-thatopen-actions">
+          <button
+            className="ifcnative-thatopen-button"
+            type="button"
+            onClick={() => void runtimeRef.current?.fit()}
+          >
             Fit
           </button>
-          <button style={styles.button} type="button" onClick={() => void runtimeRef.current?.resetCamera()}>
+          <button
+            className="ifcnative-thatopen-button"
+            type="button"
+            onClick={() => void runtimeRef.current?.resetCamera()}
+          >
             Reset
           </button>
         </div>
+        <div
+          className="ifcnative-thatopen-nudge-panel"
+          title={`Draft placement nudges for #${selectedId}${selectedName ? ` ${selectedName}` : ""}`}
+        >
+          <span className="ifcnative-thatopen-nudge-label">
+            Move #{selectedId}
+          </span>
+          <button
+            className="ifcnative-thatopen-button"
+            type="button"
+            onClick={() => onMoveSelected?.({ x: -0.25 })}
+          >
+            −X
+          </button>
+          <button
+            className="ifcnative-thatopen-button"
+            type="button"
+            onClick={() => onMoveSelected?.({ x: 0.25 })}
+          >
+            +X
+          </button>
+          <button
+            className="ifcnative-thatopen-button"
+            type="button"
+            onClick={() => onMoveSelected?.({ y: -0.25 })}
+          >
+            −Y
+          </button>
+          <button
+            className="ifcnative-thatopen-button"
+            type="button"
+            onClick={() => onMoveSelected?.({ y: 0.25 })}
+          >
+            +Y
+          </button>
+          <button
+            className="ifcnative-thatopen-button"
+            type="button"
+            onClick={() => onMoveSelected?.({ z: -0.25 })}
+          >
+            −Z
+          </button>
+          <button
+            className="ifcnative-thatopen-button"
+            type="button"
+            onClick={() => onMoveSelected?.({ z: 0.25 })}
+          >
+            +Z
+          </button>
+        </div>
       </div>
-      <div ref={containerRef} style={styles.viewport}>
-        <div style={styles.status}>{status}</div>
-        {error ? <div style={styles.error}>{error}</div> : null}
+      <div ref={containerRef} className="ifcnative-thatopen-viewport">
+        <div className="ifcnative-thatopen-status">{status}</div>
+        {error ? <div className="ifcnative-thatopen-error">{error}</div> : null}
       </div>
     </div>
   );
@@ -139,23 +200,23 @@ async function createThatOpenRuntime(
   },
 ) {
   const [OBC, THREE, FRAGS] = await Promise.all([
-    import('@thatopen/components'),
-    import('three'),
-    import('@thatopen/fragments'),
+    import("@thatopen/components"),
+    import("three"),
+    import("@thatopen/fragments"),
   ]);
 
   const components = new OBC.Components();
   const worlds = components.get(OBC.Worlds);
   const world = worlds.create<
-    import('@thatopen/components').SimpleScene,
-    import('@thatopen/components').SimpleCamera,
-    import('@thatopen/components').SimpleRenderer
+    import("@thatopen/components").SimpleScene,
+    import("@thatopen/components").SimpleCamera,
+    import("@thatopen/components").SimpleRenderer
   >();
   world.scene = new OBC.SimpleScene(components);
   world.renderer = new OBC.SimpleRenderer(components, container, {
     alpha: true,
     antialias: true,
-    powerPreference: 'high-performance',
+    powerPreference: "high-performance",
   });
   world.camera = new OBC.SimpleCamera(components);
 
@@ -176,20 +237,20 @@ async function createThatOpenRuntime(
     autoSetWasm: false,
     wasm: {
       absolute: true,
-      path: '/wasm/',
+      path: "/wasm/",
     },
   });
 
   const selectionMaterial = {
     color: new THREE.Color(0xffb703),
-    customId: 'ifcnative-selection',
+    customId: "ifcnative-selection",
     opacity: 0.95,
     renderedFaces: FRAGS.RenderedFaces.TWO,
     transparent: false,
   };
 
   let model: Awaited<ReturnType<typeof ifcLoader.load>> | null = null;
-  let currentLoadKey = '';
+  let currentLoadKey = "";
   let loadCounter = 0;
   const encoder = new TextEncoder();
   const resizeObserver = new ResizeObserver(() => {
@@ -216,22 +277,28 @@ async function createThatOpenRuntime(
     if (!localId || !Number.isFinite(localId)) {
       return;
     }
-    callbacks.onSelect(localId, 'thatopen');
-    callbacks.onLog(`viewer.select({ engine: 'thatopen', localId: ${localId} });`);
+    callbacks.onSelect(localId, "thatopen");
+    callbacks.onLog(
+      `viewer.select({ engine: 'thatopen', localId: ${localId} });`,
+    );
     await highlight(localId);
   };
 
-  container.addEventListener('pointerup', selectFromPointer);
+  container.addEventListener("pointerup", selectFromPointer);
 
-  async function load(ifcText: string, fileName: string) {
+  async function load(
+    ifcText: string,
+    fileName: string,
+    ifcBytes?: ArrayBuffer | null,
+  ) {
     const loadKey = `${fileName}:${ifcText.length}:${ifcText.slice(0, 256)}:${ifcText.slice(-256)}`;
     if (currentLoadKey === loadKey) {
-      callbacks.onStatus('ThatOpen model already loaded');
+      callbacks.onStatus("ThatOpen model already loaded");
       return;
     }
     currentLoadKey = loadKey;
 
-    callbacks.onStatus('Disposing previous ThatOpen model...');
+    callbacks.onStatus("Disposing previous ThatOpen model...");
     if (model) {
       model.object.removeFromParent();
       await model.dispose();
@@ -239,9 +306,12 @@ async function createThatOpenRuntime(
     }
     await fragments.resetHighlight().catch(() => undefined);
 
-    callbacks.onStatus('Converting IFC to ThatOpen fragments...');
+    callbacks.onStatus("Converting IFC to ThatOpen fragments...");
     const modelId = `${toModelId(fileName)}-${++loadCounter}`;
-    model = await ifcLoader.load(encoder.encode(ifcText), true, modelId, {
+    const source = ifcBytes
+      ? new Uint8Array(ifcBytes)
+      : encoder.encode(ifcText);
+    model = await ifcLoader.load(source, true, modelId, {
       instanceCallback: (importer) => {
         importer.addAllAttributes();
         importer.addAllRelations();
@@ -252,7 +322,9 @@ async function createThatOpenRuntime(
     await fragments.core.update(true);
     await fit();
     callbacks.onStatus(`ThatOpen loaded ${fileName}`);
-    callbacks.onLog(`viewer.load({ engine: 'thatopen', modelId: '${model.modelId}' });`);
+    callbacks.onLog(
+      `viewer.load({ engine: 'thatopen', modelId: '${model.modelId}' });`,
+    );
   }
 
   async function highlight(localId: number) {
@@ -282,7 +354,7 @@ async function createThatOpenRuntime(
   }
 
   async function dispose() {
-    container.removeEventListener('pointerup', selectFromPointer);
+    container.removeEventListener("pointerup", selectFromPointer);
     resizeObserver.disconnect();
     if (model) {
       model.object.removeFromParent();
@@ -304,74 +376,14 @@ async function createThatOpenRuntime(
 }
 
 function toModelId(fileName: string) {
-  return fileName.replace(/\.ifc$/i, '').replace(/[^a-z0-9_-]+/gi, '-').replace(/^-|-$/g, '') || 'ifcnative';
+  return (
+    fileName
+      .replace(/\.ifc$/i, "")
+      .replace(/[^a-z0-9_-]+/gi, "-")
+      .replace(/^-|-$/g, "") || "ifcnative"
+  );
 }
 
 function stringifyError(reason: unknown) {
   return reason instanceof Error ? reason.message : String(reason);
 }
-
-const styles = {
-  actions: {
-    display: 'flex',
-    gap: 8,
-  },
-  button: {
-    background: '#ffffff',
-    border: '1px solid #cbd5e1',
-    borderRadius: 6,
-    color: '#0f172a',
-    cursor: 'pointer',
-    fontSize: 13,
-    fontWeight: 800,
-    minHeight: 34,
-    padding: '0 12px',
-  },
-  error: {
-    background: 'rgba(127, 29, 29, 0.92)',
-    borderRadius: 8,
-    bottom: 12,
-    color: '#fee2e2',
-    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-    fontSize: 12,
-    left: 12,
-    maxWidth: '70%',
-    padding: '10px 12px',
-    position: 'absolute',
-  },
-  shell: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 10,
-    height: '100%',
-    minHeight: 0,
-  },
-  status: {
-    background: 'rgba(255, 255, 255, 0.88)',
-    border: '1px solid rgba(203, 213, 225, 0.8)',
-    borderRadius: 999,
-    color: '#334155',
-    fontSize: 12,
-    fontWeight: 800,
-    left: 12,
-    padding: '7px 10px',
-    position: 'absolute',
-    top: 12,
-    zIndex: 2,
-  },
-  toolbar: {
-    alignItems: 'center',
-    display: 'flex',
-    justifyContent: 'flex-end',
-    gap: 12,
-  },
-  viewport: {
-    background: '#f8fafc',
-    border: '1px solid #cbd5e1',
-    borderRadius: 8,
-    flex: 1,
-    minHeight: 0,
-    overflow: 'hidden',
-    position: 'relative',
-  },
-} satisfies Record<string, React.CSSProperties>;
