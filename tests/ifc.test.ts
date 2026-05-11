@@ -20,6 +20,7 @@ import {
   createNativeSampleDocument,
   getNativePlacement,
   parseNativeIfcText,
+  removeNativeRelationship,
   serializeNativeIfcDocument,
   updateNativePropertyValue,
   updateNativePlacement,
@@ -182,6 +183,37 @@ test('native document diagnostics validate references, containment and relations
       line.includes('IFCRELDEFINESBYPROPERTIES expects property or quantity definitions'),
     ),
   );
+});
+
+test('native document stages relationship deletion without removing endpoints', () => {
+  const sample = createNativeSampleDocument();
+  const storey = sample.entities.find((entity) => entity.type === 'IFCBUILDINGSTOREY');
+  assert.ok(storey);
+  const withElement = addNativeElement(sample, storey.id, 'IFCWALL', 'Delete Relation Wall');
+  const wall = withElement.entities.find((entity) => entity.type === 'IFCWALL' && entity.name === 'Delete Relation Wall');
+  assert.ok(wall);
+  const relationship = withElement.relationshipsByEntity
+    .get(wall.id)
+    ?.find((item) => item.type === 'IFCRELAGGREGATES');
+  assert.ok(relationship);
+
+  const withoutRelationship = removeNativeRelationship(withElement, relationship.id);
+  assert.ok(withoutRelationship.entityById.has(wall.id));
+  assert.ok(withoutRelationship.entityById.has(storey.id));
+  assert.equal(withoutRelationship.entityById.has(relationship.id), false);
+  assert.equal(
+    withoutRelationship.relationshipsByEntity
+      .get(wall.id)
+      ?.some((item) => item.id === relationship.id) ?? false,
+    false,
+  );
+
+  const summary = summarizeEntityAwareDiff(
+    serializeNativeIfcDocument(withElement),
+    serializeNativeIfcDocument(withoutRelationship),
+  );
+  assert.equal(summary.removedEntities, 1);
+  assert.ok(summary.relationshipChanges.some((change) => change.action === 'removed' && change.id === relationship.id));
 });
 
 test('native graph presets filter relationship neighborhoods', () => {

@@ -26,6 +26,7 @@ import {
   addNativeQuantitySet,
   addNativeRelationship,
   addNativeSiUnit,
+  removeNativeRelationship,
   assignNativeBodyRepresentation,
   createNativeSampleDocument,
   getNativePlacement,
@@ -454,6 +455,20 @@ export default function IfcWorkspace() {
     stageDocument(next, selectedId, `Update relationship #${relationshipId} ${type}`, `updateRelationship({ id: ${relationshipId}, class: '${type}' });`);
   };
 
+  const deleteRelationship = (relationshipId: number) => {
+    const relationship = document.relationships.find((item) => item.id === relationshipId);
+    const nextSelection = relationship?.sourceIds.includes(selectedId)
+      ? relationship.targetIds[0]
+      : relationship?.sourceIds[0];
+    const next = removeNativeRelationship(document, relationshipId);
+    stageDocument(
+      next,
+      nextSelection && next.entityById.has(nextSelection) ? nextSelection : selectedId,
+      `Delete relationship #${relationshipId}${relationship ? ` ${relationship.type}` : ''}`,
+      `deleteRelationship({ id: ${relationshipId} });`,
+    );
+  };
+
   const moveSelectedPlacement = (x: string, y: string, z: string) => {
     const next = updateNativePlacement(document, selectedId, { x, y, z });
     stageDocument(
@@ -571,6 +586,7 @@ export default function IfcWorkspace() {
         onAddQuantity={addQuantity}
         onAddUnit={addUnit}
         onAddRelationship={addRelationship}
+        onRemoveRelationship={deleteRelationship}
         onSaveEdit={saveSelectedEdit}
         onMovePlacement={moveSelectedPlacement}
         onUpdateProperty={updatePsetProperty}
@@ -1045,6 +1061,7 @@ function InspectorPanel({
   onAddRelationship,
   onAddUnit,
   onMovePlacement,
+  onRemoveRelationship,
   onSaveEdit,
   onUpdateProperty,
   onUpdateRelationship,
@@ -1060,6 +1077,7 @@ function InspectorPanel({
   onAddRelationship(type: string, sourceId: number, targetId: number): void;
   onAddUnit(unitType: string, unitName: string): void;
   onMovePlacement(x: string, y: string, z: string): void;
+  onRemoveRelationship(relationshipId: number): void;
   onSaveEdit(draft: EntityEditDraft): void;
   onUpdateProperty(propertyId: number, propertyName: string, propertyValue: string, propertyValueType: string): void;
   onUpdateRelationship(relationshipId: number, type: string, sourceId: number, targetId: number): void;
@@ -1092,6 +1110,7 @@ function InspectorPanel({
         document={document}
         selectedId={selectedId}
         onAddRelationship={onAddRelationship}
+        onRemoveRelationship={onRemoveRelationship}
         onUpdateRelationship={onUpdateRelationship}
       />
     );
@@ -1361,11 +1380,13 @@ function RelationsPanel({
   document,
   selectedId,
   onAddRelationship,
+  onRemoveRelationship,
   onUpdateRelationship,
 }: {
   document: NativeIfcDocument;
   selectedId: number;
   onAddRelationship(type: string, sourceId: number, targetId: number): void;
+  onRemoveRelationship(relationshipId: number): void;
   onUpdateRelationship(relationshipId: number, type: string, sourceId: number, targetId: number): void;
 }) {
   const relationships = document.relationshipsByEntity.get(selectedId) ?? [];
@@ -1400,6 +1421,7 @@ function RelationsPanel({
             document={document}
             relationship={relationship}
             selectedId={selectedId}
+            onRemove={onRemoveRelationship}
             onUpdate={onUpdateRelationship}
           />
         </InfoSection>
@@ -1413,11 +1435,13 @@ function EditableRelationship({
   document,
   relationship,
   selectedId,
+  onRemove,
   onUpdate,
 }: {
   document: NativeIfcDocument;
   relationship: NativeIfcRelationship;
   selectedId: number;
+  onRemove(relationshipId: number): void;
   onUpdate(relationshipId: number, type: string, sourceId: number, targetId: number): void;
 }) {
   const currentSourceId = relationship.sourceIds[0] ?? selectedId;
@@ -1441,11 +1465,21 @@ function EditableRelationship({
       <DropdownField label="Relationship class" options={typeOptions} value={type} onChange={setType} />
       <EntityDropdown label="Source object" document={document} value={sourceId} onChange={setSourceId} />
       <EntityDropdown label="Target object" document={document} value={targetId} onChange={setTargetId} />
-      <Button
-        disabled={!validSource || !validTarget}
-        label="Save Relationship"
-        onPress={() => onUpdate(relationship.id, type, Number(sourceId), Number(targetId))}
-      />
+      <View style={styles.row}>
+        <View style={styles.flexField}>
+          <Button
+            disabled={!validSource || !validTarget}
+            label="Save Relationship"
+            onPress={() => onUpdate(relationship.id, type, Number(sourceId), Number(targetId))}
+          />
+        </View>
+        <View style={styles.flexField}>
+          <Button
+            label="Stage Delete Relationship"
+            onPress={() => onRemove(relationship.id)}
+          />
+        </View>
+      </View>
     </View>
   );
 }

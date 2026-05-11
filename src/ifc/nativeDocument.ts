@@ -863,6 +863,16 @@ export function addNativeDocumentReference(
   return addNativeAssociation(document, next, entityId, 'IFCRELASSOCIATESDOCUMENT', 'Document', documentId);
 }
 
+export function removeNativeRelationship(document: NativeIfcDocument, relationshipId: number) {
+  const relationship = document.entityById.get(relationshipId);
+  if (!relationship || !relationship.type.startsWith('IFCREL')) {
+    return document;
+  }
+
+  const next = cloneDocumentEntities(document).filter((entity) => entity.id !== relationshipId);
+  return parseNativeIfcText(serializeEntities(document, next), document.fileName);
+}
+
 export function updateNativeRelationship(
   document: NativeIfcDocument,
   relationshipId: number,
