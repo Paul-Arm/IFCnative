@@ -208,6 +208,16 @@ test('native graph presets filter relationship neighborhoods', () => {
   assert.ok(properties.edges.some((edge) => edge.type === 'IFCRELDEFINESBYPROPERTIES'));
   assert.ok(properties.relationshipTypes.includes('IFCRELDEFINESBYPROPERTIES'));
   assert.ok(properties.edges.every((edge) => edge.type === 'IFCRELDEFINESBYPROPERTIES' || edge.type === 'IFCRELDEFINESBYTYPE'));
+
+  const explicit = buildNativeGraphNeighborhood(withProperty, {
+    depth: 2,
+    preset: 'all',
+    relationshipTypes: new Set(['IFCRELDEFINESBYPROPERTIES']),
+    selectedId: wall.id,
+  });
+  assert.deepEqual(explicit.relationshipTypes, ['IFCRELDEFINESBYPROPERTIES']);
+  assert.ok(explicit.edges.length > 0);
+  assert.ok(explicit.edges.every((edge) => edge.type === 'IFCRELDEFINESBYPROPERTIES'));
 });
 
 test('entity-aware diff groups STEP changes by entity id', () => {

@@ -8,8 +8,11 @@ export default function RelationshipFlow({
   edges,
   nodes,
   relationshipCount,
+  relationshipOptions,
+  relationshipTypeFilters,
   onClearPositions,
   onDepth,
+  onRelationshipTypeFilters,
   onSelect,
   onToggleChildren,
   onTogglePin,
@@ -33,6 +36,31 @@ export default function RelationshipFlow({
             <Text style={styles.depthText}>Auto</Text>
           </Pressable>
         </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
+          <Pressable
+            onPress={() => onRelationshipTypeFilters([])}
+            style={[styles.filterChip, relationshipTypeFilters.length === 0 && styles.filterChipActive]}>
+            <Text style={[styles.filterChipText, relationshipTypeFilters.length === 0 && styles.filterChipTextActive]}>All rels</Text>
+          </Pressable>
+          {relationshipOptions.map((option) => {
+            const active = relationshipTypeFilters.includes(option.value);
+            return (
+              <Pressable
+                key={option.value}
+                onPress={() => {
+                  const next = active
+                    ? relationshipTypeFilters.filter((value) => value !== option.value)
+                    : [...relationshipTypeFilters, option.value];
+                  onRelationshipTypeFilters(next);
+                }}
+                style={[styles.filterChip, active && styles.filterChipActive]}>
+                <Text style={[styles.filterChipText, active && styles.filterChipTextActive]} numberOfLines={1}>
+                  {shortRelationship(option.label)}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
       </View>
       <ScrollView style={styles.list}>
         {nodes.map((node) => (
@@ -73,6 +101,10 @@ function shortType(type: string) {
   return type.replace(/^IFC/i, '');
 }
 
+function shortRelationship(type: string) {
+  return type.replace(/^IFCREL/i, '').replace(/^IFC/i, '');
+}
+
 const styles = StyleSheet.create({
   depthButton: {
     borderColor: '#d4d4d8',
@@ -104,6 +136,29 @@ const styles = StyleSheet.create({
     color: '#71717a',
     fontSize: 12,
     paddingVertical: 8,
+  },
+  filterChip: {
+    borderColor: '#d4d4d8',
+    borderRadius: 999,
+    borderWidth: 1,
+    marginRight: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
+  filterChipActive: {
+    backgroundColor: '#0f766e',
+    borderColor: '#0f766e',
+  },
+  filterChipText: {
+    color: '#18181b',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  filterChipTextActive: {
+    color: '#ffffff',
+  },
+  filterScroll: {
+    maxWidth: '100%',
   },
   list: {
     padding: 8,

@@ -67,6 +67,7 @@ export default function RelationshipFlow({
   presetOptions,
   relationshipOptions,
   relationshipCount,
+  relationshipTypeFilters,
   relationshipTypes,
   onClearPositions,
   onConnectNodes,
@@ -76,6 +77,7 @@ export default function RelationshipFlow({
   onMoveEnd,
   onMoveNode,
   onPreset,
+  onRelationshipTypeFilters,
   onSelect,
   onToggleChildren,
   onTogglePin,
@@ -230,6 +232,36 @@ export default function RelationshipFlow({
           {relationshipTypes.length ? ` · ${relationshipTypes.length} rel filters` : ' · all rels'}
           {capped ? ' capped' : ''}
         </span>
+      </div>
+      <div className="ifc-graph-filter-bar" aria-label="Relationship type filters">
+        <button
+          className={!relationshipTypeFilters.length ? 'active' : ''}
+          type="button"
+          onClick={() => {
+            onRelationshipTypeFilters([]);
+            onLog('graph.relationshipFilters([]);');
+          }}>
+          All relationships
+        </button>
+        {relationshipOptions.map((option) => {
+          const active = relationshipTypeFilters.includes(option.value);
+          return (
+            <button
+              key={option.value}
+              className={active ? 'active' : ''}
+              title={option.detail ?? option.value}
+              type="button"
+              onClick={() => {
+                const next = active
+                  ? relationshipTypeFilters.filter((value) => value !== option.value)
+                  : [...relationshipTypeFilters, option.value];
+                onRelationshipTypeFilters(next);
+                onLog(`graph.relationshipFilters(${JSON.stringify(next)});`);
+              }}>
+              {option.label.replace(/^IFCREL/i, '')}
+            </button>
+          );
+        })}
       </div>
       <div className="ifc-reactflow-shell">
         <ReactFlow

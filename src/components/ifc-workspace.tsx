@@ -169,6 +169,7 @@ export default function IfcWorkspace() {
   const [search, setSearch] = useState('');
   const [graphDepth, setGraphDepth] = useState(1);
   const [graphPreset, setGraphPreset] = useState<NativeGraphPreset>('all');
+  const [graphRelationshipTypes, setGraphRelationshipTypes] = useState<Set<string>>(() => new Set());
   const [graphPinned, setGraphPinned] = useState<Set<number>>(() => new Set());
   const [graphExpanded, setGraphExpanded] = useState<Set<number>>(() => new Set());
   const [graphCollapsed, setGraphCollapsed] = useState<Set<number>>(() => new Set());
@@ -490,6 +491,7 @@ export default function IfcWorkspace() {
           positions={graphPositions}
           preset={graphPreset}
           relationshipOptions={RELATION_TYPES.map(typeOption)}
+          relationshipTypeFilters={graphRelationshipTypes}
           selectedId={selectedId}
           onConnectNodes={connectGraphNodes}
           onCreateNodeFromConnection={addGraphConnectedNode}
@@ -497,6 +499,7 @@ export default function IfcWorkspace() {
           onLog={logAction}
           onPreset={setGraphPreset}
           onPositions={setGraphPositions}
+          onRelationshipTypeFilters={(filters) => setGraphRelationshipTypes(new Set(filters))}
           onSelect={selectEntity}
           onToggleChildren={(id, loaded) => {
             if (loaded) {
@@ -852,6 +855,7 @@ function GraphPanel({
   positions,
   preset,
   relationshipOptions,
+  relationshipTypeFilters,
   selectedId,
   onConnectNodes,
   onCreateNodeFromConnection,
@@ -859,6 +863,7 @@ function GraphPanel({
   onLog,
   onPositions,
   onPreset,
+  onRelationshipTypeFilters,
   onSelect,
   onToggleChildren,
   onTogglePin,
@@ -872,6 +877,7 @@ function GraphPanel({
   positions: Map<number, Point>;
   preset: NativeGraphPreset;
   relationshipOptions: DropdownOption[];
+  relationshipTypeFilters: Set<string>;
   selectedId: number;
   onConnectNodes(sourceId: number, targetId: number, relationshipType: string): void;
   onCreateNodeFromConnection(
@@ -885,13 +891,14 @@ function GraphPanel({
   onLog(code: string): void;
   onPositions(positions: Map<number, Point>): void;
   onPreset(preset: NativeGraphPreset): void;
+  onRelationshipTypeFilters(filters: string[]): void;
   onSelect(id: number, source?: string): void;
   onToggleChildren(id: number, loaded: boolean): void;
   onTogglePin(id: number): void;
 }) {
   const graph = useMemo(
-    () => buildGraph(document, selectedId, pinned, expanded, collapsed, depth, preset),
-    [collapsed, depth, document, expanded, pinned, preset, selectedId],
+    () => buildGraph(document, selectedId, pinned, expanded, collapsed, depth, preset, relationshipTypeFilters),
+    [collapsed, depth, document, expanded, pinned, preset, relationshipTypeFilters, selectedId],
   );
   const layout = useMemo(() => layoutGraph(graph.nodeIds, graph.levels, positions), [graph.levels, graph.nodeIds, positions]);
   const flowNodes = useMemo<RelationshipFlowNode[]>(
@@ -949,6 +956,7 @@ function GraphPanel({
       presetOptions={GRAPH_PRESETS}
       relationshipOptions={relationshipOptions}
       relationshipCount={graph.edges.length}
+      relationshipTypeFilters={[...relationshipTypeFilters]}
       relationshipTypes={graph.relationshipTypes}
       onClearPositions={() => {
         onPositions(new Map());
@@ -964,6 +972,7 @@ function GraphPanel({
       onMoveEnd={(id, point) => onLog(`graph.moveNode({ id: ${id}, x: ${point.x.toFixed(1)}, y: ${point.y.toFixed(1)} });`)}
       onMoveNode={moveNode}
       onPreset={(value) => onPreset(value as NativeGraphPreset)}
+      onRelationshipTypeFilters={onRelationshipTypeFilters}
       onSelect={(id) => onSelect(id, 'graph')}
       onToggleChildren={(id, loaded) => onToggleChildren(id, loaded)}
       onTogglePin={onTogglePin}
@@ -2026,6 +2035,7 @@ function buildGraph(
   collapsed: Set<number>,
   depth: number,
   preset: NativeGraphPreset,
+  relationshipTypes: Set<string>,
 ) {
   return buildNativeGraphNeighborhood(document, {
     collapsed,
@@ -2033,6 +2043,7 @@ function buildGraph(
     expanded,
     pinned,
     preset,
+    relationshipTypes,
     selectedId,
   });
 }
