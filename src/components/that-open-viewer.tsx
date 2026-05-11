@@ -7,6 +7,7 @@ export interface ThatOpenViewerProps {
   selectedId: number;
   selectedName?: string;
   onLog?(line: string): void;
+  onMoveSelected?(delta: { x?: number; y?: number; z?: number }): void;
   onSelect(id: number, source?: string): void;
 }
 

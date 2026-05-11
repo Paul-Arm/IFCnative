@@ -464,6 +464,25 @@ export default function IfcWorkspace() {
     );
   };
 
+  const nudgeSelectedPlacement = (delta: { x?: number; y?: number; z?: number }) => {
+    const placement = getNativePlacement(document, selectedId);
+    if (!placement) {
+      setMessage(`No editable placement for #${selectedId}`);
+      logAction(`movePlacement.nudgeSkipped({ id: ${selectedId}, reason: 'no-placement' });`);
+      return;
+    }
+    const x = formatCoordinate(placement.x + (delta.x ?? 0));
+    const y = formatCoordinate(placement.y + (delta.y ?? 0));
+    const z = formatCoordinate(placement.z + (delta.z ?? 0));
+    const next = updateNativePlacement(document, selectedId, { x, y, z });
+    stageDocument(
+      next,
+      selectedId,
+      `Nudge #${selectedId} placement by (${formatCoordinate(delta.x ?? 0)}, ${formatCoordinate(delta.y ?? 0)}, ${formatCoordinate(delta.z ?? 0)}) to (${x}, ${y}, ${z})`,
+      `movePlacement.nudge({ id: ${selectedId}, dx: ${delta.x ?? 0}, dy: ${delta.y ?? 0}, dz: ${delta.z ?? 0} });`,
+    );
+  };
+
   const addUnit = (unitType: string, unitName: string) => {
     const next = addNativeSiUnit(document, unitType, '$', unitName);
     stageDocument(next, selectedId, `Add unit ${unitType} ${unitName}`, `addUnit({ unitType: '${unitType}', name: '${unitName}' });`);
@@ -573,6 +592,7 @@ export default function IfcWorkspace() {
               selectedId={selectedId}
               selectedName={selectedEntity?.name}
               onLog={logAction}
+              onMoveSelected={nudgeSelectedPlacement}
               onSelect={selectEntity}
             />
           </View>
@@ -2156,6 +2176,13 @@ function addToSet<T>(current: Set<T>, value: T) {
   return new Set(current).add(value);
 }
 
+function formatCoordinate(value: number) {
+  if (!Number.isFinite(value)) {
+    return '0';
+  }
+  const rounded = Math.round(value * 1000) / 1000;
+  return String(Object.is(rounded, -0) ? 0 : rounded);
+}
 
 function shortType(type: string) {
   return type.replace(/^IFC/i, '');

@@ -8,7 +8,9 @@ export default function ThatOpenViewer({
   fileName,
   ifcText,
   selectedId,
+  selectedName,
   onLog,
+  onMoveSelected,
   onSelect,
 }: ThatOpenViewerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -118,6 +120,15 @@ export default function ThatOpenViewer({
           <button style={styles.button} type="button" onClick={() => void runtimeRef.current?.resetCamera()}>
             Reset
           </button>
+        </div>
+        <div style={styles.nudgePanel} title={`Draft placement nudges for #${selectedId}${selectedName ? ` ${selectedName}` : ''}`}>
+          <span style={styles.nudgeLabel}>Move #{selectedId}</span>
+          <button style={styles.button} type="button" onClick={() => onMoveSelected?.({ x: -0.25 })}>−X</button>
+          <button style={styles.button} type="button" onClick={() => onMoveSelected?.({ x: 0.25 })}>+X</button>
+          <button style={styles.button} type="button" onClick={() => onMoveSelected?.({ y: -0.25 })}>−Y</button>
+          <button style={styles.button} type="button" onClick={() => onMoveSelected?.({ y: 0.25 })}>+Y</button>
+          <button style={styles.button} type="button" onClick={() => onMoveSelected?.({ z: -0.25 })}>−Z</button>
+          <button style={styles.button} type="button" onClick={() => onMoveSelected?.({ z: 0.25 })}>+Z</button>
         </div>
       </div>
       <div ref={containerRef} style={styles.viewport}>
@@ -339,6 +350,17 @@ const styles = {
     padding: '10px 12px',
     position: 'absolute',
   },
+  nudgeLabel: {
+    color: '#475569',
+    fontSize: 12,
+    fontWeight: 800,
+  },
+  nudgePanel: {
+    alignItems: 'center',
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
   shell: {
     display: 'flex',
     flexDirection: 'column',
@@ -362,7 +384,8 @@ const styles = {
   toolbar: {
     alignItems: 'center',
     display: 'flex',
-    justifyContent: 'flex-end',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
     gap: 12,
   },
   viewport: {
