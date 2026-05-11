@@ -26,6 +26,7 @@ import {
   addNativeQuantitySet,
   addNativeRelationship,
   addNativeSiUnit,
+  addNativeTypeAssignment,
   removeNativeRelationship,
   assignNativeBodyRepresentation,
   createNativeSampleDocument,
@@ -152,6 +153,18 @@ const QUANTITY_TYPES = [
   'IFCQUANTITYCOUNT',
   'IFCQUANTITYWEIGHT',
   'IFCQUANTITYTIME',
+];
+
+const TYPE_CLASSES = [
+  'IFCTYPEOBJECT',
+  'IFCELEMENTTYPE',
+  'IFCBUILDINGELEMENTPROXYTYPE',
+  'IFCWALLTYPE',
+  'IFCSLABTYPE',
+  'IFCDOORTYPE',
+  'IFCWINDOWTYPE',
+  'IFCBEAMTYPE',
+  'IFCCOLUMNTYPE',
 ];
 
 const GRAPH_PRESETS: Array<{ value: NativeGraphPreset; label: string; detail: string }> = [
@@ -441,6 +454,11 @@ export default function IfcWorkspace() {
     stageDocument(next, selectedId, `Assign document '${identification}' to #${selectedId}`, `addDocumentReference({ objectId: ${selectedId}, id: '${identification}' });`);
   };
 
+  const assignType = (typeName: string, typeClass: string, tag: string) => {
+    const next = addNativeTypeAssignment(document, selectedId, typeName, typeClass, tag);
+    stageDocument(next, selectedId, `Assign type '${typeName}' to #${selectedId}`, `assignType({ objectId: ${selectedId}, class: '${typeClass}', name: '${typeName}' });`);
+  };
+
   const updatePsetProperty = (propertyId: number, propertyName: string, propertyValue: string, propertyValueType: string) => {
     const next = updateNativePropertyValue(document, propertyId, {
       name: propertyName,
@@ -582,6 +600,7 @@ export default function IfcWorkspace() {
         onAddClassification={addClassification}
         onAddDocumentReference={addDocumentReference}
         onAddMaterial={addMaterial}
+        onAssignType={assignType}
         onAddPset={addPset}
         onAddQuantity={addQuantity}
         onAddUnit={addUnit}
@@ -623,6 +642,7 @@ export default function IfcWorkspace() {
               selectedId={selectedId}
               onAddClassification={addClassification}
               onAddDocumentReference={addDocumentReference}
+              onAssignType={assignType}
               onAddElement={addElement}
               onAddBodyElement={addBodyElement}
               onAssignBodyToSelected={assignBodyToSelected}
@@ -1056,6 +1076,7 @@ function InspectorPanel({
   onAddClassification,
   onAddDocumentReference,
   onAddMaterial,
+  onAssignType,
   onAddPset,
   onAddQuantity,
   onAddRelationship,
@@ -1072,6 +1093,7 @@ function InspectorPanel({
   onAddClassification(identification: string, name: string, location: string): void;
   onAddDocumentReference(identification: string, name: string, location: string): void;
   onAddMaterial(materialName: string, materialCategory: string): void;
+  onAssignType(typeName: string, typeClass: string, tag: string): void;
   onAddPset(psetName: string, propertyName: string, propertyValue: string, propertyValueType?: string): void;
   onAddQuantity(qtoName: string, quantityName: string, quantityValue: string, quantityType?: string): void;
   onAddRelationship(type: string, sourceId: number, targetId: number): void;
@@ -1126,6 +1148,7 @@ function InspectorPanel({
         onAddClassification={onAddClassification}
         onAddDocumentReference={onAddDocumentReference}
         onAddMaterial={onAddMaterial}
+        onAssignType={onAssignType}
       />
     );
   }
@@ -1490,16 +1513,22 @@ function ResourcesPanel({
   onAddClassification,
   onAddDocumentReference,
   onAddMaterial,
+  onAssignType,
 }: {
   document: NativeIfcDocument;
   selectedId: number;
   onAddClassification(identification: string, name: string, location: string): void;
   onAddDocumentReference(identification: string, name: string, location: string): void;
   onAddMaterial(materialName: string, materialCategory: string): void;
+  onAssignType(typeName: string, typeClass: string, tag: string): void;
 }) {
   const resources = document.resourcesByEntity.get(selectedId) ?? [];
+  const typeAssignments = document.typeAssignmentsByEntity.get(selectedId) ?? [];
   const [materialName, setMaterialName] = useState('Inspection Concrete');
   const [materialCategory, setMaterialCategory] = useState('Concrete');
+  const [typeClass, setTypeClass] = useState('IFCTYPEOBJECT');
+  const [typeName, setTypeName] = useState('Inspection Element Type');
+  const [typeTag, setTypeTag] = useState('TYPE-INSPECTION');
   const [classificationId, setClassificationId] = useState('IFCNATIVE-INSPECTION');
   const [classificationName, setClassificationName] = useState('Inspection Target');
   const [classificationUri, setClassificationUri] = useState('https://ifcnative.local/classification/inspection-target');
@@ -1516,6 +1545,24 @@ function ResourcesPanel({
           <Text style={styles.empty}>No material, classification or document linked.</Text>
         )}
       </InfoSection>
+      <InfoSection title="Type assignments">
+        {typeAssignments.length ? (
+          typeAssignments.map((assignment) => (
+            <Text key={`${assignment.relationshipId}-${assignment.typeId}`} style={styles.infoText}>
+              #{assignment.relationshipId} → #{assignment.typeId} {assignment.typeClass} {assignment.typeName}
+            </Text>
+          ))
+        ) : (
+          <Text style={styles.empty}>No IFCRELDEFINESBYTYPE assignment.</Text>
+        )}
+      </InfoSection>
+      <View style={styles.editBlock}>
+        <Text style={styles.infoTitle}>Assign Type</Text>
+        <DropdownField label="Type class" options={TYPE_CLASSES} value={typeClass} onChange={setTypeClass} />
+        <LabeledInput label="Type name" value={typeName} onChangeText={setTypeName} />
+        <LabeledInput label="Type tag" value={typeTag} onChangeText={setTypeTag} />
+        <Button label="+ Assign Type" primary onPress={() => onAssignType(typeName, typeClass, typeTag)} />
+      </View>
       <View style={styles.editBlock}>
         <Text style={styles.infoTitle}>Add Material</Text>
         <LabeledInput label="Material" value={materialName} onChangeText={setMaterialName} />
@@ -1589,6 +1636,7 @@ function BuilderPanel({
   onAddDocumentReference,
   onAddBodyElement,
   onAssignBodyToSelected,
+  onAssignType,
   onAddElement,
   onAddMaterial,
   onAddPset,
@@ -1602,6 +1650,7 @@ function BuilderPanel({
   onAddDocumentReference(identification: string, name: string, location: string): void;
   onAddBodyElement(options: BodyElementDraft): void;
   onAssignBodyToSelected(options: BodyElementDraft): void;
+  onAssignType(typeName: string, typeClass: string, tag: string): void;
   onAddElement(type: string, name: string, parentId?: number): void;
   onAddMaterial(materialName: string, materialCategory: string): void;
   onAddPset(psetName: string, propertyName: string, propertyValue: string, propertyValueType?: string): void;
@@ -1634,6 +1683,9 @@ function BuilderPanel({
   const [quantityType, setQuantityType] = useState('IFCQUANTITYLENGTH');
   const [materialName, setMaterialName] = useState('Inspection Concrete');
   const [materialCategory, setMaterialCategory] = useState('Concrete');
+  const [typeClass, setTypeClass] = useState('IFCTYPEOBJECT');
+  const [typeName, setTypeName] = useState('Inspection Element Type');
+  const [typeTag, setTypeTag] = useState('TYPE-INSPECTION');
   const [classificationId, setClassificationId] = useState('IFCNATIVE-INSPECTION');
   const [classificationName, setClassificationName] = useState('Inspection Target');
   const [classificationUri, setClassificationUri] = useState('https://ifcnative.local/classification/inspection-target');
@@ -1766,6 +1818,11 @@ function BuilderPanel({
       <LabeledInput label="Material" value={materialName} onChangeText={setMaterialName} />
       <LabeledInput label="Material category" value={materialCategory} onChangeText={setMaterialCategory} />
       <Button label="+ Add Material to selected" onPress={() => onAddMaterial(materialName, materialCategory)} />
+      <View style={styles.separator} />
+      <DropdownField label="Type class" options={TYPE_CLASSES} value={typeClass} onChange={setTypeClass} />
+      <LabeledInput label="Type name" value={typeName} onChangeText={setTypeName} />
+      <LabeledInput label="Type tag" value={typeTag} onChangeText={setTypeTag} />
+      <Button label="+ Assign Type to selected" onPress={() => onAssignType(typeName, typeClass, typeTag)} />
       <View style={styles.separator} />
       <LabeledInput label="Classification ID" value={classificationId} onChangeText={setClassificationId} />
       <LabeledInput label="Classification name" value={classificationName} onChangeText={setClassificationName} />

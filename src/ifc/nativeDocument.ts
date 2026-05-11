@@ -30,6 +30,14 @@ export interface NativeIfcPropertySet {
   values: { id: number; name: string; value: string; type: string }[];
 }
 
+export interface NativeIfcTypeAssignment {
+  relationshipId: number;
+  typeId: number;
+  typeClass: string;
+  typeName: string;
+  objectIds: number[];
+}
+
 export type NativeBodyProfile = 'rectangle' | 'cylinder';
 
 export interface NativeBodyElementOptions {
@@ -69,6 +77,7 @@ export interface NativeIfcDocument {
   relationships: NativeIfcRelationship[];
   relationshipsByEntity: Map<number, NativeIfcRelationship[]>;
   propertySetsByEntity: Map<number, NativeIfcPropertySet[]>;
+  typeAssignmentsByEntity: Map<number, NativeIfcTypeAssignment[]>;
   resourcesByEntity: Map<number, string[]>;
   units: string[];
   spatialRoots: NativeIfcTreeNode[];
@@ -129,6 +138,7 @@ export function parseNativeIfcText(text: string, fileName = 'Untitled.ifc'): Nat
   }
 
   const propertySetsByEntity = readPropertySets(entities, entityById);
+  const typeAssignmentsByEntity = readTypeAssignments(entities, entityById);
   const resourcesByEntity = readResources(entities, entityById);
   const units = readUnits(entities, entityById);
   const spatialRoots = buildSpatialRoots(entities, entityById, relationships);
@@ -153,6 +163,7 @@ export function parseNativeIfcText(text: string, fileName = 'Untitled.ifc'): Nat
     resourcesByEntity,
     schema,
     spatialRoots,
+    typeAssignmentsByEntity,
     units,
   };
 }
@@ -863,6 +874,41 @@ export function addNativeDocumentReference(
   return addNativeAssociation(document, next, entityId, 'IFCRELASSOCIATESDOCUMENT', 'Document', documentId);
 }
 
+export function addNativeTypeAssignment(
+  document: NativeIfcDocument,
+  entityId: number,
+  typeName: string,
+  typeClass = 'IFCTYPEOBJECT',
+  tag = '',
+) {
+  if (!document.entityById.has(entityId)) {
+    return document;
+  }
+  const next = cloneDocumentEntities(document);
+  const normalizedTypeClass = normalizeTypeClass(typeClass);
+  const typeId = nextEntityId(next);
+  const relationshipId = typeId + 1;
+  const cleanName = typeName.trim() || `Type for #${entityId}`;
+  const cleanTag = tag.trim() || cleanName;
+  next.push({
+    args: [quote(createIfcGuid(typeId)), '$', quote(cleanName), '$', '$', '$', '$', quote(cleanTag)],
+    description: '',
+    globalId: createIfcGuid(typeId),
+    id: typeId,
+    name: cleanName,
+    type: normalizedTypeClass,
+  });
+  next.push({
+    args: [quote(createIfcGuid(relationshipId)), '$', quote('Type'), '$', `(#${entityId})`, `#${typeId}`],
+    description: '',
+    globalId: createIfcGuid(relationshipId),
+    id: relationshipId,
+    name: 'Type',
+    type: 'IFCRELDEFINESBYTYPE',
+  });
+  return parseNativeIfcText(serializeEntities(document, next), document.fileName);
+}
+
 export function removeNativeRelationship(document: NativeIfcDocument, relationshipId: number) {
   const relationship = document.entityById.get(relationshipId);
   if (!relationship || !relationship.type.startsWith('IFCREL')) {
@@ -1041,6 +1087,29 @@ function readPropertySets(entities: NativeIfcEntity[], entityById: Map<number, N
   return result;
 }
 
+function readTypeAssignments(entities: NativeIfcEntity[], entityById: Map<number, NativeIfcEntity>) {
+  const result = new Map<number, NativeIfcTypeAssignment[]>();
+  for (const rel of entities.filter((entity) => entity.type === 'IFCRELDEFINESBYTYPE')) {
+    const objectIds = readReferences(rel.args[4]);
+    const typeId = readReferences(rel.args[5])[0];
+    const typeEntity = entityById.get(typeId);
+    if (!typeEntity) {
+      continue;
+    }
+    const assignment: NativeIfcTypeAssignment = {
+      objectIds,
+      relationshipId: rel.id,
+      typeClass: typeEntity.type,
+      typeId,
+      typeName: typeEntity.name || `#${typeId}`,
+    };
+    for (const objectId of objectIds) {
+      result.set(objectId, [...(result.get(objectId) ?? []), assignment]);
+    }
+  }
+  return result;
+}
+
 function buildPropertySet(entity: NativeIfcEntity, entityById: Map<number, NativeIfcEntity>): NativeIfcPropertySet | undefined {
   if (entity.type !== 'IFCPROPERTYSET' && entity.type !== 'IFCELEMENTQUANTITY') {
     return undefined;
@@ -1170,6 +1239,11 @@ function validateRelationshipCompatibility(
       ? undefined
       : `expects property or quantity definitions, got ${targetTypes.join(', ')}`;
   }
+  if (relationship.type === 'IFCRELDEFINESBYTYPE') {
+    return targetTypes.every(isTypeObject)
+      ? undefined
+      : `expects type object definitions, got ${targetTypes.join(', ')}`;
+  }
   if (relationship.type === 'IFCRELASSOCIATESMATERIAL') {
     return targetTypes.every((type) => type.startsWith('IFCMATERIAL'))
       ? undefined
@@ -1295,6 +1369,15 @@ function cloneDocumentEntities(document: NativeIfcDocument) {
     ...entity,
     args: [...entity.args],
   }));
+}
+
+function normalizeTypeClass(typeClass: string) {
+  const normalized = normalizeType(typeClass || 'IFCTYPEOBJECT');
+  return isTypeObject(normalized) ? normalized : 'IFCTYPEOBJECT';
+}
+
+function isTypeObject(type: string) {
+  return type === 'IFCTYPEOBJECT' || type === 'IFCELEMENTTYPE' || type.endsWith('TYPE');
 }
 
 function serializeEntities(document: NativeIfcDocument, entities: NativeIfcEntity[]) {

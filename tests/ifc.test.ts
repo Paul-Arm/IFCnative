@@ -16,6 +16,7 @@ import {
   addNativeQuantitySet,
   addNativeRelationship,
   addNativeSiUnit,
+  addNativeTypeAssignment,
   assignNativeBodyRepresentation,
   createNativeSampleDocument,
   getNativePlacement,
@@ -118,10 +119,12 @@ test('native document edits keep indexes live', () => {
   assert.ok(withClassification.resourcesByEntity.get(wall.id)?.some((resource) => resource.includes('RN Class')));
   const withDocument = addNativeDocumentReference(withClassification, wall.id, 'RN-DOC', 'RN Report', 'https://ifcnative.local/doc');
   assert.ok(withDocument.resourcesByEntity.get(wall.id)?.some((resource) => resource.includes('RN Report')));
+  const withType = addNativeTypeAssignment(withDocument, wall.id, 'RN Wall Type', 'IFCTYPEOBJECT', 'RN-WALL-TYPE');
+  assert.ok(withType.typeAssignmentsByEntity.get(wall.id)?.some((assignment) => assignment.typeName === 'RN Wall Type'));
 
-  const project = withDocument.entities.find((entity) => entity.type === 'IFCPROJECT');
+  const project = withType.entities.find((entity) => entity.type === 'IFCPROJECT');
   assert.ok(project);
-  const withRelation = addNativeRelationship(withDocument, 'IFCRELASSIGNSTOGROUP', project.id, wall.id);
+  const withRelation = addNativeRelationship(withType, 'IFCRELASSIGNSTOGROUP', project.id, wall.id);
   assert.ok(
     withRelation.relationshipsByEntity
       .get(wall.id)
@@ -150,6 +153,35 @@ test('native document edits keep indexes live', () => {
   assert.ok(reopened.propertySetsByEntity.get(wall.id)?.some((set) => set.name === 'Pset_RN'));
   assert.ok(reopened.propertySetsByEntity.get(wall.id)?.some((set) => set.name === 'Qto_RN'));
   assert.ok(reopened.resourcesByEntity.get(wall.id)?.some((resource) => resource.includes('RN Report')));
+  assert.ok(reopened.typeAssignmentsByEntity.get(wall.id)?.some((assignment) => assignment.typeClass === 'IFCTYPEOBJECT'));
+});
+
+test('native type assignments are indexed, diffed, and endpoint-validated', () => {
+  const sample = createNativeSampleDocument();
+  const block = sample.entities.find((entity) => entity.type === 'IFCBUILTELEMENT');
+  assert.ok(block);
+
+  const typed = addNativeTypeAssignment(sample, block.id, 'Inspection Type', 'IFCTYPEOBJECT', 'INSPECTION-TYPE');
+  const assignment = typed.typeAssignmentsByEntity.get(block.id)?.[0];
+  assert.ok(assignment);
+  assert.equal(assignment.typeName, 'Inspection Type');
+  assert.equal(assignment.objectIds[0], block.id);
+  assert.ok(typed.relationshipsByEntity.get(block.id)?.some((relationship) => relationship.type === 'IFCRELDEFINESBYTYPE'));
+  assert.ok(typed.diagnostics.some((line) => line.includes('Validation: no relationship or reference warnings')));
+
+  const diffSummary = summarizeEntityAwareDiff(serializeNativeIfcDocument(sample), serializeNativeIfcDocument(typed));
+  assert.ok(diffSummary.relationshipChanges.some((change) => change.type === 'IFCRELDEFINESBYTYPE'));
+
+  const badRelationship = updateNativeRelationship(
+    typed,
+    assignment.relationshipId,
+    { sourceId: block.id, targetId: block.id, type: 'IFCRELDEFINESBYTYPE' },
+  );
+  assert.ok(
+    badRelationship.diagnostics.some((line) =>
+      line.includes('IFCRELDEFINESBYTYPE expects type object definitions'),
+    ),
+  );
 });
 
 test('native document diagnostics validate references, containment and relationship endpoints', () => {
