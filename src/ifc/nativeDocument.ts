@@ -503,6 +503,176 @@ export function addNativeBodyElement(document: NativeIfcDocument, options: Nativ
   return parseNativeIfcText(serializeEntities(document, next), document.fileName);
 }
 
+export function assignNativeBodyRepresentation(
+  document: NativeIfcDocument,
+  entityId: number,
+  options: Pick<NativeBodyElementOptions, 'width' | 'depth' | 'height' | 'profile'>,
+) {
+  const product = document.entityById.get(entityId);
+  if (!product || !isRepresentationAssignableProduct(product)) {
+    return document;
+  }
+
+  const next = cloneDocumentEntities(document);
+  const nextProduct = next.find((entity) => entity.id === entityId);
+  if (!nextProduct || !isRepresentationAssignableProduct(nextProduct)) {
+    return document;
+  }
+
+  const shapeId = nextEntityId(next);
+  const representationId = shapeId + 1;
+  const solidId = shapeId + 2;
+  const solidAxisId = shapeId + 3;
+  const solidPointId = shapeId + 4;
+  const profileId = shapeId + 5;
+  const profileAxisId = shapeId + 6;
+  const profilePointId = shapeId + 7;
+  const extrusionDirectionId = shapeId + 8;
+  const profileDirectionId = shapeId + 9;
+  const quantityId = shapeId + 10;
+  const heightQuantityId = shapeId + 11;
+  const areaQuantityId = shapeId + 12;
+  const volumeQuantityId = shapeId + 13;
+  const quantityRelId = shapeId + 14;
+  const contextRef = `#${document.entities.find((entity) => entity.type === 'IFCGEOMETRICREPRESENTATIONCONTEXT')?.id ?? 10}`;
+  const width = positiveStepNumber(options.width, 1);
+  const depth = positiveStepNumber(options.depth, 1);
+  const height = positiveStepNumber(options.height, 1);
+  const profile = normalizeBodyProfile(options.profile);
+  const radius = formatDecimal(Math.max(Number(width), Number(depth)) / 2);
+  const footprintArea = profile === 'cylinder' ? circleAreaStepNumber(radius) : multiplyStepNumbers(width, depth);
+  const netVolume = multiplyStepNumbers(footprintArea, height);
+
+  setArg(nextProduct.args, 6, `#${shapeId}`);
+
+  next.push(
+    {
+      args: ['$', '$', `(#${representationId})`],
+      description: '',
+      globalId: '',
+      id: shapeId,
+      name: '',
+      type: 'IFCPRODUCTDEFINITIONSHAPE',
+    },
+    {
+      args: [contextRef, quote('Body'), quote('SweptSolid'), `(#${solidId})`],
+      description: '',
+      globalId: '',
+      id: representationId,
+      name: 'Body',
+      type: 'IFCSHAPEREPRESENTATION',
+    },
+    {
+      args: [`#${profileId}`, `#${solidAxisId}`, `#${extrusionDirectionId}`, height],
+      description: '',
+      globalId: '',
+      id: solidId,
+      name: '',
+      type: 'IFCEXTRUDEDAREASOLID',
+    },
+    {
+      args: [`#${solidPointId}`, '$', '$'],
+      description: '',
+      globalId: '',
+      id: solidAxisId,
+      name: '',
+      type: 'IFCAXIS2PLACEMENT3D',
+    },
+    {
+      args: ['(0.,0.,0.)'],
+      description: '',
+      globalId: '',
+      id: solidPointId,
+      name: '',
+      type: 'IFCCARTESIANPOINT',
+    },
+    {
+      args: profile === 'cylinder'
+        ? ['.AREA.', quote('Assigned Cylindrical Body'), `#${profileAxisId}`, radius]
+        : ['.AREA.', quote('Assigned Rectangular Body'), `#${profileAxisId}`, width, depth],
+      description: '',
+      globalId: '',
+      id: profileId,
+      name: profile === 'cylinder' ? 'Assigned Cylindrical Body' : 'Assigned Rectangular Body',
+      type: profile === 'cylinder' ? 'IFCCIRCLEPROFILEDEF' : 'IFCRECTANGLEPROFILEDEF',
+    },
+    {
+      args: [`#${profilePointId}`, `#${profileDirectionId}`],
+      description: '',
+      globalId: '',
+      id: profileAxisId,
+      name: '',
+      type: 'IFCAXIS2PLACEMENT2D',
+    },
+    {
+      args: ['(0.,0.)'],
+      description: '',
+      globalId: '',
+      id: profilePointId,
+      name: '',
+      type: 'IFCCARTESIANPOINT',
+    },
+    {
+      args: ['(0.,0.,1.)'],
+      description: '',
+      globalId: '',
+      id: extrusionDirectionId,
+      name: '',
+      type: 'IFCDIRECTION',
+    },
+    {
+      args: ['(1.,0.)'],
+      description: '',
+      globalId: '',
+      id: profileDirectionId,
+      name: '',
+      type: 'IFCDIRECTION',
+    },
+    {
+      args: [quote(createIfcGuid(quantityId)), '$', quote('IFCnative_BaseQuantities'), '$', quote('AssignedBodyQuantities'), `(#${heightQuantityId},#${areaQuantityId},#${volumeQuantityId})`],
+      description: '',
+      globalId: createIfcGuid(quantityId),
+      id: quantityId,
+      name: 'IFCnative_BaseQuantities',
+      type: 'IFCELEMENTQUANTITY',
+    },
+    {
+      args: [quote('Height'), '$', '$', height, '$'],
+      description: '',
+      globalId: '',
+      id: heightQuantityId,
+      name: 'Height',
+      type: 'IFCQUANTITYLENGTH',
+    },
+    {
+      args: [quote('FootprintArea'), '$', '$', footprintArea, '$'],
+      description: '',
+      globalId: '',
+      id: areaQuantityId,
+      name: 'FootprintArea',
+      type: 'IFCQUANTITYAREA',
+    },
+    {
+      args: [quote('NetVolume'), '$', '$', netVolume, '$'],
+      description: '',
+      globalId: '',
+      id: volumeQuantityId,
+      name: 'NetVolume',
+      type: 'IFCQUANTITYVOLUME',
+    },
+    {
+      args: [quote(createIfcGuid(quantityRelId)), '$', '$', '$', `(#${entityId})`, `#${quantityId}`],
+      description: '',
+      globalId: createIfcGuid(quantityRelId),
+      id: quantityRelId,
+      name: '',
+      type: 'IFCRELDEFINESBYPROPERTIES',
+    },
+  );
+
+  return parseNativeIfcText(serializeEntities(document, next), document.fileName);
+}
+
 export function addNativeRelationship(
   document: NativeIfcDocument,
   type: string,
@@ -1233,6 +1403,14 @@ function unique(values: number[]) {
 
 function isSpatial(type: string) {
   return ['IFCSITE', 'IFCBUILDING', 'IFCBUILDINGSTOREY', 'IFCSPACE', 'IFCFACILITY'].includes(type);
+}
+
+function isRepresentationAssignableProduct(entity: NativeIfcEntity) {
+  return !entity.type.startsWith('IFCREL')
+    && !entity.type.startsWith('IFCPROPERTY')
+    && !entity.type.startsWith('IFCQUANTITY')
+    && !['IFCPROJECT', 'IFCOWNERHISTORY', 'IFCAPPLICATION', 'IFCUNITASSIGNMENT', 'IFCSIUNIT'].includes(entity.type)
+    && entity.args.length >= 7;
 }
 
 function compactValue(value: string) {

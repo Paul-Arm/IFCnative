@@ -16,6 +16,7 @@ import {
   addNativeQuantitySet,
   addNativeRelationship,
   addNativeSiUnit,
+  assignNativeBodyRepresentation,
   createNativeSampleDocument,
   getNativePlacement,
   parseNativeIfcText,
@@ -318,6 +319,43 @@ test('native body preset creates cylindrical swept solid geometry', async () => 
   const api = new WebIFC.IfcAPI();
   await api.Init();
   const modelID = api.OpenModel(new TextEncoder().encode(serializeNativeIfcDocument(withCylinder)));
+  assert.ok(modelID >= 0);
+  assert.ok(streamGeometryVertexCount(api, modelID) > 0);
+  api.CloseModel(modelID);
+});
+
+test('native body assignment replaces selected product representation with reviewable quantities', async () => {
+  const sample = createNativeSampleDocument();
+  const block = sample.entities.find((entity) => entity.type === 'IFCBUILTELEMENT');
+  assert.ok(block);
+  const beforePlacement = getNativePlacement(sample, block.id);
+  assert.ok(beforePlacement);
+
+  const assigned = assignNativeBodyRepresentation(sample, block.id, {
+    depth: '1.5',
+    height: '2',
+    profile: 'rectangle',
+    width: '3',
+  });
+  const afterBlock = assigned.entityById.get(block.id);
+  assert.ok(afterBlock);
+  assert.equal(afterBlock.globalId, block.globalId);
+  assert.notEqual(afterBlock.args[6], block.args[6]);
+  assert.equal(getNativePlacement(assigned, block.id)?.pointId, beforePlacement.pointId);
+  assert.equal(assigned.entityById.get(Number(afterBlock.args[6].slice(1)))?.type, 'IFCPRODUCTDEFINITIONSHAPE');
+  assert.ok(
+    assigned.propertySetsByEntity
+      .get(block.id)
+      ?.some((set) => set.kind === 'Qto' && set.values.some((value) => value.name === 'NetVolume' && value.value === '9.')),
+  );
+
+  const diffSummary = summarizeEntityAwareDiff(serializeNativeIfcDocument(sample), serializeNativeIfcDocument(assigned));
+  assert.equal(diffSummary.changedEntities, 1);
+  assert.ok(diffSummary.addedEntities >= 10);
+
+  const api = new WebIFC.IfcAPI();
+  await api.Init();
+  const modelID = api.OpenModel(new TextEncoder().encode(serializeNativeIfcDocument(assigned)));
   assert.ok(modelID >= 0);
   assert.ok(streamGeometryVertexCount(api, modelID) > 0);
   api.CloseModel(modelID);

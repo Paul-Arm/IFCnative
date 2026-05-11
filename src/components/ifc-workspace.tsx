@@ -26,6 +26,7 @@ import {
   addNativeQuantitySet,
   addNativeRelationship,
   addNativeSiUnit,
+  assignNativeBodyRepresentation,
   createNativeSampleDocument,
   getNativePlacement,
   parseNativeIfcText,
@@ -355,6 +356,16 @@ export default function IfcWorkspace() {
     );
   };
 
+  const assignBodyToSelected = (options: BodyElementDraft) => {
+    const next = assignNativeBodyRepresentation(document, selectedId, options);
+    stageDocument(
+      next,
+      selectedId,
+      `Assign ${options.profile ?? 'rectangle'} body representation to #${selectedId}`,
+      `assignBodyRepresentation({ id: ${selectedId}, profile: '${options.profile ?? 'rectangle'}', width: ${options.width}, depth: ${options.depth}, height: ${options.height} });`,
+    );
+  };
+
   const addRelationship = (type: string, sourceId: number, targetId: number) => {
     const next = addNativeRelationship(document, type, sourceId, targetId);
     stageDocument(
@@ -578,6 +589,7 @@ export default function IfcWorkspace() {
               onAddDocumentReference={addDocumentReference}
               onAddElement={addElement}
               onAddBodyElement={addBodyElement}
+              onAssignBodyToSelected={assignBodyToSelected}
               onAddMaterial={addMaterial}
               onAddRelationship={addRelationship}
               onAddPset={addPset}
@@ -1522,6 +1534,7 @@ function BuilderPanel({
   onAddClassification,
   onAddDocumentReference,
   onAddBodyElement,
+  onAssignBodyToSelected,
   onAddElement,
   onAddMaterial,
   onAddPset,
@@ -1534,6 +1547,7 @@ function BuilderPanel({
   onAddClassification(identification: string, name: string, location: string): void;
   onAddDocumentReference(identification: string, name: string, location: string): void;
   onAddBodyElement(options: BodyElementDraft): void;
+  onAssignBodyToSelected(options: BodyElementDraft): void;
   onAddElement(type: string, name: string, parentId?: number): void;
   onAddMaterial(materialName: string, materialCategory: string): void;
   onAddPset(psetName: string, propertyName: string, propertyValue: string, propertyValueType?: string): void;
@@ -1576,6 +1590,7 @@ function BuilderPanel({
   const [unitName, setUnitName] = useState('METRE');
   const validSource = document.entityById.has(Number(sourceId));
   const validTarget = document.entityById.has(Number(targetId));
+  const canAssignBody = isBodyAssignableEntity(document.entityById.get(selectedId));
 
   useEffect(() => {
     setSourceId(String(selectedId));
@@ -1631,6 +1646,26 @@ function BuilderPanel({
             height: bodyHeight,
             name: bodyName,
             parentId: selectedId,
+            profile: bodyProfile,
+            tag: bodyTag,
+            type: bodyType,
+            width: bodyWidth,
+            x: bodyX,
+            y: bodyY,
+            z: bodyZ,
+          })
+        }
+      />
+      <Button
+        disabled={!canAssignBody}
+        label={bodyProfile === 'cylinder'
+          ? 'Assign Cylindrical Body to selected'
+          : 'Assign Rectangular Body to selected'}
+        onPress={() =>
+          onAssignBodyToSelected({
+            depth: bodyDepth,
+            height: bodyHeight,
+            name: bodyName,
             profile: bodyProfile,
             tag: bodyTag,
             type: bodyType,
@@ -2124,6 +2159,15 @@ function addToSet<T>(current: Set<T>, value: T) {
 
 function shortType(type: string) {
   return type.replace(/^IFC/i, '');
+}
+
+function isBodyAssignableEntity(entity?: NativeIfcEntity) {
+  return Boolean(entity)
+    && !entity?.type.startsWith('IFCREL')
+    && !entity?.type.startsWith('IFCPROPERTY')
+    && !entity?.type.startsWith('IFCQUANTITY')
+    && !['IFCPROJECT', 'IFCOWNERHISTORY', 'IFCAPPLICATION', 'IFCUNITASSIGNMENT', 'IFCSIUNIT'].includes(entity?.type ?? '')
+    && (entity?.args.length ?? 0) >= 7;
 }
 
 const styles = StyleSheet.create({
