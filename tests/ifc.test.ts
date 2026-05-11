@@ -313,6 +313,29 @@ test('native graph presets filter relationship neighborhoods', () => {
   assert.ok(explicit.edges.every((edge) => edge.type === 'IFCRELDEFINESBYPROPERTIES'));
 });
 
+test('native graph geometry preset expands placement and representation references', () => {
+  const sample = createNativeSampleDocument();
+  const block = sample.entities.find((entity) => entity.type === 'IFCBUILTELEMENT');
+  assert.ok(block);
+
+  const placement = getNativePlacement(sample, block.id);
+  assert.ok(placement);
+
+  const graph = buildNativeGraphNeighborhood(sample, {
+    depth: 4,
+    preset: 'geometry',
+    selectedId: block.id,
+  });
+
+  assert.ok(graph.nodeIds.includes(placement.placementId));
+  assert.ok(graph.nodeIds.includes(placement.axisPlacementId));
+  assert.ok(graph.nodeIds.includes(placement.pointId));
+  assert.ok(graph.nodeIds.includes(Number(block.args[6].slice(1))));
+  assert.ok(graph.edges.some((edge) => edge.type === 'IFCREFGEOMETRY' && edge.label === 'ObjectPlacement'));
+  assert.ok(graph.edges.some((edge) => edge.type === 'IFCREFGEOMETRY' && edge.label === 'Representation'));
+  assert.ok(graph.relationshipTypes.includes('IFCLOCALPLACEMENT'));
+});
+
 test('entity-aware diff groups STEP changes by entity id', () => {
   const sample = createNativeSampleDocument();
   const storey = sample.entities.find((entity) => entity.type === 'IFCBUILDINGSTOREY');
