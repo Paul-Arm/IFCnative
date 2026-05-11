@@ -184,6 +184,34 @@ test('native type assignments are indexed, diffed, and endpoint-validated', () =
   );
 });
 
+test('native document diagnostics flag unit/schema and physical product shape issues', () => {
+  const sample = createNativeSampleDocument();
+  const project = sample.entities.find((entity) => entity.type === 'IFCPROJECT');
+  const block = sample.entities.find((entity) => entity.type === 'IFCBUILTELEMENT');
+  assert.ok(project);
+  assert.ok(block);
+
+  const broken = parseNativeIfcText(
+    serializeNativeIfcDocument(sample)
+      .replace("FILE_SCHEMA(('IFC4X3_ADD2'));", '')
+      .replace(`,${project.args[8]});`, ',$);')
+      .replace(`,${block.args[5]},${block.args[6]},`, ',$,$,'),
+    'diagnostics.ifc',
+  );
+
+  assert.ok(broken.diagnostics.some((line) => line.includes('FILE_SCHEMA is missing')));
+  assert.ok(broken.diagnostics.some((line) => line.includes('IFCPROJECT does not reference an IFCUNITASSIGNMENT')));
+  assert.ok(broken.diagnostics.some((line) => line.includes(`#${block.id} IFCBUILTELEMENT has no ObjectPlacement`)));
+  assert.ok(broken.diagnostics.some((line) => line.includes(`#${block.id} IFCBUILTELEMENT has no Representation`)));
+
+  const duplicateUnits = addNativeSiUnit(sample, 'LENGTHUNIT', '$', 'METRE');
+  assert.ok(
+    duplicateUnits.diagnostics.some((line) =>
+      line.includes('IFCUNITASSIGNMENT has duplicate .LENGTHUNIT. units'),
+    ),
+  );
+});
+
 test('native document diagnostics validate references, containment and relationship endpoints', () => {
   const sample = createNativeSampleDocument();
   assert.ok(sample.diagnostics.some((line) => line.includes('Validation: no relationship or reference warnings')));

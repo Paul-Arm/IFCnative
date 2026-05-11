@@ -146,7 +146,7 @@ export function parseNativeIfcText(text: string, fileName = 'Untitled.ifc'): Nat
   diagnostics.push(`Loaded ${entities.length.toLocaleString()} STEP entities.`);
   diagnostics.push(`Detected schema: ${schema}.`);
   diagnostics.push(`Indexed ${relationships.length.toLocaleString()} relationships.`);
-  diagnostics.push(...validateNativeDocument(entities, entityById, relationships, units));
+  diagnostics.push(...validateNativeDocument(text, schema, entities, entityById, relationships, units));
 
   return {
     diagnostics,
@@ -1160,6 +1160,8 @@ function readUnits(entities: NativeIfcEntity[], entityById: Map<number, NativeIf
 }
 
 function validateNativeDocument(
+  sourceText: string,
+  schema: string,
   entities: NativeIfcEntity[],
   entityById: Map<number, NativeIfcEntity>,
   relationships: NativeIfcRelationship[],
@@ -1167,6 +1169,16 @@ function validateNativeDocument(
 ) {
   const diagnostics: string[] = [];
   const globalIdOwners = new Map<string, number[]>();
+
+  if (!/^\s*ISO-10303-21;/i.test(sourceText)) {
+    diagnostics.push('Warning: STEP file is missing ISO-10303-21 start marker.');
+  }
+  if (!/END-ISO-10303-21;\s*$/i.test(sourceText)) {
+    diagnostics.push('Warning: STEP file is missing END-ISO-10303-21 end marker.');
+  }
+  if (schema === 'UNKNOWN') {
+    diagnostics.push('Warning: FILE_SCHEMA is missing or could not be read.');
+  }
   for (const entity of entities) {
     if (entity.globalId && entity.globalId !== '$') {
       globalIdOwners.set(entity.globalId, [...(globalIdOwners.get(entity.globalId) ?? []), entity.id]);
@@ -1183,9 +1195,23 @@ function validateNativeDocument(
     }
   }
 
+  const unitAssignments = entities.filter((entity) => entity.type === 'IFCUNITASSIGNMENT');
   if (units.length === 0) {
     diagnostics.push('Warning: no IFCUNITASSIGNMENT units are indexed.');
   }
+  if (unitAssignments.length > 1) {
+    diagnostics.push(`Warning: multiple IFCUNITASSIGNMENT entities found: ${unitAssignments.map((entity) => `#${entity.id}`).join(', ')}.`);
+  }
+  const projectUnitRefs = entities
+    .filter((entity) => entity.type === 'IFCPROJECT')
+    .flatMap((entity) => readReferences(entity.args[8] ?? ''));
+  if (unitAssignments.length > 0 && projectUnitRefs.length === 0) {
+    diagnostics.push('Warning: IFCPROJECT does not reference an IFCUNITASSIGNMENT in UnitsInContext.');
+  } else if (projectUnitRefs.some((id) => entityById.get(id)?.type !== 'IFCUNITASSIGNMENT')) {
+    diagnostics.push('Warning: IFCPROJECT UnitsInContext does not point to an IFCUNITASSIGNMENT.');
+  }
+  diagnostics.push(...validateUnitAssignments(unitAssignments, entityById));
+  diagnostics.push(...validatePhysicalProducts(entities, entityById));
 
   const containmentParents = new Map<number, number[]>();
   for (const relationship of relationships) {
@@ -1210,6 +1236,58 @@ function validateNativeDocument(
   }
 
   return diagnostics.length > 0 ? diagnostics : ['Validation: no relationship or reference warnings.'];
+}
+
+function validateUnitAssignments(
+  unitAssignments: NativeIfcEntity[],
+  entityById: Map<number, NativeIfcEntity>,
+) {
+  const diagnostics: string[] = [];
+  for (const assignment of unitAssignments) {
+    const unitRefs = readReferences(assignment.args[0] ?? '');
+    if (unitRefs.length === 0) {
+      diagnostics.push(`Warning: #${assignment.id} IFCUNITASSIGNMENT contains no unit references.`);
+      continue;
+    }
+    const seenUnitTypes = new Map<string, number[]>();
+    for (const unitId of unitRefs) {
+      const unit = entityById.get(unitId);
+      if (!unit) {
+        continue;
+      }
+      const unitKind = compactValue(unit.args[1] ?? unit.type);
+      seenUnitTypes.set(unitKind, [...(seenUnitTypes.get(unitKind) ?? []), unitId]);
+    }
+    for (const [unitKind, ids] of seenUnitTypes) {
+      if (unitKind && ids.length > 1) {
+        diagnostics.push(`Warning: #${assignment.id} IFCUNITASSIGNMENT has duplicate ${unitKind} units: ${ids.map((id) => `#${id}`).join(', ')}.`);
+      }
+    }
+  }
+  return diagnostics;
+}
+
+function validatePhysicalProducts(
+  entities: NativeIfcEntity[],
+  entityById: Map<number, NativeIfcEntity>,
+) {
+  const diagnostics: string[] = [];
+  for (const product of entities.filter((entity) => isPhysicalProduct(entity.type))) {
+    const placementId = readReferences(product.args[5] ?? '')[0];
+    if (!placementId) {
+      diagnostics.push(`Warning: #${product.id} ${product.type} has no ObjectPlacement.`);
+    } else if (entityById.get(placementId)?.type !== 'IFCLOCALPLACEMENT') {
+      diagnostics.push(`Warning: #${product.id} ${product.type} ObjectPlacement points to #${placementId}, not IFCLOCALPLACEMENT.`);
+    }
+
+    const representationId = readReferences(product.args[6] ?? '')[0];
+    if (!representationId) {
+      diagnostics.push(`Warning: #${product.id} ${product.type} has no Representation.`);
+    } else if (entityById.get(representationId)?.type !== 'IFCPRODUCTDEFINITIONSHAPE') {
+      diagnostics.push(`Warning: #${product.id} ${product.type} Representation points to #${representationId}, not IFCPRODUCTDEFINITIONSHAPE.`);
+    }
+  }
+  return diagnostics;
 }
 
 function validateRelationshipCompatibility(
@@ -1378,6 +1456,36 @@ function normalizeTypeClass(typeClass: string) {
 
 function isTypeObject(type: string) {
   return type === 'IFCTYPEOBJECT' || type === 'IFCELEMENTTYPE' || type.endsWith('TYPE');
+}
+
+function isPhysicalProduct(type: string) {
+  return (
+    type === 'IFCBUILTELEMENT' ||
+    type === 'IFCBUILDINGELEMENTPROXY' ||
+    type === 'IFCPROXY' ||
+    type === 'IFCANNOTATION' ||
+    type.startsWith('IFCWALL') ||
+    type.startsWith('IFCSLAB') ||
+    type === 'IFCROOF' ||
+    type === 'IFCBEAM' ||
+    type === 'IFCCOLUMN' ||
+    type === 'IFCMEMBER' ||
+    type === 'IFCPLATE' ||
+    type === 'IFCDOOR' ||
+    type === 'IFCWINDOW' ||
+    type === 'IFCCURTAINWALL' ||
+    type === 'IFCSTAIR' ||
+    type === 'IFCRAMP' ||
+    type === 'IFCRAILING' ||
+    type === 'IFCFURNISHINGELEMENT' ||
+    type === 'IFCFLOWTERMINAL' ||
+    type === 'IFCDISTRIBUTIONELEMENT' ||
+    type === 'IFCOPENINGELEMENT' ||
+    type === 'IFCVOIDINGFEATURE' ||
+    type === 'IFCPROJECTIONELEMENT' ||
+    type === 'IFCELEMENTASSEMBLY' ||
+    type === 'IFCTRANSPORTELEMENT'
+  );
 }
 
 function serializeEntities(document: NativeIfcDocument, entities: NativeIfcEntity[]) {
