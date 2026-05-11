@@ -1899,7 +1899,7 @@ function DiffPanel({
               <Text style={styles.diffSummaryTitle}>Placement changes</Text>
               {summary.placementChanges.slice(0, 5).map((change) => (
                 <Text key={change.pointId} style={styles.diffSummaryText}>
-                  #{change.pointId} XYZ {formatPoint(change.before)} → {formatPoint(change.after)} Δ {formatPoint(change.delta)}
+                  #{change.pointId}{formatPlacementProducts(change)} XYZ {formatPoint(change.before)} → {formatPoint(change.after)} Δ {formatPoint(change.delta)}
                 </Text>
               ))}
             </View>
@@ -1936,6 +1936,17 @@ function DiffPanel({
 
 function formatPoint(point: [number, number, number]) {
   return `(${point.map((value) => Number(value).toFixed(3).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1')).join(', ')})`;
+}
+
+function formatPlacementProducts(change: ReturnType<typeof summarizeEntityAwareDiff>['placementChanges'][number]) {
+  if (!change.affectedProducts.length) {
+    return '';
+  }
+  const labels = change.affectedProducts
+    .slice(0, 3)
+    .map((product) => `#${product.id} ${product.type}${product.name ? ` '${product.name}'` : ''}`)
+    .join(', ');
+  return ` (${labels}${change.affectedProducts.length > 3 ? ' …' : ''})`;
 }
 
 function ConsolePanel({ lines, onClear }: { lines: string[]; onClear(): void }) {

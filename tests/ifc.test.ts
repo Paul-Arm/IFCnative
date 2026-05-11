@@ -455,6 +455,7 @@ test('native placement editor drafts numeric XYZ moves without rewriting product
     {
       after: [3.25, -1.5, 0.75],
       before: [0, 0, 0],
+      affectedProducts: [{ id: block.id, name: block.name, placementId: beforePlacement.placementId, type: block.type }],
       delta: [3.25, -1.5, 0.75],
       pointId: beforePlacement.pointId,
     },

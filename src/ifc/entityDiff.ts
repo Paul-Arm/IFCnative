@@ -26,6 +26,14 @@ export interface IfcPlacementDiffSummary {
   before: [number, number, number];
   after: [number, number, number];
   delta: [number, number, number];
+  affectedProducts: IfcPlacementProductSummary[];
+}
+
+export interface IfcPlacementProductSummary {
+  id: number;
+  type: string;
+  name?: string;
+  placementId: number;
 }
 
 interface StepEntityLine {
@@ -101,6 +109,7 @@ export function summarizeEntityAwareDiff(beforeText: string, afterText: string):
       const afterPoint = readCartesianPoint(afterEntity);
       if (beforePoint && afterPoint && !samePoint(beforePoint, afterPoint)) {
         placementChanges.push({
+          affectedProducts: traceProductsForPlacementPoint(after, id),
           after: afterPoint,
           before: beforePoint,
           delta: [
@@ -245,6 +254,41 @@ function describeRelationship(entity: StepEntityLine) {
   const uniqueRefs = [...new Set(refs)].slice(0, 8).join(' → ');
   const suffix = refs.length > 8 ? ' …' : '';
   return uniqueRefs ? `${entity.type} ${uniqueRefs}${suffix}` : entity.type;
+}
+
+function traceProductsForPlacementPoint(step: ParsedStepText, pointId: number): IfcPlacementProductSummary[] {
+  const axisPlacementIds = new Set<number>();
+  const localPlacementIds = new Set<number>();
+
+  for (const entity of step.entities.values()) {
+    if (entity.type === 'IFCAXIS2PLACEMENT3D' && readReferences(entity.args[0]).includes(pointId)) {
+      axisPlacementIds.add(entity.id);
+    }
+  }
+
+  for (const entity of step.entities.values()) {
+    if (entity.type === 'IFCLOCALPLACEMENT' && readReferences(entity.args[1]).some((id) => axisPlacementIds.has(id))) {
+      localPlacementIds.add(entity.id);
+    }
+  }
+
+  return [...step.entities.values()]
+    .filter((entity) => isPlacedProduct(entity) && readReferences(entity.args[5]).some((id) => localPlacementIds.has(id)))
+    .map((entity) => ({
+      id: entity.id,
+      name: entity.name,
+      placementId: readReferences(entity.args[5]).find((id) => localPlacementIds.has(id)) ?? 0,
+      type: entity.type,
+    }))
+    .sort((left, right) => left.id - right.id);
+}
+
+function isPlacedProduct(entity: StepEntityLine) {
+  return entity.args.length > 5 && !entity.type.startsWith('IFCREL') && readReferences(entity.args[5]).length > 0;
+}
+
+function readReferences(value = '') {
+  return [...value.matchAll(/#(\d+)/g)].map((match) => Number(match[1])).filter(Number.isFinite);
 }
 
 function readCartesianPoint(entity: StepEntityLine): [number, number, number] | undefined {
