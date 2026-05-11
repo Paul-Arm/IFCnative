@@ -285,6 +285,44 @@ test('native body preset creates contained swept solid geometry', async () => {
   api.CloseModel(modelID);
 });
 
+test('native body preset creates cylindrical swept solid geometry', async () => {
+  const sample = createNativeSampleDocument();
+  const storey = sample.entities.find((entity) => entity.type === 'IFCBUILDINGSTOREY');
+  assert.ok(storey);
+
+  const withCylinder = addNativeBodyElement(sample, {
+    depth: '2',
+    height: '4',
+    name: 'Body Test Column',
+    parentId: storey.id,
+    profile: 'cylinder',
+    type: 'IFCCOLUMN',
+    width: '2',
+    x: '0',
+    y: '0',
+    z: '0',
+  });
+  const column = withCylinder.entities.find(
+    (entity) => entity.type === 'IFCCOLUMN' && entity.name === 'Body Test Column',
+  );
+  assert.ok(column);
+  assert.ok(
+    withCylinder.entities.some((entity) => entity.type === 'IFCCIRCLEPROFILEDEF' && entity.args[3] === '1.'),
+  );
+  assert.ok(
+    withCylinder.propertySetsByEntity
+      .get(column.id)
+      ?.some((set) => set.values.some((value) => value.name === 'NetVolume' && value.value === '12.5664')),
+  );
+
+  const api = new WebIFC.IfcAPI();
+  await api.Init();
+  const modelID = api.OpenModel(new TextEncoder().encode(serializeNativeIfcDocument(withCylinder)));
+  assert.ok(modelID >= 0);
+  assert.ok(streamGeometryVertexCount(api, modelID) > 0);
+  api.CloseModel(modelID);
+});
+
 test('native placement editor drafts numeric XYZ moves without rewriting product identity', async () => {
   const sample = createNativeSampleDocument();
   const block = sample.entities.find((entity) => entity.type === 'IFCBUILTELEMENT');

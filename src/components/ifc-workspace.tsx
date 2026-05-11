@@ -351,7 +351,7 @@ export default function IfcWorkspace() {
       next,
       added?.id,
       `Add ${options.type} body '${options.name}'${options.parentId ? ` under #${options.parentId}` : ''}`,
-      `addBodyElement({ class: '${options.type}', name: '${options.name}', width: ${options.width}, depth: ${options.depth}, height: ${options.height} });`,
+      `addBodyElement({ class: '${options.type}', name: '${options.name}', profile: '${options.profile ?? 'rectangle'}', width: ${options.width}, depth: ${options.depth}, height: ${options.height} });`,
     );
   };
 
@@ -994,6 +994,7 @@ interface BodyElementDraft {
   width: string;
   depth: string;
   height: string;
+  profile?: 'rectangle' | 'cylinder';
   x: string;
   y: string;
   z: string;
@@ -1547,6 +1548,7 @@ function BuilderPanel({
   const [bodyWidth, setBodyWidth] = useState('4');
   const [bodyDepth, setBodyDepth] = useState('2');
   const [bodyHeight, setBodyHeight] = useState('1.5');
+  const [bodyProfile, setBodyProfile] = useState<'rectangle' | 'cylinder'>('rectangle');
   const [bodyX, setBodyX] = useState('0');
   const [bodyY, setBodyY] = useState('0');
   const [bodyZ, setBodyZ] = useState('0');
@@ -1589,9 +1591,25 @@ function BuilderPanel({
       <Text style={styles.sectionTitle}>Simple body preset</Text>
       <DropdownField label="Body class" options={ENTITY_TYPES} value={bodyType} onChange={setBodyType} />
       <LabeledInput label="Body name" value={bodyName} onChangeText={setBodyName} />
+      <DropdownField
+        label="Profile"
+        options={['rectangle', 'cylinder']}
+        value={bodyProfile}
+        onChange={(value) => setBodyProfile(value as 'rectangle' | 'cylinder')}
+      />
       <View style={styles.row}>
-        <LabeledInput label="Width X" keyboardType="numeric" value={bodyWidth} onChangeText={setBodyWidth} />
-        <LabeledInput label="Depth Y" keyboardType="numeric" value={bodyDepth} onChangeText={setBodyDepth} />
+        <LabeledInput
+          label={bodyProfile === 'cylinder' ? 'Diameter X' : 'Width X'}
+          keyboardType="numeric"
+          value={bodyWidth}
+          onChangeText={setBodyWidth}
+        />
+        <LabeledInput
+          label={bodyProfile === 'cylinder' ? 'Diameter Y' : 'Depth Y'}
+          keyboardType="numeric"
+          value={bodyDepth}
+          onChangeText={setBodyDepth}
+        />
       </View>
       <View style={styles.row}>
         <LabeledInput label="Height Z" keyboardType="numeric" value={bodyHeight} onChangeText={setBodyHeight} />
@@ -1603,7 +1621,9 @@ function BuilderPanel({
         <LabeledInput label="Z" keyboardType="numeric" value={bodyZ} onChangeText={setBodyZ} />
       </View>
       <Button
-        label="+ Add Rectangular Body under selected"
+        label={bodyProfile === 'cylinder'
+          ? '+ Add Cylindrical Body under selected'
+          : '+ Add Rectangular Body under selected'}
         primary
         onPress={() =>
           onAddBodyElement({
@@ -1611,6 +1631,7 @@ function BuilderPanel({
             height: bodyHeight,
             name: bodyName,
             parentId: selectedId,
+            profile: bodyProfile,
             tag: bodyTag,
             type: bodyType,
             width: bodyWidth,

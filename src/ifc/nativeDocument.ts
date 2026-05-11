@@ -30,6 +30,8 @@ export interface NativeIfcPropertySet {
   values: { id: number; name: string; value: string; type: string }[];
 }
 
+export type NativeBodyProfile = 'rectangle' | 'cylinder';
+
 export interface NativeBodyElementOptions {
   type: string;
   name: string;
@@ -37,6 +39,7 @@ export interface NativeBodyElementOptions {
   width: number | string;
   depth: number | string;
   height: number | string;
+  profile?: NativeBodyProfile | string;
   x?: number | string;
   y?: number | string;
   z?: number | string;
@@ -313,6 +316,10 @@ export function addNativeBodyElement(document: NativeIfcDocument, options: Nativ
   const width = positiveStepNumber(options.width, 1);
   const depth = positiveStepNumber(options.depth, 1);
   const height = positiveStepNumber(options.height, 1);
+  const profile = normalizeBodyProfile(options.profile);
+  const radius = formatDecimal(Math.max(Number(width), Number(depth)) / 2);
+  const footprintArea = profile === 'cylinder' ? circleAreaStepNumber(radius) : multiplyStepNumbers(width, depth);
+  const netVolume = multiplyStepNumbers(footprintArea, height);
   const x = numericStepNumber(options.x, 0);
   const y = numericStepNumber(options.y, 0);
   const z = numericStepNumber(options.z, 0);
@@ -394,12 +401,14 @@ export function addNativeBodyElement(document: NativeIfcDocument, options: Nativ
       type: 'IFCCARTESIANPOINT',
     },
     {
-      args: ['.AREA.', quote('Rectangular Body'), `#${profileAxisId}`, width, depth],
+      args: profile === 'cylinder'
+        ? ['.AREA.', quote('Cylindrical Body'), `#${profileAxisId}`, radius]
+        : ['.AREA.', quote('Rectangular Body'), `#${profileAxisId}`, width, depth],
       description: '',
       globalId: '',
       id: profileId,
-      name: 'Rectangular Body',
-      type: 'IFCRECTANGLEPROFILEDEF',
+      name: profile === 'cylinder' ? 'Cylindrical Body' : 'Rectangular Body',
+      type: profile === 'cylinder' ? 'IFCCIRCLEPROFILEDEF' : 'IFCRECTANGLEPROFILEDEF',
     },
     {
       args: [`#${profilePointId}`, `#${profileDirectionId}`],
@@ -466,7 +475,7 @@ export function addNativeBodyElement(document: NativeIfcDocument, options: Nativ
       type: 'IFCQUANTITYLENGTH',
     },
     {
-      args: [quote('FootprintArea'), '$', '$', multiplyStepNumbers(width, depth), '$'],
+      args: [quote('FootprintArea'), '$', '$', footprintArea, '$'],
       description: '',
       globalId: '',
       id: areaQuantityId,
@@ -474,7 +483,7 @@ export function addNativeBodyElement(document: NativeIfcDocument, options: Nativ
       type: 'IFCQUANTITYAREA',
     },
     {
-      args: [quote('NetVolume'), '$', '$', multiplyStepNumbers(width, depth, height), '$'],
+      args: [quote('NetVolume'), '$', '$', netVolume, '$'],
       description: '',
       globalId: '',
       id: volumeQuantityId,
@@ -871,7 +880,7 @@ function buildPropertySet(entity: NativeIfcEntity, entityById: Map<number, Nativ
           id,
           name: unquote(value.args[0]) ?? `#${id}`,
           type: value.type,
-          value: compactValue(value.args[2] ?? value.args[3] ?? ''),
+          value: compactValue(value.args[2] && value.args[2] !== '$' ? value.args[2] : (value.args[3] ?? '')),
         },
       ];
     }),
@@ -1153,6 +1162,10 @@ function readPropertyValueType(value = '') {
   return value.trim().match(/^([A-Z0-9_]+)\(/i)?.[1] ?? 'IFCLABEL';
 }
 
+function normalizeBodyProfile(profile: string | undefined) {
+  return String(profile ?? 'rectangle').toLowerCase() === 'cylinder' ? 'cylinder' : 'rectangle';
+}
+
 function normalizeQuantityType(type: string) {
   const normalized = normalizeType(type || 'IFCQUANTITYLENGTH');
   return QUANTITY_TYPES.has(normalized) ? normalized : 'IFCQUANTITYLENGTH';
@@ -1179,6 +1192,10 @@ function positiveStepNumber(value: number | string | undefined, fallback: number
 
 function multiplyStepNumbers(...values: string[]) {
   return formatDecimal(values.reduce((product, value) => product * Number(value), 1));
+}
+
+function circleAreaStepNumber(radius: string) {
+  return formatDecimal(Math.PI * Number(radius) * Number(radius));
 }
 
 function formatDecimal(value: number) {
