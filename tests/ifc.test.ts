@@ -4,6 +4,7 @@ import test from 'node:test';
 import * as WebIFC from 'web-ifc';
 
 import { createMinimalIfcProject } from '../src/ifc/builder';
+import { previewEntityAwareDiffLines } from '../src/ifc/entityDiff';
 import { buildGraphIndex, summarizeLine } from '../src/ifc/graphIndex';
 import {
   addNativeElement,
@@ -144,6 +145,28 @@ test('native document edits keep indexes live', () => {
   assert.ok(reopened.propertySetsByEntity.get(wall.id)?.some((set) => set.name === 'Pset_RN'));
   assert.ok(reopened.propertySetsByEntity.get(wall.id)?.some((set) => set.name === 'Qto_RN'));
   assert.ok(reopened.resourcesByEntity.get(wall.id)?.some((resource) => resource.includes('RN Report')));
+});
+
+test('entity-aware diff groups STEP changes by entity id', () => {
+  const sample = createNativeSampleDocument();
+  const storey = sample.entities.find((entity) => entity.type === 'IFCBUILDINGSTOREY');
+  assert.ok(storey);
+
+  const withBody = addNativeBodyElement(sample, {
+    depth: '1',
+    height: '1',
+    name: 'Diff Block',
+    parentId: storey.id,
+    type: 'IFCBUILDINGELEMENTPROXY',
+    width: '1',
+  });
+  const lines = previewEntityAwareDiffLines(serializeNativeIfcDocument(sample), serializeNativeIfcDocument(withBody));
+  const text = lines.map((line) => line.text).join('\n');
+
+  assert.ok(text.includes('Entity-aware STEP diff'));
+  assert.ok(text.includes('IFCBUILDINGELEMENTPROXY'));
+  assert.ok(text.includes("'Diff Block' added"));
+  assert.ok(lines.some((line) => line.kind === 'add' && line.text.includes('IFCRELCONTAINEDINSPATIALSTRUCTURE')));
 });
 
 test('native body preset creates contained swept solid geometry', async () => {

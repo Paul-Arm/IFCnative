@@ -12,6 +12,10 @@ import {
 } from 'react-native';
 
 import {
+  previewEntityAwareDiffLines,
+} from '@/ifc/entityDiff';
+
+import {
   addNativeElement,
   addNativeBodyElement,
   addNativeClassification,
@@ -1582,7 +1586,10 @@ function DiffPanel({
   onApply(): void;
   onDiscard(): void;
 }) {
-  const lines = useMemo(() => (pendingText ? previewDiffLines(currentText, pendingText) : []), [currentText, pendingText]);
+  const lines = useMemo(
+    () => (pendingText ? previewEntityAwareDiffLines(currentText, pendingText) : []),
+    [currentText, pendingText],
+  );
   const added = lines.filter((line) => line.kind === 'add').length;
   const removed = lines.filter((line) => line.kind === 'remove').length;
 
@@ -2001,54 +2008,6 @@ function uniqueEdges(edges: { rel: number; source: number; target: number; label
     seen.add(key);
     return true;
   });
-}
-
-function previewDiffLines(beforeText: string, afterText: string) {
-  const before = beforeText.split('\n');
-  const after = afterText.split('\n');
-  const maxCommonPrefix = commonPrefixLength(before, after);
-  const maxCommonSuffix = commonSuffixLength(before, after, maxCommonPrefix);
-  const context = 4;
-  const start = Math.max(0, maxCommonPrefix - context);
-  const beforeEnd = before.length - maxCommonSuffix;
-  const afterEnd = after.length - maxCommonSuffix;
-  const result: { kind: 'context' | 'add' | 'remove'; text: string }[] = [];
-
-  for (let index = start; index < maxCommonPrefix; index += 1) {
-    result.push({ kind: 'context', text: before[index] ?? '' });
-  }
-  for (let index = maxCommonPrefix; index < beforeEnd; index += 1) {
-    result.push({ kind: 'remove', text: before[index] ?? '' });
-  }
-  for (let index = maxCommonPrefix; index < afterEnd; index += 1) {
-    result.push({ kind: 'add', text: after[index] ?? '' });
-  }
-  const suffixStart = Math.max(maxCommonPrefix, afterEnd);
-  for (let index = suffixStart; index < Math.min(after.length, suffixStart + context); index += 1) {
-    result.push({ kind: 'context', text: after[index] ?? '' });
-  }
-
-  return result.slice(0, 800);
-}
-
-function commonPrefixLength(left: string[], right: string[]) {
-  let index = 0;
-  while (index < left.length && index < right.length && left[index] === right[index]) {
-    index += 1;
-  }
-  return index;
-}
-
-function commonSuffixLength(left: string[], right: string[], prefixLength: number) {
-  let count = 0;
-  while (
-    count + prefixLength < left.length &&
-    count + prefixLength < right.length &&
-    left[left.length - 1 - count] === right[right.length - 1 - count]
-  ) {
-    count += 1;
-  }
-  return count;
 }
 
 function findTreePath(document: NativeIfcDocument, id: number) {
