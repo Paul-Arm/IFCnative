@@ -150,6 +150,39 @@ test('native document edits keep indexes live', () => {
   assert.ok(reopened.resourcesByEntity.get(wall.id)?.some((resource) => resource.includes('RN Report')));
 });
 
+test('native document diagnostics validate references, containment and relationship endpoints', () => {
+  const sample = createNativeSampleDocument();
+  assert.ok(sample.diagnostics.some((line) => line.includes('Validation: no relationship or reference warnings')));
+
+  const building = sample.entities.find((entity) => entity.type === 'IFCBUILDING');
+  const storey = sample.entities.find((entity) => entity.type === 'IFCBUILDINGSTOREY');
+  const block = sample.entities.find((entity) => entity.type === 'IFCBUILTELEMENT');
+  assert.ok(building);
+  assert.ok(storey);
+  assert.ok(block);
+
+  const withExtraStorey = addNativeElement(sample, building.id, 'IFCBUILDINGSTOREY', 'Validation Storey');
+  const secondStorey = withExtraStorey.entities.find((entity) => entity.type === 'IFCBUILDINGSTOREY' && entity.name === 'Validation Storey');
+  assert.ok(secondStorey);
+  const withSecondContainer = addNativeRelationship(withExtraStorey, 'IFCRELCONTAINEDINSPATIALSTRUCTURE', secondStorey.id, block.id);
+  assert.ok(
+    withSecondContainer.diagnostics.some((line) =>
+      line.includes(`#${block.id} has multiple primary spatial containers`),
+    ),
+  );
+
+  const withBadPropertyRelationship = updateNativeRelationship(
+    withSecondContainer,
+    withSecondContainer.relationships.at(-1)?.id ?? 0,
+    { sourceId: block.id, targetId: storey.id, type: 'IFCRELDEFINESBYPROPERTIES' },
+  );
+  assert.ok(
+    withBadPropertyRelationship.diagnostics.some((line) =>
+      line.includes('IFCRELDEFINESBYPROPERTIES expects property or quantity definitions'),
+    ),
+  );
+});
+
 test('native graph presets filter relationship neighborhoods', () => {
   const sample = createNativeSampleDocument();
   const storey = sample.entities.find((entity) => entity.type === 'IFCBUILDINGSTOREY');

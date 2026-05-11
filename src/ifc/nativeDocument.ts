@@ -133,6 +133,7 @@ export function parseNativeIfcText(text: string, fileName = 'Untitled.ifc'): Nat
   diagnostics.push(`Loaded ${entities.length.toLocaleString()} STEP entities.`);
   diagnostics.push(`Detected schema: ${schema}.`);
   diagnostics.push(`Indexed ${relationships.length.toLocaleString()} relationships.`);
+  diagnostics.push(...validateNativeDocument(entities, entityById, relationships, units));
 
   return {
     diagnostics,
@@ -898,6 +899,104 @@ function readUnits(entities: NativeIfcEntity[], entityById: Map<number, NativeIf
     .flatMap((assignment) => readReferences(assignment.args.join(',')).map((id) => entityById.get(id)))
     .filter((unit): unit is NativeIfcEntity => Boolean(unit))
     .map((unit) => `#${unit.id} ${unit.type}: ${unit.args.map(compactValue).join(' ')}`);
+}
+
+function validateNativeDocument(
+  entities: NativeIfcEntity[],
+  entityById: Map<number, NativeIfcEntity>,
+  relationships: NativeIfcRelationship[],
+  units: string[],
+) {
+  const diagnostics: string[] = [];
+  const globalIdOwners = new Map<string, number[]>();
+  for (const entity of entities) {
+    if (entity.globalId && entity.globalId !== '$') {
+      globalIdOwners.set(entity.globalId, [...(globalIdOwners.get(entity.globalId) ?? []), entity.id]);
+    }
+    const missingRefs = unique(entity.args.flatMap(readReferences)).filter((id) => !entityById.has(id));
+    if (missingRefs.length > 0) {
+      diagnostics.push(`Warning: #${entity.id} ${entity.type} references missing ${missingRefs.map((id) => `#${id}`).join(', ')}.`);
+    }
+  }
+
+  for (const [globalId, ids] of globalIdOwners) {
+    if (ids.length > 1) {
+      diagnostics.push(`Warning: duplicate GlobalId ${globalId} on ${ids.map((id) => `#${id}`).join(', ')}.`);
+    }
+  }
+
+  if (units.length === 0) {
+    diagnostics.push('Warning: no IFCUNITASSIGNMENT units are indexed.');
+  }
+
+  const containmentParents = new Map<number, number[]>();
+  for (const relationship of relationships) {
+    const sourceTypes = relationship.sourceIds.map((id) => entityById.get(id)?.type ?? 'UNKNOWN');
+    const targetTypes = relationship.targetIds.map((id) => entityById.get(id)?.type ?? 'UNKNOWN');
+    const warning = validateRelationshipCompatibility(relationship, sourceTypes, targetTypes);
+    if (warning) {
+      diagnostics.push(`Warning: #${relationship.id} ${relationship.type} ${warning}.`);
+    }
+    if (relationship.type === 'IFCRELCONTAINEDINSPATIALSTRUCTURE') {
+      for (const productId of relationship.targetIds) {
+        containmentParents.set(productId, [...(containmentParents.get(productId) ?? []), ...relationship.sourceIds]);
+      }
+    }
+  }
+
+  for (const [productId, parents] of containmentParents) {
+    const uniqueParents = unique(parents);
+    if (uniqueParents.length > 1) {
+      diagnostics.push(`Warning: #${productId} has multiple primary spatial containers: ${uniqueParents.map((id) => `#${id}`).join(', ')}.`);
+    }
+  }
+
+  return diagnostics.length > 0 ? diagnostics : ['Validation: no relationship or reference warnings.'];
+}
+
+function validateRelationshipCompatibility(
+  relationship: NativeIfcRelationship,
+  sourceTypes: string[],
+  targetTypes: string[],
+) {
+  if (relationship.sourceIds.length === 0 || relationship.targetIds.length === 0) {
+    return 'has an incomplete relationship endpoint';
+  }
+  if (sourceTypes.includes('UNKNOWN') || targetTypes.includes('UNKNOWN')) {
+    return 'points at a missing relationship endpoint';
+  }
+  if (relationship.type === 'IFCRELAGGREGATES' || relationship.type === 'IFCRELNESTS') {
+    const invalidTargets = targetTypes.filter((type) => type.startsWith('IFCREL'));
+    return invalidTargets.length > 0 ? 'uses relationship entities as children' : undefined;
+  }
+  if (relationship.type === 'IFCRELCONTAINEDINSPATIALSTRUCTURE') {
+    if (!sourceTypes.every(isSpatial)) {
+      return `expects a spatial container source, got ${sourceTypes.join(', ')}`;
+    }
+    const invalidTargets = targetTypes.filter((type) => isSpatial(type) || type.startsWith('IFCREL'));
+    return invalidTargets.length > 0 ? `expects physical/product targets, got ${invalidTargets.join(', ')}` : undefined;
+  }
+  if (relationship.type === 'IFCRELDEFINESBYPROPERTIES') {
+    return targetTypes.every((type) => type === 'IFCPROPERTYSET' || type === 'IFCELEMENTQUANTITY')
+      ? undefined
+      : `expects property or quantity definitions, got ${targetTypes.join(', ')}`;
+  }
+  if (relationship.type === 'IFCRELASSOCIATESMATERIAL') {
+    return targetTypes.every((type) => type.startsWith('IFCMATERIAL'))
+      ? undefined
+      : `expects material resources, got ${targetTypes.join(', ')}`;
+  }
+  if (relationship.type === 'IFCRELASSOCIATESCLASSIFICATION') {
+    return targetTypes.every((type) => type === 'IFCCLASSIFICATION' || type === 'IFCCLASSIFICATIONREFERENCE')
+      ? undefined
+      : `expects classification resources, got ${targetTypes.join(', ')}`;
+  }
+  if (relationship.type === 'IFCRELASSOCIATESDOCUMENT') {
+    return targetTypes.every((type) => type === 'IFCDOCUMENTINFORMATION' || type === 'IFCDOCUMENTREFERENCE')
+      ? undefined
+      : `expects document resources, got ${targetTypes.join(', ')}`;
+  }
+  return undefined;
 }
 
 function buildSpatialRoots(
