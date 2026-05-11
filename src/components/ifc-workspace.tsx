@@ -1892,7 +1892,7 @@ function DiffPanel({
           <Button label="Discard" onPress={onDiscard} />
         </View>
       </View>
-      {summary && (summary.relationshipChanges.length > 0 || summary.placementChanges.length > 0) ? (
+      {summary && (summary.relationshipChanges.length > 0 || summary.placementChanges.length > 0 || summary.geometryChanges.length > 0) ? (
         <View style={styles.diffSummaryGrid}>
           {summary.placementChanges.length > 0 ? (
             <View style={styles.diffSummaryCard}>
@@ -1910,6 +1910,16 @@ function DiffPanel({
               {summary.relationshipChanges.slice(0, 5).map((change) => (
                 <Text key={`${change.action}-${change.id}`} style={styles.diffSummaryText}>
                   #{change.id} {change.type} {change.action}: {change.after ?? change.before}
+                </Text>
+              ))}
+            </View>
+          ) : null}
+          {summary.geometryChanges.length > 0 ? (
+            <View style={styles.diffSummaryCard}>
+              <Text style={styles.diffSummaryTitle}>Geometry changes</Text>
+              {summary.geometryChanges.slice(0, 5).map((change) => (
+                <Text key={`${change.action}-${change.id}`} style={styles.diffSummaryText}>
+                  #{change.id}{formatGeometryProducts(change)} {change.action}: {change.after ?? change.before}
                 </Text>
               ))}
             </View>
@@ -1939,6 +1949,17 @@ function formatPoint(point: [number, number, number]) {
 }
 
 function formatPlacementProducts(change: ReturnType<typeof summarizeEntityAwareDiff>['placementChanges'][number]) {
+  if (!change.affectedProducts.length) {
+    return '';
+  }
+  const labels = change.affectedProducts
+    .slice(0, 3)
+    .map((product) => `#${product.id} ${product.type}${product.name ? ` '${product.name}'` : ''}`)
+    .join(', ');
+  return ` (${labels}${change.affectedProducts.length > 3 ? ' …' : ''})`;
+}
+
+function formatGeometryProducts(change: ReturnType<typeof summarizeEntityAwareDiff>['geometryChanges'][number]) {
   if (!change.affectedProducts.length) {
     return '';
   }

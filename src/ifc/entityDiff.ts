@@ -10,6 +10,7 @@ export interface IfcEntityAwareDiffSummary {
   addedEntities: number;
   removedEntities: number;
   relationshipChanges: IfcRelationshipDiffSummary[];
+  geometryChanges: IfcGeometryDiffSummary[];
   placementChanges: IfcPlacementDiffSummary[];
 }
 
@@ -36,6 +37,21 @@ export interface IfcPlacementProductSummary {
   placementId: number;
 }
 
+export interface IfcGeometryDiffSummary {
+  action: 'added' | 'removed' | 'changed';
+  id: number;
+  type: string;
+  before?: string;
+  after?: string;
+  affectedProducts: IfcGeometryProductSummary[];
+}
+
+export interface IfcGeometryProductSummary {
+  id: number;
+  type: string;
+  name?: string;
+}
+
 interface StepEntityLine {
   id: number;
   type: string;
@@ -57,6 +73,7 @@ export function summarizeEntityAwareDiff(beforeText: string, afterText: string):
   const after = parseStepText(afterText);
   const ids = uniqueNumbers([...before.order, ...after.order]);
   const relationshipChanges: IfcRelationshipDiffSummary[] = [];
+  const geometryChanges: IfcGeometryDiffSummary[] = [];
   const placementChanges: IfcPlacementDiffSummary[] = [];
   let changedEntities = 0;
   let addedEntities = 0;
@@ -75,6 +92,15 @@ export function summarizeEntityAwareDiff(beforeText: string, afterText: string):
           type: afterEntity.type,
         });
       }
+      if (isGeometryEntity(afterEntity)) {
+        geometryChanges.push({
+          action: 'added',
+          after: describeGeometry(afterEntity),
+          affectedProducts: traceProductsForGeometry(after, id),
+          id,
+          type: afterEntity.type,
+        });
+      }
       continue;
     }
     if (beforeEntity && !afterEntity) {
@@ -83,6 +109,15 @@ export function summarizeEntityAwareDiff(beforeText: string, afterText: string):
         relationshipChanges.push({
           action: 'removed',
           before: describeRelationship(beforeEntity),
+          id,
+          type: beforeEntity.type,
+        });
+      }
+      if (isGeometryEntity(beforeEntity)) {
+        geometryChanges.push({
+          action: 'removed',
+          affectedProducts: traceProductsForGeometry(before, id),
+          before: describeGeometry(beforeEntity),
           id,
           type: beforeEntity.type,
         });
@@ -99,6 +134,17 @@ export function summarizeEntityAwareDiff(beforeText: string, afterText: string):
         action: 'changed',
         after: describeRelationship(afterEntity),
         before: describeRelationship(beforeEntity),
+        id,
+        type: afterEntity.type,
+      });
+    }
+
+    if (isGeometryEntity(beforeEntity) || isGeometryEntity(afterEntity)) {
+      geometryChanges.push({
+        action: 'changed',
+        after: describeGeometry(afterEntity),
+        affectedProducts: traceProductsForGeometry(after, id),
+        before: describeGeometry(beforeEntity),
         id,
         type: afterEntity.type,
       });
@@ -126,6 +172,7 @@ export function summarizeEntityAwareDiff(beforeText: string, afterText: string):
   return {
     addedEntities,
     changedEntities,
+    geometryChanges,
     placementChanges,
     relationshipChanges,
     removedEntities,
@@ -249,11 +296,83 @@ function isRelationshipEntity(entity: StepEntityLine) {
   return entity.type.startsWith('IFCREL');
 }
 
+function isGeometryEntity(entity: StepEntityLine) {
+  return GEOMETRY_ENTITY_TYPES.has(entity.type);
+}
+
+const GEOMETRY_ENTITY_TYPES = new Set([
+  'IFCPRODUCTDEFINITIONSHAPE',
+  'IFCSHAPEREPRESENTATION',
+  'IFCMAPPEDITEM',
+  'IFCREPRESENTATIONMAP',
+  'IFCSTYLEDITEM',
+  'IFCEXTRUDEDAREASOLID',
+  'IFCRECTANGLEPROFILEDEF',
+  'IFCCIRCLEPROFILEDEF',
+  'IFCARBITRARYCLOSEDPROFILEDEF',
+  'IFCPOLYLINE',
+  'IFCINDEXEDPOLYCURVE',
+  'IFCPOLYGONALFACESET',
+  'IFCINDEXEDPOLYGONALFACE',
+  'IFCBOUNDINGBOX',
+]);
+
 function describeRelationship(entity: StepEntityLine) {
   const refs = entity.text.match(/#\d+/g) ?? [];
   const uniqueRefs = [...new Set(refs)].slice(0, 8).join(' → ');
   const suffix = refs.length > 8 ? ' …' : '';
   return uniqueRefs ? `${entity.type} ${uniqueRefs}${suffix}` : entity.type;
+}
+
+function describeGeometry(entity: StepEntityLine) {
+  if (entity.type === 'IFCRECTANGLEPROFILEDEF') {
+    return `${entity.type} ${entity.args[2] ?? '?'} × ${entity.args[3] ?? '?'}`;
+  }
+  if (entity.type === 'IFCCIRCLEPROFILEDEF') {
+    return `${entity.type} radius ${entity.args[3] ?? '?'}`;
+  }
+  if (entity.type === 'IFCEXTRUDEDAREASOLID') {
+    return `${entity.type} profile ${entity.args[0] ?? '?'} depth ${entity.args[3] ?? '?'}`;
+  }
+  if (entity.type === 'IFCSHAPEREPRESENTATION') {
+    return `${entity.type} ${entity.args[2] ?? ''} ${entity.args[3] ?? ''}`.trim();
+  }
+  const refs = entity.text.match(/#\d+/g) ?? [];
+  const uniqueRefs = [...new Set(refs)].slice(0, 6).join(' → ');
+  const suffix = refs.length > 6 ? ' …' : '';
+  return uniqueRefs ? `${entity.type} ${uniqueRefs}${suffix}` : entity.type;
+}
+
+function traceProductsForGeometry(step: ParsedStepText, geometryId: number): IfcGeometryProductSummary[] {
+  const parentsByChild = new Map<number, Set<number>>();
+  for (const entity of step.entities.values()) {
+    for (const ref of readReferences(entity.text)) {
+      const parents = parentsByChild.get(ref) ?? new Set<number>();
+      parents.add(entity.id);
+      parentsByChild.set(ref, parents);
+    }
+  }
+
+  const reachable = new Set<number>([geometryId]);
+  const queue = [geometryId];
+  for (let cursor = 0; cursor < queue.length && cursor < 200; cursor += 1) {
+    const current = queue[cursor];
+    for (const parent of parentsByChild.get(current) ?? []) {
+      if (!reachable.has(parent)) {
+        reachable.add(parent);
+        queue.push(parent);
+      }
+    }
+  }
+
+  return [...step.entities.values()]
+    .filter((entity) => isPlacedProduct(entity) && readReferences(entity.args[6]).some((id) => reachable.has(id)))
+    .map((entity) => ({
+      id: entity.id,
+      name: entity.name,
+      type: entity.type,
+    }))
+    .sort((left, right) => left.id - right.id);
 }
 
 function traceProductsForPlacementPoint(step: ParsedStepText, pointId: number): IfcPlacementProductSummary[] {

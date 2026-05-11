@@ -313,6 +313,14 @@ test('entity-aware diff groups STEP changes by entity id', () => {
       (change) => change.action === 'added' && change.type === 'IFCRELCONTAINEDINSPATIALSTRUCTURE',
     ),
   );
+  assert.ok(
+    summary.geometryChanges.some(
+      (change) =>
+        change.action === 'added' &&
+        change.type === 'IFCEXTRUDEDAREASOLID' &&
+        change.affectedProducts.some((product) => product.name === 'Diff Block'),
+    ),
+  );
 });
 
 test('native body preset creates contained swept solid geometry', async () => {
@@ -416,6 +424,14 @@ test('native body assignment replaces selected product representation with revie
   const diffSummary = summarizeEntityAwareDiff(serializeNativeIfcDocument(sample), serializeNativeIfcDocument(assigned));
   assert.equal(diffSummary.changedEntities, 1);
   assert.ok(diffSummary.addedEntities >= 10);
+  assert.ok(
+    diffSummary.geometryChanges.some(
+      (change) =>
+        change.action === 'added' &&
+        change.type === 'IFCPRODUCTDEFINITIONSHAPE' &&
+        change.affectedProducts.some((product) => product.id === block.id),
+    ),
+  );
 
   const api = new WebIFC.IfcAPI();
   await api.Init();
