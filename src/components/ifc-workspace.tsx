@@ -13,6 +13,7 @@ import {
 
 import {
   previewEntityAwareDiffLines,
+  summarizeEntityAwareDiff,
 } from '@/ifc/entityDiff';
 
 import {
@@ -1685,6 +1686,10 @@ function DiffPanel({
     () => (pendingText ? previewEntityAwareDiffLines(currentText, pendingText) : []),
     [currentText, pendingText],
   );
+  const summary = useMemo(
+    () => (pendingText ? summarizeEntityAwareDiff(currentText, pendingText) : undefined),
+    [currentText, pendingText],
+  );
   const added = lines.filter((line) => line.kind === 'add').length;
   const removed = lines.filter((line) => line.kind === 'remove').length;
 
@@ -1702,14 +1707,41 @@ function DiffPanel({
       <View style={styles.diffHeader}>
         <View style={styles.diffHeaderText}>
           <Text style={styles.infoTitle}>{pendingSummary}</Text>
-          <Text style={styles.empty}>{added} additions / {removed} removals. IFC export stays disabled until this draft is applied or discarded.</Text>
+          <Text style={styles.empty}>
+            {summary?.changedEntities ?? 0} changed / {summary?.addedEntities ?? 0} added / {summary?.removedEntities ?? 0} removed STEP entities. IFC export stays disabled until this draft is applied or discarded.
+          </Text>
         </View>
         <View style={styles.actions}>
           <Button label="Apply" primary onPress={onApply} />
           <Button label="Discard" onPress={onDiscard} />
         </View>
       </View>
+      {summary && (summary.relationshipChanges.length > 0 || summary.placementChanges.length > 0) ? (
+        <View style={styles.diffSummaryGrid}>
+          {summary.placementChanges.length > 0 ? (
+            <View style={styles.diffSummaryCard}>
+              <Text style={styles.diffSummaryTitle}>Placement changes</Text>
+              {summary.placementChanges.slice(0, 5).map((change) => (
+                <Text key={change.pointId} style={styles.diffSummaryText}>
+                  #{change.pointId} XYZ {formatPoint(change.before)} → {formatPoint(change.after)} Δ {formatPoint(change.delta)}
+                </Text>
+              ))}
+            </View>
+          ) : null}
+          {summary.relationshipChanges.length > 0 ? (
+            <View style={styles.diffSummaryCard}>
+              <Text style={styles.diffSummaryTitle}>Relationship changes</Text>
+              {summary.relationshipChanges.slice(0, 5).map((change) => (
+                <Text key={`${change.action}-${change.id}`} style={styles.diffSummaryText}>
+                  #{change.id} {change.type} {change.action}: {change.after ?? change.before}
+                </Text>
+              ))}
+            </View>
+          ) : null}
+        </View>
+      ) : null}
       <ScrollView style={styles.diffLines}>
+        <Text style={styles.diffLine}>  Raw hunks: {added} additions / {removed} removals</Text>
         {lines.map((line, index) => (
           <Text
             key={`${line.kind}-${index}-${line.text}`}
@@ -1724,6 +1756,10 @@ function DiffPanel({
       </ScrollView>
     </View>
   );
+}
+
+function formatPoint(point: [number, number, number]) {
+  return `(${point.map((value) => Number(value).toFixed(3).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1')).join(', ')})`;
 }
 
 function ConsolePanel({ lines, onClear }: { lines: string[]; onClear(): void }) {
@@ -2141,6 +2177,31 @@ const styles = StyleSheet.create({
   diffHeaderText: {
     flex: 1,
     minWidth: 220,
+  },
+  diffSummaryCard: {
+    backgroundColor: '#f8fafc',
+    borderColor: '#dbe4ee',
+    borderRadius: 8,
+    borderWidth: 1,
+    flex: 1,
+    gap: 4,
+    minWidth: 240,
+    padding: 10,
+  },
+  diffSummaryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  diffSummaryText: {
+    color: '#475569',
+    fontFamily: Platform.select({ default: 'monospace', ios: 'Menlo' }),
+    fontSize: 11,
+  },
+  diffSummaryTitle: {
+    color: '#0f172a',
+    fontSize: 12,
+    fontWeight: '800',
   },
   diffLine: {
     color: '#334155',

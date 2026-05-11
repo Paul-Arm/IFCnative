@@ -5,10 +5,34 @@ export interface IfcDiffLine {
   text: string;
 }
 
+export interface IfcEntityAwareDiffSummary {
+  changedEntities: number;
+  addedEntities: number;
+  removedEntities: number;
+  relationshipChanges: IfcRelationshipDiffSummary[];
+  placementChanges: IfcPlacementDiffSummary[];
+}
+
+export interface IfcRelationshipDiffSummary {
+  action: 'added' | 'removed' | 'changed';
+  id: number;
+  type: string;
+  before?: string;
+  after?: string;
+}
+
+export interface IfcPlacementDiffSummary {
+  pointId: number;
+  before: [number, number, number];
+  after: [number, number, number];
+  delta: [number, number, number];
+}
+
 interface StepEntityLine {
   id: number;
   type: string;
   text: string;
+  args: string[];
   name?: string;
 }
 
@@ -19,6 +43,85 @@ interface ParsedStepText {
 }
 
 const MAX_ENTITY_DIFF_LINES = 800;
+
+export function summarizeEntityAwareDiff(beforeText: string, afterText: string): IfcEntityAwareDiffSummary {
+  const before = parseStepText(beforeText);
+  const after = parseStepText(afterText);
+  const ids = uniqueNumbers([...before.order, ...after.order]);
+  const relationshipChanges: IfcRelationshipDiffSummary[] = [];
+  const placementChanges: IfcPlacementDiffSummary[] = [];
+  let changedEntities = 0;
+  let addedEntities = 0;
+  let removedEntities = 0;
+
+  for (const id of ids) {
+    const beforeEntity = before.entities.get(id);
+    const afterEntity = after.entities.get(id);
+    if (!beforeEntity && afterEntity) {
+      addedEntities += 1;
+      if (isRelationshipEntity(afterEntity)) {
+        relationshipChanges.push({
+          action: 'added',
+          after: describeRelationship(afterEntity),
+          id,
+          type: afterEntity.type,
+        });
+      }
+      continue;
+    }
+    if (beforeEntity && !afterEntity) {
+      removedEntities += 1;
+      if (isRelationshipEntity(beforeEntity)) {
+        relationshipChanges.push({
+          action: 'removed',
+          before: describeRelationship(beforeEntity),
+          id,
+          type: beforeEntity.type,
+        });
+      }
+      continue;
+    }
+    if (!beforeEntity || !afterEntity || normalizeStepLine(beforeEntity.text) === normalizeStepLine(afterEntity.text)) {
+      continue;
+    }
+
+    changedEntities += 1;
+    if (isRelationshipEntity(beforeEntity) || isRelationshipEntity(afterEntity)) {
+      relationshipChanges.push({
+        action: 'changed',
+        after: describeRelationship(afterEntity),
+        before: describeRelationship(beforeEntity),
+        id,
+        type: afterEntity.type,
+      });
+    }
+
+    if (beforeEntity.type === 'IFCCARTESIANPOINT' && afterEntity.type === 'IFCCARTESIANPOINT') {
+      const beforePoint = readCartesianPoint(beforeEntity);
+      const afterPoint = readCartesianPoint(afterEntity);
+      if (beforePoint && afterPoint && !samePoint(beforePoint, afterPoint)) {
+        placementChanges.push({
+          after: afterPoint,
+          before: beforePoint,
+          delta: [
+            roundDiff(afterPoint[0] - beforePoint[0]),
+            roundDiff(afterPoint[1] - beforePoint[1]),
+            roundDiff(afterPoint[2] - beforePoint[2]),
+          ],
+          pointId: id,
+        });
+      }
+    }
+  }
+
+  return {
+    addedEntities,
+    changedEntities,
+    placementChanges,
+    relationshipChanges,
+    removedEntities,
+  };
+}
 
 export function previewEntityAwareDiffLines(beforeText: string, afterText: string, limit = MAX_ENTITY_DIFF_LINES): IfcDiffLine[] {
   const before = parseStepText(beforeText);
@@ -94,6 +197,7 @@ function parseStepText(text: string): ParsedStepText {
       continue;
     }
     const entity = {
+      args: splitTopLevelArgs(match[3]),
       id: Number(match[1]),
       name: readEntityName(match[3]),
       text: line,
@@ -130,6 +234,46 @@ function readEntityName(argsText: string) {
   const raw = args[2];
   const match = raw?.match(/^'([\s\S]*)'$/);
   return match?.[1]?.replace(/''/g, "'");
+}
+
+function isRelationshipEntity(entity: StepEntityLine) {
+  return entity.type.startsWith('IFCREL');
+}
+
+function describeRelationship(entity: StepEntityLine) {
+  const refs = entity.text.match(/#\d+/g) ?? [];
+  const uniqueRefs = [...new Set(refs)].slice(0, 8).join(' → ');
+  const suffix = refs.length > 8 ? ' …' : '';
+  return uniqueRefs ? `${entity.type} ${uniqueRefs}${suffix}` : entity.type;
+}
+
+function readCartesianPoint(entity: StepEntityLine): [number, number, number] | undefined {
+  const coordinates = entity.args[0]?.match(/^\((.*)\)$/)?.[1];
+  if (!coordinates) {
+    return undefined;
+  }
+  const values = splitTopLevelArgs(coordinates).map(parseStepNumber).filter((value) => value !== undefined);
+  if (values.length < 2) {
+    return undefined;
+  }
+  return [values[0] ?? 0, values[1] ?? 0, values[2] ?? 0];
+}
+
+function parseStepNumber(value: string) {
+  const normalized = value.trim().replace(/D/i, 'E');
+  if (!normalized || normalized === '$' || normalized === '*') {
+    return undefined;
+  }
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function samePoint(left: [number, number, number], right: [number, number, number]) {
+  return left.every((value, index) => Math.abs(value - right[index]) < 1e-9);
+}
+
+function roundDiff(value: number) {
+  return Math.round(value * 1_000_000) / 1_000_000;
 }
 
 function splitTopLevelArgs(value: string) {

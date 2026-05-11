@@ -4,7 +4,7 @@ import test from 'node:test';
 import * as WebIFC from 'web-ifc';
 
 import { createMinimalIfcProject } from '../src/ifc/builder';
-import { previewEntityAwareDiffLines } from '../src/ifc/entityDiff';
+import { previewEntityAwareDiffLines, summarizeEntityAwareDiff } from '../src/ifc/entityDiff';
 import { buildGraphIndex, summarizeLine } from '../src/ifc/graphIndex';
 import {
   addNativeElement,
@@ -230,6 +230,14 @@ test('entity-aware diff groups STEP changes by entity id', () => {
   assert.ok(text.includes('IFCBUILDINGELEMENTPROXY'));
   assert.ok(text.includes("'Diff Block' added"));
   assert.ok(lines.some((line) => line.kind === 'add' && line.text.includes('IFCRELCONTAINEDINSPATIALSTRUCTURE')));
+
+  const summary = summarizeEntityAwareDiff(serializeNativeIfcDocument(sample), serializeNativeIfcDocument(withBody));
+  assert.ok(summary.addedEntities > 0);
+  assert.ok(
+    summary.relationshipChanges.some(
+      (change) => change.action === 'added' && change.type === 'IFCRELCONTAINEDINSPATIALSTRUCTURE',
+    ),
+  );
 });
 
 test('native body preset creates contained swept solid geometry', async () => {
@@ -291,6 +299,16 @@ test('native placement editor drafts numeric XYZ moves without rewriting product
     .join('\n');
   assert.ok(diffText.includes(`#${beforePlacement.pointId} IFCCARTESIANPOINT changed`));
   assert.equal(moved.entityById.get(block.id)?.globalId, block.globalId);
+
+  const diffSummary = summarizeEntityAwareDiff(serializeNativeIfcDocument(sample), serializeNativeIfcDocument(moved));
+  assert.deepEqual(diffSummary.placementChanges, [
+    {
+      after: [3.25, -1.5, 0.75],
+      before: [0, 0, 0],
+      delta: [3.25, -1.5, 0.75],
+      pointId: beforePlacement.pointId,
+    },
+  ]);
 
   const api = new WebIFC.IfcAPI();
   await api.Init();
