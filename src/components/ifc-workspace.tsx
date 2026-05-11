@@ -26,6 +26,7 @@ import {
   addNativeRelationship,
   addNativeSiUnit,
   createNativeSampleDocument,
+  getNativePlacement,
   parseNativeIfcText,
   serializeNativeIfcDocument,
   splitTopLevel,
@@ -34,6 +35,7 @@ import {
   type NativeIfcRelationship,
   type NativeIfcTreeNode,
   updateNativeEntity,
+  updateNativePlacement,
   updateNativePropertyValue,
   updateNativeRelationship,
 } from '@/ifc';
@@ -43,7 +45,7 @@ import type { RelationshipFlowEdge, RelationshipFlowNode } from './relationship-
 import ThatOpenViewer from './that-open-viewer';
 
 type StructureMode = 'tree' | 'graph';
-type InspectorMode = 'info' | 'edit' | 'psets' | 'relations' | 'resources' | 'refs' | 'units';
+type InspectorMode = 'info' | 'edit' | 'placement' | 'psets' | 'relations' | 'resources' | 'refs' | 'units';
 type MosaicViewId = 'structure' | 'viewer' | 'inspector' | 'builder' | 'diff' | 'console' | 'diagnostics';
 
 const DEFAULT_MOSAIC_LAYOUT: MosaicNode<MosaicViewId> = {
@@ -429,6 +431,16 @@ export default function IfcWorkspace() {
     stageDocument(next, selectedId, `Update relationship #${relationshipId} ${type}`, `updateRelationship({ id: ${relationshipId}, class: '${type}' });`);
   };
 
+  const moveSelectedPlacement = (x: string, y: string, z: string) => {
+    const next = updateNativePlacement(document, selectedId, { x, y, z });
+    stageDocument(
+      next,
+      selectedId,
+      `Move #${selectedId} placement to (${x}, ${y}, ${z})`,
+      `movePlacement({ id: ${selectedId}, x: ${JSON.stringify(x)}, y: ${JSON.stringify(y)}, z: ${JSON.stringify(z)} });`,
+    );
+  };
+
   const addUnit = (unitType: string, unitName: string) => {
     const next = addNativeSiUnit(document, unitType, '$', unitName);
     stageDocument(next, selectedId, `Add unit ${unitType} ${unitName}`, `addUnit({ unitType: '${unitType}', name: '${unitName}' });`);
@@ -498,7 +510,7 @@ export default function IfcWorkspace() {
   const renderInspector = () => (
     <View style={styles.tileContent}>
       <SegmentedControl
-        options={['info', 'edit', 'psets', 'relations', 'resources', 'refs', 'units']}
+        options={['info', 'edit', 'placement', 'psets', 'relations', 'resources', 'refs', 'units']}
         value={inspectorMode}
         onChange={(value) => setInspectorMode(value as InspectorMode)}
       />
@@ -514,6 +526,7 @@ export default function IfcWorkspace() {
         onAddUnit={addUnit}
         onAddRelationship={addRelationship}
         onSaveEdit={saveSelectedEdit}
+        onMovePlacement={moveSelectedPlacement}
         onUpdateProperty={updatePsetProperty}
         onUpdateRelationship={editRelationship}
       />
@@ -968,6 +981,7 @@ function InspectorPanel({
   onAddQuantity,
   onAddRelationship,
   onAddUnit,
+  onMovePlacement,
   onSaveEdit,
   onUpdateProperty,
   onUpdateRelationship,
@@ -982,6 +996,7 @@ function InspectorPanel({
   onAddQuantity(qtoName: string, quantityName: string, quantityValue: string, quantityType?: string): void;
   onAddRelationship(type: string, sourceId: number, targetId: number): void;
   onAddUnit(unitType: string, unitName: string): void;
+  onMovePlacement(x: string, y: string, z: string): void;
   onSaveEdit(draft: EntityEditDraft): void;
   onUpdateProperty(propertyId: number, propertyName: string, propertyValue: string, propertyValueType: string): void;
   onUpdateRelationship(relationshipId: number, type: string, sourceId: number, targetId: number): void;
@@ -1004,6 +1019,9 @@ function InspectorPanel({
         onUpdateProperty={onUpdateProperty}
       />
     );
+  }
+  if (mode === 'placement') {
+    return <PlacementPanel document={document} selectedId={selectedId} onMove={onMovePlacement} />;
   }
   if (mode === 'relations') {
     return (
@@ -1112,6 +1130,63 @@ function EditPanel({ entity, onSave }: { entity: NativeIfcEntity; onSave(draft: 
       <LabeledInput label="Description" value={description} onChangeText={setDescription} multiline />
       <LabeledInput label="Raw STEP arguments" value={rawArgs} onChangeText={setRawArgs} multiline mono />
       <Button label="Save Entity" primary onPress={() => onSave({ description, name, rawArgs, type })} />
+    </ScrollView>
+  );
+}
+
+function PlacementPanel({
+  document,
+  selectedId,
+  onMove,
+}: {
+  document: NativeIfcDocument;
+  selectedId: number;
+  onMove(x: string, y: string, z: string): void;
+}) {
+  const placement = getNativePlacement(document, selectedId);
+  const [x, setX] = useState('0');
+  const [y, setY] = useState('0');
+  const [z, setZ] = useState('0');
+
+  useEffect(() => {
+    if (!placement) {
+      setX('0');
+      setY('0');
+      setZ('0');
+      return;
+    }
+    setX(String(placement.x));
+    setY(String(placement.y));
+    setZ(String(placement.z));
+  }, [placement?.pointId, placement?.x, placement?.y, placement?.z]);
+
+  if (!placement) {
+    return (
+      <View style={styles.diffEmpty}>
+        <Text style={styles.infoTitle}>No editable local placement</Text>
+        <Text style={styles.empty}>Select a product with IFCLOCALPLACEMENT → IFCAXIS2PLACEMENT3D → IFCCARTESIANPOINT to draft a numeric XYZ move.</Text>
+      </View>
+    );
+  }
+
+  return (
+    <ScrollView style={styles.panelScroll}>
+      <InfoSection title="Selected placement">
+        <InfoRow label="Product" value={`#${placement.productId}`} />
+        <InfoRow label="Placement" value={`#${placement.placementId}`} />
+        <InfoRow label="Axis" value={`#${placement.axisPlacementId}`} />
+        <InfoRow label="Point" value={`#${placement.pointId}`} />
+        <InfoRow label="Relative to" value={placement.relativeTo ? `#${placement.relativeTo}` : '$'} />
+      </InfoSection>
+      <InfoSection title="Draft move">
+        <Text style={styles.empty}>Edits update only the placement cartesian point and stay pending until reviewed in IFC Diff / Review.</Text>
+        <View style={styles.row}>
+          <View style={styles.flexField}><LabeledInput label="X" keyboardType="numeric" value={x} onChangeText={setX} /></View>
+          <View style={styles.flexField}><LabeledInput label="Y" keyboardType="numeric" value={y} onChangeText={setY} /></View>
+          <View style={styles.flexField}><LabeledInput label="Z" keyboardType="numeric" value={z} onChangeText={setZ} /></View>
+        </View>
+        <Button label="Stage Placement Move" primary onPress={() => onMove(x, y, z)} />
+      </InfoSection>
     </ScrollView>
   );
 }
@@ -2240,6 +2315,10 @@ const styles = StyleSheet.create({
     color: '#71717a',
     fontSize: 12,
     fontWeight: '700',
+  },
+  flexField: {
+    flex: 1,
+    minWidth: 82,
   },
   infoLabel: {
     color: '#71717a',

@@ -43,6 +43,17 @@ export interface NativeBodyElementOptions {
   tag?: string;
 }
 
+export interface NativePlacementSummary {
+  productId: number;
+  placementId: number;
+  axisPlacementId: number;
+  pointId: number;
+  x: number;
+  y: number;
+  z: number;
+  relativeTo?: number;
+}
+
 export interface NativeIfcDocument {
   fileName: string;
   schema: string;
@@ -180,6 +191,63 @@ export function updateNativeEntity(
   if (updates.description != null) {
     setArg(entity.args, 3, quoteOrDollar(updates.description));
   }
+
+  return parseNativeIfcText(serializeEntities(document, next), document.fileName);
+}
+
+export function getNativePlacement(document: NativeIfcDocument, entityId: number): NativePlacementSummary | undefined {
+  const product = document.entityById.get(entityId);
+  const placementId = readReferences(product?.args[5] ?? '')[0];
+  const placement = placementId ? document.entityById.get(placementId) : undefined;
+  if (!product || placement?.type !== 'IFCLOCALPLACEMENT') {
+    return undefined;
+  }
+
+  const axisPlacementId = readReferences(placement.args[1] ?? '')[0];
+  const axisPlacement = axisPlacementId ? document.entityById.get(axisPlacementId) : undefined;
+  if (axisPlacement?.type !== 'IFCAXIS2PLACEMENT3D') {
+    return undefined;
+  }
+
+  const pointId = readReferences(axisPlacement.args[0] ?? '')[0];
+  const point = pointId ? document.entityById.get(pointId) : undefined;
+  if (point?.type !== 'IFCCARTESIANPOINT') {
+    return undefined;
+  }
+
+  const [x, y, z] = parseCoordinateTuple(point.args[0]);
+  return {
+    axisPlacementId,
+    placementId,
+    pointId,
+    productId: entityId,
+    relativeTo: readReferences(placement.args[0] ?? '')[0],
+    x,
+    y,
+    z,
+  };
+}
+
+export function updateNativePlacement(
+  document: NativeIfcDocument,
+  entityId: number,
+  coordinates: { x?: number | string; y?: number | string; z?: number | string },
+) {
+  const placement = getNativePlacement(document, entityId);
+  if (!placement) {
+    return document;
+  }
+
+  const next = cloneDocumentEntities(document);
+  const point = next.find((entity) => entity.id === placement.pointId && entity.type === 'IFCCARTESIANPOINT');
+  if (!point) {
+    return document;
+  }
+
+  const x = numericStepNumber(coordinates.x, placement.x);
+  const y = numericStepNumber(coordinates.y, placement.y);
+  const z = numericStepNumber(coordinates.z, placement.z);
+  setArg(point.args, 0, `(${x},${y},${z})`);
 
   return parseNativeIfcText(serializeEntities(document, next), document.fileName);
 }
@@ -899,6 +967,16 @@ export function splitTopLevel(value: string) {
 
 export function readReferences(value = '') {
   return [...value.matchAll(/#(\d+)/g)].map((match) => Number(match[1]));
+}
+
+function parseCoordinateTuple(value = ''): [number, number, number] {
+  const inner = value.trim().replace(/^\(/, '').replace(/\)$/, '');
+  const coordinates = splitTopLevel(inner).map((item) => Number(item.replace(',', '.')));
+  return [
+    Number.isFinite(coordinates[0]) ? coordinates[0] : 0,
+    Number.isFinite(coordinates[1]) ? coordinates[1] : 0,
+    Number.isFinite(coordinates[2]) ? coordinates[2] : 0,
+  ];
 }
 
 export function unquote(value = '') {

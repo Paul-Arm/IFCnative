@@ -17,9 +17,11 @@ import {
   addNativeRelationship,
   addNativeSiUnit,
   createNativeSampleDocument,
+  getNativePlacement,
   parseNativeIfcText,
   serializeNativeIfcDocument,
   updateNativePropertyValue,
+  updateNativePlacement,
   updateNativeRelationship,
 } from '../src/ifc/nativeDocument';
 import { preflightIfcText } from '../src/ifc/preflight';
@@ -199,6 +201,39 @@ test('native body preset creates contained swept solid geometry', async () => {
   const api = new WebIFC.IfcAPI();
   await api.Init();
   const modelID = api.OpenModel(new TextEncoder().encode(serializeNativeIfcDocument(withBody)));
+  assert.ok(modelID >= 0);
+  assert.ok(streamGeometryVertexCount(api, modelID) > 0);
+  api.CloseModel(modelID);
+});
+
+test('native placement editor drafts numeric XYZ moves without rewriting product identity', async () => {
+  const sample = createNativeSampleDocument();
+  const block = sample.entities.find((entity) => entity.type === 'IFCBUILTELEMENT');
+  assert.ok(block);
+
+  const beforePlacement = getNativePlacement(sample, block.id);
+  assert.ok(beforePlacement);
+  assert.equal(beforePlacement.x, 0);
+
+  const moved = updateNativePlacement(sample, block.id, { x: '3.25', y: '-1.5', z: '0.75' });
+  const afterPlacement = getNativePlacement(moved, block.id);
+  assert.ok(afterPlacement);
+  assert.equal(afterPlacement.productId, block.id);
+  assert.equal(afterPlacement.placementId, beforePlacement.placementId);
+  assert.equal(afterPlacement.pointId, beforePlacement.pointId);
+  assert.equal(afterPlacement.x, 3.25);
+  assert.equal(afterPlacement.y, -1.5);
+  assert.equal(afterPlacement.z, 0.75);
+
+  const diffText = previewEntityAwareDiffLines(serializeNativeIfcDocument(sample), serializeNativeIfcDocument(moved))
+    .map((line) => line.text)
+    .join('\n');
+  assert.ok(diffText.includes(`#${beforePlacement.pointId} IFCCARTESIANPOINT changed`));
+  assert.equal(moved.entityById.get(block.id)?.globalId, block.globalId);
+
+  const api = new WebIFC.IfcAPI();
+  await api.Init();
+  const modelID = api.OpenModel(new TextEncoder().encode(serializeNativeIfcDocument(moved)));
   assert.ok(modelID >= 0);
   assert.ok(streamGeometryVertexCount(api, modelID) > 0);
   api.CloseModel(modelID);
