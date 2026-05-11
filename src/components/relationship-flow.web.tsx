@@ -8,6 +8,7 @@ import {
     MiniMap,
     Position,
     ReactFlow,
+    SelectionMode,
     type Connection,
     type Edge,
     type FinalConnectionState,
@@ -38,9 +39,10 @@ interface IfcFlowNodeData extends Record<string, unknown> {
   description: string;
   globalId: string;
   ifcId: number;
+  layoutPosition: FlowPoint;
   name: string;
   onToggleChildren(id: number, loaded: boolean): void;
-  onTogglePin(id: number): void;
+  onTogglePin(id: number, point?: FlowPoint): void;
   pinned: boolean;
   selectedIfc: boolean;
   type: string;
@@ -63,6 +65,17 @@ interface PendingConnect {
   targetId: number;
 }
 
+interface ConnectionDraftSource {
+  handleId: string | null;
+  nodeId: number;
+}
+
+const AGGREGATE_RELATIONSHIP_TYPE = "IFCRELAGGREGATES";
+const AGGREGATE_SOURCE_HANDLE = "aggregate-source";
+const AGGREGATE_TARGET_HANDLE = "aggregate-target";
+const RELATIONSHIP_SOURCE_HANDLE = "relationship-source";
+const RELATIONSHIP_TARGET_HANDLE = "relationship-target";
+
 const nodeTypes = {
   ifcNode: IfcNode,
 };
@@ -79,13 +92,17 @@ export default function RelationshipFlow({
   relationshipCount,
   relationshipTypeFilters,
   relationshipTypes,
+  layoutMode,
   onClearPositions,
   onConnectNodes,
   onCreateNodeFromConnection,
   onDepth,
+  onLayoutMode,
   onLog,
   onMoveEnd,
   onMoveNode,
+  onMoveNodes,
+  onMoveNodesEnd,
   onPreset,
   onRelationshipTypeFilters,
   onSelect,
@@ -95,7 +112,7 @@ export default function RelationshipFlow({
   const flowRef = useRef<ReactFlowInstance<IfcFlowNode, IfcFlowEdge> | null>(
     null,
   );
-  const connectionSourceRef = useRef<number | null>(null);
+  const connectionSourceRef = useRef<ConnectionDraftSource | null>(null);
   const [pendingCreate, setPendingCreate] = useState<PendingCreate | null>(
     null,
   );
@@ -111,6 +128,7 @@ export default function RelationshipFlow({
           description: node.entity.description,
           globalId: node.entity.globalId,
           ifcId: node.id,
+          layoutPosition: { x: node.x, y: node.y },
           name: node.entity.name,
           onToggleChildren,
           onTogglePin,
@@ -128,15 +146,31 @@ export default function RelationshipFlow({
   const [flowNodes, setFlowNodes] = useState<IfcFlowNode[]>(baseFlowNodes);
   const flowEdges = useMemo<IfcFlowEdge[]>(
     () =>
-      edges.map((edge, index) => ({
-        animated: false,
-        id: `${edge.id}-${index}`,
-        label: edge.label,
-        markerEnd: { type: MarkerType.ArrowClosed },
-        source: String(edge.source),
-        style: { stroke: "#2563eb", strokeWidth: 2 },
-        target: String(edge.target),
-      })),
+      edges.map((edge, index) => {
+        const aggregate = isAggregateRelationship(edge.relationshipType);
+        return {
+          animated: false,
+          className: aggregate
+            ? "ifc-flow-edge-aggregate"
+            : "ifc-flow-edge-reference",
+          id: `${edge.id}-${index}`,
+          label: edge.label,
+          markerEnd: { type: MarkerType.ArrowClosed },
+          source: String(edge.source),
+          sourceHandle: aggregate
+            ? AGGREGATE_SOURCE_HANDLE
+            : RELATIONSHIP_SOURCE_HANDLE,
+          style: {
+            stroke: aggregate ? "#0f766e" : "#2563eb",
+            strokeWidth: aggregate ? 2.6 : 2,
+          },
+          target: String(edge.target),
+          targetHandle: aggregate
+            ? AGGREGATE_TARGET_HANDLE
+            : RELATIONSHIP_TARGET_HANDLE,
+          type: aggregate ? "smoothstep" : "default",
+        };
+      }),
     [edges],
   );
 
@@ -145,16 +179,55 @@ export default function RelationshipFlow({
       const currentById = new Map(currentNodes.map((node) => [node.id, node]));
       return baseFlowNodes.map((node) => {
         const current = currentById.get(node.id);
-        return current ? { ...node, position: current.position } : node;
+        return current
+          ? {
+              ...node,
+              data: {
+                ...node.data,
+                layoutPosition: current.position,
+              },
+              position: current.position,
+              selected: current.selected ?? node.selected,
+            }
+          : node;
       });
     });
   }, [baseFlowNodes]);
 
   const handleNodesChange = useCallback(
     (changes: NodeChange<IfcFlowNode>[]) => {
-      setFlowNodes((currentNodes) => applyNodeChanges(changes, currentNodes));
+      setFlowNodes((currentNodes) =>
+        syncNodeDataPositions(applyNodeChanges(changes, currentNodes)),
+      );
     },
     [],
+  );
+
+  const commitMovedNodes = useCallback(
+    (movedNodes: IfcFlowNode[]) => {
+      const moves = movedNodes
+        .map((node) => ({
+          id: Number(node.id),
+          point: node.position as FlowPoint,
+        }))
+        .filter((move) => Number.isFinite(move.id));
+      if (!moves.length) {
+        return;
+      }
+      if (onMoveNodes) {
+        onMoveNodes(moves);
+      } else {
+        moves.forEach((move) => onMoveNode(move.id, move.point));
+      }
+      if (moves.length === 1) {
+        onMoveEnd(moves[0].id, moves[0].point);
+      } else if (onMoveNodesEnd) {
+        onMoveNodesEnd(moves);
+      } else {
+        moves.forEach((move) => onMoveEnd(move.id, move.point));
+      }
+    },
+    [onMoveEnd, onMoveNode, onMoveNodes, onMoveNodesEnd],
   );
 
   const handleConnect = useCallback(
@@ -172,7 +245,12 @@ export default function RelationshipFlow({
       setPendingConnect({
         relationshipType: preferredRelationship(
           relationshipOptions,
-          "IFCRELASSIGNSTOGROUP",
+          prefersAggregateRelationship(
+            connection.sourceHandle,
+            connection.targetHandle,
+          )
+            ? AGGREGATE_RELATIONSHIP_TYPE
+            : "IFCRELASSIGNSTOGROUP",
         ),
         sourceId,
         targetId,
@@ -187,7 +265,10 @@ export default function RelationshipFlow({
   const handleConnectStart = useCallback(
     (_event: MouseEvent | TouchEvent, params: OnConnectStartParams) => {
       connectionSourceRef.current = params.nodeId
-        ? Number(params.nodeId)
+        ? {
+            handleId: params.handleId,
+            nodeId: Number(params.nodeId),
+          }
         : null;
     },
     [],
@@ -199,11 +280,12 @@ export default function RelationshipFlow({
         connectionSourceRef.current = null;
         return;
       }
-      const sourceId = connectionSourceRef.current;
+      const source = connectionSourceRef.current;
       connectionSourceRef.current = null;
-      if (!sourceId) {
+      if (!source?.nodeId) {
         return;
       }
+      const sourceId = source.nodeId;
       const point = clientPointFromEvent(event);
       const position = flowRef.current?.screenToFlowPosition(point) ?? point;
       const type = preferredClass(classOptions);
@@ -213,7 +295,9 @@ export default function RelationshipFlow({
         position,
         relationshipType: preferredRelationship(
           relationshipOptions,
-          "IFCRELAGGREGATES",
+          source.handleId === AGGREGATE_SOURCE_HANDLE
+            ? AGGREGATE_RELATIONSHIP_TYPE
+            : "IFCRELASSIGNSTOGROUP",
         ),
         sourceId,
         type,
@@ -265,6 +349,22 @@ export default function RelationshipFlow({
                 {option.label}
               </option>
             ))}
+          </select>
+        </label>
+        <label>
+          <span>Layout</span>
+          <select
+            value={layoutMode}
+            onChange={(event) => {
+              const value = event.currentTarget.value;
+              if (value === "columns" || value === "tension") {
+                onLayoutMode(value);
+                onLog(`graph.layout(${JSON.stringify(value)});`);
+              }
+            }}
+          >
+            <option value="tension">Tension</option>
+            <option value="columns">Columns</option>
           </select>
         </label>
         <button type="button" onClick={fitView}>
@@ -335,13 +435,16 @@ export default function RelationshipFlow({
           }
           maxZoom={2.2}
           minZoom={0.08}
+          multiSelectionKeyCode={["Shift", "Control", "Meta"]}
           nodes={flowNodes}
           nodesDraggable
           nodeTypes={nodeTypes}
-          panOnDrag
+          panOnDrag={[1, 2]}
           panOnScroll
+          panActivationKeyCode="Space"
           proOptions={{ hideAttribution: true }}
-          selectionOnDrag={false}
+          selectionMode={SelectionMode.Partial}
+          selectionOnDrag
           zoomOnDoubleClick
           zoomOnScroll
           onInit={(instance) => {
@@ -351,10 +454,11 @@ export default function RelationshipFlow({
           onConnectEnd={handleConnectEnd}
           onConnectStart={handleConnectStart}
           onNodeClick={(_event, node) => onSelect(Number(node.id))}
-          onNodeDragStop={(_event, node) => {
-            const point = node.position as FlowPoint;
-            onMoveNode(Number(node.id), point);
-            onMoveEnd(Number(node.id), point);
+          onNodeDragStop={(_event, node, draggedNodes) => {
+            commitMovedNodes(draggedNodes.length ? draggedNodes : [node]);
+          }}
+          onSelectionDragStop={(_event, selectedNodes) => {
+            commitMovedNodes(selectedNodes);
           }}
           onNodesChange={handleNodesChange}
         >
@@ -501,6 +605,16 @@ export default function RelationshipFlow({
   );
 }
 
+function syncNodeDataPositions(nodes: IfcFlowNode[]) {
+  return nodes.map((node) => ({
+    ...node,
+    data: {
+      ...node.data,
+      layoutPosition: node.position,
+    },
+  }));
+}
+
 function IfcNode({ data, selected }: NodeProps<IfcFlowNode>) {
   const childLabel = data.childrenLoaded
     ? "-"
@@ -518,13 +632,27 @@ function IfcNode({ data, selected }: NodeProps<IfcFlowNode>) {
     <div className={classes}>
       <Handle
         className="ifc-flow-handle ifc-flow-handle-target"
+        id={RELATIONSHIP_TARGET_HANDLE}
         type="target"
         position={Position.Left}
       />
       <Handle
         className="ifc-flow-handle ifc-flow-handle-source"
+        id={RELATIONSHIP_SOURCE_HANDLE}
         type="source"
         position={Position.Right}
+      />
+      <Handle
+        className="ifc-flow-handle ifc-flow-handle-aggregate-target"
+        id={AGGREGATE_TARGET_HANDLE}
+        type="target"
+        position={Position.Top}
+      />
+      <Handle
+        className="ifc-flow-handle ifc-flow-handle-aggregate-source"
+        id={AGGREGATE_SOURCE_HANDLE}
+        type="source"
+        position={Position.Bottom}
       />
       <div className="ifc-flow-node-header">
         <div className="ifc-flow-node-labels">
@@ -536,7 +664,7 @@ function IfcNode({ data, selected }: NodeProps<IfcFlowNode>) {
         <div className="ifc-flow-node-actions">
           {data.childCount > 0 ? (
             <button
-              className={data.childrenLoaded ? "expanded" : ""}
+              className={`nodrag nopan${data.childrenLoaded ? " expanded" : ""}`}
               title={
                 data.childrenLoaded ? "Collapse children" : "Expand children"
               }
@@ -550,15 +678,15 @@ function IfcNode({ data, selected }: NodeProps<IfcFlowNode>) {
             </button>
           ) : null}
           <button
-            className={data.pinned ? "expanded" : ""}
+            className={`nodrag nopan${data.pinned ? " expanded" : ""}`}
             title={data.pinned ? "Unpin node" : "Pin node"}
             type="button"
             onClick={(event) => {
               event.stopPropagation();
-              data.onTogglePin(data.ifcId);
+              data.onTogglePin(data.ifcId, data.layoutPosition);
             }}
           >
-            {data.pinned ? "Pin" : "+Pin"}
+            {data.pinned ? "Fixed" : "Pin"}
           </button>
         </div>
       </div>
@@ -618,6 +746,20 @@ function preferredRelationship(
   preferred: string,
 ) {
   return optionValue(options, preferred);
+}
+
+function prefersAggregateRelationship(
+  sourceHandle: string | null,
+  targetHandle: string | null,
+) {
+  return (
+    sourceHandle === AGGREGATE_SOURCE_HANDLE ||
+    targetHandle === AGGREGATE_TARGET_HANDLE
+  );
+}
+
+function isAggregateRelationship(type: string) {
+  return type.trim().toUpperCase() === AGGREGATE_RELATIONSHIP_TYPE;
 }
 
 function optionValue(options: RelationshipFlowOption[], preferred: string) {

@@ -3,6 +3,13 @@ export interface FlowPoint {
   y: number;
 }
 
+export type RelationshipFlowLayoutMode = "columns" | "tension";
+
+export interface RelationshipFlowMove {
+  id: number;
+  point: FlowPoint;
+}
+
 export interface RelationshipFlowNode {
   childCount: number;
   childrenLoaded: boolean;
@@ -24,6 +31,7 @@ export interface RelationshipFlowEdge {
   id: string;
   label: string;
   rel: number;
+  relationshipType: string;
   source: number;
   target: number;
 }
@@ -39,6 +47,7 @@ export interface RelationshipFlowProps {
   classOptions: RelationshipFlowOption[];
   depth: number;
   edges: RelationshipFlowEdge[];
+  layoutMode: RelationshipFlowLayoutMode;
   nodes: RelationshipFlowNode[];
   preset: string;
   presetOptions: RelationshipFlowOption[];
@@ -47,7 +56,11 @@ export interface RelationshipFlowProps {
   relationshipTypeFilters: string[];
   relationshipTypes: string[];
   onClearPositions(): void;
-  onConnectNodes(sourceId: number, targetId: number, relationshipType: string): void;
+  onConnectNodes(
+    sourceId: number,
+    targetId: number,
+    relationshipType: string,
+  ): void;
   onCreateNodeFromConnection(
     sourceId: number,
     type: string,
@@ -56,12 +69,15 @@ export interface RelationshipFlowProps {
     position: FlowPoint,
   ): void;
   onDepth(depth: number): void;
+  onLayoutMode(mode: RelationshipFlowLayoutMode): void;
   onLog(code: string): void;
   onRelationshipTypeFilters(filters: string[]): void;
   onMoveEnd(id: number, point: FlowPoint): void;
   onMoveNode(id: number, point: FlowPoint): void;
+  onMoveNodes?(moves: RelationshipFlowMove[]): void;
+  onMoveNodesEnd?(moves: RelationshipFlowMove[]): void;
   onPreset(preset: string): void;
   onSelect(id: number): void;
   onToggleChildren(id: number, loaded: boolean): void;
-  onTogglePin(id: number): void;
+  onTogglePin(id: number, point?: FlowPoint): void;
 }

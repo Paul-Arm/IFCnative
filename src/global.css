@@ -317,6 +317,17 @@ textarea {
   width: 88px;
 }
 
+.ifc-graph-toolbar select {
+  min-height: 28px;
+  border: 1px solid #c9d1d8;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #17202a;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 0 8px;
+}
+
 .ifc-graph-toolbar input[type="range"] {
   accent-color: #0f766e;
 }
@@ -378,6 +389,12 @@ textarea {
 
 .ifc-reactflow-shell .react-flow {
   background: #fafafa;
+}
+
+.ifc-reactflow-shell .react-flow__nodesselection-rect,
+.ifc-reactflow-shell .react-flow__selection {
+  border: 1px solid #0f766e;
+  background: rgb(15 118 110 / 10%);
 }
 
 .ifc-flow-node {
@@ -485,6 +502,24 @@ textarea {
 .ifc-flow-handle-target {
   left: -7px;
   background: #0f766e;
+}
+
+.ifc-flow-handle-aggregate-source {
+  bottom: -7px;
+  background: #0f766e;
+}
+
+.ifc-flow-handle-aggregate-target {
+  top: -7px;
+  background: #14b8a6;
+}
+
+.ifc-reactflow-shell .react-flow__edge.ifc-flow-edge-aggregate path {
+  stroke: #0f766e;
+}
+
+.ifc-reactflow-shell .react-flow__edge.ifc-flow-edge-reference path {
+  stroke: #2563eb;
 }
 
 .ifc-flow-popover {
