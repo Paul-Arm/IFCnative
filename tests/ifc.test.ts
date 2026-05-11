@@ -24,6 +24,7 @@ import {
   updateNativePlacement,
   updateNativeRelationship,
 } from '../src/ifc/nativeDocument';
+import { buildNativeGraphNeighborhood } from '../src/ifc/nativeGraph';
 import { preflightIfcText } from '../src/ifc/preflight';
 import { buildPropertyIndex } from '../src/ifc/propertyIndex';
 import type { IfcEntitySummary } from '../src/ifc/types';
@@ -147,6 +148,33 @@ test('native document edits keep indexes live', () => {
   assert.ok(reopened.propertySetsByEntity.get(wall.id)?.some((set) => set.name === 'Pset_RN'));
   assert.ok(reopened.propertySetsByEntity.get(wall.id)?.some((set) => set.name === 'Qto_RN'));
   assert.ok(reopened.resourcesByEntity.get(wall.id)?.some((resource) => resource.includes('RN Report')));
+});
+
+test('native graph presets filter relationship neighborhoods', () => {
+  const sample = createNativeSampleDocument();
+  const storey = sample.entities.find((entity) => entity.type === 'IFCBUILDINGSTOREY');
+  assert.ok(storey);
+  const withWall = addNativeElement(sample, storey.id, 'IFCWALL', 'Graph Filter Wall');
+  const wall = withWall.entities.find((entity) => entity.type === 'IFCWALL' && entity.name === 'Graph Filter Wall');
+  assert.ok(wall);
+  const withProperty = addNativePropertySet(withWall, wall.id, 'Pset_GraphFilter', 'Status', 'Draft');
+
+  const spatial = buildNativeGraphNeighborhood(withProperty, {
+    depth: 2,
+    preset: 'spatial',
+    selectedId: storey.id,
+  });
+  assert.ok(spatial.nodeIds.includes(wall.id));
+  assert.ok(spatial.edges.every((edge) => edge.type === 'IFCRELAGGREGATES' || edge.type === 'IFCRELCONTAINEDINSPATIALSTRUCTURE'));
+
+  const properties = buildNativeGraphNeighborhood(withProperty, {
+    depth: 1,
+    preset: 'properties',
+    selectedId: wall.id,
+  });
+  assert.ok(properties.edges.some((edge) => edge.type === 'IFCRELDEFINESBYPROPERTIES'));
+  assert.ok(properties.relationshipTypes.includes('IFCRELDEFINESBYPROPERTIES'));
+  assert.ok(properties.edges.every((edge) => edge.type === 'IFCRELDEFINESBYPROPERTIES' || edge.type === 'IFCRELDEFINESBYTYPE'));
 });
 
 test('entity-aware diff groups STEP changes by entity id', () => {

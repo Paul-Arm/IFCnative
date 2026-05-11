@@ -39,6 +39,7 @@ import {
   updateNativePropertyValue,
   updateNativeRelationship,
 } from '@/ifc';
+import { buildNativeGraphNeighborhood, type NativeGraphPreset } from '@/ifc/nativeGraph';
 
 import RelationshipFlow from './relationship-flow';
 import type { RelationshipFlowEdge, RelationshipFlowNode } from './relationship-flow.types';
@@ -150,6 +151,14 @@ const QUANTITY_TYPES = [
   'IFCQUANTITYTIME',
 ];
 
+const GRAPH_PRESETS: Array<{ value: NativeGraphPreset; label: string; detail: string }> = [
+  { value: 'all', label: 'All', detail: 'Every indexed relationship type' },
+  { value: 'spatial', label: 'Spatial', detail: 'Aggregation, nesting and containment' },
+  { value: 'properties', label: 'Properties', detail: 'Psets, quantities and type definitions' },
+  { value: 'resources', label: 'Resources', detail: 'Groups, materials, classification and documents' },
+  { value: 'geometry', label: 'Geometry', detail: 'Placement and representation references when indexed' },
+];
+
 export default function IfcWorkspace() {
   const [document, setDocument] = useState<NativeIfcDocument>(() => createNativeSampleDocument());
   const [selectedId, setSelectedId] = useState(() => createNativeSampleDocument().spatialRoots[0]?.id ?? 1);
@@ -158,6 +167,7 @@ export default function IfcWorkspace() {
   const [mosaicValue, setMosaicValue] = useState<MosaicNode<MosaicViewId> | null>(DEFAULT_MOSAIC_LAYOUT);
   const [search, setSearch] = useState('');
   const [graphDepth, setGraphDepth] = useState(1);
+  const [graphPreset, setGraphPreset] = useState<NativeGraphPreset>('all');
   const [graphPinned, setGraphPinned] = useState<Set<number>>(() => new Set());
   const [graphExpanded, setGraphExpanded] = useState<Set<number>>(() => new Set());
   const [graphCollapsed, setGraphCollapsed] = useState<Set<number>>(() => new Set());
@@ -477,12 +487,14 @@ export default function IfcWorkspace() {
           expanded={graphExpanded}
           pinned={graphPinned}
           positions={graphPositions}
+          preset={graphPreset}
           relationshipOptions={RELATION_TYPES.map(typeOption)}
           selectedId={selectedId}
           onConnectNodes={connectGraphNodes}
           onCreateNodeFromConnection={addGraphConnectedNode}
           onDepth={setGraphDepth}
           onLog={logAction}
+          onPreset={setGraphPreset}
           onPositions={setGraphPositions}
           onSelect={selectEntity}
           onToggleChildren={(id, loaded) => {
@@ -837,6 +849,7 @@ function GraphPanel({
   expanded,
   pinned,
   positions,
+  preset,
   relationshipOptions,
   selectedId,
   onConnectNodes,
@@ -844,6 +857,7 @@ function GraphPanel({
   onDepth,
   onLog,
   onPositions,
+  onPreset,
   onSelect,
   onToggleChildren,
   onTogglePin,
@@ -855,6 +869,7 @@ function GraphPanel({
   expanded: Set<number>;
   pinned: Set<number>;
   positions: Map<number, Point>;
+  preset: NativeGraphPreset;
   relationshipOptions: DropdownOption[];
   selectedId: number;
   onConnectNodes(sourceId: number, targetId: number, relationshipType: string): void;
@@ -868,13 +883,14 @@ function GraphPanel({
   onDepth(depth: number): void;
   onLog(code: string): void;
   onPositions(positions: Map<number, Point>): void;
+  onPreset(preset: NativeGraphPreset): void;
   onSelect(id: number, source?: string): void;
   onToggleChildren(id: number, loaded: boolean): void;
   onTogglePin(id: number): void;
 }) {
   const graph = useMemo(
-    () => buildGraph(document, selectedId, pinned, expanded, collapsed, depth),
-    [collapsed, depth, document, expanded, pinned, selectedId],
+    () => buildGraph(document, selectedId, pinned, expanded, collapsed, depth, preset),
+    [collapsed, depth, document, expanded, pinned, preset, selectedId],
   );
   const layout = useMemo(() => layoutGraph(graph.nodeIds, graph.levels, positions), [graph.levels, graph.nodeIds, positions]);
   const flowNodes = useMemo<RelationshipFlowNode[]>(
@@ -928,8 +944,11 @@ function GraphPanel({
       depth={depth}
       edges={flowEdges}
       nodes={flowNodes}
+      preset={preset}
+      presetOptions={GRAPH_PRESETS}
       relationshipOptions={relationshipOptions}
       relationshipCount={graph.edges.length}
+      relationshipTypes={graph.relationshipTypes}
       onClearPositions={() => {
         onPositions(new Map());
         onLog('graph.autoLayout();');
@@ -943,6 +962,7 @@ function GraphPanel({
       onLog={onLog}
       onMoveEnd={(id, point) => onLog(`graph.moveNode({ id: ${id}, x: ${point.x.toFixed(1)}, y: ${point.y.toFixed(1)} });`)}
       onMoveNode={moveNode}
+      onPreset={(value) => onPreset(value as NativeGraphPreset)}
       onSelect={(id) => onSelect(id, 'graph')}
       onToggleChildren={(id, loaded) => onToggleChildren(id, loaded)}
       onTogglePin={onTogglePin}
@@ -1969,81 +1989,18 @@ function buildGraph(
   expanded: Set<number>,
   collapsed: Set<number>,
   depth: number,
+  preset: NativeGraphPreset,
 ) {
-  const anchors = unique([selectedId, ...pinned]);
-  const nodeSet = new Set(anchors);
-  const levels = new Map<number, number>(anchors.map((id) => [id, 0]));
-  const edges: { rel: number; source: number; target: number; label: string }[] = [];
-  const loadedSources = new Set<number>();
-  const childCounts = new Map<number, number>();
-  let capped = false;
-
-  const addSource = (sourceId: number, level: number) => {
-    const relationships = document.relationships.filter(
-      (relationship) => relationship.sourceIds.includes(sourceId) || relationship.targetIds.includes(sourceId),
-    );
-    const targets = unique(
-      relationships.flatMap((relationship) =>
-        relationship.sourceIds.includes(sourceId) ? relationship.targetIds : relationship.sourceIds,
-      ),
-    );
-    childCounts.set(sourceId, targets.length);
-    if (targets.length) {
-      loadedSources.add(sourceId);
-    }
-    const accepted: number[] = [];
-    for (const target of targets) {
-      if (nodeSet.size >= 160 && !nodeSet.has(target)) {
-        capped = true;
-        continue;
-      }
-      nodeSet.add(target);
-      if (!levels.has(target)) {
-        levels.set(target, level + 1);
-      }
-      accepted.push(target);
-    }
-    for (const relationship of relationships) {
-      for (const source of relationship.sourceIds) {
-        for (const target of relationship.targetIds) {
-          if (nodeSet.has(source) && nodeSet.has(target) && edges.length < 240) {
-            edges.push({ label: shortType(relationship.type), rel: relationship.id, source, target });
-          }
-        }
-      }
-    }
-    return accepted;
-  };
-
-  let frontier = anchors;
-  for (let level = 0; level < depth; level += 1) {
-    const next: number[] = [];
-    for (const source of unique(frontier)) {
-      if (!collapsed.has(source)) {
-        next.push(...addSource(source, level));
-      }
-    }
-    frontier = next;
-  }
-  for (const source of expanded) {
-    if (!collapsed.has(source)) {
-      addSource(source, levels.get(source) ?? 0);
-    }
-  }
-  for (const id of nodeSet) {
-    if (!childCounts.has(id)) {
-      childCounts.set(id, directChildCount(document, id));
-    }
-  }
-  return {
-    capped,
-    childCounts,
-    edges: uniqueEdges(edges),
-    levels,
-    loadedSources,
-    nodeIds: [...nodeSet].sort((a, b) => (levels.get(a) ?? 0) - (levels.get(b) ?? 0) || a - b),
-  };
+  return buildNativeGraphNeighborhood(document, {
+    collapsed,
+    depth,
+    expanded,
+    pinned,
+    preset,
+    selectedId,
+  });
 }
+
 
 function layoutGraph(nodeIds: number[], levels: Map<number, number>, manual: Map<number, Point>): GraphLayoutNode[] {
   const grouped = new Map<number, number[]>();
@@ -2065,25 +2022,6 @@ function layoutGraph(nodeIds: number[], levels: Map<number, number>, manual: Map
   return result;
 }
 
-function directChildCount(document: NativeIfcDocument, id: number) {
-  return unique(
-    document.relationships.flatMap((relationship) =>
-      relationship.sourceIds.includes(id) ? relationship.targetIds : relationship.targetIds.includes(id) ? relationship.sourceIds : [],
-    ),
-  ).length;
-}
-
-function uniqueEdges(edges: { rel: number; source: number; target: number; label: string }[]) {
-  const seen = new Set<string>();
-  return edges.filter((edge) => {
-    const key = `${edge.rel}-${edge.source}-${edge.target}`;
-    if (seen.has(key)) {
-      return false;
-    }
-    seen.add(key);
-    return true;
-  });
-}
 
 function findTreePath(document: NativeIfcDocument, id: number) {
   const path: NativeIfcEntity[] = [];
@@ -2115,9 +2053,6 @@ function addToSet<T>(current: Set<T>, value: T) {
   return new Set(current).add(value);
 }
 
-function unique(values: number[]) {
-  return [...new Set(values.filter((value) => Number.isFinite(value) && value > 0))];
-}
 
 function shortType(type: string) {
   return type.replace(/^IFC/i, '');

@@ -63,8 +63,11 @@ export default function RelationshipFlow({
   depth,
   edges,
   nodes,
+  preset,
+  presetOptions,
   relationshipOptions,
   relationshipCount,
+  relationshipTypes,
   onClearPositions,
   onConnectNodes,
   onCreateNodeFromConnection,
@@ -72,6 +75,7 @@ export default function RelationshipFlow({
   onLog,
   onMoveEnd,
   onMoveNode,
+  onPreset,
   onSelect,
   onToggleChildren,
   onTogglePin,
@@ -206,10 +210,24 @@ export default function RelationshipFlow({
             onChange={(event) => onDepth(Number(event.currentTarget.value))}
           />
         </label>
+        <label>
+          <span>Preset</span>
+          <select
+            value={preset}
+            onChange={(event) => {
+              onPreset(event.currentTarget.value);
+              onLog(`graph.preset(${JSON.stringify(event.currentTarget.value)});`);
+            }}>
+            {presetOptions.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
         <button type="button" onClick={fitView}>Fit</button>
         <button type="button" onClick={autoLayout}>Auto</button>
-        <span className="ifc-graph-count">
-          {nodes.length} / {relationshipCount}
+        <span className="ifc-graph-count" title={relationshipTypes.length ? relationshipTypes.join(', ') : 'All relationship types'}>
+          {nodes.length} nodes / {relationshipCount} edges
+          {relationshipTypes.length ? ` · ${relationshipTypes.length} rel filters` : ' · all rels'}
           {capped ? ' capped' : ''}
         </span>
       </div>

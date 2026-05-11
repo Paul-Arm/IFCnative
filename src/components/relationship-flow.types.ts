@@ -40,8 +40,11 @@ export interface RelationshipFlowProps {
   depth: number;
   edges: RelationshipFlowEdge[];
   nodes: RelationshipFlowNode[];
+  preset: string;
+  presetOptions: RelationshipFlowOption[];
   relationshipOptions: RelationshipFlowOption[];
   relationshipCount: number;
+  relationshipTypes: string[];
   onClearPositions(): void;
   onConnectNodes(sourceId: number, targetId: number, relationshipType: string): void;
   onCreateNodeFromConnection(
@@ -55,6 +58,7 @@ export interface RelationshipFlowProps {
   onLog(code: string): void;
   onMoveEnd(id: number, point: FlowPoint): void;
   onMoveNode(id: number, point: FlowPoint): void;
+  onPreset(preset: string): void;
   onSelect(id: number): void;
   onToggleChildren(id: number, loaded: boolean): void;
   onTogglePin(id: number): void;
