@@ -8,7 +8,7 @@ export interface ThatOpenViewerProps {
   selectedName?: string;
   onLog?(line: string): void;
   onMoveSelected?(delta: { x?: number; y?: number; z?: number }): void;
-  onSelect(id: number, source?: string): void;
+  onSelect(id: number, source?: string, globalId?: string): void;
 }
 
 export default function ThatOpenViewer({ fileName }: ThatOpenViewerProps) {
@@ -36,13 +36,12 @@ const styles = StyleSheet.create({
   },
   text: {
     color: "#52525b",
-    fontSize: 13,
+    fontSize: 12,
     marginTop: 6,
     textAlign: "center",
   },
   title: {
     color: "#18181b",
-    fontSize: 18,
-    fontWeight: "900",
+    fontSize: 16,
   },
 });

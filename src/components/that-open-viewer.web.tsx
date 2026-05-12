@@ -21,7 +21,7 @@ export default function ThatOpenViewer({
   const onSelectRef = useRef(onSelect);
   const [runtimeReady, setRuntimeReady] = useState(0);
   const [modelReady, setModelReady] = useState(0);
-  const [status, setStatus] = useState("Starting ThatOpen viewer...");
+  const [, setStatus] = useState("Starting ThatOpen viewer...");
   const [error, setError] = useState("");
 
   selectedRef.current = selectedId;
@@ -43,7 +43,8 @@ export default function ThatOpenViewer({
           setStatus("ThatOpen viewer error");
         },
         onLog: (line) => onLogRef.current?.(line),
-        onSelect: (id, source) => onSelectRef.current(id, source),
+        onSelect: (id, source, globalId) =>
+          onSelectRef.current(id, source, globalId),
         onStatus: setStatus,
       });
       if (disposed) {
@@ -182,7 +183,6 @@ export default function ThatOpenViewer({
         </div>
       </div>
       <div ref={containerRef} className="ifcnative-thatopen-viewport">
-        <div className="ifcnative-thatopen-status">{status}</div>
         {error ? <div className="ifcnative-thatopen-error">{error}</div> : null}
       </div>
     </div>
@@ -195,7 +195,7 @@ async function createThatOpenRuntime(
     getSelectedId(): number;
     onError(message: string): void;
     onLog(line: string): void;
-    onSelect(id: number, source?: string): void;
+    onSelect(id: number, source?: string, globalId?: string): void;
     onStatus(message: string): void;
   },
 ) {
@@ -218,6 +218,7 @@ async function createThatOpenRuntime(
     antialias: true,
     powerPreference: "high-performance",
   });
+  world.renderer.showLogo = false;
   world.camera = new OBC.SimpleCamera(components);
 
   components.init();
@@ -258,16 +259,36 @@ async function createThatOpenRuntime(
   });
   resizeObserver.observe(container);
 
-  const selectFromPointer = async (event: PointerEvent) => {
+  let pointerDown: { x: number; y: number } | null = null;
+
+  const trackPointerDown = (event: PointerEvent) => {
+    pointerDown = { x: event.clientX, y: event.clientY };
+  };
+
+  const canvas = world.renderer.three.domElement;
+
+  const selectFromPointer = async (event: MouseEvent) => {
     if (!model || !world.renderer) {
       return;
     }
-    const canvas = world.renderer.three.domElement;
+    if (pointerDown) {
+      const dx = event.clientX - pointerDown.x;
+      const dy = event.clientY - pointerDown.y;
+      pointerDown = null;
+      if (Math.hypot(dx, dy) > 4) {
+        return;
+      }
+    }
     const rect = canvas.getBoundingClientRect();
-    const mouse = new THREE.Vector2(
-      ((event.clientX - rect.left) / rect.width) * 2 - 1,
-      -((event.clientY - rect.top) / rect.height) * 2 + 1,
-    );
+    if (
+      event.clientX < rect.left ||
+      event.clientX > rect.right ||
+      event.clientY < rect.top ||
+      event.clientY > rect.bottom
+    ) {
+      return;
+    }
+    const mouse = new THREE.Vector2(event.clientX, event.clientY);
     const result = await fragments.raycast({
       camera: world.camera.three,
       dom: canvas,
@@ -275,16 +296,32 @@ async function createThatOpenRuntime(
     });
     const localId = result?.localId;
     if (!localId || !Number.isFinite(localId)) {
+      callbacks.onLog("viewer.selectMiss({ engine: 'thatopen' });");
       return;
     }
-    callbacks.onSelect(localId, "thatopen");
+    const itemData = await readItemData(fragments, result.fragments.modelId, localId);
+    const entityId = readNumericAttribute(itemData, [
+      "expressID",
+      "ExpressID",
+      "expressId",
+      "_localId",
+      "localId",
+    ]);
+    const globalId = readStringAttribute(itemData, [
+      "GlobalId",
+      "GlobalID",
+      "globalId",
+      "guid",
+    ]);
+    callbacks.onSelect(entityId ?? localId, "thatopen", globalId);
     callbacks.onLog(
-      `viewer.select({ engine: 'thatopen', localId: ${localId} });`,
+      `viewer.select({ engine: 'thatopen', localId: ${localId}, entityId: ${entityId ?? localId}${globalId ? `, globalId: '${globalId}'` : ""} });`,
     );
     await highlight(localId);
   };
 
-  container.addEventListener("pointerup", selectFromPointer);
+  canvas.addEventListener("pointerdown", trackPointerDown, { capture: true });
+  canvas.addEventListener("click", selectFromPointer, { capture: true });
 
   async function load(
     ifcText: string,
@@ -354,7 +391,10 @@ async function createThatOpenRuntime(
   }
 
   async function dispose() {
-    container.removeEventListener("pointerup", selectFromPointer);
+    canvas.removeEventListener("pointerdown", trackPointerDown, {
+      capture: true,
+    });
+    canvas.removeEventListener("click", selectFromPointer, { capture: true });
     resizeObserver.disconnect();
     if (model) {
       model.object.removeFromParent();
@@ -382,6 +422,58 @@ function toModelId(fileName: string) {
       .replace(/[^a-z0-9_-]+/gi, "-")
       .replace(/^-|-$/g, "") || "ifcnative"
   );
+}
+
+async function readItemData(
+  fragments: {
+    getData(
+      items: Record<string, Set<number>>,
+      config?: {
+        attributesDefault?: boolean;
+        relationsDefault?: { attributes: boolean; relations: boolean };
+      },
+    ): Promise<Record<string, unknown[]>>;
+  },
+  modelId: string,
+  localId: number,
+) {
+  const dataByModel = await fragments
+    .getData(
+      { [modelId]: new Set([localId]) },
+      {
+        attributesDefault: true,
+        relationsDefault: { attributes: false, relations: false },
+      },
+    )
+    .catch(() => undefined);
+  return dataByModel?.[modelId]?.[0];
+}
+
+function readNumericAttribute(data: unknown, keys: string[]) {
+  const value = readAttribute(data, keys);
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function readStringAttribute(data: unknown, keys: string[]) {
+  const value = readAttribute(data, keys);
+  return typeof value === "string" && value ? value : undefined;
+}
+
+function readAttribute(data: unknown, keys: string[]) {
+  if (!data || typeof data !== "object") {
+    return undefined;
+  }
+  const record = data as Record<string, unknown>;
+  for (const key of keys) {
+    const raw = record[key];
+    if (raw && typeof raw === "object" && "value" in raw) {
+      return (raw as { value: unknown }).value;
+    }
+    if (raw !== undefined) {
+      return raw;
+    }
+  }
+  return undefined;
 }
 
 function stringifyError(reason: unknown) {

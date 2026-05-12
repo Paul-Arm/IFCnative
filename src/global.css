@@ -92,8 +92,7 @@ textarea {
 
 .ifcnative-mosaic .mosaic-window-title {
   color: #18181b;
-  font-size: 12px;
-  font-weight: 900;
+  font-size: 11px;
   letter-spacing: 0;
 }
 
@@ -220,8 +219,7 @@ textarea {
 
 .ifcnative-thatopen-nudge-label {
   color: #475569;
-  font-size: 12px;
-  font-weight: 800;
+  font-size: 11px;
 }
 
 .ifcnative-thatopen-button {
@@ -230,8 +228,7 @@ textarea {
   border-radius: 6px;
   color: #0f172a;
   cursor: pointer;
-  font-size: 13px;
-  font-weight: 800;
+  font-size: 12px;
   min-height: 34px;
   padding: 0 12px;
 }
@@ -251,31 +248,21 @@ textarea {
   position: relative;
 }
 
-.ifcnative-thatopen-status {
-  background: rgba(255, 255, 255, 0.88);
-  border: 1px solid rgba(203, 213, 225, 0.8);
-  border-radius: 999px;
-  color: #334155;
-  font-size: 12px;
-  font-weight: 800;
-  left: 12px;
-  padding: 7px 10px;
-  position: absolute;
-  top: 12px;
-  z-index: 2;
-}
-
 .ifcnative-thatopen-error {
   background: rgba(127, 29, 29, 0.92);
   border-radius: 8px;
   bottom: 12px;
   color: #fee2e2;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-size: 11px;
   left: 12px;
   max-width: 70%;
   padding: 10px 12px;
   position: absolute;
+}
+
+.ifcnative-thatopen-viewport [data-thatopen-logo] {
+  display: none !important;
 }
 
 .ifc-relationship-graph {
@@ -323,8 +310,7 @@ textarea {
   border-radius: 6px;
   background: #ffffff;
   color: #17202a;
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 10px;
   padding: 0 8px;
 }
 
@@ -340,8 +326,7 @@ textarea {
   background: #ffffff;
   color: #17202a;
   cursor: pointer;
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 10px;
 }
 
 .ifc-graph-toolbar button {
@@ -371,7 +356,6 @@ textarea {
   color: #334155;
   cursor: pointer;
   font-size: 10px;
-  font-weight: 800;
   padding: 0 9px;
 }
 
@@ -440,16 +424,14 @@ textarea {
 
 .ifc-flow-node-id {
   color: #0f766e;
-  font-size: 11px;
-  font-weight: 900;
+  font-size: 10px;
   line-height: 1.15;
 }
 
 .ifc-flow-node-type {
   display: block;
   color: #111827;
-  font-size: 11px;
-  font-weight: 900;
+  font-size: 10px;
   line-height: 1.2;
   overflow-wrap: anywhere;
   white-space: normal;
@@ -559,8 +541,7 @@ textarea {
   border-radius: 6px;
   background: #f8fafc;
   cursor: pointer;
-  font-size: 12px;
-  font-weight: 900;
+  font-size: 11px;
 }
 
 .ifc-flow-popover label {
@@ -570,8 +551,7 @@ textarea {
 
 .ifc-flow-popover label span {
   color: #5f6f7b;
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 10px;
 }
 
 .ifc-flow-popover input,
@@ -598,8 +578,7 @@ textarea {
   background: #ffffff;
   color: #0f766e;
   cursor: pointer;
-  font-size: 12px;
-  font-weight: 900;
+  font-size: 11px;
   padding: 0 12px;
 }
 

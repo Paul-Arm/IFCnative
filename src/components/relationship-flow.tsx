@@ -125,8 +125,7 @@ const styles = StyleSheet.create({
   },
   depthText: {
     color: '#18181b',
-    fontSize: 11,
-    fontWeight: '800',
+    fontSize: 10,
     textAlign: 'center',
   },
   depthTextActive: {
@@ -152,7 +151,6 @@ const styles = StyleSheet.create({
   filterChipText: {
     color: '#18181b',
     fontSize: 10,
-    fontWeight: '800',
   },
   filterChipTextActive: {
     color: '#ffffff',
@@ -183,7 +181,6 @@ const styles = StyleSheet.create({
   nodeButtonText: {
     color: '#0f766e',
     fontSize: 10,
-    fontWeight: '900',
     textAlign: 'center',
   },
   nodeHeader: {
@@ -206,8 +203,7 @@ const styles = StyleSheet.create({
   nodeTitle: {
     color: '#18181b',
     flex: 1,
-    fontSize: 12,
-    fontWeight: '800',
+    fontSize: 11,
   },
   nodeTitleSelected: {
     color: '#ffffff',

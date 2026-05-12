@@ -407,14 +407,18 @@ export default function IfcWorkspace() {
     logAction(`draft.discard(${JSON.stringify(discardedSummary)});`);
   };
 
-  const selectEntity = (id: number, source = "ui") => {
-    if (!document.entityById.has(id)) {
+  const selectEntity = (id: number, source = "ui", globalId?: string) => {
+    const resolvedId =
+      document.entityById.has(id) || !globalId
+        ? id
+        : document.entities.find((entity) => entity.globalId === globalId)?.id;
+    if (!resolvedId || !document.entityById.has(resolvedId)) {
       return;
     }
-    setSelectedId(id);
-    const entity = document.entityById.get(id);
+    setSelectedId(resolvedId);
+    const entity = document.entityById.get(resolvedId);
     logAction(
-      `${source}.selectEntity({ id: ${id}, class: '${entity?.type ?? "UNKNOWN"}' });`,
+      `${source}.selectEntity({ id: ${resolvedId}, class: '${entity?.type ?? "UNKNOWN"}' });`,
     );
   };
 
@@ -1184,24 +1188,40 @@ function SegmentedControl({
   onChange(value: string): void;
 }) {
   return (
-    <View style={styles.segmented}>
-      {options.map((option) => (
-        <Pressable
-          key={option}
-          onPress={() => onChange(option)}
-          style={[styles.segment, value === option && styles.segmentActive]}
-        >
-          <Text
-            style={[
-              styles.segmentText,
-              value === option && styles.segmentTextActive,
+    <ScrollView
+      accessibilityRole="tablist"
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={styles.segmented}
+      contentContainerStyle={styles.segmentedContent}
+    >
+      {options.map((option) => {
+        const selected = value === option;
+        return (
+          <Pressable
+            accessibilityRole="tab"
+            accessibilityState={{ selected }}
+            key={option}
+            onPress={() => onChange(option)}
+            style={({ pressed }) => [
+              styles.segment,
+              selected && styles.segmentActive,
+              pressed && !selected && styles.segmentPressed,
             ]}
           >
-            {option}
-          </Text>
-        </Pressable>
-      ))}
-    </View>
+            <Text
+              style={[
+                styles.segmentText,
+                selected && styles.segmentTextActive,
+              ]}
+              numberOfLines={1}
+            >
+              {option}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </ScrollView>
   );
 }
 
@@ -4371,8 +4391,7 @@ const styles = StyleSheet.create({
   },
   appTitle: {
     color: "#18181b",
-    fontSize: 22,
-    fontWeight: "800",
+    fontSize: 18,
   },
   button: {
     alignItems: "center",
@@ -4396,14 +4415,13 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: "#18181b",
-    fontWeight: "700",
   },
   codeBlock: {
     backgroundColor: "#f4f4f5",
     borderRadius: 6,
     color: "#18181b",
     fontFamily: Platform.select({ default: "monospace", ios: "Menlo" }),
-    fontSize: 11,
+    fontSize: 10,
     padding: 10,
   },
   console: {
@@ -4413,7 +4431,7 @@ const styles = StyleSheet.create({
   consoleLine: {
     color: "#e4e4e7",
     fontFamily: Platform.select({ default: "monospace", ios: "Menlo" }),
-    fontSize: 11,
+    fontSize: 10,
     paddingVertical: 1,
   },
   consoleLines: {
@@ -4464,17 +4482,16 @@ const styles = StyleSheet.create({
   diffSummaryText: {
     color: "#475569",
     fontFamily: Platform.select({ default: "monospace", ios: "Menlo" }),
-    fontSize: 11,
+    fontSize: 10,
   },
   diffSummaryTitle: {
     color: "#0f172a",
-    fontSize: 12,
-    fontWeight: "800",
+    fontSize: 11,
   },
   diffLine: {
     color: "#334155",
     fontFamily: Platform.select({ default: "monospace", ios: "Menlo" }),
-    fontSize: 11,
+    fontSize: 10,
     paddingHorizontal: 8,
     paddingVertical: 1,
   },
@@ -4507,17 +4524,15 @@ const styles = StyleSheet.create({
   },
   dropdownButtonText: {
     color: "#18181b",
-    fontSize: 12,
-    fontWeight: "800",
+    fontSize: 11,
   },
   dropdownCaret: {
     color: "#0f766e",
-    fontSize: 12,
-    fontWeight: "900",
+    fontSize: 11,
   },
   dropdownDetail: {
     color: "#71717a",
-    fontSize: 11,
+    fontSize: 10,
     marginTop: 2,
   },
   dropdownList: {
@@ -4542,13 +4557,12 @@ const styles = StyleSheet.create({
   },
   dropdownOptionDetail: {
     color: "#71717a",
-    fontSize: 11,
+    fontSize: 10,
     marginTop: 2,
   },
   dropdownOptionText: {
     color: "#18181b",
-    fontSize: 12,
-    fontWeight: "800",
+    fontSize: 11,
   },
   dropdownOptionTextActive: {
     color: "#0f766e",
@@ -4568,7 +4582,7 @@ const styles = StyleSheet.create({
   },
   empty: {
     color: "#71717a",
-    fontSize: 13,
+    fontSize: 12,
     paddingVertical: 8,
   },
   field: {
@@ -4577,8 +4591,7 @@ const styles = StyleSheet.create({
   },
   fieldLabel: {
     color: "#71717a",
-    fontSize: 12,
-    fontWeight: "700",
+    fontSize: 11,
   },
   flexField: {
     flex: 1,
@@ -4586,8 +4599,7 @@ const styles = StyleSheet.create({
   },
   infoLabel: {
     color: "#71717a",
-    fontSize: 12,
-    fontWeight: "700",
+    fontSize: 11,
     width: 96,
   },
   infoRow: {
@@ -4604,12 +4616,11 @@ const styles = StyleSheet.create({
   infoText: {
     color: "#18181b",
     flex: 1,
-    fontSize: 12,
+    fontSize: 11,
   },
   infoTitle: {
     color: "#18181b",
-    fontSize: 14,
-    fontWeight: "800",
+    fontSize: 13,
   },
   input: {
     backgroundColor: "#ffffff",
@@ -4623,12 +4634,12 @@ const styles = StyleSheet.create({
   },
   monoInput: {
     fontFamily: Platform.select({ default: "monospace", ios: "Menlo" }),
-    fontSize: 11,
+    fontSize: 10,
   },
   monoLine: {
     color: "#18181b",
     fontFamily: Platform.select({ default: "monospace", ios: "Menlo" }),
-    fontSize: 12,
+    fontSize: 11,
     paddingVertical: 2,
   },
   panelScroll: {
@@ -4646,31 +4657,48 @@ const styles = StyleSheet.create({
   },
   segment: {
     alignItems: "center",
+    backgroundColor: "#f8fafc",
+    borderBottomColor: "#d4d4d8",
     borderColor: "#d4d4d8",
-    borderRadius: 6,
+    borderTopLeftRadius: 6,
+    borderTopRightRadius: 6,
     borderWidth: 1,
-    flex: 1,
-    minHeight: 32,
+    marginBottom: -1,
+    minHeight: 34,
     justifyContent: "center",
-    paddingHorizontal: 8,
+    minWidth: 58,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
   },
   segmentActive: {
-    backgroundColor: "#0f766e",
-    borderColor: "#0f766e",
+    backgroundColor: "#ffffff",
+    borderBottomColor: "#ffffff",
+    borderTopColor: "#0f766e",
+    borderTopWidth: 3,
+    paddingTop: 5,
+  },
+  segmentPressed: {
+    backgroundColor: "#eef2f7",
   },
   segmented: {
+    borderBottomColor: "#d4d4d8",
+    borderBottomWidth: 1,
+    flexGrow: 0,
+    flexShrink: 0,
+    marginBottom: 2,
+    maxHeight: 36,
+  },
+  segmentedContent: {
+    alignItems: "flex-end",
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 6,
   },
   segmentText: {
-    color: "#18181b",
-    fontSize: 11,
-    fontWeight: "800",
+    color: "#52525b",
+    fontSize: 10,
     textTransform: "capitalize",
   },
   segmentTextActive: {
-    color: "#ffffff",
+    color: "#0f766e",
   },
   separator: {
     backgroundColor: "#e4e4e7",
@@ -4679,8 +4707,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     color: "#18181b",
-    fontSize: 13,
-    fontWeight: "900",
+    fontSize: 12,
     marginBottom: 8,
   },
   mosaicShell: {
@@ -4729,14 +4756,13 @@ const styles = StyleSheet.create({
   },
   treeMeta: {
     color: "#71717a",
-    fontSize: 11,
+    fontSize: 10,
     marginTop: 3,
   },
   treeTitle: {
     color: "#18181b",
     flex: 1,
-    fontSize: 13,
-    fontWeight: "800",
+    fontSize: 12,
   },
   treeTitleRow: {
     alignItems: "center",
@@ -4746,8 +4772,7 @@ const styles = StyleSheet.create({
   },
   treeToggle: {
     color: "#0f766e",
-    fontSize: 13,
-    fontWeight: "900",
+    fontSize: 12,
     width: 12,
   },
   windowMenu: {
@@ -4760,8 +4785,7 @@ const styles = StyleSheet.create({
   },
   windowMenuEmpty: {
     color: "#71717a",
-    fontSize: 12,
-    fontWeight: "700",
+    fontSize: 11,
     paddingHorizontal: 10,
     paddingVertical: 9,
   },
@@ -4778,8 +4802,7 @@ const styles = StyleSheet.create({
   },
   windowMenuOptionMeta: {
     color: "#0f766e",
-    fontSize: 11,
-    fontWeight: "900",
+    fontSize: 10,
   },
   windowMenuOptionPressed: {
     backgroundColor: "#ccfbf1",
@@ -4787,8 +4810,7 @@ const styles = StyleSheet.create({
   windowMenuOptionText: {
     color: "#18181b",
     flex: 1,
-    fontSize: 12,
-    fontWeight: "800",
+    fontSize: 11,
   },
   windowMenuPanel: {
     backgroundColor: "#ffffff",
