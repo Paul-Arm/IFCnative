@@ -170,7 +170,12 @@ test('native type assignments are indexed, diffed, and endpoint-validated', () =
   assert.ok(typed.diagnostics.some((line) => line.includes('Validation: no relationship or reference warnings')));
 
   const diffSummary = summarizeEntityAwareDiff(serializeNativeIfcDocument(sample), serializeNativeIfcDocument(typed));
-  assert.ok(diffSummary.relationshipChanges.some((change) => change.type === 'IFCRELDEFINESBYTYPE'));
+  const typeChange = diffSummary.relationshipChanges.find((change) => change.type === 'IFCRELDEFINESBYTYPE');
+  assert.ok(typeChange);
+  assert.ok(typeChange.afterSources?.some((endpoint) => endpoint.id === assignment.typeId && endpoint.type === 'IFCTYPEOBJECT'));
+  assert.ok(typeChange.afterTargets?.some((endpoint) => endpoint.id === block.id && endpoint.type === block.type));
+  assert.ok(typeChange.after?.includes(`#${assignment.typeId} IFCTYPEOBJECT`));
+  assert.ok(typeChange.after?.includes(`#${block.id} IFCBUILTELEMENT`));
 
   const badRelationship = updateNativeRelationship(
     typed,
@@ -273,7 +278,10 @@ test('native document stages relationship deletion without removing endpoints', 
     serializeNativeIfcDocument(withoutRelationship),
   );
   assert.equal(summary.removedEntities, 1);
-  assert.ok(summary.relationshipChanges.some((change) => change.action === 'removed' && change.id === relationship.id));
+  const removed = summary.relationshipChanges.find((change) => change.action === 'removed' && change.id === relationship.id);
+  assert.ok(removed);
+  assert.ok(removed.beforeSources?.some((endpoint) => endpoint.id === storey.id && endpoint.type === storey.type));
+  assert.ok(removed.beforeTargets?.some((endpoint) => endpoint.id === wall.id && endpoint.name === 'Delete Relation Wall'));
 });
 
 test('native graph presets filter relationship neighborhoods', () => {
