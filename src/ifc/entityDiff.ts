@@ -108,7 +108,7 @@ export function summarizeEntityAwareDiff(beforeText: string, afterText: string):
       if (isGeometryEntity(afterEntity)) {
         geometryChanges.push({
           action: 'added',
-          after: describeGeometry(afterEntity),
+          after: describeGeometry(afterEntity, after),
           affectedProducts: traceProductsForGeometry(after, id),
           id,
           type: afterEntity.type,
@@ -133,7 +133,7 @@ export function summarizeEntityAwareDiff(beforeText: string, afterText: string):
         geometryChanges.push({
           action: 'removed',
           affectedProducts: traceProductsForGeometry(before, id),
-          before: describeGeometry(beforeEntity),
+          before: describeGeometry(beforeEntity, before),
           id,
           type: beforeEntity.type,
         });
@@ -164,9 +164,9 @@ export function summarizeEntityAwareDiff(beforeText: string, afterText: string):
     if (isGeometryEntity(beforeEntity) || isGeometryEntity(afterEntity)) {
       geometryChanges.push({
         action: 'changed',
-        after: describeGeometry(afterEntity),
+        after: describeGeometry(afterEntity, after),
         affectedProducts: traceProductsForGeometry(after, id),
-        before: describeGeometry(beforeEntity),
+        before: describeGeometry(beforeEntity, before),
         id,
         type: afterEntity.type,
       });
@@ -411,23 +411,43 @@ function describeRelationshipFallback(entity: StepEntityLine) {
   return uniqueRefs ? `${entity.type} ${uniqueRefs}${suffix}` : entity.type;
 }
 
-function describeGeometry(entity: StepEntityLine) {
-  if (entity.type === 'IFCRECTANGLEPROFILEDEF') {
-    return `${entity.type} ${entity.args[2] ?? '?'} × ${entity.args[3] ?? '?'}`;
-  }
-  if (entity.type === 'IFCCIRCLEPROFILEDEF') {
-    return `${entity.type} radius ${entity.args[3] ?? '?'}`;
+function describeGeometry(entity: StepEntityLine, step?: ParsedStepText) {
+  const profileDescription = describeProfileGeometry(entity);
+  if (profileDescription) {
+    return `${entity.type} ${profileDescription}`;
   }
   if (entity.type === 'IFCEXTRUDEDAREASOLID') {
-    return `${entity.type} profile ${entity.args[0] ?? '?'} depth ${entity.args[3] ?? '?'}`;
+    const profileId = readReferences(entity.args[0] ?? '')[0];
+    const profile = profileId ? step?.entities.get(profileId) : undefined;
+    const profileText = profile ? `${describeGeometry(profile, step)} (#${profile.id})` : `profile ${entity.args[0] ?? '?'}`;
+    return `${entity.type} ${profileText} depth ${entity.args[3] ?? '?'}`;
   }
   if (entity.type === 'IFCSHAPEREPRESENTATION') {
-    return `${entity.type} ${entity.args[2] ?? ''} ${entity.args[3] ?? ''}`.trim();
+    const items = readReferences(entity.args[3] ?? '')
+      .map((id) => step?.entities.get(id))
+      .filter((item): item is StepEntityLine => Boolean(item))
+      .map((item) => `#${item.id} ${describeGeometry(item, step)}`)
+      .slice(0, 3);
+    const itemText = items.length ? ` items ${items.join(', ')}` : ` ${entity.args[3] ?? ''}`;
+    return `${entity.type} ${entity.args[2] ?? ''}${itemText}`.trim();
   }
   const refs = entity.text.match(/#\d+/g) ?? [];
   const uniqueRefs = [...new Set(refs)].slice(0, 6).join(' → ');
   const suffix = refs.length > 6 ? ' …' : '';
   return uniqueRefs ? `${entity.type} ${uniqueRefs}${suffix}` : entity.type;
+}
+
+function describeProfileGeometry(entity: StepEntityLine) {
+  if (entity.type === 'IFCRECTANGLEPROFILEDEF') {
+    return `rectangle ${entity.args[3] ?? '?'} × ${entity.args[4] ?? '?'}`;
+  }
+  if (entity.type === 'IFCCIRCLEPROFILEDEF') {
+    return `circle radius ${entity.args[3] ?? '?'}`;
+  }
+  if (entity.type === 'IFCBOUNDINGBOX') {
+    return `box ${entity.args[3] ?? '?'} × ${entity.args[4] ?? '?'} × ${entity.args[5] ?? '?'}`;
+  }
+  return undefined;
 }
 
 function traceProductsForGeometry(step: ParsedStepText, geometryId: number): IfcGeometryProductSummary[] {

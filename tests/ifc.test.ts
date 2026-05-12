@@ -396,14 +396,15 @@ test('entity-aware diff groups STEP changes by entity id', () => {
       (change) => change.action === 'added' && change.type === 'IFCRELCONTAINEDINSPATIALSTRUCTURE',
     ),
   );
-  assert.ok(
-    summary.geometryChanges.some(
-      (change) =>
-        change.action === 'added' &&
-        change.type === 'IFCEXTRUDEDAREASOLID' &&
-        change.affectedProducts.some((product) => product.name === 'Diff Block'),
-    ),
+  const solidChange = summary.geometryChanges.find(
+    (change) =>
+      change.action === 'added' &&
+      change.type === 'IFCEXTRUDEDAREASOLID' &&
+      change.affectedProducts.some((product) => product.name === 'Diff Block'),
   );
+  assert.ok(solidChange);
+  assert.ok(solidChange.after?.includes('rectangle 1. × 1.'));
+  assert.ok(solidChange.after?.includes('depth 1.'));
 });
 
 test('native body preset creates contained swept solid geometry', async () => {
@@ -513,6 +514,15 @@ test('native body assignment replaces selected product representation with revie
         change.action === 'added' &&
         change.type === 'IFCPRODUCTDEFINITIONSHAPE' &&
         change.affectedProducts.some((product) => product.id === block.id),
+    ),
+  );
+  assert.ok(
+    diffSummary.geometryChanges.some(
+      (change) =>
+        change.action === 'added' &&
+        change.type === 'IFCEXTRUDEDAREASOLID' &&
+        change.after?.includes('rectangle 3. × 1.5') &&
+        change.after.includes('depth 2.'),
     ),
   );
 
