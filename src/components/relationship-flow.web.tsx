@@ -71,6 +71,7 @@ interface ConnectionDraftSource {
 }
 
 const AGGREGATE_RELATIONSHIP_TYPE = "IFCRELAGGREGATES";
+const CONTAINED_SPATIAL_RELATIONSHIP_TYPE = "IFCRELCONTAINEDINSPATIALSTRUCTURE";
 const AGGREGATE_SOURCE_HANDLE = "aggregate-source";
 const AGGREGATE_TARGET_HANDLE = "aggregate-target";
 const RELATIONSHIP_SOURCE_HANDLE = "relationship-source";
@@ -149,27 +150,37 @@ export default function RelationshipFlow({
     () =>
       edges.map((edge, index) => {
         const aggregate = isAggregateRelationship(edge.relationshipType);
+        const containedSpatial = isContainedSpatialRelationship(
+          edge.relationshipType,
+        );
+        const vertical = aggregate || containedSpatial;
         return {
           animated: false,
           className: aggregate
             ? "ifc-flow-edge-aggregate"
-            : "ifc-flow-edge-reference",
+            : containedSpatial
+              ? "ifc-flow-edge-contained"
+              : "ifc-flow-edge-reference",
           id: `${edge.id}-${index}`,
           label: edge.label,
           markerEnd: { type: MarkerType.ArrowClosed },
           source: String(edge.source),
-          sourceHandle: aggregate
+          sourceHandle: vertical
             ? AGGREGATE_SOURCE_HANDLE
             : RELATIONSHIP_SOURCE_HANDLE,
           style: {
-            stroke: aggregate ? "#0f766e" : "#2563eb",
-            strokeWidth: aggregate ? 2.6 : 2,
+            stroke: aggregate
+              ? "#0f766e"
+              : containedSpatial
+                ? "#0891b2"
+                : "#2563eb",
+            strokeWidth: vertical ? 2.6 : 2,
           },
           target: String(edge.target),
-          targetHandle: aggregate
+          targetHandle: vertical
             ? AGGREGATE_TARGET_HANDLE
             : RELATIONSHIP_TARGET_HANDLE,
-          type: aggregate ? "smoothstep" : "default",
+          type: vertical ? "smoothstep" : "default",
         };
       }),
     [edges],
@@ -761,6 +772,10 @@ function prefersAggregateRelationship(
 
 function isAggregateRelationship(type: string) {
   return type.trim().toUpperCase() === AGGREGATE_RELATIONSHIP_TYPE;
+}
+
+function isContainedSpatialRelationship(type: string) {
+  return type.trim().toUpperCase() === CONTAINED_SPATIAL_RELATIONSHIP_TYPE;
 }
 
 function optionValue(options: RelationshipFlowOption[], preferred: string) {

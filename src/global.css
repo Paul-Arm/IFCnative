@@ -336,6 +336,18 @@ textarea {
   padding: 8px 10px;
 }
 
+.ifcnative-thatopen-viewcube {
+  --bim-view-cube--c: #ffffff;
+  --bim-view-cube--fz: 12px;
+  --bim-view-cube_x--bgc: rgba(239, 68, 68, 0.92);
+  --bim-view-cube_y--bgc: rgba(22, 163, 74, 0.92);
+  --bim-view-cube_z--bgc: rgba(37, 99, 235, 0.92);
+  bottom: 12px;
+  filter: drop-shadow(0 8px 18px rgba(15, 23, 42, 0.18));
+  right: 12px;
+  z-index: 2;
+}
+
 .ifcnative-thatopen-error {
   background: rgba(127, 29, 29, 0.92);
   border-radius: 8px;
@@ -586,6 +598,10 @@ textarea {
 
 .ifc-reactflow-shell .react-flow__edge.ifc-flow-edge-aggregate path {
   stroke: #0f766e;
+}
+
+.ifc-reactflow-shell .react-flow__edge.ifc-flow-edge-contained path {
+  stroke: #0891b2;
 }
 
 .ifc-reactflow-shell .react-flow__edge.ifc-flow-edge-reference path {
