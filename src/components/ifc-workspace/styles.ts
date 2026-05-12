@@ -60,6 +60,43 @@ export const styles = StyleSheet.create({
     minHeight: 190,
     padding: 10,
   },
+  collapsibleBody: {
+    gap: 2,
+    padding: 10,
+  },
+  collapsibleHeader: {
+    alignItems: "center",
+    backgroundColor: "#f8fafc",
+    borderBottomColor: "#e4e4e7",
+    borderBottomWidth: 1,
+    flexDirection: "row",
+    gap: 8,
+    justifyContent: "space-between",
+    minHeight: 38,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  collapsibleHeaderText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  collapsibleMeta: {
+    color: "#71717a",
+    fontSize: 10,
+    marginTop: 1,
+  },
+  collapsibleSection: {
+    backgroundColor: "#ffffff",
+    borderColor: "#e4e4e7",
+    borderRadius: 7,
+    borderWidth: 1,
+    marginBottom: 8,
+    overflow: "hidden",
+  },
+  collapsibleTitle: {
+    color: "#18181b",
+    fontSize: 12,
+  },
   disabled: {
     opacity: 0.45,
   },
@@ -207,7 +244,7 @@ export const styles = StyleSheet.create({
   },
   field: {
     gap: 5,
-    marginBottom: 10,
+    marginBottom: 8,
   },
   fieldLabel: {
     color: "#71717a",

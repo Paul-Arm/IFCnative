@@ -14,7 +14,13 @@ import {
 } from "./constants";
 import { styles } from "./styles";
 import type { BodyElementDraft, CoordinateClipboard } from "./types";
-import { Button, DropdownField, EntityDropdown, LabeledInput } from "./ui";
+import {
+  Button,
+  CollapsibleSection,
+  DropdownField,
+  EntityDropdown,
+  LabeledInput,
+} from "./ui";
 
 export function BuilderPanel({
   coordinateClipboard,
@@ -143,341 +149,455 @@ export function BuilderPanel({
     setBodyPlacementMode("world");
   };
 
+  const bodyDraft: BodyElementDraft = {
+    depth: bodyDepth,
+    height: bodyHeight,
+    name: bodyName,
+    placementMode: bodyPlacementMode,
+    profile: bodyProfile,
+    tag: bodyTag,
+    type: bodyType,
+    width: bodyWidth,
+    x: bodyX,
+    y: bodyY,
+    z: bodyZ,
+  };
+
   return (
     <ScrollView style={styles.panelScroll}>
-      <DropdownField
-        label="Elementklasse"
-        options={ENTITY_TYPES}
-        value={type}
-        onChange={setType}
-      />
-      <LabeledInput label="Elementname" value={name} onChangeText={setName} />
-      <Button
-        label="+ Element unter Auswahl anlegen"
-        primary
-        onPress={() => onAddElement(type, name, selectedId)}
-      />
-      <View style={styles.separator} />
-      <Text style={styles.sectionTitle}>Einfacher 3D-Körper</Text>
-      <DropdownField
-        label="Körperklasse"
-        options={ENTITY_TYPES}
-        value={bodyType}
-        onChange={setBodyType}
-      />
-      <LabeledInput
-        label="Körpername"
-        value={bodyName}
-        onChangeText={setBodyName}
-      />
-      <DropdownField
-        label="Profil"
-        options={[
-          { label: "Rechteck", value: "rectangle" },
-          { label: "Zylinder", value: "cylinder" },
-        ]}
-        value={bodyProfile}
-        onChange={(value) => setBodyProfile(value as "rectangle" | "cylinder")}
-      />
-      <View style={styles.row}>
-        <LabeledInput
-          label={bodyProfile === "cylinder" ? "Durchmesser X" : "Breite X"}
-          keyboardType="numeric"
-          value={bodyWidth}
-          onChangeText={setBodyWidth}
+      <CollapsibleSection
+        defaultOpen
+        title="Element"
+        meta={`${shortIfc(type)} unter #${selectedId}`}
+      >
+        <DropdownField
+          label="Elementklasse"
+          options={ENTITY_TYPES}
+          value={type}
+          onChange={setType}
         />
-        <LabeledInput
-          label={bodyProfile === "cylinder" ? "Durchmesser Y" : "Tiefe Y"}
-          keyboardType="numeric"
-          value={bodyDepth}
-          onChangeText={setBodyDepth}
-        />
-      </View>
-      <View style={styles.row}>
-        <LabeledInput
-          label="Höhe Z"
-          keyboardType="numeric"
-          value={bodyHeight}
-          onChangeText={setBodyHeight}
-        />
-        <LabeledInput
-          label="Kennzeichen"
-          value={bodyTag}
-          onChangeText={setBodyTag}
-        />
-      </View>
-      <View style={styles.row}>
-        <LabeledInput
-          label="X"
-          keyboardType="numeric"
-          value={bodyX}
-          onChangeText={setBodyX}
-        />
-        <LabeledInput
-          label="Y"
-          keyboardType="numeric"
-          value={bodyY}
-          onChangeText={setBodyY}
-        />
-        <LabeledInput
-          label="Z"
-          keyboardType="numeric"
-          value={bodyZ}
-          onChangeText={setBodyZ}
-        />
-      </View>
-      <View style={styles.editBlock}>
-        <Text style={styles.infoTitle}>Koordinaten-Zwischenablage</Text>
-        <Text style={styles.empty}>
-          {coordinateClipboard
-            ? `X ${coordinateClipboard.x}, Y ${coordinateClipboard.y}, Z ${coordinateClipboard.z} (${coordinateClipboard.copiedAt})`
-            : "Noch keine Koordinaten aus dem 3D-Viewer übernommen."}
-        </Text>
+        <LabeledInput label="Elementname" value={name} onChangeText={setName} />
         <Button
-          label={
-            coordinateClipboard
-              ? "Koordinaten in Körper laden"
-              : "Koordinaten aus Zwischenablage lesen"
-          }
-          onPress={() => void loadCoordinateClipboard()}
+          label="+ Element unter Auswahl anlegen"
+          primary
+          onPress={() => onAddElement(type, name, selectedId)}
         />
-      </View>
-      <DropdownField
-        label="Spawn-Bezug"
-        options={[
-          {
-            detail: "X/Y/Z relativ zur ausgewählten Platzierung",
-            label: "Relativ zur Auswahl",
-            value: "parent",
-          },
-          {
-            detail: "Picker-Koordinaten als Weltpunkt verwenden",
-            label: "Weltkoordinaten",
-            value: "world",
-          },
-        ]}
-        value={bodyPlacementMode}
-        onChange={(value) => setBodyPlacementMode(value as "parent" | "world")}
-      />
-      <Button
-        label={
-          bodyProfile === "cylinder"
-            ? "+ Zylindrischen Körper unter Auswahl anlegen"
-            : "+ Rechteckigen Körper unter Auswahl anlegen"
-        }
-        primary
-        onPress={() =>
-          onAddBodyElement({
-            depth: bodyDepth,
-            height: bodyHeight,
-            name: bodyName,
-            parentId: selectedId,
-            placementMode: bodyPlacementMode,
-            profile: bodyProfile,
-            tag: bodyTag,
-            type: bodyType,
-            width: bodyWidth,
-            x: bodyX,
-            y: bodyY,
-            z: bodyZ,
-          })
-        }
-      />
-      <Button
-        disabled={!canAssignBody}
-        label={
-          bodyProfile === "cylinder"
-            ? "Zylindrischen Körper der Auswahl zuweisen"
-            : "Rechteckigen Körper der Auswahl zuweisen"
-        }
-        onPress={() =>
-          onAssignBodyToSelected({
-            depth: bodyDepth,
-            height: bodyHeight,
-            name: bodyName,
-            placementMode: bodyPlacementMode,
-            profile: bodyProfile,
-            tag: bodyTag,
-            type: bodyType,
-            width: bodyWidth,
-            x: bodyX,
-            y: bodyY,
-            z: bodyZ,
-          })
-        }
-      />
-      <View style={styles.separator} />
-      <DropdownField
-        label="Beziehung"
-        options={RELATION_TYPES}
-        value={relType}
-        onChange={setRelType}
-      />
-      <EntityDropdown
-        label="Quellobjekt"
-        document={document}
-        value={sourceId}
-        onChange={setSourceId}
-      />
-      <EntityDropdown
-        label="Zielobjekt"
-        document={document}
-        value={targetId}
-        onChange={setTargetId}
-      />
-      <Button
-        disabled={!validSource || !validTarget}
-        label="+ Beziehung anlegen"
-        onPress={() =>
-          onAddRelationship(relType, Number(sourceId), Number(targetId))
-        }
-      />
-      <View style={styles.separator} />
-      <LabeledInput label="Pset" value={psetName} onChangeText={setPsetName} />
-      <LabeledInput
-        label="Eigenschaft"
-        value={propertyName}
-        onChangeText={setPropertyName}
-      />
-      <DropdownField
-        label="Werttyp"
-        options={PROPERTY_VALUE_TYPES}
-        value={propertyValueType}
-        onChange={setPropertyValueType}
-      />
-      <LabeledInput
-        label="Wert"
-        value={propertyValue}
-        onChangeText={setPropertyValue}
-      />
-      <Button
-        label="+ Pset zur Auswahl hinzufügen"
-        onPress={() =>
-          onAddPset(psetName, propertyName, propertyValue, propertyValueType)
-        }
-      />
-      <View style={styles.separator} />
-      <LabeledInput label="QTO" value={qtoName} onChangeText={setQtoName} />
-      <LabeledInput
-        label="Menge"
-        value={quantityName}
-        onChangeText={setQuantityName}
-      />
-      <DropdownField
-        label="Mengentyp"
-        options={QUANTITY_TYPES}
-        value={quantityType}
-        onChange={setQuantityType}
-      />
-      <LabeledInput
-        label="Mengenwert"
-        keyboardType="numeric"
-        value={quantityValue}
-        onChangeText={setQuantityValue}
-      />
-      <Button
-        label="+ Menge zur Auswahl hinzufügen"
-        onPress={() =>
-          onAddQuantity(qtoName, quantityName, quantityValue, quantityType)
-        }
-      />
-      <View style={styles.separator} />
-      <LabeledInput
-        label="Material"
-        value={materialName}
-        onChangeText={setMaterialName}
-      />
-      <LabeledInput
-        label="Materialkategorie"
-        value={materialCategory}
-        onChangeText={setMaterialCategory}
-      />
-      <Button
-        label="+ Material zur Auswahl hinzufügen"
-        onPress={() => onAddMaterial(materialName, materialCategory)}
-      />
-      <View style={styles.separator} />
-      <DropdownField
-        label="Typklasse"
-        options={TYPE_CLASSES}
-        value={typeClass}
-        onChange={setTypeClass}
-      />
-      <LabeledInput
-        label="Typname"
-        value={typeName}
-        onChangeText={setTypeName}
-      />
-      <LabeledInput label="Typ-Tag" value={typeTag} onChangeText={setTypeTag} />
-      <Button
-        label="+ Typ der Auswahl zuweisen"
-        onPress={() => onAssignType(typeName, typeClass, typeTag)}
-      />
-      <View style={styles.separator} />
-      <LabeledInput
-        label="Klassifikations-ID"
-        value={classificationId}
-        onChangeText={setClassificationId}
-      />
-      <LabeledInput
-        label="Klassifikationsname"
-        value={classificationName}
-        onChangeText={setClassificationName}
-      />
-      <LabeledInput
-        label="Klassifikations-URI"
-        value={classificationUri}
-        onChangeText={setClassificationUri}
-      />
-      <Button
-        label="+ Klassifikation hinzufügen"
-        onPress={() =>
-          onAddClassification(
-            classificationId,
-            classificationName,
-            classificationUri,
-          )
-        }
-      />
-      <View style={styles.separator} />
-      <LabeledInput
-        label="Dokument-ID"
-        value={documentId}
-        onChangeText={setDocumentId}
-      />
-      <LabeledInput
-        label="Dokumentname"
-        value={documentName}
-        onChangeText={setDocumentName}
-      />
-      <LabeledInput
-        label="Dokument-URI"
-        value={documentUri}
-        onChangeText={setDocumentUri}
-      />
-      <Button
-        label="+ Dokument hinzufügen"
-        onPress={() =>
-          onAddDocumentReference(documentId, documentName, documentUri)
-        }
-      />
-      <View style={styles.separator} />
-      <DropdownField
-        label="Einheitentyp"
-        options={UNIT_TYPES}
-        value={unitType}
-        onChange={setUnitType}
-      />
-      <DropdownField
-        label="Einheitenname"
-        options={UNIT_NAMES}
-        value={unitName}
-        onChange={setUnitName}
-      />
-      <Button
-        label="+ Einheit hinzufügen"
-        onPress={() => onAddUnit(unitType, unitName)}
-      />
+      </CollapsibleSection>
+
+      <CollapsibleSection
+        defaultOpen
+        title="3D-Körper"
+        meta={`${bodyProfile === "cylinder" ? "Zylinder" : "Rechteck"} ${bodyWidth} x ${bodyDepth} x ${bodyHeight}`}
+      >
+        <View style={styles.row}>
+          <View style={styles.flexField}>
+            <DropdownField
+              label="Körperklasse"
+              options={ENTITY_TYPES}
+              value={bodyType}
+              onChange={setBodyType}
+            />
+          </View>
+          <View style={styles.flexField}>
+            <DropdownField
+              label="Profil"
+              options={[
+                { label: "Rechteck", value: "rectangle" },
+                { label: "Zylinder", value: "cylinder" },
+              ]}
+              value={bodyProfile}
+              onChange={(value) =>
+                setBodyProfile(value as "rectangle" | "cylinder")
+              }
+            />
+          </View>
+        </View>
+        <LabeledInput
+          label="Körpername"
+          value={bodyName}
+          onChangeText={setBodyName}
+        />
+        <View style={styles.row}>
+          <View style={styles.flexField}>
+            <LabeledInput
+              label={bodyProfile === "cylinder" ? "Durchmesser X" : "Breite X"}
+              keyboardType="numeric"
+              value={bodyWidth}
+              onChangeText={setBodyWidth}
+            />
+          </View>
+          <View style={styles.flexField}>
+            <LabeledInput
+              label={bodyProfile === "cylinder" ? "Durchmesser Y" : "Tiefe Y"}
+              keyboardType="numeric"
+              value={bodyDepth}
+              onChangeText={setBodyDepth}
+            />
+          </View>
+          <View style={styles.flexField}>
+            <LabeledInput
+              label="Höhe Z"
+              keyboardType="numeric"
+              value={bodyHeight}
+              onChangeText={setBodyHeight}
+            />
+          </View>
+        </View>
+        <View style={styles.row}>
+          <View style={styles.flexField}>
+            <LabeledInput
+              label="X"
+              keyboardType="numeric"
+              value={bodyX}
+              onChangeText={setBodyX}
+            />
+          </View>
+          <View style={styles.flexField}>
+            <LabeledInput
+              label="Y"
+              keyboardType="numeric"
+              value={bodyY}
+              onChangeText={setBodyY}
+            />
+          </View>
+          <View style={styles.flexField}>
+            <LabeledInput
+              label="Z"
+              keyboardType="numeric"
+              value={bodyZ}
+              onChangeText={setBodyZ}
+            />
+          </View>
+        </View>
+        <View style={styles.row}>
+          <View style={styles.flexField}>
+            <LabeledInput
+              label="Kennzeichen"
+              value={bodyTag}
+              onChangeText={setBodyTag}
+            />
+          </View>
+          <View style={styles.flexField}>
+            <DropdownField
+              label="Spawn-Bezug"
+              options={[
+                {
+                  detail: "XYZ relativ zur Auswahl",
+                  label: "Relativ zur Auswahl",
+                  value: "parent",
+                },
+                {
+                  detail: "Picker-Koordinaten",
+                  label: "Weltkoordinaten",
+                  value: "world",
+                },
+              ]}
+              value={bodyPlacementMode}
+              onChange={(value) =>
+                setBodyPlacementMode(value as "parent" | "world")
+              }
+            />
+          </View>
+        </View>
+        <View style={styles.editBlock}>
+          <Text style={styles.infoTitle}>Koordinaten-Zwischenablage</Text>
+          <Text style={styles.empty}>
+            {coordinateClipboard
+              ? `X ${coordinateClipboard.x}, Y ${coordinateClipboard.y}, Z ${coordinateClipboard.z} (${coordinateClipboard.copiedAt})`
+              : "Noch keine Koordinaten aus dem 3D-Viewer übernommen."}
+          </Text>
+          <Button
+            label={
+              coordinateClipboard
+                ? "Koordinaten in Körper laden"
+                : "Koordinaten aus Zwischenablage lesen"
+            }
+            onPress={() => void loadCoordinateClipboard()}
+          />
+        </View>
+        <View style={styles.row}>
+          <View style={styles.flexField}>
+            <Button
+              label={
+                bodyProfile === "cylinder"
+                  ? "+ Zylinder anlegen"
+                  : "+ Rechteck anlegen"
+              }
+              primary
+              onPress={() =>
+                onAddBodyElement({ ...bodyDraft, parentId: selectedId })
+              }
+            />
+          </View>
+          <View style={styles.flexField}>
+            <Button
+              disabled={!canAssignBody}
+              label="Der Auswahl zuweisen"
+              onPress={() => onAssignBodyToSelected(bodyDraft)}
+            />
+          </View>
+        </View>
+      </CollapsibleSection>
+
+      <CollapsibleSection title="Beziehung" meta={shortIfc(relType)}>
+        <DropdownField
+          label="Beziehung"
+          options={RELATION_TYPES}
+          value={relType}
+          onChange={setRelType}
+        />
+        <View style={styles.row}>
+          <View style={styles.flexField}>
+            <EntityDropdown
+              label="Quellobjekt"
+              document={document}
+              value={sourceId}
+              onChange={setSourceId}
+            />
+          </View>
+          <View style={styles.flexField}>
+            <EntityDropdown
+              label="Zielobjekt"
+              document={document}
+              value={targetId}
+              onChange={setTargetId}
+            />
+          </View>
+        </View>
+        <Button
+          disabled={!validSource || !validTarget}
+          label="+ Beziehung anlegen"
+          onPress={() =>
+            onAddRelationship(relType, Number(sourceId), Number(targetId))
+          }
+        />
+      </CollapsibleSection>
+
+      <CollapsibleSection
+        title="Pset und Menge"
+        meta={`${propertyName}, ${quantityName}`}
+      >
+        <View style={styles.row}>
+          <View style={styles.flexField}>
+            <LabeledInput
+              label="Pset"
+              value={psetName}
+              onChangeText={setPsetName}
+            />
+          </View>
+          <View style={styles.flexField}>
+            <LabeledInput
+              label="Eigenschaft"
+              value={propertyName}
+              onChangeText={setPropertyName}
+            />
+          </View>
+        </View>
+        <View style={styles.row}>
+          <View style={styles.flexField}>
+            <DropdownField
+              label="Werttyp"
+              options={PROPERTY_VALUE_TYPES}
+              value={propertyValueType}
+              onChange={setPropertyValueType}
+            />
+          </View>
+          <View style={styles.flexField}>
+            <LabeledInput
+              label="Wert"
+              value={propertyValue}
+              onChangeText={setPropertyValue}
+            />
+          </View>
+        </View>
+        <Button
+          label="+ Pset zur Auswahl hinzufügen"
+          onPress={() =>
+            onAddPset(psetName, propertyName, propertyValue, propertyValueType)
+          }
+        />
+        <View style={styles.separator} />
+        <View style={styles.row}>
+          <View style={styles.flexField}>
+            <LabeledInput label="QTO" value={qtoName} onChangeText={setQtoName} />
+          </View>
+          <View style={styles.flexField}>
+            <LabeledInput
+              label="Menge"
+              value={quantityName}
+              onChangeText={setQuantityName}
+            />
+          </View>
+        </View>
+        <View style={styles.row}>
+          <View style={styles.flexField}>
+            <DropdownField
+              label="Mengentyp"
+              options={QUANTITY_TYPES}
+              value={quantityType}
+              onChange={setQuantityType}
+            />
+          </View>
+          <View style={styles.flexField}>
+            <LabeledInput
+              label="Mengenwert"
+              keyboardType="numeric"
+              value={quantityValue}
+              onChangeText={setQuantityValue}
+            />
+          </View>
+        </View>
+        <Button
+          label="+ Menge zur Auswahl hinzufügen"
+          onPress={() =>
+            onAddQuantity(qtoName, quantityName, quantityValue, quantityType)
+          }
+        />
+      </CollapsibleSection>
+
+      <CollapsibleSection
+        title="Ressourcen"
+        meta={`${materialName}, ${typeName}`}
+      >
+        <View style={styles.row}>
+          <View style={styles.flexField}>
+            <LabeledInput
+              label="Material"
+              value={materialName}
+              onChangeText={setMaterialName}
+            />
+          </View>
+          <View style={styles.flexField}>
+            <LabeledInput
+              label="Materialkategorie"
+              value={materialCategory}
+              onChangeText={setMaterialCategory}
+            />
+          </View>
+        </View>
+        <Button
+          label="+ Material zur Auswahl hinzufügen"
+          onPress={() => onAddMaterial(materialName, materialCategory)}
+        />
+        <View style={styles.separator} />
+        <DropdownField
+          label="Typklasse"
+          options={TYPE_CLASSES}
+          value={typeClass}
+          onChange={setTypeClass}
+        />
+        <View style={styles.row}>
+          <View style={styles.flexField}>
+            <LabeledInput
+              label="Typname"
+              value={typeName}
+              onChangeText={setTypeName}
+            />
+          </View>
+          <View style={styles.flexField}>
+            <LabeledInput
+              label="Typ-Tag"
+              value={typeTag}
+              onChangeText={setTypeTag}
+            />
+          </View>
+        </View>
+        <Button
+          label="+ Typ der Auswahl zuweisen"
+          onPress={() => onAssignType(typeName, typeClass, typeTag)}
+        />
+      </CollapsibleSection>
+
+      <CollapsibleSection
+        title="Referenzen"
+        meta={`${classificationId}, ${documentId}`}
+      >
+        <View style={styles.row}>
+          <View style={styles.flexField}>
+            <LabeledInput
+              label="Klassifikations-ID"
+              value={classificationId}
+              onChangeText={setClassificationId}
+            />
+          </View>
+          <View style={styles.flexField}>
+            <LabeledInput
+              label="Klassifikationsname"
+              value={classificationName}
+              onChangeText={setClassificationName}
+            />
+          </View>
+        </View>
+        <LabeledInput
+          label="Klassifikations-URI"
+          value={classificationUri}
+          onChangeText={setClassificationUri}
+        />
+        <Button
+          label="+ Klassifikation hinzufügen"
+          onPress={() =>
+            onAddClassification(
+              classificationId,
+              classificationName,
+              classificationUri,
+            )
+          }
+        />
+        <View style={styles.separator} />
+        <View style={styles.row}>
+          <View style={styles.flexField}>
+            <LabeledInput
+              label="Dokument-ID"
+              value={documentId}
+              onChangeText={setDocumentId}
+            />
+          </View>
+          <View style={styles.flexField}>
+            <LabeledInput
+              label="Dokumentname"
+              value={documentName}
+              onChangeText={setDocumentName}
+            />
+          </View>
+        </View>
+        <LabeledInput
+          label="Dokument-URI"
+          value={documentUri}
+          onChangeText={setDocumentUri}
+        />
+        <Button
+          label="+ Dokument hinzufügen"
+          onPress={() =>
+            onAddDocumentReference(documentId, documentName, documentUri)
+          }
+        />
+      </CollapsibleSection>
+
+      <CollapsibleSection title="Einheiten" meta={`${unitType}: ${unitName}`}>
+        <View style={styles.row}>
+          <View style={styles.flexField}>
+            <DropdownField
+              label="Einheitentyp"
+              options={UNIT_TYPES}
+              value={unitType}
+              onChange={setUnitType}
+            />
+          </View>
+          <View style={styles.flexField}>
+            <DropdownField
+              label="Einheitenname"
+              options={UNIT_NAMES}
+              value={unitName}
+              onChange={setUnitName}
+            />
+          </View>
+        </View>
+        <Button
+          label="+ Einheit hinzufügen"
+          onPress={() => onAddUnit(unitType, unitName)}
+        />
+      </CollapsibleSection>
+
       <Text style={styles.empty}>
         Aktuelle Auswahl: #{selectedId}{" "}
         {document.entityById.get(selectedId)?.type}
@@ -501,4 +621,8 @@ function isBodyAssignableEntity(entity?: NativeIfcEntity) {
     ].includes(entity?.type ?? "") &&
     (entity?.args.length ?? 0) >= 7
   );
+}
+
+function shortIfc(value: string) {
+  return value.replace(/^IFC/i, "");
 }

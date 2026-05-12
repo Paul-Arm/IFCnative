@@ -357,6 +357,45 @@ export function InfoSection({
   );
 }
 
+export function CollapsibleSection({
+  children,
+  defaultOpen = false,
+  meta,
+  title,
+}: {
+  children: ReactNode;
+  defaultOpen?: boolean;
+  meta?: string;
+  title: string;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <View style={styles.collapsibleSection}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        onPress={() => setOpen((current) => !current)}
+        style={({ pressed }) => [
+          styles.collapsibleHeader,
+          pressed && styles.segmentPressed,
+        ]}
+      >
+        <View style={styles.collapsibleHeaderText}>
+          <Text style={styles.collapsibleTitle}>{title}</Text>
+          {meta ? (
+            <Text style={styles.collapsibleMeta} numberOfLines={1}>
+              {meta}
+            </Text>
+          ) : null}
+        </View>
+        <Text style={styles.dropdownCaret}>{open ? "^" : "v"}</Text>
+      </Pressable>
+      {open ? <View style={styles.collapsibleBody}>{children}</View> : null}
+    </View>
+  );
+}
+
 export function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.infoRow}>
