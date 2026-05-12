@@ -4,31 +4,33 @@ import test from "node:test";
 import * as WebIFC from "web-ifc";
 
 import { createMinimalIfcProject } from "../src/ifc/builder";
+import { viewerWorldDeltaToIfcPlacementDelta } from "../src/ifc/coordinateMapping";
 import {
-    previewEntityAwareDiffLines,
-    summarizeEntityAwareDiff,
+  previewEntityAwareDiffLines,
+  summarizeEntityAwareDiff,
 } from "../src/ifc/entityDiff";
 import { buildGraphIndex, summarizeLine } from "../src/ifc/graphIndex";
 import {
-    addNativeBodyElement,
-    addNativeClassification,
-    addNativeDocumentReference,
-    addNativeElement,
-    addNativeMaterial,
-    addNativePropertySet,
-    addNativeQuantitySet,
-    addNativeRelationship,
-    addNativeSiUnit,
-    addNativeTypeAssignment,
-    assignNativeBodyRepresentation,
-    createNativeSampleDocument,
-    getNativePlacement,
-    parseNativeIfcText,
-    removeNativeRelationship,
-    serializeNativeIfcDocument,
-    updateNativePlacement,
-    updateNativePropertyValue,
-    updateNativeRelationship,
+  addNativeBodyElement,
+  addNativeClassification,
+  addNativeDocumentReference,
+  addNativeElement,
+  addNativeMaterial,
+  addNativePropertySet,
+  addNativeQuantitySet,
+  addNativeRelationship,
+  addNativeSiUnit,
+  addNativeTypeAssignment,
+  assignNativeBodyRepresentation,
+  createNativeSampleDocument,
+  getNativePlacement,
+  parseNativeIfcText,
+  removeNativeRelationship,
+  resolveNativeMovableProductId,
+  serializeNativeIfcDocument,
+  updateNativePlacement,
+  updateNativePropertyValue,
+  updateNativeRelationship,
 } from "../src/ifc/nativeDocument";
 import { buildNativeGraphNeighborhood } from "../src/ifc/nativeGraph";
 import { preflightIfcText } from "../src/ifc/preflight";
@@ -854,6 +856,65 @@ test("native placement editor drafts numeric XYZ moves without rewriting product
   api.CloseModel(modelID);
 });
 
+test("native movable product resolves from sample geometry references", () => {
+  const sample = createNativeSampleDocument();
+  const block = sample.entities.find(
+    (entity) => entity.type === "IFCBUILTELEMENT",
+  );
+  assert.ok(block);
+  const shapeId = firstStepReference(block.args[6]);
+  const shape = sample.entityById.get(shapeId);
+  assert.ok(shape);
+  const representationId = firstStepReference(shape.args[2]);
+  const representation = sample.entityById.get(representationId);
+  assert.ok(representation);
+  const solidId = firstStepReference(representation.args[3]);
+
+  assert.equal(resolveNativeMovableProductId(sample, block.id), block.id);
+  assert.equal(resolveNativeMovableProductId(sample, shapeId), block.id);
+  assert.equal(resolveNativeMovableProductId(sample, solidId), block.id);
+  assert.equal(resolveNativeMovableProductId(sample, 21), undefined);
+});
+
+test("viewer-world move deltas are converted to IFC placement axes", async () => {
+  const sample = createNativeSampleDocument();
+  const block = sample.entities.find(
+    (entity) => entity.type === "IFCBUILTELEMENT",
+  );
+  assert.ok(block);
+
+  const placement = getNativePlacement(sample, block.id);
+  assert.ok(placement);
+  const viewerDelta = { x: 1.5, y: 0.75, z: -2 };
+  const ifcDelta = viewerWorldDeltaToIfcPlacementDelta(viewerDelta);
+  const moved = updateNativePlacement(sample, block.id, {
+    x: String(placement.x + ifcDelta.x),
+    y: String(placement.y + ifcDelta.y),
+    z: String(placement.z + ifcDelta.z),
+  });
+
+  const api = new WebIFC.IfcAPI();
+  await api.Init();
+  const beforeModelID = api.OpenModel(
+    new TextEncoder().encode(serializeNativeIfcDocument(sample)),
+  );
+  const afterModelID = api.OpenModel(
+    new TextEncoder().encode(serializeNativeIfcDocument(moved)),
+  );
+  const beforeCenter = streamGeometryWorldCenter(api, beforeModelID);
+  const afterCenter = streamGeometryWorldCenter(api, afterModelID);
+
+  assert.deepEqual(
+    afterCenter.map((value, index) =>
+      roundCoordinate(value - beforeCenter[index]),
+    ),
+    [viewerDelta.x, viewerDelta.y, viewerDelta.z],
+  );
+
+  api.CloseModel(beforeModelID);
+  api.CloseModel(afterModelID);
+});
+
 function readEntitySummaries(api: WebIFC.IfcAPI, modelID: number) {
   const entities: IfcEntitySummary[] = [];
   const counts: Array<{ typeName: string; typeCode: number; count: number }> =
@@ -891,4 +952,53 @@ function streamGeometryVertexCount(api: WebIFC.IfcAPI, modelID: number) {
     }
   });
   return vertexCount;
+}
+
+function streamGeometryWorldCenter(api: WebIFC.IfcAPI, modelID: number) {
+  const min = [Infinity, Infinity, Infinity];
+  const max = [-Infinity, -Infinity, -Infinity];
+  api.StreamAllMeshes(modelID, (mesh) => {
+    for (let index = 0; index < mesh.geometries.size(); index += 1) {
+      const placed = mesh.geometries.get(index);
+      const matrix = placed.flatTransformation;
+      const geometry = api.GetGeometry(modelID, placed.geometryExpressID);
+      const vertices = api.GetVertexArray(
+        geometry.GetVertexData(),
+        geometry.GetVertexDataSize(),
+      );
+      for (
+        let vertexIndex = 0;
+        vertexIndex < vertices.length;
+        vertexIndex += 6
+      ) {
+        const x = vertices[vertexIndex];
+        const y = vertices[vertexIndex + 1];
+        const z = vertices[vertexIndex + 2];
+        const worldX =
+          matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12];
+        const worldY =
+          matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13];
+        const worldZ =
+          matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14];
+        min[0] = Math.min(min[0], worldX);
+        min[1] = Math.min(min[1], worldY);
+        min[2] = Math.min(min[2], worldZ);
+        max[0] = Math.max(max[0], worldX);
+        max[1] = Math.max(max[1], worldY);
+        max[2] = Math.max(max[2], worldZ);
+      }
+      geometry.delete();
+    }
+  });
+  return [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2];
+}
+
+function roundCoordinate(value: number) {
+  return Math.round(value * 1000) / 1000;
+}
+
+function firstStepReference(value: string) {
+  const id = Number(value.match(/#(\d+)/)?.[1]);
+  assert.ok(Number.isFinite(id));
+  return id;
 }

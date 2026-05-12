@@ -123,7 +123,7 @@ export default function ThatOpenViewer({
     setError("");
     setStatus("Converting IFC with ThatOpen...");
     void runtime
-      .load(ifcText, fileName, ifcBytes)
+      .load(ifcText, fileName, ifcBytes, { fitAfterLoad: !isDraftPreview })
       .then(async () => {
         if (cancelled) {
           return;
@@ -144,7 +144,7 @@ export default function ThatOpenViewer({
     return () => {
       cancelled = true;
     };
-  }, [fileName, ifcBytes, ifcText, runtimeReady]);
+  }, [fileName, ifcBytes, ifcText, isDraftPreview, runtimeReady]);
 
   useEffect(() => {
     const runtime = runtimeRef.current;
@@ -430,6 +430,7 @@ async function createThatOpenRuntime(
     ifcText: string,
     fileName: string,
     ifcBytes?: ArrayBuffer | null,
+    options?: { fitAfterLoad?: boolean },
   ) {
     const loadKey = `${fileName}:${ifcText.length}:${hashText(ifcText)}`;
     if (currentLoadKey === loadKey) {
@@ -461,7 +462,9 @@ async function createThatOpenRuntime(
     model.useCamera(world.camera.three);
     world.scene.three.add(model.object);
     await fragments.core.update(true);
-    await fit();
+    if (options?.fitAfterLoad ?? true) {
+      await fit();
+    }
     callbacks.onStatus(`ThatOpen loaded ${fileName}`);
     callbacks.onLog(
       `viewer.load({ engine: 'thatopen', modelId: '${model.modelId}' });`,

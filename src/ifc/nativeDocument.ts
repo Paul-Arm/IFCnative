@@ -281,6 +281,42 @@ export function getNativePlacement(
   };
 }
 
+export function resolveNativeMovableProductId(
+  document: NativeIfcDocument,
+  entityId: number,
+  globalId?: string,
+) {
+  const globalEntity = globalId
+    ? document.entities.find((entity) => entity.globalId === globalId)
+    : undefined;
+  if (globalEntity && getNativePlacement(document, globalEntity.id)) {
+    return globalEntity.id;
+  }
+  if (getNativePlacement(document, entityId)) {
+    return entityId;
+  }
+
+  const queue = [{ depth: 0, id: entityId }];
+  const visited = new Set<number>([entityId]);
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current || current.depth >= 6) {
+      continue;
+    }
+    for (const incoming of document.incomingRefs.get(current.id) ?? []) {
+      if (visited.has(incoming.id)) {
+        continue;
+      }
+      if (getNativePlacement(document, incoming.id)) {
+        return incoming.id;
+      }
+      visited.add(incoming.id);
+      queue.push({ depth: current.depth + 1, id: incoming.id });
+    }
+  }
+  return undefined;
+}
+
 export function updateNativePlacement(
   document: NativeIfcDocument,
   entityId: number,
