@@ -44,6 +44,7 @@ export interface NativeBodyElementOptions {
   type: string;
   name: string;
   parentId?: number;
+  placementMode?: "parent" | "world";
   width: number | string;
   depth: number | string;
   height: number | string;
@@ -384,9 +385,12 @@ export function addNativeBodyElement(
   const parent = options.parentId
     ? document.entityById.get(options.parentId)
     : undefined;
-  const parentPlacementRef = parent?.args[5]?.startsWith("#")
-    ? parent.args[5]
-    : "$";
+  const parentPlacementRef =
+    options.placementMode === "world"
+      ? "$"
+      : parent?.args[5]?.startsWith("#")
+        ? parent.args[5]
+        : "$";
   const contextRef = `#${document.entities.find((entity) => entity.type === "IFCGEOMETRICREPRESENTATIONCONTEXT")?.id ?? 10}`;
   const width = positiveStepNumber(options.width, 1);
   const depth = positiveStepNumber(options.depth, 1);

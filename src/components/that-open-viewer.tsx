@@ -1,13 +1,25 @@
 import { StyleSheet, Text, View } from "react-native";
 
+export interface ViewerCoordinatePick {
+  entityId?: number;
+  globalId?: string;
+  localId?: number;
+  source: "thatopen";
+  x: number;
+  y: number;
+  z: number;
+}
+
 export interface ThatOpenViewerProps {
   fileName: string;
   ifcBytes?: ArrayBuffer | null;
   ifcText: string;
+  isDraftPreview?: boolean;
   selectedId: number;
   selectedName?: string;
   onLog?(line: string): void;
   onMoveSelected?(delta: { x?: number; y?: number; z?: number }): void;
+  onPickCoordinates?(pick: ViewerCoordinatePick): void;
   onSelect(id: number, source?: string, globalId?: string): void;
 }
 

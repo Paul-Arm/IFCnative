@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 
-import type { ThatOpenViewerProps } from "./that-open-viewer";
+import type {
+    ThatOpenViewerProps,
+    ViewerCoordinatePick,
+} from "./that-open-viewer";
 
 type ViewerRuntime = Awaited<ReturnType<typeof createThatOpenRuntime>>;
 
@@ -8,25 +11,47 @@ export default function ThatOpenViewer({
   fileName,
   ifcBytes,
   ifcText,
+  isDraftPreview,
   selectedId,
   selectedName,
   onLog,
   onMoveSelected,
+  onPickCoordinates,
   onSelect,
 }: ThatOpenViewerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const runtimeRef = useRef<ViewerRuntime | null>(null);
   const selectedRef = useRef(selectedId);
   const onLogRef = useRef(onLog);
+  const onPickCoordinatesRef = useRef(onPickCoordinates);
   const onSelectRef = useRef(onSelect);
+  const pickerActiveRef = useRef(false);
   const [runtimeReady, setRuntimeReady] = useState(0);
   const [modelReady, setModelReady] = useState(0);
   const [, setStatus] = useState("Starting ThatOpen viewer...");
   const [error, setError] = useState("");
+  const [pickerActive, setPickerActive] = useState(false);
+  const [lastPick, setLastPick] = useState<ViewerCoordinatePick | null>(null);
+  const [copyStatus, setCopyStatus] = useState("");
 
   selectedRef.current = selectedId;
   onLogRef.current = onLog;
+  onPickCoordinatesRef.current = onPickCoordinates;
   onSelectRef.current = onSelect;
+  pickerActiveRef.current = pickerActive;
+
+  const copyPick = async (pick: ViewerCoordinatePick) => {
+    const text = formatCoordinatePickClipboard(pick);
+    await writeClipboardText(text);
+    setCopyStatus("Kopiert");
+    onLogRef.current?.(`viewer.coordinates.copy(${JSON.stringify(text)});`);
+  };
+
+  const closeCoordinateReadout = () => {
+    setLastPick(null);
+    setCopyStatus("");
+    runtimeRef.current?.hideCoordinateCursor();
+  };
 
   useEffect(() => {
     let disposed = false;
@@ -43,6 +68,19 @@ export default function ThatOpenViewer({
           setStatus("ThatOpen viewer error");
         },
         onLog: (line) => onLogRef.current?.(line),
+        onPickCoordinates: (pick) => {
+          setLastPick(pick);
+          onPickCoordinatesRef.current?.(pick);
+          void copyPick(pick).catch((reason) => {
+            const message = stringifyError(reason);
+            setCopyStatus("Kopieren fehlgeschlagen");
+            onLogRef.current?.(
+              `viewer.coordinates.copyError(${JSON.stringify(message)});`,
+            );
+          });
+        },
+        isCoordinatePickerActive: () => pickerActiveRef.current,
+        onCoordinatePickerUsed: () => setPickerActive(false),
         onSelect: (id, source, globalId) =>
           onSelectRef.current(id, source, globalId),
         onStatus: setStatus,
@@ -130,7 +168,43 @@ export default function ThatOpenViewer({
           >
             Reset
           </button>
+          <button
+            className={`ifcnative-thatopen-button${pickerActive ? " is-active" : ""}`}
+            type="button"
+            onClick={() => {
+              setCopyStatus("");
+              setPickerActive((current) => !current);
+            }}
+          >
+            {pickerActive ? "Picker aktiv" : "Koordinaten wählen"}
+          </button>
+          <button
+            className="ifcnative-thatopen-button"
+            disabled={!lastPick}
+            type="button"
+            onClick={() => lastPick && void copyPick(lastPick)}
+          >
+            Koordinaten kopieren
+          </button>
         </div>
+        {lastPick ? (
+          <div className="ifcnative-thatopen-coordinate-readout">
+            <span>{formatCoordinatePickLabel(lastPick)}</span>
+            {copyStatus ? <strong>{copyStatus}</strong> : null}
+            <button
+              aria-label="Koordinatenanzeige schließen"
+              className="ifcnative-thatopen-coordinate-close"
+              title="Koordinatenanzeige schließen"
+              type="button"
+              onClick={closeCoordinateReadout}
+            >
+              ×
+            </button>
+          </div>
+        ) : null}
+        {isDraftPreview ? (
+          <div className="ifcnative-thatopen-draft-badge">Entwurfsvorschau</div>
+        ) : null}
         <div
           className="ifcnative-thatopen-nudge-panel"
           title={`Draft placement nudges for #${selectedId}${selectedName ? ` ${selectedName}` : ""}`}
@@ -182,7 +256,15 @@ export default function ThatOpenViewer({
           </button>
         </div>
       </div>
-      <div ref={containerRef} className="ifcnative-thatopen-viewport">
+      <div
+        ref={containerRef}
+        className={`ifcnative-thatopen-viewport${pickerActive ? " is-picking" : ""}`}
+      >
+        {pickerActive ? (
+          <div className="ifcnative-thatopen-picker-hint">
+            Punkt im Modell anklicken
+          </div>
+        ) : null}
         {error ? <div className="ifcnative-thatopen-error">{error}</div> : null}
       </div>
     </div>
@@ -193,8 +275,11 @@ async function createThatOpenRuntime(
   container: HTMLDivElement,
   callbacks: {
     getSelectedId(): number;
+    isCoordinatePickerActive(): boolean;
     onError(message: string): void;
+    onCoordinatePickerUsed(): void;
     onLog(line: string): void;
+    onPickCoordinates(pick: ViewerCoordinatePick): void;
     onSelect(id: number, source?: string, globalId?: string): void;
     onStatus(message: string): void;
   },
@@ -228,9 +313,11 @@ async function createThatOpenRuntime(
 
   const grids = components.get(OBC.Grids);
   grids.create(world);
+  const coordinateCursor = createCoordinateCursor(THREE);
+  world.scene.three.add(coordinateCursor.group, coordinateCursor.rayLine);
 
   const fragments = components.get(OBC.FragmentsManager);
-  const fragmentsWorkerUrl = `${globalThis.location.origin}/fragments/worker.mjs`;
+  const fragmentsWorkerUrl = resolvePublicAssetUrl("fragments/worker.mjs");
   fragments.init(fragmentsWorkerUrl);
 
   const ifcLoader = components.get(OBC.IfcLoader);
@@ -238,7 +325,7 @@ async function createThatOpenRuntime(
     autoSetWasm: false,
     wasm: {
       absolute: true,
-      path: "/wasm/",
+      path: resolvePublicAssetUrl("wasm/"),
     },
   });
 
@@ -299,7 +386,11 @@ async function createThatOpenRuntime(
       callbacks.onLog("viewer.selectMiss({ engine: 'thatopen' });");
       return;
     }
-    const itemData = await readItemData(fragments, result.fragments.modelId, localId);
+    const itemData = await readItemData(
+      fragments,
+      result.fragments.modelId,
+      localId,
+    );
     const entityId = readNumericAttribute(itemData, [
       "expressID",
       "ExpressID",
@@ -313,6 +404,27 @@ async function createThatOpenRuntime(
       "globalId",
       "guid",
     ]);
+    if (callbacks.isCoordinatePickerActive()) {
+      coordinateCursor.show(
+        result.point,
+        result.ray?.origin ?? world.camera.three.position,
+        world.camera.three.position.distanceTo(result.point),
+      );
+      callbacks.onCoordinatePickerUsed();
+      callbacks.onPickCoordinates({
+        entityId: entityId ?? localId,
+        globalId,
+        localId,
+        source: "thatopen",
+        x: result.point.x,
+        y: result.point.y,
+        z: result.point.z,
+      });
+      callbacks.onLog(
+        `viewer.coordinates.pick({ x: ${formatCoordinate(result.point.x)}, y: ${formatCoordinate(result.point.y)}, z: ${formatCoordinate(result.point.z)}, localId: ${localId} });`,
+      );
+      await fragments.core.update(true);
+    }
     callbacks.onSelect(entityId ?? localId, "thatopen", globalId);
     callbacks.onLog(
       `viewer.select({ engine: 'thatopen', localId: ${localId}, entityId: ${entityId ?? localId}${globalId ? `, globalId: '${globalId}'` : ""} });`,
@@ -336,6 +448,7 @@ async function createThatOpenRuntime(
     currentLoadKey = loadKey;
 
     callbacks.onStatus("Disposing previous ThatOpen model...");
+    coordinateCursor.hide();
     if (model) {
       model.object.removeFromParent();
       await model.dispose();
@@ -402,6 +515,7 @@ async function createThatOpenRuntime(
       model = null;
     }
     fragments.dispose();
+    coordinateCursor.dispose();
     ifcLoader.dispose();
     components.dispose();
   }
@@ -410,9 +524,160 @@ async function createThatOpenRuntime(
     dispose,
     fit,
     highlight,
+    hideCoordinateCursor: coordinateCursor.hide,
     load,
     resetCamera,
   };
+}
+
+function createCoordinateCursor(THREE: typeof import("three")) {
+  const group = new THREE.Group();
+  group.name = "IFCnativeCoordinateCursor";
+  group.visible = false;
+
+  const originMaterial = new THREE.MeshBasicMaterial({ color: 0xffc857 });
+  const origin = new THREE.Mesh(
+    new THREE.SphereGeometry(0.07, 24, 16),
+    originMaterial,
+  );
+  group.add(origin);
+
+  const xMaterial = new THREE.LineBasicMaterial({ color: 0xef4444 });
+  const yMaterial = new THREE.LineBasicMaterial({ color: 0x16a34a });
+  const zMaterial = new THREE.LineBasicMaterial({ color: 0x2563eb });
+  group.add(createCursorAxis(THREE, "x", 0xef4444, xMaterial));
+  group.add(createCursorAxis(THREE, "y", 0x16a34a, yMaterial));
+  group.add(createCursorAxis(THREE, "z", 0x2563eb, zMaterial));
+
+  group.add(
+    createAxisLabel(THREE, "X", 0xef4444, new THREE.Vector3(0.82, 0, 0)),
+  );
+  group.add(
+    createAxisLabel(THREE, "Y", 0x16a34a, new THREE.Vector3(0, 0.82, 0)),
+  );
+  group.add(
+    createAxisLabel(THREE, "Z", 0x2563eb, new THREE.Vector3(0, 0, 0.82)),
+  );
+
+  const rayMaterial = new THREE.LineBasicMaterial({
+    color: 0xf59e0b,
+    transparent: true,
+    opacity: 0.85,
+  });
+  const rayGeometry = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(),
+    new THREE.Vector3(),
+  ]);
+  const rayLine = new THREE.Line(rayGeometry, rayMaterial);
+  rayLine.name = "IFCnativePickerRay";
+  rayLine.visible = false;
+
+  const show = (
+    point: import("three").Vector3,
+    rayOrigin: import("three").Vector3,
+    cameraDistance: number,
+  ) => {
+    const scale = Math.min(Math.max(cameraDistance * 0.035, 0.35), 2.25);
+    group.position.copy(point);
+    group.scale.setScalar(scale);
+    group.visible = true;
+    rayGeometry.setFromPoints([rayOrigin, point]);
+    rayGeometry.computeBoundingSphere();
+    rayLine.visible = true;
+  };
+
+  const hide = () => {
+    group.visible = false;
+    rayLine.visible = false;
+  };
+
+  const dispose = () => {
+    worldDispose(group);
+    rayGeometry.dispose();
+    rayMaterial.dispose();
+  };
+
+  return { dispose, group, hide, rayLine, show };
+}
+
+function createCursorAxis(
+  THREE: typeof import("three"),
+  axis: "x" | "y" | "z",
+  color: number,
+  lineMaterial: import("three").LineBasicMaterial,
+) {
+  const length = 0.72;
+  const end =
+    axis === "x"
+      ? new THREE.Vector3(length, 0, 0)
+      : axis === "y"
+        ? new THREE.Vector3(0, length, 0)
+        : new THREE.Vector3(0, 0, length);
+  const group = new THREE.Group();
+  const line = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), end]),
+    lineMaterial,
+  );
+  const cone = new THREE.Mesh(
+    new THREE.ConeGeometry(0.045, 0.14, 18),
+    new THREE.MeshBasicMaterial({ color }),
+  );
+  cone.position.copy(end);
+  if (axis === "x") {
+    cone.rotation.z = -Math.PI / 2;
+  } else if (axis === "z") {
+    cone.rotation.x = Math.PI / 2;
+  }
+  group.add(line, cone);
+  return group;
+}
+
+function createAxisLabel(
+  THREE: typeof import("three"),
+  label: string,
+  color: number,
+  position: import("three").Vector3,
+) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 64;
+  canvas.height = 64;
+  const context = canvas.getContext("2d");
+  if (context) {
+    context.fillStyle = `#${color.toString(16).padStart(6, "0")}`;
+    context.beginPath();
+    context.arc(32, 32, 24, 0, Math.PI * 2);
+    context.fill();
+    context.fillStyle = "#ffffff";
+    context.font = "700 30px system-ui, sans-serif";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(label, 32, 33);
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  const material = new THREE.SpriteMaterial({
+    depthTest: false,
+    map: texture,
+    transparent: true,
+  });
+  const sprite = new THREE.Sprite(material);
+  sprite.position.copy(position);
+  sprite.scale.setScalar(0.22);
+  return sprite;
+}
+
+function worldDispose(object: import("three").Object3D) {
+  object.traverse((child) => {
+    const mesh = child as import("three").Mesh;
+    mesh.geometry?.dispose();
+    const material = mesh.material;
+    if (Array.isArray(material)) {
+      for (const item of material) {
+        item.dispose();
+      }
+    } else {
+      material?.dispose();
+    }
+  });
 }
 
 function toModelId(fileName: string) {
@@ -422,6 +687,43 @@ function toModelId(fileName: string) {
       .replace(/[^a-z0-9_-]+/gi, "-")
       .replace(/^-|-$/g, "") || "ifcnative"
   );
+}
+
+function resolvePublicAssetUrl(assetPath: string) {
+  const cleanPath = assetPath.replace(/^\/+/, "");
+  if (globalThis.location.protocol === "file:") {
+    return new URL(cleanPath, globalThis.location.href).toString();
+  }
+  return new URL(cleanPath, `${globalThis.location.origin}/`).toString();
+}
+
+function formatCoordinate(value: number) {
+  return Number(value)
+    .toFixed(4)
+    .replace(/\.0+$/, "")
+    .replace(/(\.\d*?)0+$/, "$1");
+}
+
+function formatCoordinatePickLabel(pick: ViewerCoordinatePick) {
+  return `X ${formatCoordinate(pick.x)} · Y ${formatCoordinate(pick.y)} · Z ${formatCoordinate(pick.z)}`;
+}
+
+function formatCoordinatePickClipboard(pick: ViewerCoordinatePick) {
+  return JSON.stringify({
+    entityId: pick.entityId,
+    localId: pick.localId,
+    source: pick.source,
+    x: formatCoordinate(pick.x),
+    y: formatCoordinate(pick.y),
+    z: formatCoordinate(pick.z),
+  });
+}
+
+async function writeClipboardText(text: string) {
+  if (!globalThis.navigator?.clipboard?.writeText) {
+    throw new Error("Clipboard API is not available.");
+  }
+  await globalThis.navigator.clipboard.writeText(text);
 }
 
 async function readItemData(
@@ -451,7 +753,9 @@ async function readItemData(
 
 function readNumericAttribute(data: unknown, keys: string[]) {
   const value = readAttribute(data, keys);
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
 }
 
 function readStringAttribute(data: unknown, keys: string[]) {

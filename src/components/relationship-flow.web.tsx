@@ -75,6 +75,7 @@ const AGGREGATE_SOURCE_HANDLE = "aggregate-source";
 const AGGREGATE_TARGET_HANDLE = "aggregate-target";
 const RELATIONSHIP_SOURCE_HANDLE = "relationship-source";
 const RELATIONSHIP_TARGET_HANDLE = "relationship-target";
+const MAX_GRAPH_DEPTH = 25;
 
 const nodeTypes = {
   ifcNode: IfcNode,
@@ -327,7 +328,7 @@ export default function RelationshipFlow({
           <span>Depth {depth}</span>
           <input
             min={0}
-            max={4}
+            max={MAX_GRAPH_DEPTH}
             step={1}
             type="range"
             value={depth}

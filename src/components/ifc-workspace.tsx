@@ -61,6 +61,7 @@ import type {
     RelationshipFlowMove,
     RelationshipFlowNode,
 } from "./relationship-flow.types";
+import type { ViewerCoordinatePick } from "./that-open-viewer";
 import ThatOpenViewer from "./that-open-viewer";
 
 type StructureMode = "tree" | "graph";
@@ -125,7 +126,7 @@ const DEFAULT_MOSAIC_LAYOUT: MosaicNode<MosaicViewId> = {
 };
 
 const MOSAIC_TITLES: Record<MosaicViewId, string> = {
-  builder: "Builder",
+  builder: "Baukasten",
   console: "JS Console",
   diagnostics: "Diagnostics",
   diff: "IFC Diff / Review",
@@ -261,6 +262,9 @@ export default function IfcWorkspace() {
     initialDocument.document,
   );
   const [selectedId, setSelectedId] = useState(initialDocument.selectedId);
+  const [graphAnchorId, setGraphAnchorId] = useState(
+    initialDocument.selectedId,
+  );
   const [structureMode, setStructureMode] = useState<StructureMode>("tree");
   const [inspectorMode, setInspectorMode] = useState<InspectorMode>("info");
   const [treeExpanded, setTreeExpanded] = useState<Set<number>>(
@@ -294,9 +298,16 @@ export default function IfcWorkspace() {
   const [consoleLines, setConsoleLines] = useState<string[]>(() => [
     `${new Date().toLocaleTimeString()}  ui.boot({ shell: 'vite-react' });`,
   ]);
+  const [coordinateClipboard, setCoordinateClipboard] =
+    useState<CoordinateClipboard | null>(null);
 
+  const viewerDocument = pendingDocument ?? document;
+  const viewerIfcText = pendingIfcText || documentText;
+  const viewerIfcBytes = pendingIfcText ? null : documentBytes;
   const selectedEntity =
-    document.entityById.get(selectedId) ?? document.entities[0];
+    viewerDocument.entityById.get(selectedId) ??
+    document.entityById.get(selectedId) ??
+    document.entities[0];
   const closedMosaicIds = useMemo(() => {
     const visibleIds = new Set(getMosaicLeaves(mosaicValue));
     return MOSAIC_VIEW_IDS.filter((id) => !visibleIds.has(id));
@@ -349,11 +360,11 @@ export default function IfcWorkspace() {
     setDocumentBytes(nextBytes ?? null);
     setTreeExpanded(new Set());
     const fallbackId = next.spatialRoots[0]?.id ?? next.entities[0]?.id ?? 0;
-    setSelectedId(
-      next.entityById.has(nextSelectedId ?? 0)
-        ? (nextSelectedId as number)
-        : fallbackId,
-    );
+    const resolvedSelectedId = next.entityById.has(nextSelectedId ?? 0)
+      ? (nextSelectedId as number)
+      : fallbackId;
+    setSelectedId(resolvedSelectedId);
+    setGraphAnchorId(resolvedSelectedId);
     setGraphPositions(nextGraphPositions ?? new Map());
     if (log) {
       logAction(log);
@@ -404,19 +415,31 @@ export default function IfcWorkspace() {
     setPendingDocument(null);
     setPendingIfcText("");
     setPendingSummary("");
+    if (!document.entityById.has(selectedId)) {
+      const fallbackId =
+        document.spatialRoots[0]?.id ?? document.entities[0]?.id ?? 0;
+      setSelectedId(fallbackId);
+      setGraphAnchorId(fallbackId);
+    }
     logAction(`draft.discard(${JSON.stringify(discardedSummary)});`);
   };
 
   const selectEntity = (id: number, source = "ui", globalId?: string) => {
+    const selectionDocument = pendingDocument ?? document;
     const resolvedId =
-      document.entityById.has(id) || !globalId
+      selectionDocument.entityById.has(id) || !globalId
         ? id
-        : document.entities.find((entity) => entity.globalId === globalId)?.id;
-    if (!resolvedId || !document.entityById.has(resolvedId)) {
+        : selectionDocument.entities.find(
+            (entity) => entity.globalId === globalId,
+          )?.id;
+    if (!resolvedId || !selectionDocument.entityById.has(resolvedId)) {
       return;
     }
     setSelectedId(resolvedId);
-    const entity = document.entityById.get(resolvedId);
+    if (source === "graph") {
+      setGraphAnchorId(resolvedId);
+    }
+    const entity = selectionDocument.entityById.get(resolvedId);
     logAction(
       `${source}.selectEntity({ id: ${resolvedId}, class: '${entity?.type ?? "UNKNOWN"}' });`,
     );
@@ -801,6 +824,50 @@ export default function IfcWorkspace() {
     );
   };
 
+  const storePickedCoordinates = (pick: ViewerCoordinatePick) => {
+    const copiedAt = new Date().toLocaleTimeString();
+    const nextClipboard = {
+      copiedAt,
+      entityId: pick.entityId,
+      localId: pick.localId,
+      source: pick.source,
+      x: formatCoordinate(pick.x),
+      y: formatCoordinate(pick.y),
+      z: formatCoordinate(pick.z),
+    } satisfies CoordinateClipboard;
+    setCoordinateClipboard(nextClipboard);
+    logAction(
+      `viewer.coordinates.clipboard({ x: ${nextClipboard.x}, y: ${nextClipboard.y}, z: ${nextClipboard.z}${pick.entityId ? `, entityId: ${pick.entityId}` : ""} });`,
+    );
+  };
+
+  const loadSystemCoordinateClipboard = async () => {
+    let text = "";
+    try {
+      text = (await globalThis.navigator?.clipboard?.readText?.()) ?? "";
+    } catch (error) {
+      logAction(
+        `builder.coordinates.readClipboardError(${JSON.stringify(String(error))});`,
+      );
+      return undefined;
+    }
+    const parsed = parseCoordinateClipboardText(text ?? "");
+    if (!parsed) {
+      logAction("builder.coordinates.readClipboardFailed();");
+      return undefined;
+    }
+    const nextClipboard = {
+      copiedAt: new Date().toLocaleTimeString(),
+      source: "system",
+      ...parsed,
+    } satisfies CoordinateClipboard;
+    setCoordinateClipboard(nextClipboard);
+    logAction(
+      `builder.coordinates.readClipboard({ x: ${nextClipboard.x}, y: ${nextClipboard.y}, z: ${nextClipboard.z} });`,
+    );
+    return nextClipboard;
+  };
+
   const addUnit = (unitType: string, unitName: string) => {
     const next = addNativeSiUnit(document, unitType, "$", unitName);
     stageDocument(
@@ -843,6 +910,7 @@ export default function IfcWorkspace() {
         />
       ) : (
         <GraphPanel
+          anchorId={graphAnchorId}
           classOptions={ENTITY_TYPES.map(typeOption)}
           collapsed={graphCollapsed}
           depth={graphDepth}
@@ -942,12 +1010,14 @@ export default function IfcWorkspace() {
           <View style={styles.tileContent}>
             <ThatOpenViewer
               fileName={document.fileName}
-              ifcBytes={documentBytes}
-              ifcText={documentText}
+              ifcBytes={viewerIfcBytes}
+              ifcText={viewerIfcText}
+              isDraftPreview={Boolean(pendingIfcText)}
               selectedId={selectedId}
               selectedName={selectedEntity?.name}
               onLog={logAction}
               onMoveSelected={nudgeSelectedPlacement}
+              onPickCoordinates={storePickedCoordinates}
               onSelect={selectEntity}
             />
           </View>
@@ -958,6 +1028,7 @@ export default function IfcWorkspace() {
         return (
           <View style={styles.tileContent}>
             <BuilderPanel
+              coordinateClipboard={coordinateClipboard}
               document={document}
               selectedId={selectedId}
               onAddClassification={addClassification}
@@ -971,6 +1042,7 @@ export default function IfcWorkspace() {
               onAddPset={addPset}
               onAddQuantity={addQuantity}
               onAddUnit={addUnit}
+              onLoadSystemCoordinates={loadSystemCoordinateClipboard}
             />
           </View>
         );
@@ -1210,10 +1282,7 @@ function SegmentedControl({
             ]}
           >
             <Text
-              style={[
-                styles.segmentText,
-                selected && styles.segmentTextActive,
-              ]}
+              style={[styles.segmentText, selected && styles.segmentTextActive]}
               numberOfLines={1}
             >
               {option}
@@ -1371,6 +1440,7 @@ interface Point {
 }
 
 function GraphPanel({
+  anchorId,
   classOptions,
   collapsed,
   depth,
@@ -1393,6 +1463,7 @@ function GraphPanel({
   onToggleChildren,
   onTogglePin,
 }: {
+  anchorId: number;
   classOptions: DropdownOption[];
   collapsed: Set<number>;
   depth: number;
@@ -1431,7 +1502,7 @@ function GraphPanel({
     () =>
       buildGraph(
         document,
-        selectedId,
+        anchorId,
         pinned,
         expanded,
         collapsed,
@@ -1444,10 +1515,10 @@ function GraphPanel({
       depth,
       document,
       expanded,
+      anchorId,
       pinned,
       preset,
       relationshipTypeFilters,
-      selectedId,
     ],
   );
   const layout = useMemo(
@@ -1588,6 +1659,7 @@ interface BodyElementDraft {
   type: string;
   name: string;
   parentId?: number;
+  placementMode?: "parent" | "world";
   width: string;
   depth: string;
   height: string;
@@ -1597,6 +1669,18 @@ interface BodyElementDraft {
   z: string;
   tag?: string;
 }
+
+interface CoordinateClipboard {
+  copiedAt: string;
+  entityId?: number;
+  localId?: number;
+  source: "thatopen" | "system";
+  x: string;
+  y: string;
+  z: string;
+}
+
+type ParsedCoordinates = Pick<CoordinateClipboard, "x" | "y" | "z">;
 
 function InspectorPanel({
   document,
@@ -1983,10 +2067,10 @@ function PsetPanel({
 }) {
   const [psetName, setPsetName] = useState("Pset_IFCnative_Custom");
   const [propertyName, setPropertyName] = useState("Status");
-  const [propertyValue, setPropertyValue] = useState("Draft");
+  const [propertyValue, setPropertyValue] = useState("Entwurf");
   const [propertyValueType, setPropertyValueType] = useState("IFCLABEL");
   const [qtoName, setQtoName] = useState("Qto_IFCnative_BaseQuantities");
-  const [quantityName, setQuantityName] = useState("ObservedLength");
+  const [quantityName, setQuantityName] = useState("ErfassteLaenge");
   const [quantityValue, setQuantityValue] = useState("1");
   const [quantityType, setQuantityType] = useState("IFCQUANTITYLENGTH");
   const sets = document.propertySetsByEntity.get(selectedId) ?? [];
@@ -2323,21 +2407,21 @@ function ResourcesPanel({
   const resources = document.resourcesByEntity.get(selectedId) ?? [];
   const typeAssignments =
     document.typeAssignmentsByEntity.get(selectedId) ?? [];
-  const [materialName, setMaterialName] = useState("Inspection Concrete");
-  const [materialCategory, setMaterialCategory] = useState("Concrete");
+  const [materialName, setMaterialName] = useState("Inspektionsbeton");
+  const [materialCategory, setMaterialCategory] = useState("Beton");
   const [typeClass, setTypeClass] = useState("IFCTYPEOBJECT");
-  const [typeName, setTypeName] = useState("Inspection Element Type");
+  const [typeName, setTypeName] = useState("Inspektionselement-Typ");
   const [typeTag, setTypeTag] = useState("TYPE-INSPECTION");
   const [classificationId, setClassificationId] = useState(
     "IFCNATIVE-INSPECTION",
   );
   const [classificationName, setClassificationName] =
-    useState("Inspection Target");
+    useState("Inspektionsziel");
   const [classificationUri, setClassificationUri] = useState(
     "https://ifcnative.local/classification/inspection-target",
   );
   const [documentId, setDocumentId] = useState("DOC-INSPECTION");
-  const [documentName, setDocumentName] = useState("Inspection Report");
+  const [documentName, setDocumentName] = useState("Inspektionsbericht");
   const [documentUri, setDocumentUri] = useState(
     "https://ifcnative.local/documents/inspection-report",
   );
@@ -2545,6 +2629,7 @@ function UnitsPanel({
 }
 
 function BuilderPanel({
+  coordinateClipboard,
   document,
   selectedId,
   onAddClassification,
@@ -2558,7 +2643,9 @@ function BuilderPanel({
   onAddQuantity,
   onAddRelationship,
   onAddUnit,
+  onLoadSystemCoordinates,
 }: {
+  coordinateClipboard: CoordinateClipboard | null;
   document: NativeIfcDocument;
   selectedId: number;
   onAddClassification(
@@ -2590,17 +2677,21 @@ function BuilderPanel({
   ): void;
   onAddRelationship(type: string, sourceId: number, targetId: number): void;
   onAddUnit(unitType: string, unitName: string): void;
+  onLoadSystemCoordinates(): Promise<CoordinateClipboard | undefined>;
 }) {
   const [type, setType] = useState("IFCBUILDINGELEMENTPROXY");
-  const [name, setName] = useState("New Element");
+  const [name, setName] = useState("Neues Element");
   const [bodyType, setBodyType] = useState("IFCBUILTELEMENT");
-  const [bodyName, setBodyName] = useState("New Body Element");
+  const [bodyName, setBodyName] = useState("Neuer 3D-Körper");
   const [bodyWidth, setBodyWidth] = useState("4");
   const [bodyDepth, setBodyDepth] = useState("2");
   const [bodyHeight, setBodyHeight] = useState("1.5");
   const [bodyProfile, setBodyProfile] = useState<"rectangle" | "cylinder">(
     "rectangle",
   );
+  const [bodyPlacementMode, setBodyPlacementMode] = useState<
+    "parent" | "world"
+  >("parent");
   const [bodyX, setBodyX] = useState("0");
   const [bodyY, setBodyY] = useState("0");
   const [bodyZ, setBodyZ] = useState("0");
@@ -2610,27 +2701,27 @@ function BuilderPanel({
   const [targetId, setTargetId] = useState(String(selectedId));
   const [psetName, setPsetName] = useState("Pset_IFCnative_Custom");
   const [propertyName, setPropertyName] = useState("Status");
-  const [propertyValue, setPropertyValue] = useState("Draft");
+  const [propertyValue, setPropertyValue] = useState("Entwurf");
   const [propertyValueType, setPropertyValueType] = useState("IFCLABEL");
   const [qtoName, setQtoName] = useState("Qto_IFCnative_BaseQuantities");
-  const [quantityName, setQuantityName] = useState("ObservedLength");
+  const [quantityName, setQuantityName] = useState("ErfassteLaenge");
   const [quantityValue, setQuantityValue] = useState("1");
   const [quantityType, setQuantityType] = useState("IFCQUANTITYLENGTH");
-  const [materialName, setMaterialName] = useState("Inspection Concrete");
-  const [materialCategory, setMaterialCategory] = useState("Concrete");
+  const [materialName, setMaterialName] = useState("Inspektionsbeton");
+  const [materialCategory, setMaterialCategory] = useState("Beton");
   const [typeClass, setTypeClass] = useState("IFCTYPEOBJECT");
-  const [typeName, setTypeName] = useState("Inspection Element Type");
+  const [typeName, setTypeName] = useState("Inspektionselement-Typ");
   const [typeTag, setTypeTag] = useState("TYPE-INSPECTION");
   const [classificationId, setClassificationId] = useState(
     "IFCNATIVE-INSPECTION",
   );
   const [classificationName, setClassificationName] =
-    useState("Inspection Target");
+    useState("Inspektionsziel");
   const [classificationUri, setClassificationUri] = useState(
     "https://ifcnative.local/classification/inspection-target",
   );
   const [documentId, setDocumentId] = useState("DOC-INSPECTION");
-  const [documentName, setDocumentName] = useState("Inspection Report");
+  const [documentName, setDocumentName] = useState("Inspektionsbericht");
   const [documentUri, setDocumentUri] = useState(
     "https://ifcnative.local/documents/inspection-report",
   );
@@ -2647,48 +2738,68 @@ function BuilderPanel({
     setTargetId(String(selectedId));
   }, [selectedId]);
 
+  const loadCoordinateClipboard = async () => {
+    if (!coordinateClipboard) {
+      const systemClipboard = await onLoadSystemCoordinates();
+      if (systemClipboard) {
+        setBodyX(systemClipboard.x);
+        setBodyY(systemClipboard.y);
+        setBodyZ(systemClipboard.z);
+        setBodyPlacementMode("world");
+      }
+      return;
+    }
+    setBodyX(coordinateClipboard.x);
+    setBodyY(coordinateClipboard.y);
+    setBodyZ(coordinateClipboard.z);
+    setBodyPlacementMode("world");
+  };
+
   return (
     <ScrollView style={styles.panelScroll}>
       <DropdownField
-        label="Element class"
+        label="Elementklasse"
         options={ENTITY_TYPES}
         value={type}
         onChange={setType}
       />
-      <LabeledInput label="Element name" value={name} onChangeText={setName} />
+      <LabeledInput label="Elementname" value={name} onChangeText={setName} />
       <Button
-        label="+ Add Element under selected"
+        label="+ Element unter Auswahl anlegen"
         primary
         onPress={() => onAddElement(type, name, selectedId)}
       />
       <View style={styles.separator} />
-      <Text style={styles.sectionTitle}>Simple body preset</Text>
+      <Text style={styles.sectionTitle}>Einfacher 3D-Körper</Text>
       <DropdownField
-        label="Body class"
+        label="Körperklasse"
         options={ENTITY_TYPES}
         value={bodyType}
         onChange={setBodyType}
       />
       <LabeledInput
-        label="Body name"
+        label="Körpername"
         value={bodyName}
         onChangeText={setBodyName}
       />
       <DropdownField
-        label="Profile"
-        options={["rectangle", "cylinder"]}
+        label="Profil"
+        options={[
+          { label: "Rechteck", value: "rectangle" },
+          { label: "Zylinder", value: "cylinder" },
+        ]}
         value={bodyProfile}
         onChange={(value) => setBodyProfile(value as "rectangle" | "cylinder")}
       />
       <View style={styles.row}>
         <LabeledInput
-          label={bodyProfile === "cylinder" ? "Diameter X" : "Width X"}
+          label={bodyProfile === "cylinder" ? "Durchmesser X" : "Breite X"}
           keyboardType="numeric"
           value={bodyWidth}
           onChangeText={setBodyWidth}
         />
         <LabeledInput
-          label={bodyProfile === "cylinder" ? "Diameter Y" : "Depth Y"}
+          label={bodyProfile === "cylinder" ? "Durchmesser Y" : "Tiefe Y"}
           keyboardType="numeric"
           value={bodyDepth}
           onChangeText={setBodyDepth}
@@ -2696,12 +2807,16 @@ function BuilderPanel({
       </View>
       <View style={styles.row}>
         <LabeledInput
-          label="Height Z"
+          label="Höhe Z"
           keyboardType="numeric"
           value={bodyHeight}
           onChangeText={setBodyHeight}
         />
-        <LabeledInput label="Tag" value={bodyTag} onChangeText={setBodyTag} />
+        <LabeledInput
+          label="Kennzeichen"
+          value={bodyTag}
+          onChangeText={setBodyTag}
+        />
       </View>
       <View style={styles.row}>
         <LabeledInput
@@ -2723,11 +2838,44 @@ function BuilderPanel({
           onChangeText={setBodyZ}
         />
       </View>
+      <View style={styles.editBlock}>
+        <Text style={styles.infoTitle}>Koordinaten-Zwischenablage</Text>
+        <Text style={styles.empty}>
+          {coordinateClipboard
+            ? `X ${coordinateClipboard.x}, Y ${coordinateClipboard.y}, Z ${coordinateClipboard.z} (${coordinateClipboard.copiedAt})`
+            : "Noch keine Koordinaten aus dem 3D-Viewer übernommen."}
+        </Text>
+        <Button
+          label={
+            coordinateClipboard
+              ? "Koordinaten in Körper laden"
+              : "Koordinaten aus Zwischenablage lesen"
+          }
+          onPress={() => void loadCoordinateClipboard()}
+        />
+      </View>
+      <DropdownField
+        label="Spawn-Bezug"
+        options={[
+          {
+            detail: "X/Y/Z relativ zur ausgewählten Platzierung",
+            label: "Relativ zur Auswahl",
+            value: "parent",
+          },
+          {
+            detail: "Picker-Koordinaten als Weltpunkt verwenden",
+            label: "Weltkoordinaten",
+            value: "world",
+          },
+        ]}
+        value={bodyPlacementMode}
+        onChange={(value) => setBodyPlacementMode(value as "parent" | "world")}
+      />
       <Button
         label={
           bodyProfile === "cylinder"
-            ? "+ Add Cylindrical Body under selected"
-            : "+ Add Rectangular Body under selected"
+            ? "+ Zylindrischen Körper unter Auswahl anlegen"
+            : "+ Rechteckigen Körper unter Auswahl anlegen"
         }
         primary
         onPress={() =>
@@ -2736,6 +2884,7 @@ function BuilderPanel({
             height: bodyHeight,
             name: bodyName,
             parentId: selectedId,
+            placementMode: bodyPlacementMode,
             profile: bodyProfile,
             tag: bodyTag,
             type: bodyType,
@@ -2750,14 +2899,15 @@ function BuilderPanel({
         disabled={!canAssignBody}
         label={
           bodyProfile === "cylinder"
-            ? "Assign Cylindrical Body to selected"
-            : "Assign Rectangular Body to selected"
+            ? "Zylindrischen Körper der Auswahl zuweisen"
+            : "Rechteckigen Körper der Auswahl zuweisen"
         }
         onPress={() =>
           onAssignBodyToSelected({
             depth: bodyDepth,
             height: bodyHeight,
             name: bodyName,
+            placementMode: bodyPlacementMode,
             profile: bodyProfile,
             tag: bodyTag,
             type: bodyType,
@@ -2770,26 +2920,26 @@ function BuilderPanel({
       />
       <View style={styles.separator} />
       <DropdownField
-        label="Relationship"
+        label="Beziehung"
         options={RELATION_TYPES}
         value={relType}
         onChange={setRelType}
       />
       <EntityDropdown
-        label="Source object"
+        label="Quellobjekt"
         document={document}
         value={sourceId}
         onChange={setSourceId}
       />
       <EntityDropdown
-        label="Target object"
+        label="Zielobjekt"
         document={document}
         value={targetId}
         onChange={setTargetId}
       />
       <Button
         disabled={!validSource || !validTarget}
-        label="+ Add Relationship"
+        label="+ Beziehung anlegen"
         onPress={() =>
           onAddRelationship(relType, Number(sourceId), Number(targetId))
         }
@@ -2797,23 +2947,23 @@ function BuilderPanel({
       <View style={styles.separator} />
       <LabeledInput label="Pset" value={psetName} onChangeText={setPsetName} />
       <LabeledInput
-        label="Property"
+        label="Eigenschaft"
         value={propertyName}
         onChangeText={setPropertyName}
       />
       <DropdownField
-        label="Value type"
+        label="Werttyp"
         options={PROPERTY_VALUE_TYPES}
         value={propertyValueType}
         onChange={setPropertyValueType}
       />
       <LabeledInput
-        label="Value"
+        label="Wert"
         value={propertyValue}
         onChangeText={setPropertyValue}
       />
       <Button
-        label="+ Add Pset to selected"
+        label="+ Pset zur Auswahl hinzufügen"
         onPress={() =>
           onAddPset(psetName, propertyName, propertyValue, propertyValueType)
         }
@@ -2821,24 +2971,24 @@ function BuilderPanel({
       <View style={styles.separator} />
       <LabeledInput label="QTO" value={qtoName} onChangeText={setQtoName} />
       <LabeledInput
-        label="Quantity"
+        label="Menge"
         value={quantityName}
         onChangeText={setQuantityName}
       />
       <DropdownField
-        label="Quantity type"
+        label="Mengentyp"
         options={QUANTITY_TYPES}
         value={quantityType}
         onChange={setQuantityType}
       />
       <LabeledInput
-        label="Quantity value"
+        label="Mengenwert"
         keyboardType="numeric"
         value={quantityValue}
         onChangeText={setQuantityValue}
       />
       <Button
-        label="+ Add Quantity to selected"
+        label="+ Menge zur Auswahl hinzufügen"
         onPress={() =>
           onAddQuantity(qtoName, quantityName, quantityValue, quantityType)
         }
@@ -2850,53 +3000,49 @@ function BuilderPanel({
         onChangeText={setMaterialName}
       />
       <LabeledInput
-        label="Material category"
+        label="Materialkategorie"
         value={materialCategory}
         onChangeText={setMaterialCategory}
       />
       <Button
-        label="+ Add Material to selected"
+        label="+ Material zur Auswahl hinzufügen"
         onPress={() => onAddMaterial(materialName, materialCategory)}
       />
       <View style={styles.separator} />
       <DropdownField
-        label="Type class"
+        label="Typklasse"
         options={TYPE_CLASSES}
         value={typeClass}
         onChange={setTypeClass}
       />
       <LabeledInput
-        label="Type name"
+        label="Typname"
         value={typeName}
         onChangeText={setTypeName}
       />
-      <LabeledInput
-        label="Type tag"
-        value={typeTag}
-        onChangeText={setTypeTag}
-      />
+      <LabeledInput label="Typ-Tag" value={typeTag} onChangeText={setTypeTag} />
       <Button
-        label="+ Assign Type to selected"
+        label="+ Typ der Auswahl zuweisen"
         onPress={() => onAssignType(typeName, typeClass, typeTag)}
       />
       <View style={styles.separator} />
       <LabeledInput
-        label="Classification ID"
+        label="Klassifikations-ID"
         value={classificationId}
         onChangeText={setClassificationId}
       />
       <LabeledInput
-        label="Classification name"
+        label="Klassifikationsname"
         value={classificationName}
         onChangeText={setClassificationName}
       />
       <LabeledInput
-        label="Classification URI"
+        label="Klassifikations-URI"
         value={classificationUri}
         onChangeText={setClassificationUri}
       />
       <Button
-        label="+ Add Classification"
+        label="+ Klassifikation hinzufügen"
         onPress={() =>
           onAddClassification(
             classificationId,
@@ -2907,45 +3053,45 @@ function BuilderPanel({
       />
       <View style={styles.separator} />
       <LabeledInput
-        label="Document ID"
+        label="Dokument-ID"
         value={documentId}
         onChangeText={setDocumentId}
       />
       <LabeledInput
-        label="Document name"
+        label="Dokumentname"
         value={documentName}
         onChangeText={setDocumentName}
       />
       <LabeledInput
-        label="Document URI"
+        label="Dokument-URI"
         value={documentUri}
         onChangeText={setDocumentUri}
       />
       <Button
-        label="+ Add Document"
+        label="+ Dokument hinzufügen"
         onPress={() =>
           onAddDocumentReference(documentId, documentName, documentUri)
         }
       />
       <View style={styles.separator} />
       <DropdownField
-        label="Unit type"
+        label="Einheitentyp"
         options={UNIT_TYPES}
         value={unitType}
         onChange={setUnitType}
       />
       <DropdownField
-        label="Unit name"
+        label="Einheitenname"
         options={UNIT_NAMES}
         value={unitName}
         onChange={setUnitName}
       />
       <Button
-        label="+ Add Unit"
+        label="+ Einheit hinzufügen"
         onPress={() => onAddUnit(unitType, unitName)}
       />
       <Text style={styles.empty}>
-        Current selection: #{selectedId}{" "}
+        Aktuelle Auswahl: #{selectedId}{" "}
         {document.entityById.get(selectedId)?.type}
       </Text>
     </ScrollView>
@@ -4357,6 +4503,81 @@ function formatCoordinate(value: number) {
   }
   const rounded = Math.round(value * 1000) / 1000;
   return String(Object.is(rounded, -0) ? 0 : rounded);
+}
+
+function parseCoordinateClipboardText(
+  text: string,
+): ParsedCoordinates | undefined {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  try {
+    const data = JSON.parse(trimmed) as Record<string, unknown>;
+    const x = readClipboardCoordinate(data.x);
+    const y = readClipboardCoordinate(data.y);
+    const z = readClipboardCoordinate(data.z);
+    if (x && y && z) {
+      return toParsedCoordinates(x, y, z);
+    }
+  } catch {
+    // fall through to plain text parsing
+  }
+
+  const labeled = [
+    ...trimmed.matchAll(/\b([xyz])\s*[:=]?\s*(-?\d+(?:[.,]\d+)?)/gi),
+  ];
+  if (labeled.length >= 3) {
+    const coordinates = new Map(
+      labeled.map((match) => [
+        match[1].toLowerCase(),
+        normalizeCoordinateText(match[2]),
+      ]),
+    );
+    const x = coordinates.get("x");
+    const y = coordinates.get("y");
+    const z = coordinates.get("z");
+    if (x && y && z) {
+      return toParsedCoordinates(x, y, z);
+    }
+  }
+
+  const numbers = trimmed
+    .match(/-?\d+(?:[.,]\d+)?/g)
+    ?.map(normalizeCoordinateText);
+  if (numbers && numbers.length >= 3) {
+    const [x, y, z] = numbers;
+    if (x && y && z) {
+      return toParsedCoordinates(x, y, z);
+    }
+  }
+  return undefined;
+}
+
+function toParsedCoordinates(
+  x: string,
+  y: string,
+  z: string,
+): ParsedCoordinates {
+  return { x, y, z };
+}
+
+function readClipboardCoordinate(value: unknown) {
+  if (typeof value === "number") {
+    return formatCoordinate(value);
+  }
+  if (typeof value === "string") {
+    return normalizeCoordinateText(value);
+  }
+  return undefined;
+}
+
+function normalizeCoordinateText(value: string) {
+  const normalized = Number(value.trim().replace(",", "."));
+  if (!Number.isFinite(normalized)) {
+    return undefined;
+  }
+  return formatCoordinate(normalized);
 }
 
 function shortType(type: string) {

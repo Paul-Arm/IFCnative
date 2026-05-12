@@ -1,6 +1,8 @@
 {
   "name": "ifcnative",
   "version": "1.0.0",
+  "description": "Desktop IFC builder and viewer built with Vite, React, and Electron.",
+  "main": "dist-electron/main.js",
   "engines": {
     "node": ">=22.13.0",
     "npm": ">=10.5.1"
@@ -9,6 +11,12 @@
     "start": "vite --host 127.0.0.1 --port 5173",
     "dev": "vite --host 127.0.0.1 --port 5173",
     "build": "vite build",
+    "electron:build": "tsc -p src-electron/tsconfig.json",
+    "electron:dev": "npm run electron:build && concurrently -k -s first -n vite,electron \"npm run dev\" \"wait-on http://127.0.0.1:5173 && cross-env ELECTRON_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
+    "desktop:build": "npm run build && npm run electron:build",
+    "desktop:pack": "npm run desktop:build && electron-builder --dir",
+    "desktop:dist": "npm run desktop:build && electron-builder --win zip",
+    "desktop:installer": "npm run desktop:build && electron-builder --win nsis",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
     "postinstall": "node ./scripts/sync-web-ifc-wasm.js && node ./scripts/patch-thatopen-fragments.js && node ./scripts/patch-react-dnd-react19.js && node ./scripts/patch-react-native-web-react19.js",
     "sync-web-ifc-wasm": "node ./scripts/sync-web-ifc-wasm.js",
@@ -37,15 +45,44 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
+    "@types/node": "^25.7.0",
     "@types/react": "~19.2.2",
     "@types/react-dom": "^19.2.0",
     "@types/three": "^0.184.1",
     "@vitejs/plugin-react": "^5.0.0",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^41.5.1",
+    "electron-builder": "^26.8.1",
     "eslint": "^9.0.0",
     "tsx": "^4.21.0",
     "typescript": "~5.9.2",
     "typescript-eslint": "^8.0.0",
-    "vite": "^7.3.3"
+    "vite": "^7.3.3",
+    "wait-on": "^9.0.10"
   },
-  "private": true
+  "private": true,
+  "build": {
+    "appId": "com.ifcnative.desktop",
+    "productName": "IFCnative",
+    "directories": {
+      "output": "release/electron"
+    },
+    "npmRebuild": false,
+    "extraMetadata": {
+      "dependencies": {}
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "!node_modules/**/*",
+      "package.json"
+    ],
+    "win": {
+      "signAndEditExecutable": false,
+      "target": [
+        "zip"
+      ]
+    }
+  }
 }
