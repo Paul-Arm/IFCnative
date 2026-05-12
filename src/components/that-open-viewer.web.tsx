@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type {
     ThatOpenViewerProps,
     ViewerCoordinatePick,
+    ViewerMoveDelta,
 } from "./that-open-viewer";
 
 type ViewerRuntime = Awaited<ReturnType<typeof createThatOpenRuntime>>;
@@ -13,7 +14,6 @@ export default function ThatOpenViewer({
   ifcText,
   isDraftPreview,
   selectedId,
-  selectedName,
   onLog,
   onMoveSelected,
   onPickCoordinates,
@@ -23,6 +23,7 @@ export default function ThatOpenViewer({
   const runtimeRef = useRef<ViewerRuntime | null>(null);
   const selectedRef = useRef(selectedId);
   const onLogRef = useRef(onLog);
+  const onMoveSelectedRef = useRef(onMoveSelected);
   const onPickCoordinatesRef = useRef(onPickCoordinates);
   const onSelectRef = useRef(onSelect);
   const pickerActiveRef = useRef(false);
@@ -30,12 +31,14 @@ export default function ThatOpenViewer({
   const [modelReady, setModelReady] = useState(0);
   const [, setStatus] = useState("Starting ThatOpen viewer...");
   const [error, setError] = useState("");
+  const [moveGizmoActive, setMoveGizmoActive] = useState(false);
   const [pickerActive, setPickerActive] = useState(false);
   const [lastPick, setLastPick] = useState<ViewerCoordinatePick | null>(null);
   const [copyStatus, setCopyStatus] = useState("");
 
   selectedRef.current = selectedId;
   onLogRef.current = onLog;
+  onMoveSelectedRef.current = onMoveSelected;
   onPickCoordinatesRef.current = onPickCoordinates;
   onSelectRef.current = onSelect;
   pickerActiveRef.current = pickerActive;
@@ -68,6 +71,7 @@ export default function ThatOpenViewer({
           setStatus("ThatOpen viewer error");
         },
         onLog: (line) => onLogRef.current?.(line),
+        onMoveSelected: (delta) => onMoveSelectedRef.current?.(delta),
         onPickCoordinates: (pick) => {
           setLastPick(pick);
           onPickCoordinatesRef.current?.(pick);
@@ -150,6 +154,14 @@ export default function ThatOpenViewer({
     void runtime.highlight(selectedId);
   }, [modelReady, selectedId]);
 
+  useEffect(() => {
+    const runtime = runtimeRef.current;
+    if (!runtime || !runtimeReady) {
+      return;
+    }
+    void runtime.setMoveGizmoEnabled(moveGizmoActive);
+  }, [moveGizmoActive, runtimeReady]);
+
   return (
     <div className="ifcnative-thatopen-shell">
       <div className="ifcnative-thatopen-toolbar">
@@ -179,6 +191,13 @@ export default function ThatOpenViewer({
             {pickerActive ? "Picker aktiv" : "Koordinaten wählen"}
           </button>
           <button
+            className={`ifcnative-thatopen-button${moveGizmoActive ? " is-active" : ""}`}
+            type="button"
+            onClick={() => setMoveGizmoActive((current) => !current)}
+          >
+            {moveGizmoActive ? "Move-Gizmo aktiv" : "Move-Gizmo"}
+          </button>
+          <button
             className="ifcnative-thatopen-button"
             disabled={!lastPick}
             type="button"
@@ -205,56 +224,6 @@ export default function ThatOpenViewer({
         {isDraftPreview ? (
           <div className="ifcnative-thatopen-draft-badge">Entwurfsvorschau</div>
         ) : null}
-        <div
-          className="ifcnative-thatopen-nudge-panel"
-          title={`Draft placement nudges for #${selectedId}${selectedName ? ` ${selectedName}` : ""}`}
-        >
-          <span className="ifcnative-thatopen-nudge-label">
-            Move #{selectedId}
-          </span>
-          <button
-            className="ifcnative-thatopen-button"
-            type="button"
-            onClick={() => onMoveSelected?.({ x: -0.25 })}
-          >
-            −X
-          </button>
-          <button
-            className="ifcnative-thatopen-button"
-            type="button"
-            onClick={() => onMoveSelected?.({ x: 0.25 })}
-          >
-            +X
-          </button>
-          <button
-            className="ifcnative-thatopen-button"
-            type="button"
-            onClick={() => onMoveSelected?.({ y: -0.25 })}
-          >
-            −Y
-          </button>
-          <button
-            className="ifcnative-thatopen-button"
-            type="button"
-            onClick={() => onMoveSelected?.({ y: 0.25 })}
-          >
-            +Y
-          </button>
-          <button
-            className="ifcnative-thatopen-button"
-            type="button"
-            onClick={() => onMoveSelected?.({ z: -0.25 })}
-          >
-            −Z
-          </button>
-          <button
-            className="ifcnative-thatopen-button"
-            type="button"
-            onClick={() => onMoveSelected?.({ z: 0.25 })}
-          >
-            +Z
-          </button>
-        </div>
       </div>
       <div
         ref={containerRef}
@@ -279,18 +248,21 @@ async function createThatOpenRuntime(
     onError(message: string): void;
     onCoordinatePickerUsed(): void;
     onLog(line: string): void;
+    onMoveSelected(delta: ViewerMoveDelta): void;
     onPickCoordinates(pick: ViewerCoordinatePick): void;
     onSelect(id: number, source?: string, globalId?: string): void;
     onStatus(message: string): void;
   },
 ) {
-  const [OBC, THREE, FRAGS, BUI, OBCUI] = await Promise.all([
-    import("@thatopen/components"),
-    import("three"),
-    import("@thatopen/fragments"),
-    import("@thatopen/ui"),
-    import("@thatopen/ui-obc"),
-  ]);
+  const [OBC, THREE, FRAGS, BUI, OBCUI, transformControlsModule] =
+    await Promise.all([
+      import("@thatopen/components"),
+      import("three"),
+      import("@thatopen/fragments"),
+      import("@thatopen/ui"),
+      import("@thatopen/ui-obc"),
+      import("three/addons/controls/TransformControls.js"),
+    ]);
   BUI.Manager.init();
   OBCUI.Manager.init();
 
@@ -318,6 +290,17 @@ async function createThatOpenRuntime(
   const grids = components.get(OBC.Grids);
   grids.create(world);
   const viewCube = createThatOpenViewCube(THREE, container, world.camera);
+  const moveGizmo = createMoveGizmo(
+    THREE,
+    transformControlsModule.TransformControls,
+    world.scene.three,
+    world.camera.three,
+    world.camera.controls,
+    canvasFromRenderer(world.renderer),
+    callbacks.onMoveSelected,
+    (line) => callbacks.onLog(line),
+    () => void fragments.core.update(true),
+  );
   const coordinateCursor = createCoordinateCursor(THREE);
   world.scene.three.add(coordinateCursor.group, coordinateCursor.rayLine);
 
@@ -361,6 +344,9 @@ async function createThatOpenRuntime(
 
   const selectFromPointer = async (event: MouseEvent) => {
     if (!model || !world.renderer) {
+      return;
+    }
+    if (moveGizmo.isDragging()) {
       return;
     }
     if (pointerDown) {
@@ -445,7 +431,7 @@ async function createThatOpenRuntime(
     fileName: string,
     ifcBytes?: ArrayBuffer | null,
   ) {
-    const loadKey = `${fileName}:${ifcText.length}:${ifcText.slice(0, 256)}:${ifcText.slice(-256)}`;
+    const loadKey = `${fileName}:${ifcText.length}:${hashText(ifcText)}`;
     if (currentLoadKey === loadKey) {
       callbacks.onStatus("ThatOpen model already loaded");
       return;
@@ -491,12 +477,14 @@ async function createThatOpenRuntime(
       [model.modelId]: new Set([localId]),
     });
     await fragments.core.update(true);
+    await moveGizmo.updateSelection(localId, model);
   }
 
   async function fit() {
     if (!model) {
       return;
     }
+    await moveGizmo.updateSelection(callbacks.getSelectedId(), model);
     await world.camera.fitToItems();
   }
 
@@ -520,6 +508,7 @@ async function createThatOpenRuntime(
       model = null;
     }
     fragments.dispose();
+    moveGizmo.dispose();
     viewCube.dispose();
     coordinateCursor.dispose();
     ifcLoader.dispose();
@@ -533,6 +522,164 @@ async function createThatOpenRuntime(
     hideCoordinateCursor: coordinateCursor.hide,
     load,
     resetCamera,
+    setMoveGizmoEnabled: moveGizmo.setEnabled,
+  };
+}
+
+type TransformControlsConstructor =
+  typeof import("three/addons/controls/TransformControls.js").TransformControls;
+
+interface CameraControlsLike {
+  enabled: boolean;
+}
+
+interface FragmentModelLike {
+  getMergedBox(localIds: number[]): Promise<import("three").Box3>;
+}
+
+function canvasFromRenderer(
+  renderer: import("@thatopen/components").SimpleRenderer,
+) {
+  return renderer.three.domElement;
+}
+
+function createMoveGizmo(
+  THREE: typeof import("three"),
+  TransformControls: TransformControlsConstructor,
+  scene: import("three").Scene,
+  camera: import("three").Camera,
+  cameraControls: CameraControlsLike,
+  canvas: HTMLCanvasElement,
+  onMoveSelected: (delta: ViewerMoveDelta) => void,
+  onLog: (line: string) => void,
+  onSceneChange: () => void,
+) {
+  const anchor = new THREE.Object3D();
+  anchor.name = "IFCnativeMoveGizmoAnchor";
+  scene.add(anchor);
+
+  const controls = new TransformControls(camera, canvas);
+  controls.setMode("translate");
+  controls.setSpace("world");
+  controls.size = 0.85;
+  controls.showXY = false;
+  controls.showYZ = false;
+  controls.showXZ = false;
+  const helper = controls.getHelper();
+  helper.name = "IFCnativeMoveGizmo";
+  helper.visible = false;
+  scene.add(helper);
+  const previewBox = new THREE.Box3Helper(
+    new THREE.Box3(),
+    new THREE.Color(0xf59e0b),
+  );
+  previewBox.name = "IFCnativeMovePreviewBox";
+  previewBox.visible = false;
+  scene.add(previewBox);
+
+  let enabled = false;
+  let dragging = false;
+  let selectedLocalId = 0;
+  let selectedModel: FragmentModelLike | null = null;
+  const dragStart = new THREE.Vector3();
+  const selectedBox = new THREE.Box3();
+
+  const updateSelection = async (
+    localId: number,
+    model: FragmentModelLike | null,
+  ) => {
+    selectedLocalId = localId;
+    selectedModel = model;
+    if (!enabled || !model || !Number.isFinite(localId) || localId <= 0) {
+      controls.detach();
+      helper.visible = false;
+      previewBox.visible = false;
+      return;
+    }
+    const box = await model.getMergedBox([localId]).catch(() => undefined);
+    if (!box || box.isEmpty()) {
+      controls.detach();
+      helper.visible = false;
+      previewBox.visible = false;
+      return;
+    }
+    selectedBox.copy(box);
+    previewBox.box.copy(selectedBox);
+    previewBox.visible = false;
+    box.getCenter(anchor.position);
+    controls.attach(anchor);
+    helper.visible = true;
+    onSceneChange();
+  };
+
+  const setEnabled = async (nextEnabled: boolean) => {
+    enabled = nextEnabled;
+    if (!enabled) {
+      controls.detach();
+      helper.visible = false;
+      previewBox.visible = false;
+      onSceneChange();
+      return;
+    }
+    await updateSelection(selectedLocalId, selectedModel);
+  };
+
+  const onDraggingChanged = (event: { value: unknown }) => {
+    dragging = Boolean(event.value);
+    cameraControls.enabled = !dragging;
+  };
+  const onMouseDown = () => {
+    dragStart.copy(anchor.position);
+    previewBox.box.copy(selectedBox);
+    previewBox.visible = true;
+    onSceneChange();
+  };
+  const onMouseUp = () => {
+    const delta = anchor.position.clone().sub(dragStart);
+    previewBox.visible = false;
+    if (delta.lengthSq() < 0.000001) {
+      onSceneChange();
+      return;
+    }
+    onMoveSelected({ x: delta.x, y: delta.y, z: delta.z });
+    onLog(
+      `viewer.moveGizmo.delta({ dx: ${formatCoordinate(delta.x)}, dy: ${formatCoordinate(delta.y)}, dz: ${formatCoordinate(delta.z)} });`,
+    );
+    onSceneChange();
+  };
+  const onChange = () => {
+    if (dragging) {
+      previewBox.box
+        .copy(selectedBox)
+        .translate(anchor.position.clone().sub(dragStart));
+      previewBox.visible = true;
+    }
+    onSceneChange();
+  };
+
+  controls.addEventListener("dragging-changed", onDraggingChanged);
+  controls.addEventListener("mouseDown", onMouseDown);
+  controls.addEventListener("mouseUp", onMouseUp);
+  controls.addEventListener("change", onChange);
+
+  const dispose = () => {
+    controls.removeEventListener("dragging-changed", onDraggingChanged);
+    controls.removeEventListener("mouseDown", onMouseDown);
+    controls.removeEventListener("mouseUp", onMouseUp);
+    controls.removeEventListener("change", onChange);
+    controls.detach();
+    controls.dispose();
+    worldDispose(previewBox);
+    previewBox.removeFromParent();
+    helper.removeFromParent();
+    anchor.removeFromParent();
+  };
+
+  return {
+    dispose,
+    isDragging: () => dragging,
+    setEnabled,
+    updateSelection,
   };
 }
 
@@ -783,6 +930,15 @@ function resolvePublicAssetUrl(assetPath: string) {
     return new URL(cleanPath, globalThis.location.href).toString();
   }
   return new URL(cleanPath, `${globalThis.location.origin}/`).toString();
+}
+
+function hashText(text: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
 }
 
 function formatCoordinate(value: number) {

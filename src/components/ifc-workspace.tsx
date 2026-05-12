@@ -1,65 +1,65 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-    Mosaic,
-    MosaicWindow,
-    type MosaicNode,
-    type MosaicPath,
+  Mosaic,
+  MosaicWindow,
+  type MosaicNode,
+  type MosaicPath,
 } from "react-mosaic-component";
 import {
-    Platform,
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  Platform,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
 
 import {
-    previewEntityAwareDiffLines,
-    summarizeEntityAwareDiff,
+  previewEntityAwareDiffLines,
+  summarizeEntityAwareDiff,
 } from "@/ifc/entityDiff";
 
 import {
-    addNativeBodyElement,
-    addNativeClassification,
-    addNativeDocumentReference,
-    addNativeElement,
-    addNativeMaterial,
-    addNativePropertySet,
-    addNativeQuantitySet,
-    addNativeRelationship,
-    addNativeSiUnit,
-    addNativeTypeAssignment,
-    assignNativeBodyRepresentation,
-    createNativeSampleDocument,
-    getNativePlacement,
-    parseNativeIfcFileInWorker,
-    removeNativeRelationship,
-    serializeNativeIfcDocument,
-    splitTopLevel,
-    updateNativeEntity,
-    updateNativePlacement,
-    updateNativePropertyValue,
-    updateNativeRelationship,
-    type NativeIfcDocument,
-    type NativeIfcEntity,
-    type NativeIfcRelationship,
-    type NativeIfcTreeNode,
+  addNativeBodyElement,
+  addNativeClassification,
+  addNativeDocumentReference,
+  addNativeElement,
+  addNativeMaterial,
+  addNativePropertySet,
+  addNativeQuantitySet,
+  addNativeRelationship,
+  addNativeSiUnit,
+  addNativeTypeAssignment,
+  assignNativeBodyRepresentation,
+  createNativeSampleDocument,
+  getNativePlacement,
+  parseNativeIfcFileInWorker,
+  removeNativeRelationship,
+  serializeNativeIfcDocument,
+  splitTopLevel,
+  updateNativeEntity,
+  updateNativePlacement,
+  updateNativePropertyValue,
+  updateNativeRelationship,
+  type NativeIfcDocument,
+  type NativeIfcEntity,
+  type NativeIfcRelationship,
+  type NativeIfcTreeNode
 } from "@/ifc";
 import {
-    buildNativeGraphNeighborhood,
-    type NativeGraphEdge,
-    type NativeGraphPreset,
+  buildNativeGraphNeighborhood,
+  type NativeGraphEdge,
+  type NativeGraphPreset,
 } from "@/ifc/nativeGraph";
 
 import RelationshipFlow from "./relationship-flow";
 import type {
-    RelationshipFlowEdge,
-    RelationshipFlowLayoutMode,
-    RelationshipFlowMove,
-    RelationshipFlowNode,
+  RelationshipFlowEdge,
+  RelationshipFlowLayoutMode,
+  RelationshipFlowMove,
+  RelationshipFlowNode,
 } from "./relationship-flow.types";
 import type { ViewerCoordinatePick } from "./that-open-viewer";
 import ThatOpenViewer from "./that-open-viewer";
@@ -791,7 +791,8 @@ export default function IfcWorkspace() {
   };
 
   const moveSelectedPlacement = (x: string, y: string, z: string) => {
-    const next = updateNativePlacement(document, selectedId, { x, y, z });
+    const sourceDocument = pendingDocument ?? document;
+    const next = updateNativePlacement(sourceDocument, selectedId, { x, y, z });
     stageDocument(
       next,
       selectedId,
@@ -805,22 +806,24 @@ export default function IfcWorkspace() {
     y?: number;
     z?: number;
   }) => {
-    const placement = getNativePlacement(document, selectedId);
+    const sourceDocument = pendingDocument ?? document;
+    const placement = getNativePlacement(sourceDocument, selectedId);
     if (!placement) {
       logAction(
         `movePlacement.nudgeSkipped({ id: ${selectedId}, reason: 'no-placement' });`,
       );
       return;
     }
-    const x = formatCoordinate(placement.x + (delta.x ?? 0));
-    const y = formatCoordinate(placement.y + (delta.y ?? 0));
-    const z = formatCoordinate(placement.z + (delta.z ?? 0));
-    const next = updateNativePlacement(document, selectedId, { x, y, z });
+    const nativeDelta = viewerWorldDeltaToNativePlacementDelta(delta);
+    const x = formatCoordinate(placement.x + nativeDelta.x);
+    const y = formatCoordinate(placement.y + nativeDelta.y);
+    const z = formatCoordinate(placement.z + nativeDelta.z);
+    const next = updateNativePlacement(sourceDocument, selectedId, { x, y, z });
     stageDocument(
       next,
       selectedId,
-      `Nudge #${selectedId} placement by (${formatCoordinate(delta.x ?? 0)}, ${formatCoordinate(delta.y ?? 0)}, ${formatCoordinate(delta.z ?? 0)}) to (${x}, ${y}, ${z})`,
-      `movePlacement.nudge({ id: ${selectedId}, dx: ${delta.x ?? 0}, dy: ${delta.y ?? 0}, dz: ${delta.z ?? 0} });`,
+      `Move #${selectedId} placement by viewer delta (${formatCoordinate(delta.x ?? 0)}, ${formatCoordinate(delta.y ?? 0)}, ${formatCoordinate(delta.z ?? 0)}) to IFC (${x}, ${y}, ${z})`,
+      `movePlacement.viewerDelta({ id: ${selectedId}, dx: ${delta.x ?? 0}, dy: ${delta.y ?? 0}, dz: ${delta.z ?? 0} });`,
     );
   };
 
@@ -981,7 +984,7 @@ export default function IfcWorkspace() {
         onChange={(value) => setInspectorMode(value as InspectorMode)}
       />
       <InspectorPanel
-        document={document}
+        document={viewerDocument}
         mode={inspectorMode}
         selectedId={selectedId}
         onAddClassification={addClassification}

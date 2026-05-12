@@ -18,9 +18,15 @@ export interface ThatOpenViewerProps {
   selectedId: number;
   selectedName?: string;
   onLog?(line: string): void;
-  onMoveSelected?(delta: { x?: number; y?: number; z?: number }): void;
+  onMoveSelected?(delta: ViewerMoveDelta): void;
   onPickCoordinates?(pick: ViewerCoordinatePick): void;
   onSelect(id: number, source?: string, globalId?: string): void;
+}
+
+export interface ViewerMoveDelta {
+  x?: number;
+  y?: number;
+  z?: number;
 }
 
 export default function ThatOpenViewer({ fileName }: ThatOpenViewerProps) {

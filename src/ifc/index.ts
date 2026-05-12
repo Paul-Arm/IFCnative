@@ -1,4 +1,5 @@
 export * from "./builder";
+export * from "./coordinateMapping";
 export * from "./coverage";
 export * from "./geometryIndex";
 export * from "./graphIndex";
