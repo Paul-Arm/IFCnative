@@ -46,6 +46,7 @@ export interface RelationshipFlowProps {
   relationshipCount: number;
   relationshipTypeFilters: string[];
   relationshipTypes: string[];
+  relationshipWarnings: string[];
   onClearPositions(): void;
   onConnectNodes(sourceId: number, targetId: number, relationshipType: string): void;
   onCreateNodeFromConnection(

@@ -336,6 +336,30 @@ test('native graph geometry preset expands placement and representation referenc
   assert.ok(graph.relationshipTypes.includes('IFCLOCALPLACEMENT'));
 });
 
+test('native graph surfaces visible relationship validation warnings', () => {
+  const sample = createNativeSampleDocument();
+  const block = sample.entities.find((entity) => entity.type === 'IFCBUILTELEMENT');
+  assert.ok(block);
+
+  const typed = addNativeTypeAssignment(sample, block.id, 'Graph Warning Type', 'IFCTYPEOBJECT', 'WARN-TYPE');
+  const assignment = typed.typeAssignmentsByEntity.get(block.id)?.[0];
+  assert.ok(assignment);
+
+  const broken = updateNativeRelationship(typed, assignment.relationshipId, {
+    sourceId: block.id,
+    targetId: block.id,
+    type: 'IFCRELDEFINESBYTYPE',
+  });
+  const graph = buildNativeGraphNeighborhood(broken, {
+    depth: 1,
+    preset: 'all',
+    selectedId: block.id,
+  });
+
+  assert.ok(graph.warnings.some((warning) => warning.relationshipId === assignment.relationshipId));
+  assert.ok(graph.warnings.some((warning) => warning.message.includes('IFCRELDEFINESBYTYPE expects type object definitions')));
+});
+
 test('entity-aware diff groups STEP changes by entity id', () => {
   const sample = createNativeSampleDocument();
   const storey = sample.entities.find((entity) => entity.type === 'IFCBUILDINGSTOREY');

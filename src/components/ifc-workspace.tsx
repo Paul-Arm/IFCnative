@@ -1026,6 +1026,7 @@ function GraphPanel({
       relationshipCount={graph.edges.length}
       relationshipTypeFilters={[...relationshipTypeFilters]}
       relationshipTypes={graph.relationshipTypes}
+      relationshipWarnings={graph.warnings.map((warning) => warning.message)}
       onClearPositions={() => {
         onPositions(new Map());
         onLog('graph.autoLayout();');

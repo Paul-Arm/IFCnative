@@ -30,6 +30,14 @@ export interface NativeGraphNeighborhood {
   loadedSources: Set<number>;
   nodeIds: number[];
   relationshipTypes: string[];
+  warnings: NativeGraphWarning[];
+}
+
+export interface NativeGraphWarning {
+  entityIds: number[];
+  message: string;
+  relationshipId?: number;
+  type?: string;
 }
 
 const PRESET_RELATIONSHIPS: Record<NativeGraphPreset, string[] | undefined> = {
@@ -159,15 +167,68 @@ export function buildNativeGraphNeighborhood(
     }
   }
 
+  const visibleNodeIds = [...nodeSet];
+  const visibleEdges = uniqueEdges(edges);
+
   return {
     capped,
     childCounts,
-    edges: uniqueEdges(edges),
+    edges: visibleEdges,
     levels,
     loadedSources,
-    nodeIds: [...nodeSet].sort((a, b) => (levels.get(a) ?? 0) - (levels.get(b) ?? 0) || a - b),
+    nodeIds: visibleNodeIds.sort((a, b) => (levels.get(a) ?? 0) - (levels.get(b) ?? 0) || a - b),
     relationshipTypes: [...relationshipTypes].sort(),
+    warnings: graphWarnings(document, visibleNodeIds, visibleEdges),
   };
+}
+
+function graphWarnings(
+  document: NativeIfcDocument,
+  visibleNodeIds: number[],
+  visibleEdges: NativeGraphEdge[],
+): NativeGraphWarning[] {
+  const visible = new Set(visibleNodeIds);
+  const relationshipIds = new Set(
+    visibleEdges.map((edge) => edge.rel).filter((id) => id > 0),
+  );
+  const warnings: NativeGraphWarning[] = [];
+
+  for (const relationship of document.relationships) {
+    const relationshipVisible = relationshipIds.has(relationship.id);
+    const endpointVisible = [...relationship.sourceIds, ...relationship.targetIds].some((id) => visible.has(id));
+    if (!relationshipVisible && !endpointVisible) {
+      continue;
+    }
+    for (const message of diagnosticsForRelationship(document.diagnostics, relationship.id)) {
+      warnings.push({
+        entityIds: unique([...relationship.sourceIds, ...relationship.targetIds]),
+        message,
+        relationshipId: relationship.id,
+        type: relationship.type,
+      });
+    }
+  }
+
+  for (const id of visibleNodeIds) {
+    for (const message of diagnosticsForEntity(document.diagnostics, id)) {
+      if (warnings.some((warning) => warning.message === message)) {
+        continue;
+      }
+      warnings.push({ entityIds: [id], message });
+    }
+  }
+
+  return warnings.slice(0, 12);
+}
+
+function diagnosticsForRelationship(diagnostics: string[], relationshipId: number) {
+  const prefix = `Warning: #${relationshipId} `;
+  return diagnostics.filter((line) => line.startsWith(prefix));
+}
+
+function diagnosticsForEntity(diagnostics: string[], entityId: number) {
+  const prefix = `Warning: #${entityId} `;
+  return diagnostics.filter((line) => line.startsWith(prefix));
 }
 
 function geometryReferenceEdgesForSource(

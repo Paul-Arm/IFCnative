@@ -69,6 +69,7 @@ export default function RelationshipFlow({
   relationshipCount,
   relationshipTypeFilters,
   relationshipTypes,
+  relationshipWarnings,
   onClearPositions,
   onConnectNodes,
   onCreateNodeFromConnection,
@@ -263,6 +264,12 @@ export default function RelationshipFlow({
           );
         })}
       </div>
+      {relationshipWarnings.length ? (
+        <div className="ifc-graph-warning-bar" title={relationshipWarnings.join('\n')}>
+          <strong>{relationshipWarnings.length} graph warning{relationshipWarnings.length === 1 ? '' : 's'}</strong>
+          <span>{relationshipWarnings[0]}</span>
+        </div>
+      ) : null}
       <div className="ifc-reactflow-shell">
         <ReactFlow
           connectionMode={ConnectionMode.Loose}
