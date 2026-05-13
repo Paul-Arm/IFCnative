@@ -291,12 +291,12 @@ textarea {
   border-color: #5eead4;
 }
 
-.ifcnative-thatopen-draft-badge {
+.ifcnative-thatopen-warning {
   align-items: center;
-  background: #fff7ed;
-  border: 1px solid #fed7aa;
+  background: #fffbeb;
+  border: 1px solid #fbbf24;
   border-radius: 6px;
-  color: #9a3412;
+  color: #92400e;
   display: inline-flex;
   font-size: 11px;
   font-weight: 700;

@@ -14,7 +14,6 @@ export interface ThatOpenViewerProps {
   fileName: string;
   ifcBytes?: ArrayBuffer | null;
   ifcText: string;
-  isDraftPreview?: boolean;
   selectedId: number;
   selectedName?: string;
   onLog?(line: string): void;

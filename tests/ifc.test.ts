@@ -6,31 +6,31 @@ import * as WebIFC from "web-ifc";
 import { createMinimalIfcProject } from "../src/ifc/builder";
 import { viewerWorldDeltaToIfcPlacementDelta } from "../src/ifc/coordinateMapping";
 import {
-  previewEntityAwareDiffLines,
-  summarizeEntityAwareDiff,
-} from "../src/ifc/entityDiff";
+    buildNativeDocumentFromFragments,
+    type FragmentDocumentModel,
+} from "../src/ifc/fragmentDocument";
 import { buildGraphIndex, summarizeLine } from "../src/ifc/graphIndex";
 import {
-  addNativeBodyElement,
-  addNativeClassification,
-  addNativeDocumentReference,
-  addNativeElement,
-  addNativeMaterial,
-  addNativePropertySet,
-  addNativeQuantitySet,
-  addNativeRelationship,
-  addNativeSiUnit,
-  addNativeTypeAssignment,
-  assignNativeBodyRepresentation,
-  createNativeSampleDocument,
-  getNativePlacement,
-  parseNativeIfcText,
-  removeNativeRelationship,
-  resolveNativeMovableProductId,
-  serializeNativeIfcDocument,
-  updateNativePlacement,
-  updateNativePropertyValue,
-  updateNativeRelationship,
+    addNativeBodyElement,
+    addNativeClassification,
+    addNativeDocumentReference,
+    addNativeElement,
+    addNativeMaterial,
+    addNativePropertySet,
+    addNativeQuantitySet,
+    addNativeRelationship,
+    addNativeSiUnit,
+    addNativeTypeAssignment,
+    assignNativeBodyRepresentation,
+    createNativeSampleDocument,
+    getNativePlacement,
+    parseNativeIfcText,
+    removeNativeRelationship,
+    resolveNativeMovableProductId,
+    serializeNativeIfcDocument,
+    updateNativePlacement,
+    updateNativePropertyValue,
+    updateNativeRelationship,
 } from "../src/ifc/nativeDocument";
 import { buildNativeGraphNeighborhood } from "../src/ifc/nativeGraph";
 import { preflightIfcText } from "../src/ifc/preflight";
@@ -65,6 +65,129 @@ test("preflight reports missing STEP markers", () => {
     ),
   );
 });
+
+test("fragments adapter projects model data into the native document contract", async () => {
+  const items = new Map<number, Record<string, unknown>>();
+  const project = fragmentItem(1, "Demo Project");
+  const storey = fragmentItem(2, "Level 01");
+  const wall = fragmentItem(3, "Basic Wall", {
+    HasAssociations: [
+      fragmentItem(12, "Catalog class", {
+        Identification: { value: "B-123" },
+        Location: { value: "openSIM BIM Objektkatalog" },
+      }),
+    ],
+  });
+  const pset = fragmentItem(10, "Pset_WallCommon", {
+    HasProperties: [
+      fragmentItem(11, "Reference", {
+        NominalValue: { value: "A-01" },
+        valueType: { value: "IFCLABEL" },
+      }),
+    ],
+  });
+  project.IsDecomposedBy = [storey];
+  storey.ContainsElements = [wall];
+  wall.IsDefinedBy = [pset];
+  for (const item of [project, storey, wall, pset]) {
+    items.set(Number((item.localId as { value: number }).value), item);
+  }
+
+  const categories = new Map([
+    ["IFCPROJECT", [1]],
+    ["IFCBUILDINGSTOREY", [2]],
+    ["IFCWALL", [3]],
+    ["IFCPROPERTYSET", [10]],
+  ]);
+  const model: FragmentDocumentModel = {
+    modelId: "demo-frag",
+    getAttributeNames: async () => ["Name", "GlobalId"],
+    getCategories: async () => [...categories.keys()],
+    getGuidsByLocalIds: async (ids) => ids.map((id) => `guid-${id}`),
+    getItemsData: async (ids) => ids.map((id) => items.get(id) ?? {}),
+    getItemsOfCategories: async (patterns) => {
+      const result: Record<string, number[]> = {};
+      for (const [category, ids] of categories) {
+        if (patterns.some((pattern) => pattern.test(category))) {
+          result[category] = ids;
+        }
+      }
+      return result;
+    },
+    getLocalIds: async () => [1, 2, 3, 10],
+    getMetadata: async () => ({ schema: "IFC4X3_ADD2" }),
+    getRelationNames: async () => [
+      "IsDecomposedBy",
+      "ContainsElements",
+      "IsDefinedBy",
+      "HasAssociations",
+    ],
+    getSpatialStructure: async () => ({
+      category: "IFCPROJECT",
+      localId: null,
+      children: [
+        {
+          category: "IFCPROJECT",
+          localId: 1,
+          children: [
+            {
+              category: "IFCBUILDINGSTOREY",
+              localId: 2,
+              children: [{ category: "IFCWALL", localId: 3 }],
+            },
+          ],
+        },
+      ],
+    }),
+  };
+
+  const document = await buildNativeDocumentFromFragments(model, {
+    fileName: "demo.ifc",
+  });
+
+  assert.equal(document.schema, "IFC4X3_ADD2");
+  assert.equal(document.entityById.get(3)?.type, "IFCWALL");
+  assert.equal(document.entityById.get(3)?.name, "Basic Wall");
+  assert.equal(document.spatialRoots[0]?.children[0]?.children[0]?.id, 3);
+  assert.ok(
+    document.relationships.some(
+      (relationship) =>
+        relationship.type === "IFCRELCONTAINEDINSPATIALSTRUCTURE" &&
+        relationship.sourceIds.includes(2) &&
+        relationship.targetIds.includes(3),
+    ),
+  );
+  assert.deepEqual(document.propertySetsByEntity.get(3)?.[0], {
+    id: 10,
+    kind: "IFCPROPERTYSET",
+    name: "Pset_WallCommon",
+    values: [
+      {
+        id: 11,
+        name: "Reference",
+        type: "IFCLABEL",
+        value: "A-01",
+      },
+    ],
+  });
+  assert.equal(
+    document.resourcesByEntity.get(3)?.[0],
+    "B-123 openSIM BIM Objektkatalog",
+  );
+});
+
+function fragmentItem(
+  localId: number,
+  name: string,
+  extra: Record<string, unknown> = {},
+) {
+  return {
+    GlobalId: { value: `guid-${localId}` },
+    Name: { value: name },
+    localId: { value: localId },
+    ...extra,
+  };
+}
 
 test("web-ifc opens builder scaffold and graph indexes spatial hierarchy", async () => {
   const api = new WebIFC.IfcAPI();
@@ -294,7 +417,7 @@ test("native document edits keep indexes live", () => {
   );
 });
 
-test("native type assignments are indexed, diffed, and endpoint-validated", () => {
+test("native type assignments are indexed and endpoint-validated", () => {
   const sample = createNativeSampleDocument();
   const block = sample.entities.find(
     (entity) => entity.type === "IFCBUILTELEMENT",
@@ -323,13 +446,9 @@ test("native type assignments are indexed, diffed, and endpoint-validated", () =
     ),
   );
 
-  const diffSummary = summarizeEntityAwareDiff(
-    serializeNativeIfcDocument(sample),
-    serializeNativeIfcDocument(typed),
-  );
   assert.ok(
-    diffSummary.relationshipChanges.some(
-      (change) => change.type === "IFCRELDEFINESBYTYPE",
+    typed.relationships.some(
+      (relationship) => relationship.type === "IFCRELDEFINESBYTYPE",
     ),
   );
 
@@ -408,7 +527,7 @@ test("native document diagnostics validate references, containment and relations
   );
 });
 
-test("native document stages relationship deletion without removing endpoints", () => {
+test("native document removes relationships without removing endpoints", () => {
   const sample = createNativeSampleDocument();
   const storey = sample.entities.find(
     (entity) => entity.type === "IFCBUILDINGSTOREY",
@@ -444,15 +563,11 @@ test("native document stages relationship deletion without removing endpoints", 
     false,
   );
 
-  const summary = summarizeEntityAwareDiff(
-    serializeNativeIfcDocument(withElement),
-    serializeNativeIfcDocument(withoutRelationship),
-  );
-  assert.equal(summary.removedEntities, 1);
-  assert.ok(
-    summary.relationshipChanges.some(
-      (change) => change.action === "removed" && change.id === relationship.id,
+  assert.equal(
+    serializeNativeIfcDocument(withoutRelationship).includes(
+      `#${relationship.id}=`,
     ),
+    false,
   );
 });
 
@@ -525,61 +640,96 @@ test("native graph presets filter relationship neighborhoods", () => {
   );
 });
 
-test("entity-aware diff groups STEP changes by entity id", () => {
-  const sample = createNativeSampleDocument();
-  const storey = sample.entities.find(
-    (entity) => entity.type === "IFCBUILDINGSTOREY",
-  );
-  assert.ok(storey);
+test("native spatial tree handles deep hierarchies without recursion", () => {
+  const document = parseNativeIfcText(createDeepSpatialIfc(2500), "deep.ifc");
+  assert.equal(document.spatialRoots.length, 1);
 
-  const withBody = addNativeBodyElement(sample, {
-    depth: "1",
-    height: "1",
-    name: "Diff Block",
-    parentId: storey.id,
-    type: "IFCBUILDINGELEMENTPROXY",
-    width: "1",
-  });
-  const lines = previewEntityAwareDiffLines(
-    serializeNativeIfcDocument(sample),
-    serializeNativeIfcDocument(withBody),
-  );
-  const text = lines.map((line) => line.text).join("\n");
+  let current = document.spatialRoots[0];
+  let depth = 0;
+  while (current.children.length) {
+    depth += 1;
+    current = current.children[0];
+  }
 
-  assert.ok(text.includes("Entity-aware STEP diff"));
-  assert.ok(text.includes("IFCBUILDINGELEMENTPROXY"));
-  assert.ok(text.includes("'Diff Block' added"));
-  assert.ok(
-    lines.some(
-      (line) =>
-        line.kind === "add" &&
-        line.text.includes("IFCRELCONTAINEDINSPATIALSTRUCTURE"),
-    ),
-  );
-
-  const summary = summarizeEntityAwareDiff(
-    serializeNativeIfcDocument(sample),
-    serializeNativeIfcDocument(withBody),
-  );
-  assert.ok(summary.addedEntities > 0);
-  assert.ok(
-    summary.relationshipChanges.some(
-      (change) =>
-        change.action === "added" &&
-        change.type === "IFCRELCONTAINEDINSPATIALSTRUCTURE",
-    ),
-  );
-  assert.ok(
-    summary.geometryChanges.some(
-      (change) =>
-        change.action === "added" &&
-        change.type === "IFCEXTRUDEDAREASOLID" &&
-        change.affectedProducts.some(
-          (product) => product.name === "Diff Block",
-        ),
-    ),
-  );
+  assert.equal(depth, 2500);
+  assert.ok(document.entityById.has(2501));
 });
+
+test("web-ifc graph tree handles deep aggregate chains without recursion", () => {
+  const depth = 2500;
+  const entities: IfcEntitySummary[] = Array.from(
+    { length: depth + 1 },
+    (_value, index) => ({
+      expressID: index + 1,
+      name: `Node ${index + 1}`,
+      typeCode: index === 0 ? 1 : 2,
+      typeName: index === 0 ? "IFCPROJECT" : "IFCSITE",
+    }),
+  );
+  const relationshipLines = new Map<number, Record<string, unknown>>();
+  for (let index = 0; index < depth; index += 1) {
+    const id = 10_000 + index;
+    relationshipLines.set(id, {
+      RelatedObjects: [{ value: index + 2 }],
+      RelatingObject: { value: index + 1 },
+      expressID: id,
+    });
+  }
+  const ids = [...relationshipLines.keys()];
+  const api = {
+    GetLine: (_modelID: number, expressID: number) =>
+      relationshipLines.get(expressID),
+    GetLineIDsWithType: () => ({
+      get: (index: number) => ids[index],
+      size: () => ids.length,
+    }),
+    GetTypeCodeFromName: (typeName: string) =>
+      typeName === "IFCRELAGGREGATES" ? 1 : 0,
+  } as unknown as WebIFC.IfcAPI;
+
+  const graph = buildGraphIndex(api, 1, entities, []);
+  assert.equal(graph.spatialTree.length, 1);
+
+  let current = graph.spatialTree[0];
+  let resolvedDepth = 0;
+  while (current.children.length) {
+    resolvedDepth += 1;
+    current = current.children[0];
+  }
+
+  assert.equal(resolvedDepth, depth);
+});
+
+function createDeepSpatialIfc(depth: number) {
+  const entities = [
+    "#1=IFCPROJECT('0IFCnative000000000001',$,'Deep Project',$,$,$,$,$,$);",
+  ];
+  const relationships: string[] = [];
+  for (let index = 0; index < depth; index += 1) {
+    const id = index + 2;
+    const parentId = id - 1;
+    entities.push(
+      `#${id}=IFCSITE('0IFCnative${String(id).padStart(12, "0")}',$,'Node ${id}',$,$,$,$,$,.ELEMENT.,$,$,$,$,$);`,
+    );
+    relationships.push(
+      `#${10_000 + index}=IFCRELAGGREGATES('0IFCnative${String(10_000 + index).padStart(12, "0")}',$,$,$,#${parentId},(#${id}));`,
+    );
+  }
+  return [
+    "ISO-10303-21;",
+    "HEADER;",
+    "FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');",
+    "FILE_NAME('deep.ifc','2026-05-13T00:00:00',('IFCnative'),('IFCnative'),'IFCnative','IFCnative','');",
+    "FILE_SCHEMA(('IFC4X3_ADD2'));",
+    "ENDSEC;",
+    "DATA;",
+    ...entities,
+    ...relationships,
+    "ENDSEC;",
+    "END-ISO-10303-21;",
+    "",
+  ].join("\n");
+}
 
 test("native body preset creates contained swept solid geometry", async () => {
   const sample = createNativeSampleDocument();
@@ -764,18 +914,9 @@ test("native body assignment replaces selected product representation with revie
       ),
   );
 
-  const diffSummary = summarizeEntityAwareDiff(
-    serializeNativeIfcDocument(sample),
-    serializeNativeIfcDocument(assigned),
-  );
-  assert.equal(diffSummary.changedEntities, 1);
-  assert.ok(diffSummary.addedEntities >= 10);
   assert.ok(
-    diffSummary.geometryChanges.some(
-      (change) =>
-        change.action === "added" &&
-        change.type === "IFCPRODUCTDEFINITIONSHAPE" &&
-        change.affectedProducts.some((product) => product.id === block.id),
+    assigned.entities.some(
+      (entity) => entity.type === "IFCPRODUCTDEFINITIONSHAPE",
     ),
   );
 
@@ -789,7 +930,7 @@ test("native body assignment replaces selected product representation with revie
   api.CloseModel(modelID);
 });
 
-test("native placement editor drafts numeric XYZ moves without rewriting product identity", async () => {
+test("native placement editor writes numeric XYZ moves without rewriting product identity", async () => {
   const sample = createNativeSampleDocument();
   const block = sample.entities.find(
     (entity) => entity.type === "IFCBUILTELEMENT",
@@ -814,37 +955,10 @@ test("native placement editor drafts numeric XYZ moves without rewriting product
   assert.equal(afterPlacement.y, -1.5);
   assert.equal(afterPlacement.z, 0.75);
 
-  const diffText = previewEntityAwareDiffLines(
-    serializeNativeIfcDocument(sample),
-    serializeNativeIfcDocument(moved),
-  )
-    .map((line) => line.text)
-    .join("\n");
-  assert.ok(
-    diffText.includes(`#${beforePlacement.pointId} IFCCARTESIANPOINT changed`),
-  );
+  const movedPoint = moved.entityById.get(beforePlacement.pointId);
+  assert.ok(movedPoint);
+  assert.deepEqual(movedPoint.args, ["(3.25,-1.5,0.75)"]);
   assert.equal(moved.entityById.get(block.id)?.globalId, block.globalId);
-
-  const diffSummary = summarizeEntityAwareDiff(
-    serializeNativeIfcDocument(sample),
-    serializeNativeIfcDocument(moved),
-  );
-  assert.deepEqual(diffSummary.placementChanges, [
-    {
-      after: [3.25, -1.5, 0.75],
-      before: [0, 0, 0],
-      affectedProducts: [
-        {
-          id: block.id,
-          name: block.name,
-          placementId: beforePlacement.placementId,
-          type: block.type,
-        },
-      ],
-      delta: [3.25, -1.5, 0.75],
-      pointId: beforePlacement.pointId,
-    },
-  ]);
 
   const api = new WebIFC.IfcAPI();
   await api.Init();

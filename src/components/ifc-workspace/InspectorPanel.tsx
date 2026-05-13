@@ -364,7 +364,7 @@ function PlacementPanel({
         <Text style={styles.infoTitle}>No editable local placement</Text>
         <Text style={styles.empty}>
           Select a product with IFCLOCALPLACEMENT → IFCAXIS2PLACEMENT3D →
-          IFCCARTESIANPOINT to draft a numeric XYZ move.
+          IFCCARTESIANPOINT to edit a numeric XYZ move.
         </Text>
       </View>
     );
@@ -382,10 +382,9 @@ function PlacementPanel({
           value={placement.relativeTo ? `#${placement.relativeTo}` : "$"}
         />
       </InfoSection>
-      <InfoSection title="Draft move">
+      <InfoSection title="Move">
         <Text style={styles.empty}>
-          Edits update only the placement cartesian point and stay pending until
-          reviewed in IFC Diff / Review.
+          Edits update the placement cartesian point directly in the active IFC.
         </Text>
         <View style={styles.row}>
           <View style={styles.flexField}>
@@ -1349,7 +1348,12 @@ function groupCatalogPsets(objectType: CatalogObjectType | undefined) {
   }
   const groups = new Map<string, CatalogPropertyRule[]>();
   for (const rule of objectType.propertyRules) {
-    groups.set(rule.psetName, [...(groups.get(rule.psetName) ?? []), rule]);
+    const existing = groups.get(rule.psetName);
+    if (existing) {
+      existing.push(rule);
+    } else {
+      groups.set(rule.psetName, [rule]);
+    }
   }
   return [...groups.entries()].map(([name, rules]) => ({ name, rules }));
 }

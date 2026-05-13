@@ -1,8 +1,6 @@
 import type { MosaicViewId } from "./components/ifc-workspace/types";
 
 type IfcNativeDesktopCommand =
-  | { type: "apply-draft" }
-  | { type: "discard-draft" }
   | { type: "export-ifc" }
   | { type: "import-catalog" }
   | { type: "load-sample" }
@@ -14,7 +12,6 @@ type IfcNativeDesktopMenuState = {
   catalogImporting: boolean;
   closedWindowIds: MosaicViewId[];
   hasCatalog: boolean;
-  hasPendingDraft: boolean;
   loadingIfcName: string;
 };
 

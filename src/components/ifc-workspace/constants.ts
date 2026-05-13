@@ -10,7 +10,6 @@ export const MOSAIC_VIEW_IDS: MosaicViewId[] = [
   "inspector",
   "builder",
   "catalog",
-  "diff",
   "console",
   "diagnostics",
 ];
@@ -33,14 +32,9 @@ export const DEFAULT_MOSAIC_LAYOUT: MosaicNode<MosaicViewId> = {
     },
     second: {
       direction: "row",
-      first: "diff",
-      second: {
-        direction: "row",
-        first: "console",
-        second: "diagnostics",
-        splitPercentage: 52,
-      },
-      splitPercentage: 42,
+      first: "console",
+      second: "diagnostics",
+      splitPercentage: 52,
     },
     splitPercentage: 72,
   },
@@ -52,7 +46,6 @@ export const MOSAIC_TITLES: Record<MosaicViewId, string> = {
   catalog: "Objektkatalog",
   console: "JS Console",
   diagnostics: "Diagnostics",
-  diff: "IFC Diff / Review",
   inspector: "Inspector",
   structure: "Structure",
   viewer: "3D Viewer",

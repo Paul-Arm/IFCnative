@@ -130,7 +130,12 @@ export function groupCatalogRulesByPset(rules: CatalogPropertyRule[]) {
   const groups = new Map<string, CatalogPropertyRule[]>();
   for (const rule of rules) {
     const key = rule.psetName;
-    groups.set(key, [...(groups.get(key) ?? []), rule]);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.push(rule);
+    } else {
+      groups.set(key, [rule]);
+    }
   }
   return groups;
 }

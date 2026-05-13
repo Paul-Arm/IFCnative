@@ -1,6 +1,11 @@
-import type * as WebIFC from 'web-ifc';
+import type * as WebIFC from "web-ifc";
 
-import type { IfcDiagnostic, IfcEntitySummary, IfcGeometryIndex, IfcGeometryPiece } from './types';
+import type {
+    IfcDiagnostic,
+    IfcEntitySummary,
+    IfcGeometryIndex,
+    IfcGeometryPiece,
+} from "./types";
 
 export function buildGeometryIndex(
   api: WebIFC.IfcAPI,
@@ -11,13 +16,21 @@ export function buildGeometryIndex(
   const pieces: IfcGeometryPiece[] = [];
   const byExpressID = new Map<number, IfcGeometryPiece[]>();
   const typeCounter = new Map<string, number>();
-  const min: [number, number, number] = [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY];
-  const max: [number, number, number] = [Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY];
+  const min: [number, number, number] = [
+    Number.POSITIVE_INFINITY,
+    Number.POSITIVE_INFINITY,
+    Number.POSITIVE_INFINITY,
+  ];
+  const max: [number, number, number] = [
+    Number.NEGATIVE_INFINITY,
+    Number.NEGATIVE_INFINITY,
+    Number.NEGATIVE_INFINITY,
+  ];
 
   try {
     api.StreamAllMeshes(modelID, (mesh) => {
       const summary = entitiesByID.get(mesh.expressID);
-      const typeName = summary?.typeName ?? 'IFCPRODUCT';
+      const typeName = summary?.typeName ?? "IFCPRODUCT";
       typeCounter.set(typeName, (typeCounter.get(typeName) ?? 0) + 1);
 
       for (let index = 0; index < mesh.geometries.size(); index += 1) {
@@ -27,9 +40,14 @@ export function buildGeometryIndex(
           geometry.GetVertexData(),
           geometry.GetVertexDataSize(),
         );
-        const indexData = api.GetIndexArray(geometry.GetIndexData(), geometry.GetIndexDataSize());
+        const indexData = api.GetIndexArray(
+          geometry.GetIndexData(),
+          geometry.GetIndexDataSize(),
+        );
         const { positions, normals } = splitVertexData(vertexData);
-        const matrix = Array.from(placed.flatTransformation ?? identityMatrix());
+        const matrix = Array.from(
+          placed.flatTransformation ?? identityMatrix(),
+        );
         updateBounds(positions, matrix, min, max);
 
         const piece: IfcGeometryPiece = {
@@ -48,14 +66,14 @@ export function buildGeometryIndex(
           indices: new Uint32Array(indexData),
         };
         pieces.push(piece);
-        byExpressID.set(mesh.expressID, [...(byExpressID.get(mesh.expressID) ?? []), piece]);
+        pushMapValue(byExpressID, mesh.expressID, piece);
         geometry.delete();
       }
     });
   } catch (error) {
     diagnostics.push({
-      code: 'GEOMETRY_STREAM_FAILED',
-      severity: 'warning',
+      code: "GEOMETRY_STREAM_FAILED",
+      severity: "warning",
       message: `Geometry stream failed: ${String(error)}`,
     });
   }
@@ -69,6 +87,15 @@ export function buildGeometryIndex(
     bounds: pieces.length > 0 ? boundsFromMinMax(min, max) : undefined,
     diagnostics,
   };
+}
+
+function pushMapValue<K, V>(map: Map<K, V[]>, key: K, value: V) {
+  const values = map.get(key);
+  if (values) {
+    values.push(value);
+  } else {
+    map.set(key, [value]);
+  }
 }
 
 function splitVertexData(vertexData: Float32Array) {
@@ -113,7 +140,10 @@ function updateBounds(
   }
 }
 
-function boundsFromMinMax(min: [number, number, number], max: [number, number, number]) {
+function boundsFromMinMax(
+  min: [number, number, number],
+  max: [number, number, number],
+) {
   const center: [number, number, number] = [
     (min[0] + max[0]) / 2,
     (min[1] + max[1]) / 2,

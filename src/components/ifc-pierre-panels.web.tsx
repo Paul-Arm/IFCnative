@@ -1,8 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
-import { MultiFileDiff } from '@pierre/diffs/react';
-import { FileTree, useFileTree } from '@pierre/trees/react';
+import { FileTree, useFileTree } from "@pierre/trees/react";
+import React, { useCallback, useEffect, useMemo, useRef } from "react";
 
-import type { IfcTreeNode } from '@/ifc';
+import type { IfcTreeNode } from "@/ifc";
 
 interface StructureTreeModel {
   paths: string[];
@@ -18,13 +17,11 @@ interface IfcPierreTreeProps {
   onSelect(expressID: number): void;
 }
 
-interface IfcStepDiffPanelProps {
-  filename?: string;
-  sourceText: string;
-  savedText: string;
-}
-
-export function IfcPierreTree({ roots, selectedExpressID, onSelect }: IfcPierreTreeProps) {
+export function IfcPierreTree({
+  roots,
+  selectedExpressID,
+  onSelect,
+}: IfcPierreTreeProps) {
   const treeModel = useMemo(() => buildStructureTreeModel(roots), [roots]);
   const expressByPathRef = useRef(treeModel.expressByPath);
   const typeByPathRef = useRef(treeModel.typeByPath);
@@ -32,23 +29,27 @@ export function IfcPierreTree({ roots, selectedExpressID, onSelect }: IfcPierreT
   onSelectRef.current = onSelect;
 
   const { model } = useFileTree({
-    density: 'compact',
-    fileTreeSearchMode: 'expand-matches',
+    density: "compact",
+    fileTreeSearchMode: "expand-matches",
     flattenEmptyDirectories: false,
-    id: 'ifcnative-spatial-tree',
-    initialExpansion: 'open',
+    id: "ifcnative-spatial-tree",
+    initialExpansion: "open",
     initialVisibleRowCount: 18,
     itemHeight: 30,
     onSelectionChange: (paths) => {
-      const expressID = expressByPathRef.current.get(normalizeSelectedTreePath(paths[0]));
-      if (typeof expressID === 'number') {
+      const expressID = expressByPathRef.current.get(
+        normalizeSelectedTreePath(paths[0]),
+      );
+      if (typeof expressID === "number") {
         onSelectRef.current(expressID);
       }
     },
-    paths: treeModel.paths.length ? treeModel.paths : ['No model loaded'],
+    paths: treeModel.paths.length ? treeModel.paths : ["No model loaded"],
     renderRowDecoration: ({ item }) => {
-      const typeName = typeByPathRef.current.get(normalizeSelectedTreePath(item.path));
-      return typeName ? { text: typeName.replace(/^Ifc/i, '') } : null;
+      const typeName = typeByPathRef.current.get(
+        normalizeSelectedTreePath(item.path),
+      );
+      return typeName ? { text: typeName.replace(/^Ifc/i, "") } : null;
     },
     search: true,
     stickyFolders: true,
@@ -70,9 +71,12 @@ export function IfcPierreTree({ roots, selectedExpressID, onSelect }: IfcPierreT
   useEffect(() => {
     expressByPathRef.current = treeModel.expressByPath;
     typeByPathRef.current = treeModel.typeByPath;
-    model.resetPaths(treeModel.paths.length ? treeModel.paths : ['No model loaded'], {
-      initialExpandedPaths: treeModel.expandedPaths,
-    });
+    model.resetPaths(
+      treeModel.paths.length ? treeModel.paths : ["No model loaded"],
+      {
+        initialExpandedPaths: treeModel.expandedPaths,
+      },
+    );
   }, [model, treeModel]);
 
   useEffect(() => {
@@ -89,18 +93,23 @@ export function IfcPierreTree({ roots, selectedExpressID, onSelect }: IfcPierreT
     item?.focus();
   }, [model, selectedExpressID, treeModel]);
 
-  const selectTreePath = useCallback((rawPath?: string | null) => {
-    const path = normalizeSelectedTreePath(rawPath);
-    const expressID = expressByPathRef.current.get(path);
-    if (typeof expressID !== 'number') {
-      return;
-    }
-    model.getSelectedPaths().forEach((selectedPath) => model.getItem(selectedPath)?.deselect());
-    const item = model.getItem(path);
-    item?.select();
-    item?.focus();
-    onSelectRef.current(expressID);
-  }, [model]);
+  const selectTreePath = useCallback(
+    (rawPath?: string | null) => {
+      const path = normalizeSelectedTreePath(rawPath);
+      const expressID = expressByPathRef.current.get(path);
+      if (typeof expressID !== "number") {
+        return;
+      }
+      model
+        .getSelectedPaths()
+        .forEach((selectedPath) => model.getItem(selectedPath)?.deselect());
+      const item = model.getItem(path);
+      item?.select();
+      item?.focus();
+      onSelectRef.current(expressID);
+    },
+    [model],
+  );
 
   const handleTreeActivation = (event: React.SyntheticEvent<HTMLElement>) => {
     selectTreePath(readTreePathFromEvent(event.nativeEvent));
@@ -129,8 +138,9 @@ export function IfcPierreTree({ roots, selectedExpressID, onSelect }: IfcPierreT
         retryTimer = window.setTimeout(connect, 50);
         return;
       }
-      shadowRoot.addEventListener('click', handleNativeTreeClick, true);
-      cleanup = () => shadowRoot.removeEventListener('click', handleNativeTreeClick, true);
+      shadowRoot.addEventListener("click", handleNativeTreeClick, true);
+      cleanup = () =>
+        shadowRoot.removeEventListener("click", handleNativeTreeClick, true);
     };
 
     connect();
@@ -154,53 +164,6 @@ export function IfcPierreTree({ roots, selectedExpressID, onSelect }: IfcPierreT
   );
 }
 
-export function IfcStepDiffPanel({ filename, sourceText, savedText }: IfcStepDiffPanelProps) {
-  const baseName = filename?.replace(/\.ifc$/i, '') || 'IFCnative_Builder_Sample';
-  const { left, right, truncated } = useMemo(
-    () => ({
-      left: truncateStepText(sourceText),
-      right: truncateStepText(savedText),
-      truncated: sourceText.length > STEP_DIFF_CHAR_LIMIT || savedText.length > STEP_DIFF_CHAR_LIMIT,
-    }),
-    [savedText, sourceText],
-  );
-
-  return (
-    <div className="ifc-step-diff">
-      {truncated && (
-        <p className="ifc-empty">
-          Large STEP payload preview is capped so the browser stays responsive.
-        </p>
-      )}
-      <MultiFileDiff
-        disableWorkerPool
-        newFile={{
-          contents: right,
-          lang: 'text',
-          name: `${baseName}.saved.ifc`,
-        }}
-        oldFile={{
-          contents: left,
-          lang: 'text',
-          name: `${baseName}.source.ifc`,
-        }}
-        options={{
-          collapsedContextThreshold: 4,
-          diffIndicators: 'bars',
-          diffStyle: 'split',
-          hunkSeparators: 'line-info-basic',
-          lineDiffType: 'word',
-          overflow: 'wrap',
-          themeType: 'light',
-          tokenizeMaxLineLength: 180,
-        }}
-      />
-    </div>
-  );
-}
-
-const STEP_DIFF_CHAR_LIMIT = 280_000;
-
 function buildStructureTreeModel(roots: IfcTreeNode[]): StructureTreeModel {
   const model: StructureTreeModel = {
     expandedPaths: [],
@@ -210,11 +173,15 @@ function buildStructureTreeModel(roots: IfcTreeNode[]): StructureTreeModel {
     typeByPath: new Map(),
   };
 
-  roots.forEach((root) => addTreeNode(root, '', model));
+  roots.forEach((root) => addTreeNode(root, "", model));
   return model;
 }
 
-function addTreeNode(node: IfcTreeNode, parentPath: string, model: StructureTreeModel) {
+function addTreeNode(
+  node: IfcTreeNode,
+  parentPath: string,
+  model: StructureTreeModel,
+) {
   const segment = formatTreeSegment(node);
   const path = parentPath ? `${parentPath}/${segment}` : segment;
   const canonicalPath = node.children.length ? `${path}/` : path;
@@ -238,14 +205,17 @@ function formatTreeSegment(node: IfcTreeNode) {
 }
 
 function sanitizeTreeSegment(value: string) {
-  return value.replace(/[\\/]/g, '-').replace(/\s+/g, ' ').trim().slice(0, 96) || 'IFC Entity';
+  return (
+    value.replace(/[\\/]/g, "-").replace(/\s+/g, " ").trim().slice(0, 96) ||
+    "IFC Entity"
+  );
 }
 
 function normalizeSelectedTreePath(path?: string | null) {
   if (!path) {
-    return '';
+    return "";
   }
-  return path.endsWith('/') ? path : path;
+  return path.endsWith("/") ? path : path;
 }
 
 function readTreePathFromEvent(event: Event) {
@@ -270,13 +240,6 @@ function isTreeChevronClick(event: Event) {
     if (!(target instanceof HTMLElement)) {
       return false;
     }
-    return target.dataset.itemSection === 'icon';
+    return target.dataset.itemSection === "icon";
   });
-}
-
-function truncateStepText(text: string) {
-  if (text.length <= STEP_DIFF_CHAR_LIMIT) {
-    return text;
-  }
-  return `${text.slice(0, STEP_DIFF_CHAR_LIMIT)}\n/* IFCnative diff preview truncated */\n`;
 }

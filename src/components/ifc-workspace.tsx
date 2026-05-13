@@ -25,6 +25,7 @@ import {
     createNativeSampleDocument,
     findCatalogObject,
     getNativePlacement,
+    getNextNativeEntityId,
     parseNativeIfcFileInWorker,
     removeNativeRelationship,
     resolveNativeMovableProductId,
@@ -54,11 +55,7 @@ import {
 } from "./ifc-workspace/constants";
 import { GraphPanel } from "./ifc-workspace/GraphPanel";
 import { InspectorPanel } from "./ifc-workspace/InspectorPanel";
-import {
-    ConsolePanel,
-    DiagnosticsPanel,
-    DiffPanel,
-} from "./ifc-workspace/ReviewPanels";
+import { ConsolePanel, DiagnosticsPanel } from "./ifc-workspace/ReviewPanels";
 import { StructurePanel } from "./ifc-workspace/StructurePanel";
 import { styles } from "./ifc-workspace/styles";
 import type {
@@ -121,12 +118,12 @@ export default function IfcWorkspace() {
   const [graphPositions, setGraphPositions] = useState<Map<number, Point>>(
     () => new Map(),
   );
-  const [pendingDocument, setPendingDocument] =
-    useState<NativeIfcDocument | null>(null);
-  const [pendingIfcText, setPendingIfcText] = useState("");
-  const [pendingSummary, setPendingSummary] = useState("");
   const [documentText, setDocumentText] = useState(initialDocument.text);
-  const [documentBytes, setDocumentBytes] = useState<ArrayBuffer | null>(null);
+  const [documentTextDirty, setDocumentTextDirty] = useState(false);
+  const [viewerModelText, setViewerModelText] = useState(initialDocument.text);
+  const [viewerModelBytes, setViewerModelBytes] = useState<ArrayBuffer | null>(
+    null,
+  );
   const [loadingIfcName, setLoadingIfcName] = useState("");
   const [catalog, setCatalog] = useState<IfcObjectCatalog | null>(null);
   const [catalogImporting, setCatalogImporting] = useState(false);
@@ -140,9 +137,9 @@ export default function IfcWorkspace() {
     typeof window === "undefined" ? undefined : window.ifcNativeDesktop;
   const isElectronDesktop = Boolean(desktopApi?.isElectron);
 
-  const viewerDocument = pendingDocument ?? document;
-  const viewerIfcText = pendingIfcText || documentText;
-  const viewerIfcBytes = pendingIfcText ? null : documentBytes;
+  const viewerDocument = document;
+  const viewerIfcText = viewerModelText;
+  const viewerIfcBytes = viewerModelBytes;
   const selectedEntity =
     viewerDocument.entityById.get(selectedId) ??
     document.entityById.get(selectedId) ??
@@ -221,11 +218,11 @@ export default function IfcWorkspace() {
     nextBytes?: ArrayBuffer | null,
   ) => {
     setDocument(next);
-    setPendingDocument(null);
-    setPendingIfcText("");
-    setPendingSummary("");
-    setDocumentText(nextText ?? serializeNativeIfcDocument(next));
-    setDocumentBytes(nextBytes ?? null);
+    const replacementText = nextText ?? serializeNativeIfcDocument(next);
+    setDocumentText(replacementText);
+    setDocumentTextDirty(false);
+    setViewerModelText(replacementText);
+    setViewerModelBytes(nextBytes ?? null);
     setTreeExpanded(new Set());
     const fallbackId = next.spatialRoots[0]?.id ?? next.entities[0]?.id ?? 0;
     const resolvedSelectedId = next.entityById.has(nextSelectedId ?? 0)
@@ -239,16 +236,24 @@ export default function IfcWorkspace() {
     }
   };
 
-  const stageDocument = (
+  const commitDocument = (
     next: NativeIfcDocument,
     nextSelectedId: number | undefined,
-    summary: string,
+    _summary: string,
     log?: string,
     nextGraphPositions?: Map<number, Point>,
+    options?: { reloadViewer?: boolean },
   ) => {
-    setPendingDocument(next);
-    setPendingIfcText(serializeNativeIfcDocument(next));
-    setPendingSummary(summary);
+    setDocument(next);
+    if (options?.reloadViewer) {
+      const nextText = serializeNativeIfcDocument(next);
+      setDocumentText(nextText);
+      setDocumentTextDirty(false);
+      setViewerModelText(nextText);
+      setViewerModelBytes(null);
+    } else {
+      setDocumentTextDirty(true);
+    }
     const fallbackId =
       next.spatialRoots[0]?.id ?? next.entities[0]?.id ?? selectedId;
     setSelectedId(
@@ -260,40 +265,12 @@ export default function IfcWorkspace() {
       setGraphPositions(nextGraphPositions);
     }
     if (log) {
-      logAction(`draft.${log}`);
+      logAction(log);
     }
-  };
-
-  const applyPendingDocument = () => {
-    if (!pendingDocument) {
-      return;
-    }
-    const appliedSummary = pendingSummary;
-    setDocument(pendingDocument);
-    setPendingDocument(null);
-    setDocumentText(pendingIfcText);
-    setDocumentBytes(null);
-    setPendingIfcText("");
-    setPendingSummary("");
-    logAction(`draft.apply(${JSON.stringify(appliedSummary)});`);
-  };
-
-  const discardPendingDocument = () => {
-    const discardedSummary = pendingSummary;
-    setPendingDocument(null);
-    setPendingIfcText("");
-    setPendingSummary("");
-    if (!document.entityById.has(selectedId)) {
-      const fallbackId =
-        document.spatialRoots[0]?.id ?? document.entities[0]?.id ?? 0;
-      setSelectedId(fallbackId);
-      setGraphAnchorId(fallbackId);
-    }
-    logAction(`draft.discard(${JSON.stringify(discardedSummary)});`);
   };
 
   const selectEntity = (id: number, source = "ui", globalId?: string) => {
-    const selectionDocument = pendingDocument ?? document;
+    const selectionDocument = document;
     const resolvedId =
       source === "thatopen"
         ? (resolveNativeMovableProductId(selectionDocument, id, globalId) ??
@@ -380,12 +357,12 @@ export default function IfcWorkspace() {
   };
 
   const applyCatalogFinding = (finding: CatalogValidationFinding) => {
-    const sourceDocument = pendingDocument ?? document;
+    const sourceDocument = document;
     const next = applyCatalogQuickFix(sourceDocument, selectedId, finding);
     if (next === sourceDocument) {
       return;
     }
-    stageDocument(
+    commitDocument(
       next,
       selectedId,
       `Catalog quick fix: ${finding.quickFix?.label ?? finding.kind}`,
@@ -398,7 +375,7 @@ export default function IfcWorkspace() {
     if (!fixes.length) {
       return;
     }
-    const sourceDocument = pendingDocument ?? document;
+    const sourceDocument = document;
     const next = fixes.reduce(
       (currentDocument, finding) =>
         applyCatalogQuickFix(currentDocument, selectedId, finding),
@@ -407,7 +384,7 @@ export default function IfcWorkspace() {
     if (next === sourceDocument) {
       return;
     }
-    stageDocument(
+    commitDocument(
       next,
       selectedId,
       `Apply ${fixes.length.toLocaleString()} catalog quick fixes to #${selectedId}`,
@@ -424,7 +401,9 @@ export default function IfcWorkspace() {
   };
 
   const exportIfc = async () => {
-    const text = documentText;
+    const text = documentTextDirty
+      ? serializeNativeIfcDocument(document)
+      : documentText;
     const fileName = document.fileName.replace(/\.ifc$/i, "") || "IFCnative";
     const blob = new Blob([text], { type: "application/x-step" });
     const url = URL.createObjectURL(blob);
@@ -457,15 +436,9 @@ export default function IfcWorkspace() {
           }
           break;
         case "export-ifc":
-          if (!pendingDocument && !loadingIfcName) {
+          if (!loadingIfcName) {
             void exportIfc();
           }
-          break;
-        case "apply-draft":
-          applyPendingDocument();
-          break;
-        case "discard-draft":
-          discardPendingDocument();
           break;
         case "reset-layout":
           resetMosaicLayout();
@@ -488,17 +461,9 @@ export default function IfcWorkspace() {
       catalogImporting,
       closedWindowIds: closedMosaicIds,
       hasCatalog: Boolean(catalog),
-      hasPendingDraft: Boolean(pendingDocument),
       loadingIfcName,
     });
-  }, [
-    catalog,
-    catalogImporting,
-    closedMosaicIds,
-    desktopApi,
-    loadingIfcName,
-    pendingDocument,
-  ]);
+  }, [catalog, catalogImporting, closedMosaicIds, desktopApi, loadingIfcName]);
 
   const saveSelectedEdit = (draft: EntityEditDraft) => {
     const next = updateNativeEntity(document, selectedId, {
@@ -507,22 +472,21 @@ export default function IfcWorkspace() {
       name: draft.name,
       type: draft.type,
     });
-    stageDocument(
+    commitDocument(
       next,
       selectedId,
       `Edit #${selectedId} ${draft.type}`,
       `saveEdit({ id: ${selectedId}, class: '${draft.type}' });`,
+      undefined,
+      { reloadViewer: true },
     );
   };
 
   const addElement = (type: string, name: string, parentId?: number) => {
-    const previousMaxId = Math.max(
-      ...document.entities.map((entity) => entity.id),
-      0,
-    );
+    const addedId = getNextNativeEntityId(document);
     const next = addNativeElement(document, parentId, type, name);
-    const added = next.entityById.get(previousMaxId + 1);
-    stageDocument(
+    const added = next.entityById.get(addedId);
+    commitDocument(
       next,
       added?.id,
       `Add ${type} '${name}'${parentId ? ` under #${parentId}` : ""}`,
@@ -531,27 +495,28 @@ export default function IfcWorkspace() {
   };
 
   const addBodyElement = (options: BodyElementDraft) => {
-    const previousMaxId = Math.max(
-      ...document.entities.map((entity) => entity.id),
-      0,
-    );
+    const addedId = getNextNativeEntityId(document);
     const next = addNativeBodyElement(document, options);
-    const added = next.entityById.get(previousMaxId + 1);
-    stageDocument(
+    const added = next.entityById.get(addedId);
+    commitDocument(
       next,
       added?.id,
       `Add ${options.type} body '${options.name}'${options.parentId ? ` under #${options.parentId}` : ""}`,
       `addBodyElement({ class: '${options.type}', name: '${options.name}', profile: '${options.profile ?? "rectangle"}', width: ${options.width}, depth: ${options.depth}, height: ${options.height} });`,
+      undefined,
+      { reloadViewer: true },
     );
   };
 
   const assignBodyToSelected = (options: BodyElementDraft) => {
     const next = assignNativeBodyRepresentation(document, selectedId, options);
-    stageDocument(
+    commitDocument(
       next,
       selectedId,
       `Assign ${options.profile ?? "rectangle"} body representation to #${selectedId}`,
       `assignBodyRepresentation({ id: ${selectedId}, profile: '${options.profile ?? "rectangle"}', width: ${options.width}, depth: ${options.depth}, height: ${options.height} });`,
+      undefined,
+      { reloadViewer: true },
     );
   };
 
@@ -561,7 +526,7 @@ export default function IfcWorkspace() {
     targetId: number,
   ) => {
     const next = addNativeRelationship(document, type, sourceId, targetId);
-    stageDocument(
+    commitDocument(
       next,
       targetId,
       `Add ${type} from #${sourceId} to #${targetId}`,
@@ -576,12 +541,8 @@ export default function IfcWorkspace() {
     relationshipType: string,
     position: Point,
   ) => {
-    const previousMaxId = Math.max(
-      ...document.entities.map((entity) => entity.id),
-      0,
-    );
+    const addedId = getNextNativeEntityId(document);
     const withElement = addNativeElement(document, undefined, type, name);
-    const addedId = previousMaxId + 1;
     const next = addNativeRelationship(
       withElement,
       relationshipType,
@@ -590,7 +551,7 @@ export default function IfcWorkspace() {
     );
     const nextPositions = new Map(graphPositions);
     nextPositions.set(addedId, position);
-    stageDocument(
+    commitDocument(
       next,
       addedId,
       `Create ${type} '${name}' from graph and connect #${sourceId} -> #${addedId}`,
@@ -613,7 +574,7 @@ export default function IfcWorkspace() {
       sourceId,
       targetId,
     );
-    stageDocument(
+    commitDocument(
       next,
       targetId,
       `Connect graph nodes #${sourceId} -> #${targetId} with ${relationshipType}`,
@@ -641,7 +602,7 @@ export default function IfcWorkspace() {
       propertyValue,
       propertyValueType,
     );
-    stageDocument(
+    commitDocument(
       next,
       selectedId,
       `Add Pset '${psetName}' to #${selectedId}`,
@@ -651,7 +612,7 @@ export default function IfcWorkspace() {
 
   const addEmptyPset = (psetName: string) => {
     const next = addNativeEmptyPropertySet(document, selectedId, psetName);
-    stageDocument(
+    commitDocument(
       next,
       selectedId,
       `Add empty Pset '${psetName}' to #${selectedId}`,
@@ -672,7 +633,7 @@ export default function IfcWorkspace() {
       propertyValue,
       propertyValueType,
     );
-    stageDocument(
+    commitDocument(
       next,
       selectedId,
       `Add property '${propertyName}' to #${setId}`,
@@ -694,7 +655,7 @@ export default function IfcWorkspace() {
       quantityValue,
       quantityType,
     );
-    stageDocument(
+    commitDocument(
       next,
       selectedId,
       `Add quantity '${quantityName}' to #${selectedId}`,
@@ -709,7 +670,7 @@ export default function IfcWorkspace() {
       materialName,
       materialCategory,
     );
-    stageDocument(
+    commitDocument(
       next,
       selectedId,
       `Assign material '${materialName}' to #${selectedId}`,
@@ -729,7 +690,7 @@ export default function IfcWorkspace() {
       name,
       location,
     );
-    stageDocument(
+    commitDocument(
       next,
       selectedId,
       `Assign classification '${identification}' to #${selectedId}`,
@@ -749,7 +710,7 @@ export default function IfcWorkspace() {
       name,
       location,
     );
-    stageDocument(
+    commitDocument(
       next,
       selectedId,
       `Assign document '${identification}' to #${selectedId}`,
@@ -765,7 +726,7 @@ export default function IfcWorkspace() {
       typeClass,
       tag,
     );
-    stageDocument(
+    commitDocument(
       next,
       selectedId,
       `Assign type '${typeName}' to #${selectedId}`,
@@ -779,13 +740,13 @@ export default function IfcWorkspace() {
     propertyValue: string,
     propertyValueType: string,
   ) => {
-    const sourceDocument = pendingDocument ?? document;
+    const sourceDocument = document;
     const next = updateNativePropertyValue(sourceDocument, propertyId, {
       name: propertyName,
       value: propertyValue,
       valueType: propertyValueType,
     });
-    stageDocument(
+    commitDocument(
       next,
       selectedId,
       `Update property #${propertyId} '${propertyName}'`,
@@ -804,7 +765,7 @@ export default function IfcWorkspace() {
       targetId,
       type,
     });
-    stageDocument(
+    commitDocument(
       next,
       selectedId,
       `Update relationship #${relationshipId} ${type}`,
@@ -820,7 +781,7 @@ export default function IfcWorkspace() {
       ? relationship.targetIds[0]
       : relationship?.sourceIds[0];
     const next = removeNativeRelationship(document, relationshipId);
-    stageDocument(
+    commitDocument(
       next,
       nextSelection && next.entityById.has(nextSelection)
         ? nextSelection
@@ -831,13 +792,15 @@ export default function IfcWorkspace() {
   };
 
   const moveSelectedPlacement = (x: string, y: string, z: string) => {
-    const sourceDocument = pendingDocument ?? document;
+    const sourceDocument = document;
     const next = updateNativePlacement(sourceDocument, selectedId, { x, y, z });
-    stageDocument(
+    commitDocument(
       next,
       selectedId,
       `Move #${selectedId} placement to (${x}, ${y}, ${z})`,
       `movePlacement({ id: ${selectedId}, x: ${JSON.stringify(x)}, y: ${JSON.stringify(y)}, z: ${JSON.stringify(z)} });`,
+      undefined,
+      { reloadViewer: true },
     );
   };
 
@@ -846,7 +809,7 @@ export default function IfcWorkspace() {
     y?: number;
     z?: number;
   }) => {
-    const sourceDocument = pendingDocument ?? document;
+    const sourceDocument = document;
     const moveTargetId = resolveNativeMovableProductId(
       sourceDocument,
       selectedId,
@@ -873,11 +836,13 @@ export default function IfcWorkspace() {
       y,
       z,
     });
-    stageDocument(
+    commitDocument(
       next,
       moveTargetId,
       `Move #${moveTargetId} placement by viewer delta (${formatCoordinate(delta.x ?? 0)}, ${formatCoordinate(delta.y ?? 0)}, ${formatCoordinate(delta.z ?? 0)}) to IFC (${x}, ${y}, ${z})`,
       `movePlacement.viewerDelta({ id: ${moveTargetId}, selectedId: ${selectedId}, dx: ${delta.x ?? 0}, dy: ${delta.y ?? 0}, dz: ${delta.z ?? 0} });`,
+      undefined,
+      { reloadViewer: true },
     );
   };
 
@@ -927,7 +892,7 @@ export default function IfcWorkspace() {
 
   const addUnit = (unitType: string, unitName: string) => {
     const next = addNativeSiUnit(document, unitType, "$", unitName);
-    stageDocument(
+    commitDocument(
       next,
       selectedId,
       `Add unit ${unitType} ${unitName}`,
@@ -1074,7 +1039,6 @@ export default function IfcWorkspace() {
               fileName={document.fileName}
               ifcBytes={viewerIfcBytes}
               ifcText={viewerIfcText}
-              isDraftPreview={Boolean(pendingIfcText)}
               selectedId={selectedId}
               selectedName={selectedEntity?.name}
               onLog={logAction}
@@ -1121,18 +1085,6 @@ export default function IfcWorkspace() {
               onApplyFinding={applyCatalogFinding}
               onImportCatalog={importCatalog}
               onSelectCatalogObject={setSelectedCatalogObjectId}
-            />
-          </View>
-        );
-      case "diff":
-        return (
-          <View style={styles.tileContent}>
-            <DiffPanel
-              currentText={documentText}
-              pendingSummary={pendingSummary}
-              pendingText={pendingIfcText}
-              onApply={applyPendingDocument}
-              onDiscard={discardPendingDocument}
             />
           </View>
         );
@@ -1190,20 +1142,9 @@ export default function IfcWorkspace() {
               onPress={() => void importCatalog()}
             />
             <Button
-              disabled={Boolean(pendingDocument) || Boolean(loadingIfcName)}
+              disabled={Boolean(loadingIfcName)}
               label="Export IFC"
               onPress={() => void exportIfc()}
-            />
-            <Button
-              disabled={!pendingDocument}
-              label="Apply Draft"
-              primary
-              onPress={applyPendingDocument}
-            />
-            <Button
-              disabled={!pendingDocument}
-              label="Discard Draft"
-              onPress={discardPendingDocument}
             />
             <Button label="Reset Layout" onPress={resetMosaicLayout} />
             <MosaicWindowMenu

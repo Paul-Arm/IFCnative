@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type {
     ThatOpenViewerProps,
@@ -12,7 +12,6 @@ export default function ThatOpenViewer({
   fileName,
   ifcBytes,
   ifcText,
-  isDraftPreview,
   selectedId,
   onLog,
   onMoveSelected,
@@ -35,6 +34,11 @@ export default function ThatOpenViewer({
   const [pickerActive, setPickerActive] = useState(false);
   const [lastPick, setLastPick] = useState<ViewerCoordinatePick | null>(null);
   const [copyStatus, setCopyStatus] = useState("");
+  const largeLoadWarning = useMemo(
+    () => describeLargeIfcWarning(ifcText, ifcBytes),
+    [ifcBytes, ifcText],
+  );
+  const lastWarningRef = useRef("");
 
   selectedRef.current = selectedId;
   onLogRef.current = onLog;
@@ -122,8 +126,14 @@ export default function ThatOpenViewer({
     let cancelled = false;
     setError("");
     setStatus("Converting IFC with ThatOpen...");
+    if (largeLoadWarning && lastWarningRef.current !== largeLoadWarning) {
+      lastWarningRef.current = largeLoadWarning;
+      onLogRef.current?.(
+        `viewer.largeFileWarning(${JSON.stringify(largeLoadWarning)});`,
+      );
+    }
     void runtime
-      .load(ifcText, fileName, ifcBytes, { fitAfterLoad: !isDraftPreview })
+      .load(ifcText, fileName, ifcBytes, { fitAfterLoad: true })
       .then(async () => {
         if (cancelled) {
           return;
@@ -144,7 +154,7 @@ export default function ThatOpenViewer({
     return () => {
       cancelled = true;
     };
-  }, [fileName, ifcBytes, ifcText, isDraftPreview, runtimeReady]);
+  }, [fileName, ifcBytes, ifcText, largeLoadWarning, runtimeReady]);
 
   useEffect(() => {
     const runtime = runtimeRef.current;
@@ -221,8 +231,8 @@ export default function ThatOpenViewer({
             </button>
           </div>
         ) : null}
-        {isDraftPreview ? (
-          <div className="ifcnative-thatopen-draft-badge">Entwurfsvorschau</div>
+        {largeLoadWarning ? (
+          <div className="ifcnative-thatopen-warning">{largeLoadWarning}</div>
         ) : null}
       </div>
       <div
@@ -238,6 +248,26 @@ export default function ThatOpenViewer({
       </div>
     </div>
   );
+}
+
+const LARGE_IFC_WARNING_BYTES = 120 * 1024 * 1024;
+
+function describeLargeIfcWarning(
+  ifcText: string,
+  ifcBytes?: ArrayBuffer | null,
+) {
+  const estimatedBytes = ifcBytes?.byteLength ?? ifcText.length;
+  if (estimatedBytes < LARGE_IFC_WARNING_BYTES) {
+    return "";
+  }
+  return `Große IFC (${formatByteSize(estimatedBytes)}): Viewer lädt weiterhin vollständig; Konvertierung kann spürbar dauern.`;
+}
+
+function formatByteSize(bytes: number) {
+  if (bytes >= 1024 * 1024 * 1024) {
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
 }
 
 async function createThatOpenRuntime(
@@ -285,6 +315,9 @@ async function createThatOpenRuntime(
   components.init();
   world.scene.setup();
   world.scene.three.background = new THREE.Color(0xf8fafc);
+  world.camera.three.near = 0.1;
+  world.camera.three.far = 1_000_000;
+  world.camera.three.updateProjectionMatrix();
   world.camera.controls.setLookAt(8, 6, 8, 0, 0, 0);
 
   const grids = components.get(OBC.Grids);
@@ -311,6 +344,9 @@ async function createThatOpenRuntime(
   const ifcLoader = components.get(OBC.IfcLoader);
   await ifcLoader.setup({
     autoSetWasm: false,
+    webIfc: {
+      COORDINATE_TO_ORIGIN: true,
+    },
     wasm: {
       absolute: true,
       path: resolvePublicAssetUrl("wasm/"),
@@ -326,6 +362,7 @@ async function createThatOpenRuntime(
   };
 
   let model: Awaited<ReturnType<typeof ifcLoader.load>> | null = null;
+  let fitItems: Record<string, Set<number>> | undefined;
   let currentLoadKey = "";
   let loadCounter = 0;
   const encoder = new TextEncoder();
@@ -446,6 +483,7 @@ async function createThatOpenRuntime(
       await model.dispose();
       model = null;
     }
+    fitItems = undefined;
     await fragments.resetHighlight().catch(() => undefined);
 
     callbacks.onStatus("Converting IFC to ThatOpen fragments...");
@@ -455,10 +493,23 @@ async function createThatOpenRuntime(
       : encoder.encode(ifcText);
     model = await ifcLoader.load(source, true, modelId, {
       instanceCallback: (importer) => {
+        importer.webIfcSettings = {
+          ...importer.webIfcSettings,
+          COORDINATE_TO_ORIGIN: true,
+        };
         importer.addAllAttributes();
         importer.addAllRelations();
       },
     });
+    const fitModelItems = await getCameraFitLocalIds(model);
+    if (fitModelItems.ignored > 0) {
+      fitItems = { [model.modelId]: fitModelItems.localIds };
+      callbacks.onLog(
+        `viewer.fit.ignoreOriginMarkers({ count: ${fitModelItems.ignored} });`,
+      );
+    } else {
+      fitItems = undefined;
+    }
     model.useCamera(world.camera.three);
     world.scene.three.add(model.object);
     await fragments.core.update(true);
@@ -488,7 +539,7 @@ async function createThatOpenRuntime(
       return;
     }
     await moveGizmo.updateSelection(callbacks.getSelectedId(), model);
-    await world.camera.fitToItems();
+    await world.camera.fitToItems(fitItems);
   }
 
   async function resetCamera() {
@@ -538,6 +589,17 @@ interface CameraControlsLike {
 
 interface FragmentModelLike {
   getMergedBox(localIds: number[]): Promise<import("three").Box3>;
+}
+
+interface FitFragmentModelLike {
+  getItemsData(
+    ids: number[],
+    config?: {
+      attributesDefault?: boolean;
+      relationsDefault?: { attributes: boolean; relations: boolean };
+    },
+  ): Promise<unknown[]>;
+  getLocalIds(): Promise<number[]>;
 }
 
 function canvasFromRenderer(
@@ -996,6 +1058,54 @@ async function readItemData(
     )
     .catch(() => undefined);
   return dataByModel?.[modelId]?.[0];
+}
+
+async function getCameraFitLocalIds(model: FitFragmentModelLike) {
+  const localIds = await model.getLocalIds().catch(() => []);
+  const fitLocalIds = new Set<number>();
+  let ignored = 0;
+  const chunkSize = 1500;
+  for (let index = 0; index < localIds.length; index += chunkSize) {
+    const chunk = localIds.slice(index, index + chunkSize);
+    const data = await model
+      .getItemsData(chunk, {
+        attributesDefault: true,
+        relationsDefault: { attributes: false, relations: false },
+      })
+      .catch(() => []);
+    chunk.forEach((localId, chunkIndex) => {
+      const item = data[chunkIndex];
+      if (isOriginMarkerItem(item)) {
+        ignored += 1;
+      } else {
+        fitLocalIds.add(localId);
+      }
+    });
+  }
+  return {
+    ignored,
+    localIds: fitLocalIds.size > 0 ? fitLocalIds : new Set(localIds),
+  };
+}
+
+const ORIGIN_MARKER_TERMS = [
+  "nullpunktobjekt",
+  "nullpunkt",
+  "origin marker",
+  "survey point",
+];
+
+function isOriginMarkerItem(data: unknown) {
+  const haystack = [
+    readStringAttribute(data, ["Name", "name"]),
+    readStringAttribute(data, ["ObjectType", "objectType"]),
+    readStringAttribute(data, ["Tag", "tag"]),
+    readStringAttribute(data, ["Description", "description"]),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLocaleLowerCase();
+  return ORIGIN_MARKER_TERMS.some((term) => haystack.includes(term));
 }
 
 function readNumericAttribute(data: unknown, keys: string[]) {

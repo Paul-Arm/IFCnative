@@ -22,13 +22,10 @@ type DesktopMenuState = {
   catalogImporting: boolean;
   closedWindowIds: string[];
   hasCatalog: boolean;
-  hasPendingDraft: boolean;
   loadingIfcName: string;
 };
 
 type DesktopCommand =
-  | { type: "apply-draft" }
-  | { type: "discard-draft" }
   | { type: "export-ifc" }
   | { type: "import-catalog" }
   | { type: "load-sample" }
@@ -40,7 +37,6 @@ const defaultMenuState: DesktopMenuState = {
   catalogImporting: false,
   closedWindowIds: [],
   hasCatalog: false,
-  hasPendingDraft: false,
   loadingIfcName: "",
 };
 
@@ -49,7 +45,6 @@ const mosaicWindowTitles: Record<string, string> = {
   catalog: "Objektkatalog",
   console: "JS Console",
   diagnostics: "Diagnostics",
-  diff: "IFC Diff / Review",
   inspector: "Inspector",
   structure: "Structure",
   viewer: "3D Viewer",
@@ -191,7 +186,6 @@ function normalizeDesktopMenuState(state: DesktopMenuState): DesktopMenuState {
       ? state.closedWindowIds.filter((id) => typeof id === "string")
       : [],
     hasCatalog: Boolean(state?.hasCatalog),
-    hasPendingDraft: Boolean(state?.hasPendingDraft),
     loadingIfcName:
       typeof state?.loadingIfcName === "string" ? state.loadingIfcName : "",
   };
@@ -202,7 +196,7 @@ function installApplicationMenu(
   state: DesktopMenuState,
 ) {
   const openEnabled = !state.loadingIfcName;
-  const exportEnabled = !state.hasPendingDraft && !state.loadingIfcName;
+  const exportEnabled = !state.loadingIfcName;
   const catalogLabel = state.hasCatalog ? "Reload Catalog" : "Import Catalog";
   const closedWindowItems = state.closedWindowIds.length
     ? state.closedWindowIds.map<MenuItemConstructorOptions>((viewId) => ({
@@ -251,24 +245,6 @@ function installApplicationMenu(
         },
         { type: "separator" },
         process.platform === "darwin" ? { role: "close" } : { role: "quit" },
-      ],
-    },
-    {
-      label: "Draft",
-      submenu: [
-        {
-          enabled: state.hasPendingDraft,
-          label: "Apply Draft",
-          click: () => sendDesktopCommand(mainWindow, { type: "apply-draft" }),
-        },
-        {
-          enabled: state.hasPendingDraft,
-          label: "Discard Draft",
-          click: () =>
-            sendDesktopCommand(mainWindow, {
-              type: "discard-draft",
-            }),
-        },
       ],
     },
     {
