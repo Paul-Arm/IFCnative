@@ -1,4 +1,6 @@
 export * from "./builder";
+export * from "./catalog";
+export * from "./catalogValidation";
 export * from "./coordinateMapping";
 export * from "./coverage";
 export * from "./geometryIndex";

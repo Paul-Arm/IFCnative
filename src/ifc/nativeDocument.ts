@@ -983,6 +983,166 @@ export function addNativePropertySet(
   );
 }
 
+export function addNativePropertySetValues(
+  document: NativeIfcDocument,
+  entityId: number,
+  psetName: string,
+  properties: Array<{ name: string; value: string; valueType?: string }>,
+) {
+  if (!document.entityById.has(entityId) || properties.length === 0) {
+    return document;
+  }
+  const next = cloneDocumentEntities(document);
+  const propertyIds: number[] = [];
+  for (const property of properties) {
+    const propertyId = nextEntityId(next);
+    propertyIds.push(propertyId);
+    next.push({
+      args: [
+        quote(property.name),
+        "$",
+        formatPropertyValue(property.valueType ?? "IFCLABEL", property.value),
+        "$",
+      ],
+      description: "",
+      globalId: "",
+      id: propertyId,
+      name: property.name,
+      type: "IFCPROPERTYSINGLEVALUE",
+    });
+  }
+  const psetId = nextEntityId(next);
+  next.push({
+    args: [
+      quote(createIfcGuid(psetId)),
+      "$",
+      quote(psetName),
+      "$",
+      `(${propertyIds.map((id) => `#${id}`).join(",")})`,
+    ],
+    description: "",
+    globalId: createIfcGuid(psetId),
+    id: psetId,
+    name: psetName,
+    type: "IFCPROPERTYSET",
+  });
+  const relId = nextEntityId(next);
+  next.push({
+    args: [
+      quote(createIfcGuid(relId)),
+      "$",
+      "$",
+      "$",
+      `(#${entityId})`,
+      `#${psetId}`,
+    ],
+    description: "",
+    globalId: createIfcGuid(relId),
+    id: relId,
+    name: "",
+    type: "IFCRELDEFINESBYPROPERTIES",
+  });
+  return parseNativeIfcText(
+    serializeEntities(document, next),
+    document.fileName,
+  );
+}
+
+export function addNativeEmptyPropertySet(
+  document: NativeIfcDocument,
+  entityId: number,
+  psetName: string,
+) {
+  if (!document.entityById.has(entityId)) {
+    return document;
+  }
+  const next = cloneDocumentEntities(document);
+  const psetId = nextEntityId(next);
+  next.push({
+    args: [quote(createIfcGuid(psetId)), "$", quote(psetName), "$", "()"],
+    description: "",
+    globalId: createIfcGuid(psetId),
+    id: psetId,
+    name: psetName,
+    type: "IFCPROPERTYSET",
+  });
+  const relId = nextEntityId(next);
+  next.push({
+    args: [
+      quote(createIfcGuid(relId)),
+      "$",
+      "$",
+      "$",
+      `(#${entityId})`,
+      `#${psetId}`,
+    ],
+    description: "",
+    globalId: createIfcGuid(relId),
+    id: relId,
+    name: "",
+    type: "IFCRELDEFINESBYPROPERTIES",
+  });
+  return parseNativeIfcText(
+    serializeEntities(document, next),
+    document.fileName,
+  );
+}
+
+export function addNativePropertyToSet(
+  document: NativeIfcDocument,
+  setId: number,
+  propertyName: string,
+  propertyValue: string,
+  propertyValueType = "IFCLABEL",
+) {
+  const next = cloneDocumentEntities(document);
+  const set = next.find((entity) => entity.id === setId);
+  if (
+    !set ||
+    (set.type !== "IFCPROPERTYSET" && set.type !== "IFCELEMENTQUANTITY")
+  ) {
+    return document;
+  }
+  const propertyId = nextEntityId(next);
+  if (set.type === "IFCELEMENTQUANTITY") {
+    const quantityType = normalizeQuantityType(propertyValueType);
+    next.push({
+      args: [
+        quote(propertyName),
+        "$",
+        "$",
+        formatStepNumber(propertyValue),
+        "$",
+      ],
+      description: "",
+      globalId: "",
+      id: propertyId,
+      name: propertyName,
+      type: quantityType,
+    });
+    appendReference(set.args, 5, propertyId);
+  } else {
+    next.push({
+      args: [
+        quote(propertyName),
+        "$",
+        formatPropertyValue(propertyValueType, propertyValue),
+        "$",
+      ],
+      description: "",
+      globalId: "",
+      id: propertyId,
+      name: propertyName,
+      type: "IFCPROPERTYSINGLEVALUE",
+    });
+    appendReference(set.args, 4, propertyId);
+  }
+  return parseNativeIfcText(
+    serializeEntities(document, next),
+    document.fileName,
+  );
+}
+
 export function addNativeQuantitySet(
   document: NativeIfcDocument,
   entityId: number,
@@ -1906,6 +2066,11 @@ function setArg(args: string[], index: number, value: string) {
     args.push("$");
   }
   args[index] = value;
+}
+
+function appendReference(args: string[], index: number, id: number) {
+  const refs = readReferences(args[index]);
+  setArg(args, index, `(${[...refs, id].map((ref) => `#${ref}`).join(",")})`);
 }
 
 function cloneDocumentEntities(document: NativeIfcDocument) {

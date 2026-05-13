@@ -1,72 +1,82 @@
 import { useMemo, useState } from "react";
 import {
-  Mosaic,
-  MosaicWindow,
-  type MosaicNode,
-  type MosaicPath,
+    Mosaic,
+    MosaicWindow,
+    type MosaicNode,
+    type MosaicPath,
 } from "react-mosaic-component";
 import { SafeAreaView, Text, TextInput, View } from "react-native";
 
 import {
-  addNativeBodyElement,
-  addNativeClassification,
-  addNativeDocumentReference,
-  addNativeElement,
-  addNativeMaterial,
-  addNativePropertySet,
-  addNativeQuantitySet,
-  addNativeRelationship,
-  addNativeSiUnit,
-  addNativeTypeAssignment,
-  assignNativeBodyRepresentation,
-  createNativeSampleDocument,
-  getNativePlacement,
-  parseNativeIfcFileInWorker,
-  removeNativeRelationship,
-  resolveNativeMovableProductId,
-  serializeNativeIfcDocument,
-  splitTopLevel,
-  updateNativeEntity,
-  updateNativePlacement,
-  updateNativePropertyValue,
-  updateNativeRelationship,
-  viewerWorldDeltaToIfcPlacementDelta,
-  type NativeIfcDocument,
+    addNativeBodyElement,
+    addNativeClassification,
+    addNativeDocumentReference,
+    addNativeElement,
+    addNativeEmptyPropertySet,
+    addNativeMaterial,
+    addNativePropertySet,
+    addNativePropertySetValues,
+    addNativePropertyToSet,
+    addNativeQuantitySet,
+    addNativeRelationship,
+    addNativeSiUnit,
+    addNativeTypeAssignment,
+    applyCatalogQuickFix,
+    assignNativeBodyRepresentation,
+    createNativeSampleDocument,
+    findCatalogObject,
+    getNativePlacement,
+    parseNativeIfcFileInWorker,
+    removeNativeRelationship,
+    resolveNativeMovableProductId,
+    serializeNativeIfcDocument,
+    splitTopLevel,
+    suggestCatalogObjectForEntity,
+    updateNativeEntity,
+    updateNativePlacement,
+    updateNativePropertyValue,
+    updateNativeRelationship,
+    validateEntityAgainstCatalogObject,
+    viewerWorldDeltaToIfcPlacementDelta,
+    type CatalogValidationFinding,
+    type IfcObjectCatalog,
+    type NativeIfcDocument,
 } from "@/ifc";
 import { type NativeGraphPreset } from "@/ifc/nativeGraph";
 
 import { BuilderPanel } from "./ifc-workspace/BuilderPanel";
+import { CatalogPanel } from "./ifc-workspace/CatalogPanel";
 import {
-  DEFAULT_MOSAIC_LAYOUT,
-  ENTITY_TYPES,
-  MOSAIC_TITLES,
-  MOSAIC_VIEW_IDS,
-  RELATION_TYPES,
+    DEFAULT_MOSAIC_LAYOUT,
+    ENTITY_TYPES,
+    MOSAIC_TITLES,
+    MOSAIC_VIEW_IDS,
+    RELATION_TYPES,
 } from "./ifc-workspace/constants";
 import { GraphPanel } from "./ifc-workspace/GraphPanel";
 import { InspectorPanel } from "./ifc-workspace/InspectorPanel";
 import {
-  ConsolePanel,
-  DiagnosticsPanel,
-  DiffPanel,
+    ConsolePanel,
+    DiagnosticsPanel,
+    DiffPanel,
 } from "./ifc-workspace/ReviewPanels";
 import { StructurePanel } from "./ifc-workspace/StructurePanel";
 import { styles } from "./ifc-workspace/styles";
 import type {
-  BodyElementDraft,
-  CoordinateClipboard,
-  EntityEditDraft,
-  InspectorMode,
-  MosaicViewId,
-  ParsedCoordinates,
-  Point,
-  StructureMode,
+    BodyElementDraft,
+    CoordinateClipboard,
+    EntityEditDraft,
+    InspectorMode,
+    MosaicViewId,
+    ParsedCoordinates,
+    Point,
+    StructureMode,
 } from "./ifc-workspace/types";
 import {
-  Button,
-  MosaicWindowMenu,
-  SegmentedControl,
-  typeOption,
+    Button,
+    MosaicWindowMenu,
+    SegmentedControl,
+    typeOption,
 } from "./ifc-workspace/ui";
 import type { ViewerCoordinatePick } from "./that-open-viewer";
 import ThatOpenViewer from "./that-open-viewer";
@@ -119,6 +129,9 @@ export default function IfcWorkspace() {
   const [documentText, setDocumentText] = useState(initialDocument.text);
   const [documentBytes, setDocumentBytes] = useState<ArrayBuffer | null>(null);
   const [loadingIfcName, setLoadingIfcName] = useState("");
+  const [catalog, setCatalog] = useState<IfcObjectCatalog | null>(null);
+  const [catalogImporting, setCatalogImporting] = useState(false);
+  const [selectedCatalogObjectId, setSelectedCatalogObjectId] = useState("");
   const [consoleLines, setConsoleLines] = useState<string[]>(() => [
     `${new Date().toLocaleTimeString()}  ui.boot({ shell: 'vite-react' });`,
   ]);
@@ -132,6 +145,35 @@ export default function IfcWorkspace() {
     viewerDocument.entityById.get(selectedId) ??
     document.entityById.get(selectedId) ??
     document.entities[0];
+  const suggestedCatalogObject = useMemo(
+    () =>
+      catalog
+        ? suggestCatalogObjectForEntity(
+            viewerDocument,
+            selectedId,
+            catalog.objectTypes,
+          )
+        : undefined,
+    [catalog, selectedId, viewerDocument],
+  );
+  const activeCatalogObjectId =
+    selectedCatalogObjectId ||
+    suggestedCatalogObject?.id ||
+    catalog?.objectTypes[0]?.id ||
+    "";
+  const activeCatalogObject =
+    findCatalogObject(catalog, activeCatalogObjectId) ?? suggestedCatalogObject;
+  const catalogFindings = useMemo(
+    () =>
+      activeCatalogObject
+        ? validateEntityAgainstCatalogObject(
+            viewerDocument,
+            selectedId,
+            activeCatalogObject,
+          )
+        : [],
+    [activeCatalogObject, selectedId, viewerDocument],
+  );
   const closedMosaicIds = useMemo(() => {
     const visibleIds = new Set(getMosaicLeaves(mosaicValue));
     return MOSAIC_VIEW_IDS.filter((id) => !visibleIds.has(id));
@@ -300,6 +342,53 @@ export default function IfcWorkspace() {
     } finally {
       setLoadingIfcName("");
     }
+  };
+
+  const importCatalog = async () => {
+    try {
+      const asset = await pickCatalogFile();
+      if (!asset) {
+        return;
+      }
+      setCatalogImporting(true);
+      logAction(`ui.importCatalog.start({ file: '${asset.name}' });`);
+      const { parseCatalogWorkbook } = await import("@/ifc/catalogExcel");
+      const parsed = parseCatalogWorkbook(
+        await asset.file.arrayBuffer(),
+        asset.name,
+      );
+      const suggested = suggestCatalogObjectForEntity(
+        viewerDocument,
+        selectedId,
+        parsed.objectTypes,
+      );
+      setCatalog(parsed);
+      setSelectedCatalogObjectId(
+        suggested?.id ?? parsed.objectTypes[0]?.id ?? "",
+      );
+      setMosaicValue((current) => addMosaicView(current, "catalog"));
+      logAction(
+        `ui.importCatalog({ file: '${asset.name}', classes: ${parsed.objectTypes.length} });`,
+      );
+    } catch (error) {
+      logAction(`ui.error(${JSON.stringify(String(error))});`);
+    } finally {
+      setCatalogImporting(false);
+    }
+  };
+
+  const applyCatalogFinding = (finding: CatalogValidationFinding) => {
+    const sourceDocument = pendingDocument ?? document;
+    const next = applyCatalogQuickFix(sourceDocument, selectedId, finding);
+    if (next === sourceDocument) {
+      return;
+    }
+    stageDocument(
+      next,
+      selectedId,
+      `Catalog quick fix: ${finding.quickFix?.label ?? finding.kind}`,
+      `catalog.quickFix({ id: ${selectedId}, kind: '${finding.kind}' });`,
+    );
   };
 
   const loadSample = () => {
@@ -472,6 +561,55 @@ export default function IfcWorkspace() {
     );
   };
 
+  const addEmptyPset = (psetName: string) => {
+    const next = addNativeEmptyPropertySet(document, selectedId, psetName);
+    stageDocument(
+      next,
+      selectedId,
+      `Add empty Pset '${psetName}' to #${selectedId}`,
+      `addEmptyPset({ objectId: ${selectedId}, name: '${psetName}' });`,
+    );
+  };
+
+  const addCatalogPset = (
+    psetName: string,
+    properties: Array<{ name: string; value: string; valueType?: string }>,
+  ) => {
+    const next = addNativePropertySetValues(
+      document,
+      selectedId,
+      psetName,
+      properties,
+    );
+    stageDocument(
+      next,
+      selectedId,
+      `Add catalog Pset '${psetName}' to #${selectedId}`,
+      `addCatalogPset({ objectId: ${selectedId}, name: '${psetName}', properties: ${properties.length} });`,
+    );
+  };
+
+  const addPropertyToSet = (
+    setId: number,
+    propertyName: string,
+    propertyValue: string,
+    propertyValueType = "IFCLABEL",
+  ) => {
+    const next = addNativePropertyToSet(
+      document,
+      setId,
+      propertyName,
+      propertyValue,
+      propertyValueType,
+    );
+    stageDocument(
+      next,
+      selectedId,
+      `Add property '${propertyName}' to #${setId}`,
+      `addPropertyToSet({ setId: ${setId}, name: '${propertyName}', type: '${propertyValueType}' });`,
+    );
+  };
+
   const addQuantity = (
     qtoName: string,
     quantityName: string,
@@ -571,7 +709,8 @@ export default function IfcWorkspace() {
     propertyValue: string,
     propertyValueType: string,
   ) => {
-    const next = updateNativePropertyValue(document, propertyId, {
+    const sourceDocument = pendingDocument ?? document;
+    const next = updateNativePropertyValue(sourceDocument, propertyId, {
       name: propertyName,
       value: propertyValue,
       valueType: propertyValueType,
@@ -829,6 +968,8 @@ export default function IfcWorkspace() {
         onChange={(value) => setInspectorMode(value as InspectorMode)}
       />
       <InspectorPanel
+        activeCatalogObjectId={activeCatalogObjectId}
+        catalog={catalog}
         document={viewerDocument}
         mode={inspectorMode}
         selectedId={selectedId}
@@ -836,7 +977,9 @@ export default function IfcWorkspace() {
         onAddDocumentReference={addDocumentReference}
         onAddMaterial={addMaterial}
         onAssignType={assignType}
-        onAddPset={addPset}
+        onAddCatalogPset={addCatalogPset}
+        onAddEmptyPset={addEmptyPset}
+        onAddPropertyToSet={addPropertyToSet}
         onAddQuantity={addQuantity}
         onAddUnit={addUnit}
         onAddRelationship={addRelationship}
@@ -891,6 +1034,22 @@ export default function IfcWorkspace() {
               onAddQuantity={addQuantity}
               onAddUnit={addUnit}
               onLoadSystemCoordinates={loadSystemCoordinateClipboard}
+            />
+          </View>
+        );
+      case "catalog":
+        return (
+          <View style={styles.tileContent}>
+            <CatalogPanel
+              catalog={catalog}
+              document={viewerDocument}
+              findings={catalogFindings}
+              importing={catalogImporting}
+              selectedCatalogObjectId={activeCatalogObjectId}
+              selectedId={selectedId}
+              onApplyFinding={applyCatalogFinding}
+              onImportCatalog={importCatalog}
+              onSelectCatalogObject={setSelectedCatalogObjectId}
             />
           </View>
         );
@@ -954,6 +1113,11 @@ export default function IfcWorkspace() {
           />
           <Button label="Sample" onPress={loadSample} />
           <Button
+            disabled={catalogImporting}
+            label={catalog ? "Reload Catalog" : "Import Catalog"}
+            onPress={() => void importCatalog()}
+          />
+          <Button
             disabled={Boolean(pendingDocument) || Boolean(loadingIfcName)}
             label="Export IFC"
             onPress={() => void exportIfc()}
@@ -1006,6 +1170,23 @@ function pickIfcFile() {
       input.type = "file";
       input.accept =
         ".ifc,application/x-step,text/plain,application/octet-stream";
+      input.onchange = () => {
+        const file = input.files?.[0];
+        resolve(file ? { file, name: file.name } : undefined);
+      };
+      input.onerror = () => reject(new Error("File picker failed."));
+      input.click();
+    },
+  );
+}
+
+function pickCatalogFile() {
+  return new Promise<{ file: File; name: string } | undefined>(
+    (resolve, reject) => {
+      const input = globalThis.document.createElement("input");
+      input.type = "file";
+      input.accept =
+        ".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel";
       input.onchange = () => {
         const file = input.files?.[0];
         resolve(file ? { file, name: file.name } : undefined);

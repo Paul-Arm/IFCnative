@@ -1,35 +1,60 @@
-import { useEffect, useMemo, useState } from "react";
-import { ScrollView, Text, View } from "react-native";
+import {
+    useEffect,
+    useMemo,
+    useState,
+    type ComponentProps,
+    type ComponentType,
+} from "react";
+import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 
 import {
-  getNativePlacement,
-  type NativeIfcDocument,
-  type NativeIfcEntity,
-  type NativeIfcRelationship,
+    catalogObjectLabel,
+    getNativePlacement,
+    type CatalogObjectType,
+    type CatalogPropertyRule,
+    type IfcObjectCatalog,
+    type NativeIfcDocument,
+    type NativeIfcEntity,
+    type NativeIfcPropertySet,
+    type NativeIfcRelationship,
 } from "@/ifc";
 
 import {
-  ENTITY_TYPES,
-  PROPERTY_VALUE_TYPES,
-  QUANTITY_TYPES,
-  RELATION_TYPES,
-  TYPE_CLASSES,
-  UNIT_NAMES,
-  UNIT_TYPES,
+    ENTITY_TYPES,
+    PROPERTY_VALUE_TYPES,
+    QUANTITY_TYPES,
+    RELATION_TYPES,
+    TYPE_CLASSES,
+    UNIT_NAMES,
+    UNIT_TYPES,
 } from "./constants";
+import { findTreePath } from "./StructurePanel";
 import { styles } from "./styles";
 import type { EntityEditDraft, InspectorMode } from "./types";
-import { findTreePath } from "./StructurePanel";
 import {
-  Button,
-  DropdownField,
-  EntityDropdown,
-  InfoRow,
-  InfoSection,
-  LabeledInput,
+    Button,
+    CollapsibleSection,
+    DropdownField,
+    EntityDropdown,
+    InfoRow,
+    InfoSection,
+    LabeledInput,
+    SegmentedControl,
 } from "./ui";
 
+type NativeContextMenuEvent = {
+  preventDefault?: () => void;
+};
+
+const ContextMenuView = View as ComponentType<
+  ComponentProps<typeof View> & {
+    onContextMenu?: (event: NativeContextMenuEvent) => void;
+  }
+>;
+
 export function InspectorPanel({
+  activeCatalogObjectId,
+  catalog,
   document,
   mode,
   selectedId,
@@ -37,7 +62,8 @@ export function InspectorPanel({
   onAddDocumentReference,
   onAddMaterial,
   onAssignType,
-  onAddPset,
+  onAddEmptyPset,
+  onAddPropertyToSet,
   onAddQuantity,
   onAddRelationship,
   onAddUnit,
@@ -47,6 +73,8 @@ export function InspectorPanel({
   onUpdateProperty,
   onUpdateRelationship,
 }: {
+  activeCatalogObjectId: string;
+  catalog: IfcObjectCatalog | null;
   document: NativeIfcDocument;
   mode: InspectorMode;
   selectedId: number;
@@ -62,8 +90,9 @@ export function InspectorPanel({
   ): void;
   onAddMaterial(materialName: string, materialCategory: string): void;
   onAssignType(typeName: string, typeClass: string, tag: string): void;
-  onAddPset(
-    psetName: string,
+  onAddEmptyPset(psetName: string): void;
+  onAddPropertyToSet(
+    setId: number,
     propertyName: string,
     propertyValue: string,
     propertyValueType?: string,
@@ -103,9 +132,12 @@ export function InspectorPanel({
   if (mode === "psets") {
     return (
       <PsetPanel
+        activeCatalogObjectId={activeCatalogObjectId}
+        catalog={catalog}
         document={document}
         selectedId={selectedId}
-        onAddPset={onAddPset}
+        onAddEmptyPset={onAddEmptyPset}
+        onAddPropertyToSet={onAddPropertyToSet}
         onAddQuantity={onAddQuantity}
         onUpdateProperty={onUpdateProperty}
       />
@@ -385,16 +417,22 @@ function PlacementPanel({
 }
 
 function PsetPanel({
+  activeCatalogObjectId,
+  catalog,
   document,
   selectedId,
-  onAddPset,
+  onAddEmptyPset,
+  onAddPropertyToSet,
   onAddQuantity,
   onUpdateProperty,
 }: {
+  activeCatalogObjectId: string;
+  catalog: IfcObjectCatalog | null;
   document: NativeIfcDocument;
   selectedId: number;
-  onAddPset(
-    psetName: string,
+  onAddEmptyPset(psetName: string): void;
+  onAddPropertyToSet(
+    setId: number,
     propertyName: string,
     propertyValue: string,
     propertyValueType?: string,
@@ -412,108 +450,256 @@ function PsetPanel({
     propertyValueType: string,
   ): void;
 }) {
-  const [psetName, setPsetName] = useState("Pset_IFCnative_Custom");
-  const [propertyName, setPropertyName] = useState("Status");
-  const [propertyValue, setPropertyValue] = useState("Entwurf");
-  const [propertyValueType, setPropertyValueType] = useState("IFCLABEL");
+  const sets = document.propertySetsByEntity.get(selectedId) ?? [];
+  const catalogObject = catalog?.objectTypes.find(
+    (objectType) => objectType.id === activeCatalogObjectId,
+  );
+  const catalogPsets = useMemo(
+    () => groupCatalogPsets(catalogObject),
+    [catalogObject],
+  );
+  const [psetSource, setPsetSource] = useState("empty");
+  const [emptyPsetName, setEmptyPsetName] = useState("Pset_IFCnative_Custom");
   const [qtoName, setQtoName] = useState("Qto_IFCnative_BaseQuantities");
   const [quantityName, setQuantityName] = useState("ErfassteLaenge");
   const [quantityValue, setQuantityValue] = useState("1");
   const [quantityType, setQuantityType] = useState("IFCQUANTITYLENGTH");
-  const sets = document.propertySetsByEntity.get(selectedId) ?? [];
+  const catalogRuleCount = catalogPsets.reduce(
+    (total, set) => total + set.rules.length,
+    0,
+  );
+
+  const addSelectedPset = () => {
+    if (psetSource === "catalog") {
+      return;
+    }
+    onAddEmptyPset(emptyPsetName.trim() || "Pset_IFCnative_Custom");
+  };
+
   return (
     <ScrollView style={styles.panelScroll}>
-      <View style={styles.editBlock}>
-        <Text style={styles.infoTitle}>Add Property Set</Text>
-        <LabeledInput
-          label="Pset name"
-          value={psetName}
-          onChangeText={setPsetName}
-        />
-        <LabeledInput
-          label="Property"
-          value={propertyName}
-          onChangeText={setPropertyName}
-        />
-        <DropdownField
-          label="Value type"
-          options={PROPERTY_VALUE_TYPES}
-          value={propertyValueType}
-          onChange={setPropertyValueType}
-        />
-        <LabeledInput
-          label="Value"
-          value={propertyValue}
-          onChangeText={setPropertyValue}
-        />
-        <Button
-          label="+ Add Pset"
-          primary
-          onPress={() =>
-            onAddPset(psetName, propertyName, propertyValue, propertyValueType)
-          }
-        />
+      <View style={styles.psetToolbar}>
+        <View style={styles.psetToolbarSummary}>
+          <Text style={styles.infoTitle}>Psets</Text>
+          <Text style={styles.psetHeaderMeta}>
+            {sets.length.toLocaleString()} Sets fuer #{selectedId}
+          </Text>
+        </View>
+        <View style={styles.psetToolbarControls}>
+          <View style={styles.psetSourceField}>
+            <SegmentedControl
+              options={["empty", "catalog"]}
+              value={psetSource}
+              onChange={setPsetSource}
+            />
+          </View>
+          {psetSource === "catalog" ? (
+            <View style={styles.psetCatalogHint}>
+              <Text style={styles.psetCatalogHintTitle} numberOfLines={1}>
+                {catalogObject
+                  ? catalogObjectLabel(catalogObject)
+                  : "Keine Katalogklasse gewaehlt"}
+              </Text>
+              <Text style={styles.psetCatalogHintMeta} numberOfLines={1}>
+                {catalogObject
+                  ? `${catalogPsets.length.toLocaleString()} Psets / ${catalogRuleCount.toLocaleString()} Regeln im Objektkatalog`
+                  : "Auswahl im Objektkatalog-Panel treffen"}
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.psetNameField}>
+              <TextInput
+                placeholder="Pset-Name"
+                placeholderTextColor="#71717a"
+                style={[styles.input, styles.psetToolbarInput]}
+                value={emptyPsetName}
+                onChangeText={setEmptyPsetName}
+              />
+            </View>
+          )}
+          {psetSource === "empty" ? (
+            <PsetPrimaryButton label="+ Pset" onPress={addSelectedPset} />
+          ) : null}
+        </View>
       </View>
-      <View style={styles.editBlock}>
-        <Text style={styles.infoTitle}>Add Quantity Set</Text>
-        <LabeledInput
-          label="QTO name"
-          value={qtoName}
-          onChangeText={setQtoName}
+
+      {sets.map((set, index) => (
+        <PsetTableSection
+          document={document}
+          key={set.id}
+          set={set}
+          stackIndex={sets.length - index}
+          onAddPropertyToSet={onAddPropertyToSet}
+          onUpdateProperty={onUpdateProperty}
         />
-        <LabeledInput
-          label="Quantity"
-          value={quantityName}
-          onChangeText={setQuantityName}
-        />
-        <DropdownField
-          label="Quantity type"
-          options={QUANTITY_TYPES}
-          value={quantityType}
-          onChange={setQuantityType}
-        />
-        <LabeledInput
-          label="Value"
-          keyboardType="numeric"
-          value={quantityValue}
-          onChangeText={setQuantityValue}
-        />
+      ))}
+      {!sets.length ? (
+        <View style={styles.diffEmpty}>
+          <Text style={styles.infoTitle}>Keine Psets</Text>
+          <Text style={styles.empty}>
+            Ueber + Pset ein leeres Set oder eine Vorlage aus dem Objektkatalog
+            anlegen.
+          </Text>
+        </View>
+      ) : null}
+
+      <CollapsibleSection title="Quantity Set" meta="QTO manuell anlegen">
+        <View style={styles.row}>
+          <View style={styles.flexField}>
+            <LabeledInput
+              label="QTO name"
+              value={qtoName}
+              onChangeText={setQtoName}
+            />
+          </View>
+          <View style={styles.flexField}>
+            <LabeledInput
+              label="Quantity"
+              value={quantityName}
+              onChangeText={setQuantityName}
+            />
+          </View>
+        </View>
+        <View style={styles.row}>
+          <View style={styles.flexField}>
+            <DropdownField
+              label="Quantity type"
+              options={QUANTITY_TYPES}
+              value={quantityType}
+              onChange={setQuantityType}
+            />
+          </View>
+          <View style={styles.flexField}>
+            <LabeledInput
+              label="Value"
+              keyboardType="numeric"
+              value={quantityValue}
+              onChangeText={setQuantityValue}
+            />
+          </View>
+        </View>
         <Button
-          label="+ Add Quantity"
+          label="+ Add Quantity Set"
           onPress={() =>
             onAddQuantity(qtoName, quantityName, quantityValue, quantityType)
           }
         />
-      </View>
-      {sets.map((set) => (
-        <InfoSection key={set.id} title={`${set.kind} #${set.id} ${set.name}`}>
-          {set.values.map((value) => (
-            <EditablePropertyRow
-              key={value.id}
-              property={value}
-              rawValue={editableSetValue(
-                document.entityById.get(value.id),
-                value.value,
-              )}
-              onUpdate={onUpdateProperty}
-            />
-          ))}
-        </InfoSection>
-      ))}
-      {!sets.length ? (
-        <Text style={styles.empty}>No Psets or QTOs indexed.</Text>
-      ) : null}
+      </CollapsibleSection>
     </ScrollView>
   );
 }
 
-function EditablePropertyRow({
+function PsetTableSection({
+  document,
+  set,
+  stackIndex,
+  onAddPropertyToSet,
+  onUpdateProperty,
+}: {
+  document: NativeIfcDocument;
+  set: NativeIfcPropertySet;
+  stackIndex: number;
+  onAddPropertyToSet(
+    setId: number,
+    propertyName: string,
+    propertyValue: string,
+    propertyValueType?: string,
+  ): void;
+  onUpdateProperty(
+    propertyId: number,
+    propertyName: string,
+    propertyValue: string,
+    propertyValueType: string,
+  ): void;
+}) {
+  const typeOptions =
+    set.kind === "Qto" ? QUANTITY_TYPES : PROPERTY_VALUE_TYPES;
+  const [newName, setNewName] = useState(
+    set.kind === "Qto" ? "NeueMenge" : "NeueEigenschaft",
+  );
+  const [newType, setNewType] = useState(typeOptions[0] ?? "IFCLABEL");
+  const [newValue, setNewValue] = useState("");
+
+  useEffect(() => {
+    setNewType(typeOptions[0] ?? "IFCLABEL");
+  }, [set.kind, typeOptions]);
+
+  return (
+    <View style={[styles.psetSection, { zIndex: stackIndex }]}>
+      <View style={styles.psetHeader}>
+        <View style={styles.diffHeaderText}>
+          <Text style={styles.psetHeaderTitle} numberOfLines={1}>
+            {set.name}
+          </Text>
+          <Text style={styles.psetHeaderMeta}>
+            {set.kind} #{set.id} / {set.values.length.toLocaleString()} Werte
+          </Text>
+        </View>
+        <MiniButton
+          disabled={!newName.trim()}
+          label="+ Wert"
+          onPress={() => {
+            onAddPropertyToSet(set.id, newName, newValue, newType);
+            setNewValue("");
+          }}
+        />
+      </View>
+      <View style={styles.psetTable}>
+        <View style={[styles.psetTableRow, styles.psetTableHead]}>
+          <Text style={[styles.psetHeadCell, styles.psetNameCell]}>Name</Text>
+          <Text style={[styles.psetHeadCell, styles.psetTypeCell]}>Typ</Text>
+          <Text style={[styles.psetHeadCell, styles.psetValueCell]}>Wert</Text>
+        </View>
+        {set.values.map((value) => (
+          <EditablePropertyTableRow
+            key={value.id}
+            property={value}
+            rawValue={editableSetValue(
+              document.entityById.get(value.id),
+              value.value,
+            )}
+            typeOptions={typeOptions}
+            onUpdate={onUpdateProperty}
+          />
+        ))}
+        {!set.values.length ? (
+          <View style={styles.psetTableEmptyRow}>
+            <Text style={styles.empty}>Noch keine Werte.</Text>
+          </View>
+        ) : null}
+        <View style={[styles.psetTableRow, styles.psetAddRow]}>
+          <TextInput
+            value={newName}
+            onChangeText={setNewName}
+            style={[styles.psetCellInput, styles.psetNameCell]}
+          />
+          <TextInput
+            value={newType}
+            onChangeText={setNewType}
+            style={[styles.psetCellInput, styles.psetTypeCell]}
+          />
+          <PsetValueInput
+            selectedType={newType}
+            typeOptions={typeOptions}
+            value={newValue}
+            onChangeText={setNewValue}
+            onSelectType={setNewType}
+          />
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function EditablePropertyTableRow({
   property,
   rawValue,
+  typeOptions,
   onUpdate,
 }: {
   property: { id: number; name: string; value: string; type: string };
   rawValue: string;
+  typeOptions: string[];
   onUpdate(
     propertyId: number,
     propertyName: string,
@@ -525,15 +711,21 @@ function EditablePropertyRow({
   const [name, setName] = useState(property.name);
   const [valueType, setValueType] = useState(parsed.valueType);
   const [value, setValue] = useState(parsed.value);
-  const propertyOptions = useMemo(
-    () =>
-      uniqueStrings([
-        ...PROPERTY_VALUE_TYPES,
-        ...QUANTITY_TYPES,
-        parsed.valueType,
-      ]),
-    [parsed.valueType],
-  );
+
+  const updateName = (nextName: string) => {
+    setName(nextName);
+    onUpdate(property.id, nextName, value, valueType);
+  };
+
+  const updateValueType = (nextType: string) => {
+    setValueType(nextType);
+    onUpdate(property.id, name, value, nextType);
+  };
+
+  const updateValue = (nextValue: string) => {
+    setValue(nextValue);
+    onUpdate(property.id, name, nextValue, valueType);
+  };
 
   useEffect(() => {
     setName(property.name);
@@ -542,24 +734,214 @@ function EditablePropertyRow({
   }, [parsed.value, parsed.valueType, property.id, property.name]);
 
   return (
-    <View style={styles.editBlock}>
-      <LabeledInput
-        label={`Property #${property.id}`}
+    <View style={styles.psetTableRow}>
+      <TextInput
         value={name}
-        onChangeText={setName}
+        onChangeText={updateName}
+        style={[styles.psetCellInput, styles.psetNameCell]}
       />
-      <DropdownField
-        label="Value type"
-        options={propertyOptions}
+      <TextInput
         value={valueType}
-        onChange={setValueType}
+        onChangeText={updateValueType}
+        style={[styles.psetCellInput, styles.psetTypeCell]}
       />
-      <LabeledInput label="Value" value={value} onChangeText={setValue} />
-      <Button
-        label="Save Property"
-        onPress={() => onUpdate(property.id, name, value, valueType)}
+      <PsetValueInput
+        selectedType={valueType}
+        typeOptions={typeOptions}
+        value={value}
+        onChangeText={updateValue}
+        onSelectType={updateValueType}
       />
     </View>
+  );
+}
+
+function PsetValueInput({
+  selectedType,
+  typeOptions,
+  value,
+  onChangeText,
+  onSelectType,
+}: {
+  selectedType: string;
+  typeOptions: string[];
+  value: string;
+  onChangeText(value: string): void;
+  onSelectType(valueType: string): void;
+}) {
+  const [open, setOpen] = useState(false);
+  const normalizedTypeOptions = useMemo(
+    () => uniqueStrings([selectedType, ...typeOptions]),
+    [selectedType, typeOptions],
+  );
+
+  return (
+    <ContextMenuView
+      onContextMenu={(event) => {
+        event.preventDefault?.();
+        setOpen(true);
+      }}
+      style={[styles.psetValueCell, open && styles.psetValueCellOpen]}
+    >
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        style={[styles.psetCellInput, styles.psetValueInput]}
+      />
+      {open ? (
+        <View style={styles.psetTypeMenu}>
+          {normalizedTypeOptions.map((typeOption) => {
+            const selected = typeOption === selectedType;
+            return (
+              <Pressable
+                key={typeOption}
+                onPress={() => {
+                  onSelectType(typeOption);
+                  setOpen(false);
+                }}
+                style={[
+                  styles.psetTypeMenuOption,
+                  selected && styles.dropdownOptionActive,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.dropdownOptionText,
+                    selected && styles.dropdownOptionTextActive,
+                  ]}
+                >
+                  {typeOption}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
+    </ContextMenuView>
+  );
+}
+
+function CompactSelect({
+  options,
+  placeholder,
+  value,
+  onChange,
+}: {
+  options: Array<{ value: string; label: string; detail?: string }>;
+  placeholder: string;
+  value: string;
+  onChange(value: string): void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = options.find((option) => option.value === value);
+
+  return (
+    <View style={styles.psetCompactSelect}>
+      <Pressable
+        onPress={() => setOpen((current) => !current)}
+        style={({ pressed }) => [
+          styles.psetCompactSelectButton,
+          pressed && styles.buttonPressed,
+        ]}
+      >
+        <View style={styles.dropdownTextWrap}>
+          <Text style={styles.dropdownButtonText} numberOfLines={1}>
+            {selected?.label ?? placeholder}
+          </Text>
+          {selected?.detail ? (
+            <Text style={styles.dropdownDetail} numberOfLines={1}>
+              {selected.detail}
+            </Text>
+          ) : null}
+        </View>
+        <Text style={styles.dropdownCaret}>{open ? "^" : "v"}</Text>
+      </Pressable>
+      {open ? (
+        <View style={styles.psetCompactSelectMenu}>
+          <ScrollView nestedScrollEnabled style={styles.dropdownList}>
+            {options.map((option) => {
+              const selectedOption = option.value === value;
+              return (
+                <Pressable
+                  key={option.value}
+                  onPress={() => {
+                    onChange(option.value);
+                    setOpen(false);
+                  }}
+                  style={[
+                    styles.dropdownOption,
+                    selectedOption && styles.dropdownOptionActive,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.dropdownOptionText,
+                      selectedOption && styles.dropdownOptionTextActive,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {option.label}
+                  </Text>
+                  {option.detail ? (
+                    <Text style={styles.dropdownOptionDetail} numberOfLines={1}>
+                      {option.detail}
+                    </Text>
+                  ) : null}
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function PsetPrimaryButton({
+  disabled,
+  label,
+  onPress,
+}: {
+  disabled?: boolean;
+  label: string;
+  onPress(): void;
+}) {
+  return (
+    <Pressable
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.psetPrimaryButton,
+        pressed && styles.buttonPressed,
+        disabled && styles.disabled,
+      ]}
+    >
+      <Text style={styles.psetPrimaryButtonText}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function MiniButton({
+  disabled,
+  label,
+  onPress,
+}: {
+  disabled?: boolean;
+  label: string;
+  onPress(): void;
+}) {
+  return (
+    <Pressable
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.psetMiniButton,
+        pressed && styles.buttonPressed,
+        disabled && styles.disabled,
+      ]}
+    >
+      <Text style={styles.psetMiniButtonText}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -1013,6 +1395,32 @@ function normalizePropertyValueType(type: string) {
     .toUpperCase()
     .replace(/[^A-Z0-9_]/g, "");
   return normalized.startsWith("IFC") ? normalized : "IFCLABEL";
+}
+
+function groupCatalogPsets(objectType: CatalogObjectType | undefined) {
+  if (!objectType) {
+    return [];
+  }
+  const groups = new Map<string, CatalogPropertyRule[]>();
+  for (const rule of objectType.propertyRules) {
+    groups.set(rule.psetName, [...(groups.get(rule.psetName) ?? []), rule]);
+  }
+  return [...groups.entries()].map(([name, rules]) => ({ name, rules }));
+}
+
+function defaultPropertyValueForType(valueType: string) {
+  const normalized = normalizePropertyValueType(valueType);
+  if (normalized === "IFCBOOLEAN") {
+    return "False";
+  }
+  if (
+    normalized === "IFCREAL" ||
+    normalized === "IFCINTEGER" ||
+    normalized.includes("MEASURE")
+  ) {
+    return "0";
+  }
+  return "";
 }
 
 function uniqueStrings(values: string[]) {
