@@ -15,7 +15,6 @@ import {
     addNativeEmptyPropertySet,
     addNativeMaterial,
     addNativePropertySet,
-    addNativePropertySetValues,
     addNativePropertyToSet,
     addNativeQuantitySet,
     addNativeRelationship,
@@ -571,24 +570,6 @@ export default function IfcWorkspace() {
     );
   };
 
-  const addCatalogPset = (
-    psetName: string,
-    properties: Array<{ name: string; value: string; valueType?: string }>,
-  ) => {
-    const next = addNativePropertySetValues(
-      document,
-      selectedId,
-      psetName,
-      properties,
-    );
-    stageDocument(
-      next,
-      selectedId,
-      `Add catalog Pset '${psetName}' to #${selectedId}`,
-      `addCatalogPset({ objectId: ${selectedId}, name: '${psetName}', properties: ${properties.length} });`,
-    );
-  };
-
   const addPropertyToSet = (
     setId: number,
     propertyName: string,
@@ -977,7 +958,6 @@ export default function IfcWorkspace() {
         onAddDocumentReference={addDocumentReference}
         onAddMaterial={addMaterial}
         onAssignType={assignType}
-        onAddCatalogPset={addCatalogPset}
         onAddEmptyPset={addEmptyPset}
         onAddPropertyToSet={addPropertyToSet}
         onAddQuantity={addQuantity}

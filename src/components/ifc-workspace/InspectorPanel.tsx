@@ -821,82 +821,6 @@ function PsetValueInput({
   );
 }
 
-function CompactSelect({
-  options,
-  placeholder,
-  value,
-  onChange,
-}: {
-  options: Array<{ value: string; label: string; detail?: string }>;
-  placeholder: string;
-  value: string;
-  onChange(value: string): void;
-}) {
-  const [open, setOpen] = useState(false);
-  const selected = options.find((option) => option.value === value);
-
-  return (
-    <View style={styles.psetCompactSelect}>
-      <Pressable
-        onPress={() => setOpen((current) => !current)}
-        style={({ pressed }) => [
-          styles.psetCompactSelectButton,
-          pressed && styles.buttonPressed,
-        ]}
-      >
-        <View style={styles.dropdownTextWrap}>
-          <Text style={styles.dropdownButtonText} numberOfLines={1}>
-            {selected?.label ?? placeholder}
-          </Text>
-          {selected?.detail ? (
-            <Text style={styles.dropdownDetail} numberOfLines={1}>
-              {selected.detail}
-            </Text>
-          ) : null}
-        </View>
-        <Text style={styles.dropdownCaret}>{open ? "^" : "v"}</Text>
-      </Pressable>
-      {open ? (
-        <View style={styles.psetCompactSelectMenu}>
-          <ScrollView nestedScrollEnabled style={styles.dropdownList}>
-            {options.map((option) => {
-              const selectedOption = option.value === value;
-              return (
-                <Pressable
-                  key={option.value}
-                  onPress={() => {
-                    onChange(option.value);
-                    setOpen(false);
-                  }}
-                  style={[
-                    styles.dropdownOption,
-                    selectedOption && styles.dropdownOptionActive,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.dropdownOptionText,
-                      selectedOption && styles.dropdownOptionTextActive,
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {option.label}
-                  </Text>
-                  {option.detail ? (
-                    <Text style={styles.dropdownOptionDetail} numberOfLines={1}>
-                      {option.detail}
-                    </Text>
-                  ) : null}
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-        </View>
-      ) : null}
-    </View>
-  );
-}
-
 function PsetPrimaryButton({
   disabled,
   label,
@@ -1406,21 +1330,6 @@ function groupCatalogPsets(objectType: CatalogObjectType | undefined) {
     groups.set(rule.psetName, [...(groups.get(rule.psetName) ?? []), rule]);
   }
   return [...groups.entries()].map(([name, rules]) => ({ name, rules }));
-}
-
-function defaultPropertyValueForType(valueType: string) {
-  const normalized = normalizePropertyValueType(valueType);
-  if (normalized === "IFCBOOLEAN") {
-    return "False";
-  }
-  if (
-    normalized === "IFCREAL" ||
-    normalized === "IFCINTEGER" ||
-    normalized.includes("MEASURE")
-  ) {
-    return "0";
-  }
-  return "";
 }
 
 function uniqueStrings(values: string[]) {
