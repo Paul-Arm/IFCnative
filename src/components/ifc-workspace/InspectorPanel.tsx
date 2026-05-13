@@ -12,6 +12,7 @@ import {
     getNativePlacement,
     type CatalogObjectType,
     type CatalogPropertyRule,
+    type CatalogValidationFinding,
     type IfcObjectCatalog,
     type NativeIfcDocument,
     type NativeIfcEntity,
@@ -55,6 +56,7 @@ const ContextMenuView = View as ComponentType<
 export function InspectorPanel({
   activeCatalogObjectId,
   catalog,
+  catalogFindings,
   document,
   mode,
   selectedId,
@@ -67,6 +69,7 @@ export function InspectorPanel({
   onAddQuantity,
   onAddRelationship,
   onAddUnit,
+  onApplyCatalogFindings,
   onMovePlacement,
   onRemoveRelationship,
   onSaveEdit,
@@ -75,6 +78,7 @@ export function InspectorPanel({
 }: {
   activeCatalogObjectId: string;
   catalog: IfcObjectCatalog | null;
+  catalogFindings: CatalogValidationFinding[];
   document: NativeIfcDocument;
   mode: InspectorMode;
   selectedId: number;
@@ -105,6 +109,7 @@ export function InspectorPanel({
   ): void;
   onAddRelationship(type: string, sourceId: number, targetId: number): void;
   onAddUnit(unitType: string, unitName: string): void;
+  onApplyCatalogFindings(findings: CatalogValidationFinding[]): void;
   onMovePlacement(x: string, y: string, z: string): void;
   onRemoveRelationship(relationshipId: number): void;
   onSaveEdit(draft: EntityEditDraft): void;
@@ -134,11 +139,13 @@ export function InspectorPanel({
       <PsetPanel
         activeCatalogObjectId={activeCatalogObjectId}
         catalog={catalog}
+        catalogFindings={catalogFindings}
         document={document}
         selectedId={selectedId}
         onAddEmptyPset={onAddEmptyPset}
         onAddPropertyToSet={onAddPropertyToSet}
         onAddQuantity={onAddQuantity}
+        onApplyCatalogFindings={onApplyCatalogFindings}
         onUpdateProperty={onUpdateProperty}
       />
     );
@@ -419,15 +426,18 @@ function PlacementPanel({
 function PsetPanel({
   activeCatalogObjectId,
   catalog,
+  catalogFindings,
   document,
   selectedId,
   onAddEmptyPset,
   onAddPropertyToSet,
   onAddQuantity,
+  onApplyCatalogFindings,
   onUpdateProperty,
 }: {
   activeCatalogObjectId: string;
   catalog: IfcObjectCatalog | null;
+  catalogFindings: CatalogValidationFinding[];
   document: NativeIfcDocument;
   selectedId: number;
   onAddEmptyPset(psetName: string): void;
@@ -443,6 +453,7 @@ function PsetPanel({
     quantityValue: string,
     quantityType?: string,
   ): void;
+  onApplyCatalogFindings(findings: CatalogValidationFinding[]): void;
   onUpdateProperty(
     propertyId: number,
     propertyName: string,
@@ -467,6 +478,9 @@ function PsetPanel({
   const catalogRuleCount = catalogPsets.reduce(
     (total, set) => total + set.rules.length,
     0,
+  );
+  const catalogQuickFixes = catalogFindings.filter(
+    (finding) => finding.quickFix,
   );
 
   const addSelectedPset = () => {
@@ -519,7 +533,15 @@ function PsetPanel({
           )}
           {psetSource === "empty" ? (
             <PsetPrimaryButton label="+ Pset" onPress={addSelectedPset} />
-          ) : null}
+          ) : (
+            <PsetPrimaryButton
+              disabled={!catalogQuickFixes.length}
+              label={
+                catalogQuickFixes.length ? "Katalog anwenden" : "Katalog OK"
+              }
+              onPress={() => onApplyCatalogFindings(catalogQuickFixes)}
+            />
+          )}
         </View>
       </View>
 

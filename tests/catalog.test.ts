@@ -28,6 +28,25 @@ test("catalog workbook parser imports object class sheets", () => {
   assert.equal(catalog.objectTypes[0].propertyRules[1].valueType, "IFCREAL");
 });
 
+test("catalog parser prefers master property rows by object code suffix", () => {
+  const catalog = parseCatalogWorkbook(
+    createCatalogWorkbookWithStaleClassSheet(),
+    "catalog.xlsx",
+  );
+
+  const objectType = catalog.objectTypes[0];
+  assert.equal(objectType.name, "Chloridanalyse");
+  assert.equal(objectType.code, "BWD - CA");
+  assert.deepEqual(
+    objectType.propertyRules.map((rule) => rule.psetName),
+    ["ePset_Chloridgehalt", "ePset_Chloridgehalt"],
+  );
+  assert.deepEqual(
+    objectType.propertyRules.map((rule) => rule.propertyName),
+    ["_Chloridanalyse_CA", "_Datum_CA"],
+  );
+});
+
 test("catalog validation can quick-fix missing psets and classification", () => {
   const catalog = parseCatalogWorkbook(createCatalogWorkbook(), "catalog.xlsx");
   const objectType = catalog.objectTypes[0];
@@ -196,6 +215,127 @@ function createCatalogWorkbook() {
   ]);
   XLSX.utils.book_append_sheet(workbook, objectSheet, "Testwand");
   XLSX.utils.book_append_sheet(workbook, ignoredSheet, "Pset_Test");
+  return XLSX.write(workbook, {
+    bookType: "xlsx",
+    type: "array",
+  }) as ArrayBuffer;
+}
+
+function createCatalogWorkbookWithStaleClassSheet() {
+  const workbook = XLSX.utils.book_new();
+  const objectSheet = XLSX.utils.aoa_to_sheet([
+    [
+      'Merkmalsgruppe "Klasse"',
+      "Chloridanalyse",
+      "BWD - CA",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "V001",
+    ],
+    ["IFC-Klassifikation", "IfcBuildingElementProxy"],
+    [
+      "Merkmalsliste",
+      "Merkmal",
+      "Datentyp",
+      "Format",
+      "Einheit",
+      "Eintrag",
+      "TM UP",
+      "TM EE",
+      "TM UE",
+      "Level of Information",
+    ],
+    ["(Propertyset)", "(Property)", "", "", "", "", "", "", "", "LoI 100"],
+    [
+      "ePset_Ultraschall",
+      "_Datum_USM",
+      "ifcLabel",
+      "Text",
+      "ohne",
+      "erforderlich",
+      "X",
+      "X",
+      "-",
+      "X",
+    ],
+  ]);
+  const masterSheet = XLSX.utils.aoa_to_sheet([
+    [
+      "Element",
+      "Merkmal (Property) DEUTSCH",
+      "Merkmalsgruppe (Kategorie: PropertySet)",
+      "Herkunft",
+      "TM UP",
+      "TM EE",
+      "TM UE",
+      "LoI 100",
+      "LoI 200",
+      "LoI 300",
+      "LoI 400",
+      "LoI 500",
+      "Datentyp IFC",
+      "IFC-Typ",
+      "Format",
+      "Format Allplan",
+      "Einheit*",
+      "Eintrag",
+    ],
+    [
+      "Proxy",
+      "_Chloridanalyse_CA",
+      "ePset_Chloridgehalt",
+      "openSIM",
+      "X",
+      "X",
+      "-",
+      "-",
+      "-",
+      "X",
+      "X",
+      "X",
+      "Text",
+      "ifcLabel",
+      "[Text]",
+      "Text",
+      "ohne",
+      "erforderlich",
+    ],
+    [
+      "Proxy",
+      "_Datum_CA",
+      "ePset_Chloridgehalt",
+      "openSIM",
+      "-",
+      "X",
+      "-",
+      "-",
+      "-",
+      "X",
+      "X",
+      "X",
+      "Text",
+      "ifcLabel",
+      "[Datum]",
+      "Datum",
+      "ohne",
+      "erforderlich",
+    ],
+  ]);
+  XLSX.utils.book_append_sheet(workbook, objectSheet, "Chloridanalyse");
+  XLSX.utils.book_append_sheet(
+    workbook,
+    masterSheet,
+    "Alle Merkmale (Propertys)",
+  );
   return XLSX.write(workbook, {
     bookType: "xlsx",
     type: "array",

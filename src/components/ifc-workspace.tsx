@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
     Mosaic,
     MosaicWindow,
@@ -136,6 +136,9 @@ export default function IfcWorkspace() {
   ]);
   const [coordinateClipboard, setCoordinateClipboard] =
     useState<CoordinateClipboard | null>(null);
+  const desktopApi =
+    typeof window === "undefined" ? undefined : window.ifcNativeDesktop;
+  const isElectronDesktop = Boolean(desktopApi?.isElectron);
 
   const viewerDocument = pendingDocument ?? document;
   const viewerIfcText = pendingIfcText || documentText;
@@ -390,6 +393,28 @@ export default function IfcWorkspace() {
     );
   };
 
+  const applyCatalogFindings = (findings: CatalogValidationFinding[]) => {
+    const fixes = findings.filter((finding) => finding.quickFix);
+    if (!fixes.length) {
+      return;
+    }
+    const sourceDocument = pendingDocument ?? document;
+    const next = fixes.reduce(
+      (currentDocument, finding) =>
+        applyCatalogQuickFix(currentDocument, selectedId, finding),
+      sourceDocument,
+    );
+    if (next === sourceDocument) {
+      return;
+    }
+    stageDocument(
+      next,
+      selectedId,
+      `Apply ${fixes.length.toLocaleString()} catalog quick fixes to #${selectedId}`,
+      `catalog.quickFixAll({ id: ${selectedId}, fixes: ${fixes.length} });`,
+    );
+  };
+
   const loadSample = () => {
     replaceDocument(
       createNativeSampleDocument(),
@@ -410,6 +435,70 @@ export default function IfcWorkspace() {
     URL.revokeObjectURL(url);
     logAction(`ui.exportIfc({ file: '${fileName}.ifc' });`);
   };
+
+  useEffect(() => {
+    if (!desktopApi) {
+      return;
+    }
+
+    return desktopApi.onCommand((command) => {
+      switch (command.type) {
+        case "open-ifc":
+          if (!loadingIfcName) {
+            void openIfc();
+          }
+          break;
+        case "load-sample":
+          loadSample();
+          break;
+        case "import-catalog":
+          if (!catalogImporting) {
+            void importCatalog();
+          }
+          break;
+        case "export-ifc":
+          if (!pendingDocument && !loadingIfcName) {
+            void exportIfc();
+          }
+          break;
+        case "apply-draft":
+          applyPendingDocument();
+          break;
+        case "discard-draft":
+          discardPendingDocument();
+          break;
+        case "reset-layout":
+          resetMosaicLayout();
+          break;
+        case "restore-window":
+          if (MOSAIC_VIEW_IDS.includes(command.viewId)) {
+            restoreMosaicView(command.viewId);
+          }
+          break;
+      }
+    });
+  });
+
+  useEffect(() => {
+    if (!desktopApi) {
+      return;
+    }
+
+    desktopApi.setMenuState({
+      catalogImporting,
+      closedWindowIds: closedMosaicIds,
+      hasCatalog: Boolean(catalog),
+      hasPendingDraft: Boolean(pendingDocument),
+      loadingIfcName,
+    });
+  }, [
+    catalog,
+    catalogImporting,
+    closedMosaicIds,
+    desktopApi,
+    loadingIfcName,
+    pendingDocument,
+  ]);
 
   const saveSelectedEdit = (draft: EntityEditDraft) => {
     const next = updateNativeEntity(document, selectedId, {
@@ -951,6 +1040,7 @@ export default function IfcWorkspace() {
       <InspectorPanel
         activeCatalogObjectId={activeCatalogObjectId}
         catalog={catalog}
+        catalogFindings={catalogFindings}
         document={viewerDocument}
         mode={inspectorMode}
         selectedId={selectedId}
@@ -962,6 +1052,7 @@ export default function IfcWorkspace() {
         onAddPropertyToSet={addPropertyToSet}
         onAddQuantity={addQuantity}
         onAddUnit={addUnit}
+        onApplyCatalogFindings={applyCatalogFindings}
         onAddRelationship={addRelationship}
         onRemoveRelationship={deleteRelationship}
         onSaveEdit={saveSelectedEdit}
@@ -1080,46 +1171,48 @@ export default function IfcWorkspace() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={styles.topbar}>
-        <View>
-          <Text style={styles.appTitle}>IFCnative</Text>
+      {isElectronDesktop ? null : (
+        <View style={styles.topbar}>
+          <View>
+            <Text style={styles.appTitle}>IFCnative</Text>
+          </View>
+          <View style={styles.actions}>
+            <Button
+              disabled={Boolean(loadingIfcName)}
+              label={loadingIfcName ? "Loading IFC..." : "Open IFC"}
+              primary
+              onPress={() => void openIfc()}
+            />
+            <Button label="Sample" onPress={loadSample} />
+            <Button
+              disabled={catalogImporting}
+              label={catalog ? "Reload Catalog" : "Import Catalog"}
+              onPress={() => void importCatalog()}
+            />
+            <Button
+              disabled={Boolean(pendingDocument) || Boolean(loadingIfcName)}
+              label="Export IFC"
+              onPress={() => void exportIfc()}
+            />
+            <Button
+              disabled={!pendingDocument}
+              label="Apply Draft"
+              primary
+              onPress={applyPendingDocument}
+            />
+            <Button
+              disabled={!pendingDocument}
+              label="Discard Draft"
+              onPress={discardPendingDocument}
+            />
+            <Button label="Reset Layout" onPress={resetMosaicLayout} />
+            <MosaicWindowMenu
+              closedIds={closedMosaicIds}
+              onRestore={restoreMosaicView}
+            />
+          </View>
         </View>
-        <View style={styles.actions}>
-          <Button
-            disabled={Boolean(loadingIfcName)}
-            label={loadingIfcName ? "Loading IFC..." : "Open IFC"}
-            primary
-            onPress={() => void openIfc()}
-          />
-          <Button label="Sample" onPress={loadSample} />
-          <Button
-            disabled={catalogImporting}
-            label={catalog ? "Reload Catalog" : "Import Catalog"}
-            onPress={() => void importCatalog()}
-          />
-          <Button
-            disabled={Boolean(pendingDocument) || Boolean(loadingIfcName)}
-            label="Export IFC"
-            onPress={() => void exportIfc()}
-          />
-          <Button
-            disabled={!pendingDocument}
-            label="Apply Draft"
-            primary
-            onPress={applyPendingDocument}
-          />
-          <Button
-            disabled={!pendingDocument}
-            label="Discard Draft"
-            onPress={discardPendingDocument}
-          />
-          <Button label="Reset Layout" onPress={resetMosaicLayout} />
-          <MosaicWindowMenu
-            closedIds={closedMosaicIds}
-            onRestore={restoreMosaicView}
-          />
-        </View>
-      </View>
+      )}
 
       <View style={styles.mosaicShell}>
         <Mosaic<MosaicViewId>

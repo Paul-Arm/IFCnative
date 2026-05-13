@@ -24,6 +24,22 @@ const LOI_COLUMNS = [
   { index: 13, label: "LoI 500" },
 ];
 
+const MASTER_PROPERTY_SHEET = "Alle Merkmale (Propertys)";
+
+const MASTER_TRADE_COLUMNS = [
+  { index: 4, label: "TM UP" },
+  { index: 5, label: "TM EE" },
+  { index: 6, label: "TM UE" },
+];
+
+const MASTER_LOI_COLUMNS = [
+  { index: 7, label: "LoI 100" },
+  { index: 8, label: "LoI 200" },
+  { index: 9, label: "LoI 300" },
+  { index: 10, label: "LoI 400" },
+  { index: 11, label: "LoI 500" },
+];
+
 export function parseCatalogWorkbook(
   arrayBuffer: ArrayBuffer,
   fileName: string,
@@ -31,16 +47,11 @@ export function parseCatalogWorkbook(
   const workbook = XLSX.read(arrayBuffer, { cellDates: false });
   const diagnostics: string[] = [];
   const objectTypes: CatalogObjectType[] = [];
+  const masterRows = readSheetRows(workbook, MASTER_PROPERTY_SHEET);
 
   for (const sheetName of workbook.SheetNames) {
-    const sheet = workbook.Sheets[sheetName];
-    const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
-      blankrows: false,
-      defval: "",
-      header: 1,
-      raw: false,
-    });
-    const parsed = parseObjectSheet(sheetName, rows);
+    const rows = readSheetRows(workbook, sheetName);
+    const parsed = parseObjectSheet(sheetName, rows, masterRows);
     if (parsed) {
       objectTypes.push(parsed);
     }
@@ -63,6 +74,11 @@ export function parseCatalogWorkbook(
   diagnostics.push(
     `Indexed ${propertyRuleCount.toLocaleString()} object-bound property rules.`,
   );
+  if (masterRows.length) {
+    diagnostics.push(
+      `Preferred ${MASTER_PROPERTY_SHEET} rows for object classes with matching code suffixes.`,
+    );
+  }
 
   return {
     diagnostics,
@@ -75,6 +91,7 @@ export function parseCatalogWorkbook(
 function parseObjectSheet(
   sheetName: string,
   rows: unknown[][],
+  masterRows: unknown[][],
 ): CatalogObjectType | undefined {
   const firstCell = normalizeCatalogToken(rows[0]?.[0]);
   if (!firstCell.includes("merkmalsgruppe") || !firstCell.includes("klasse")) {
@@ -86,7 +103,9 @@ function parseObjectSheet(
   const version = cleanCell(rows[0]?.[14]);
   const ifcClass = normalizeIfcClass(rows[1]?.[1]);
   const id = makeCatalogId(code || name || sheetName);
-  const propertyRules = readPropertyRules(sheetName, rows, id);
+  const sheetRules = readPropertyRules(sheetName, rows, id);
+  const masterRules = readMasterPropertyRules(masterRows, id, code);
+  const propertyRules = masterRules.length ? masterRules : sheetRules;
 
   return {
     code,
@@ -97,6 +116,56 @@ function parseObjectSheet(
     sheetName,
     version,
   };
+}
+
+function readSheetRows(workbook: XLSX.WorkBook, sheetName: string) {
+  const sheet = workbook.Sheets[sheetName];
+  if (!sheet) {
+    return [];
+  }
+  return XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+    blankrows: false,
+    defval: "",
+    header: 1,
+    raw: false,
+  });
+}
+
+function readMasterPropertyRules(
+  rows: unknown[][],
+  objectId: string,
+  code: string,
+) {
+  const suffix = catalogCodeSuffix(code);
+  if (!suffix) {
+    return [];
+  }
+  const rules: CatalogPropertyRule[] = [];
+  for (let index = 1; index < rows.length; index += 1) {
+    const row = rows[index];
+    const psetName = cleanCell(row[2]);
+    const propertyName = cleanCell(row[1]);
+    if (
+      !looksLikePropertyRule(psetName, propertyName) ||
+      !hasPropertySuffix(propertyName, suffix)
+    ) {
+      continue;
+    }
+    rules.push({
+      format: cleanCell(row[14]),
+      id: `${objectId}:master:${rules.length + 1}`,
+      loiMarkers: readMarkers(row, MASTER_LOI_COLUMNS),
+      propertyName,
+      psetName,
+      requirement: normalizeCatalogRequirement(row[17]),
+      sourceRow: index + 1,
+      sourceSheet: MASTER_PROPERTY_SHEET,
+      tradeMarkers: readMarkers(row, MASTER_TRADE_COLUMNS),
+      unit: cleanCell(row[16]),
+      valueType: normalizeIfcValueType(row[13] || row[12]),
+    });
+  }
+  return rules;
 }
 
 function readPropertyRules(
@@ -159,6 +228,20 @@ function isMarkerSet(value: unknown) {
 
 function cleanCell(value: unknown) {
   return String(value ?? "").trim();
+}
+
+function catalogCodeSuffix(code: string) {
+  return (
+    cleanCell(code)
+      .split("-")
+      .pop()
+      ?.toUpperCase()
+      .replace(/[^A-Z0-9]/g, "") ?? ""
+  );
+}
+
+function hasPropertySuffix(propertyName: string, suffix: string) {
+  return propertyName.toUpperCase().endsWith(`_${suffix}`);
 }
 
 function makeCatalogId(value: string) {

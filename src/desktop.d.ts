@@ -1,0 +1,40 @@
+import type { MosaicViewId } from "./components/ifc-workspace/types";
+
+type IfcNativeDesktopCommand =
+  | { type: "apply-draft" }
+  | { type: "discard-draft" }
+  | { type: "export-ifc" }
+  | { type: "import-catalog" }
+  | { type: "load-sample" }
+  | { type: "open-ifc" }
+  | { type: "reset-layout" }
+  | { type: "restore-window"; viewId: MosaicViewId };
+
+type IfcNativeDesktopMenuState = {
+  catalogImporting: boolean;
+  closedWindowIds: MosaicViewId[];
+  hasCatalog: boolean;
+  hasPendingDraft: boolean;
+  loadingIfcName: string;
+};
+
+declare global {
+  interface Window {
+    ifcNativeDesktop?: {
+      isElectron: true;
+      onCommand(
+        callback: (command: IfcNativeDesktopCommand) => void,
+      ): () => void;
+      platform: string;
+      setMenuState(state: IfcNativeDesktopMenuState): void;
+      versions: Readonly<{
+        chrome: string;
+        electron: string;
+        node: string;
+      }>;
+    };
+  }
+}
+
+export { };
+
