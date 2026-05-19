@@ -4,7 +4,10 @@ import test from "node:test";
 import * as WebIFC from "web-ifc";
 
 import { createMinimalIfcProject } from "../src/ifc/builder";
-import { viewerWorldDeltaToIfcPlacementDelta } from "../src/ifc/coordinateMapping";
+import {
+    viewerWorldDeltaToIfcPlacementDelta,
+    viewerWorldPointToIfcPlacementPoint,
+} from "../src/ifc/coordinateMapping";
 import {
     buildNativeDocumentFromFragments,
     type FragmentDocumentModel,
@@ -1027,6 +1030,17 @@ test("viewer-world move deltas are converted to IFC placement axes", async () =>
 
   api.CloseModel(beforeModelID);
   api.CloseModel(afterModelID);
+});
+
+test("viewer-world picked points are converted to IFC placement axes", () => {
+  assert.deepEqual(
+    viewerWorldPointToIfcPlacementPoint({
+      x: -1456.5366,
+      y: 15.1184,
+      z: -395.765,
+    }),
+    { x: -1456.5366, y: 395.765, z: 15.1184 },
+  );
 });
 
 function readEntitySummaries(api: WebIFC.IfcAPI, modelID: number) {

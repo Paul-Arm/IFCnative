@@ -1,19 +1,19 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import type { NativeIfcDocument } from "@/ifc";
+import type { NativeIfcDocument, NativeIfcEntity } from "@/ifc";
 import {
-  buildGraph,
-  layoutGraph,
-  retainPinnedPositions,
+    buildGraph,
+    layoutGraph,
+    retainPinnedPositions,
 } from "@/ifc/graphLayout";
 import type { NativeGraphPreset } from "@/ifc/nativeGraph";
 
 import RelationshipFlow from "../relationship-flow";
 import type {
-  RelationshipFlowEdge,
-  RelationshipFlowLayoutMode,
-  RelationshipFlowMove,
-  RelationshipFlowNode,
+    RelationshipFlowEdge,
+    RelationshipFlowLayoutMode,
+    RelationshipFlowMove,
+    RelationshipFlowNode,
 } from "../relationship-flow.types";
 import { GRAPH_PRESETS } from "./constants";
 import type { Point } from "./types";
@@ -31,6 +31,8 @@ export function GraphPanel({
   preset,
   relationshipOptions,
   relationshipTypeFilters,
+  search,
+  searchMatches,
   selectedId,
   onConnectNodes,
   onCreateNodeFromConnection,
@@ -54,6 +56,8 @@ export function GraphPanel({
   preset: NativeGraphPreset;
   relationshipOptions: DropdownOption[];
   relationshipTypeFilters: Set<string>;
+  search: string;
+  searchMatches: NativeIfcEntity[];
   selectedId: number;
   onConnectNodes(
     sourceId: number,
@@ -78,11 +82,42 @@ export function GraphPanel({
 }) {
   const [layoutMode, setLayoutMode] =
     useState<RelationshipFlowLayoutMode>("tension");
+  const [searchCursor, setSearchCursor] = useState(0);
+  const searchQuery = search.trim().toLowerCase();
+  const searchMatchIds = useMemo(
+    () => new Set(searchMatches.map((entity) => entity.id)),
+    [searchMatches],
+  );
+  const activeSearchIndex =
+    searchQuery && searchMatches.length
+      ? Math.min(searchCursor, searchMatches.length - 1)
+      : -1;
+  const activeSearchMatch =
+    activeSearchIndex >= 0 ? searchMatches[activeSearchIndex] : undefined;
+  const graphAnchorId = useMemo(() => {
+    return activeSearchMatch?.id ?? anchorId;
+  }, [activeSearchMatch, anchorId]);
+
+  useEffect(() => {
+    if (!searchQuery || !searchMatches.length) {
+      setSearchCursor(0);
+      return;
+    }
+    const selectedSearchIndex = searchMatches.findIndex(
+      (entity) => entity.id === selectedId,
+    );
+    setSearchCursor((current) => {
+      if (selectedSearchIndex >= 0) {
+        return selectedSearchIndex;
+      }
+      return current < searchMatches.length ? current : 0;
+    });
+  }, [searchMatches, searchQuery, selectedId]);
   const graph = useMemo(
     () =>
       buildGraph(
         document,
-        anchorId,
+        graphAnchorId,
         pinned,
         expanded,
         collapsed,
@@ -95,7 +130,7 @@ export function GraphPanel({
       depth,
       document,
       expanded,
-      anchorId,
+      graphAnchorId,
       pinned,
       preset,
       relationshipTypeFilters,
@@ -133,6 +168,7 @@ export function GraphPanel({
             },
             id: node.id,
             pinned: pinned.has(node.id),
+            searchMatch: searchMatchIds.has(node.id),
             selected: node.id === selectedId,
             x: node.x,
             y: node.y,
@@ -145,6 +181,7 @@ export function GraphPanel({
       graph.loadedSources,
       layout,
       pinned,
+      searchMatchIds,
       selectedId,
     ],
   );
@@ -176,6 +213,23 @@ export function GraphPanel({
     moveNodes([{ id, point }]);
   };
 
+  const navigateSearchResult = (direction: "previous" | "next") => {
+    if (!searchQuery || !searchMatches.length) {
+      return;
+    }
+    const currentIndex = activeSearchIndex >= 0 ? activeSearchIndex : 0;
+    const nextIndex =
+      direction === "next"
+        ? (currentIndex + 1) % searchMatches.length
+        : (currentIndex - 1 + searchMatches.length) % searchMatches.length;
+    const target = searchMatches[nextIndex];
+    setSearchCursor(nextIndex);
+    onSelect(target.id, "graph");
+    onLog(
+      `graph.searchResult({ direction: '${direction}', index: ${nextIndex + 1}, count: ${searchMatches.length}, id: ${target.id} });`,
+    );
+  };
+
   return (
     <RelationshipFlow
       capped={graph.capped}
@@ -190,6 +244,10 @@ export function GraphPanel({
       relationshipCount={graph.edges.length}
       relationshipTypeFilters={[...relationshipTypeFilters]}
       relationshipTypes={graph.relationshipTypes}
+      search={search}
+      searchActiveId={activeSearchMatch?.id ?? null}
+      searchActiveIndex={activeSearchIndex}
+      searchMatchCount={searchMatches.length}
       onClearPositions={() => {
         onPositions(retainPinnedPositions(positions, pinned));
         onLog(`graph.autoLayout({ mode: '${layoutMode}' });`);
@@ -221,6 +279,7 @@ export function GraphPanel({
       }}
       onPreset={(value) => onPreset(value as NativeGraphPreset)}
       onRelationshipTypeFilters={onRelationshipTypeFilters}
+      onSearchNavigate={navigateSearchResult}
       onSelect={(id) => onSelect(id, "graph")}
       onToggleChildren={(id, loaded) => onToggleChildren(id, loaded)}
       onTogglePin={onTogglePin}

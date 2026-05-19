@@ -1,25 +1,29 @@
 import { useEffect, useState } from "react";
 import { ScrollView, Text, View } from "react-native";
 
-import type { NativeIfcDocument, NativeIfcEntity } from "@/ifc";
+import {
+    viewerWorldPointToIfcPlacementPoint,
+    type NativeIfcDocument,
+    type NativeIfcEntity,
+} from "@/ifc";
 
 import {
-  ENTITY_TYPES,
-  PROPERTY_VALUE_TYPES,
-  QUANTITY_TYPES,
-  RELATION_TYPES,
-  TYPE_CLASSES,
-  UNIT_NAMES,
-  UNIT_TYPES,
+    ENTITY_TYPES,
+    PROPERTY_VALUE_TYPES,
+    QUANTITY_TYPES,
+    RELATION_TYPES,
+    TYPE_CLASSES,
+    UNIT_NAMES,
+    UNIT_TYPES,
 } from "./constants";
 import { styles } from "./styles";
 import type { BodyElementDraft, CoordinateClipboard } from "./types";
 import {
-  Button,
-  CollapsibleSection,
-  DropdownField,
-  EntityDropdown,
-  LabeledInput,
+    Button,
+    CollapsibleSection,
+    DropdownField,
+    EntityDropdown,
+    LabeledInput,
 } from "./ui";
 
 export function BuilderPanel({
@@ -136,16 +140,18 @@ export function BuilderPanel({
     if (!coordinateClipboard) {
       const systemClipboard = await onLoadSystemCoordinates();
       if (systemClipboard) {
-        setBodyX(systemClipboard.x);
-        setBodyY(systemClipboard.y);
-        setBodyZ(systemClipboard.z);
+        const placement = coordinateClipboardToIfcPlacement(systemClipboard);
+        setBodyX(placement.x);
+        setBodyY(placement.y);
+        setBodyZ(placement.z);
         setBodyPlacementMode("world");
       }
       return;
     }
-    setBodyX(coordinateClipboard.x);
-    setBodyY(coordinateClipboard.y);
-    setBodyZ(coordinateClipboard.z);
+    const placement = coordinateClipboardToIfcPlacement(coordinateClipboard);
+    setBodyX(placement.x);
+    setBodyY(placement.y);
+    setBodyZ(placement.z);
     setBodyPlacementMode("world");
   };
 
@@ -303,7 +309,7 @@ export function BuilderPanel({
           <Text style={styles.infoTitle}>Koordinaten-Zwischenablage</Text>
           <Text style={styles.empty}>
             {coordinateClipboard
-              ? `X ${coordinateClipboard.x}, Y ${coordinateClipboard.y}, Z ${coordinateClipboard.z} (${coordinateClipboard.copiedAt})`
+              ? describeCoordinateClipboard(coordinateClipboard)
               : "Noch keine Koordinaten aus dem 3D-Viewer übernommen."}
           </Text>
           <Button
@@ -419,7 +425,11 @@ export function BuilderPanel({
         <View style={styles.separator} />
         <View style={styles.row}>
           <View style={styles.flexField}>
-            <LabeledInput label="QTO" value={qtoName} onChangeText={setQtoName} />
+            <LabeledInput
+              label="QTO"
+              value={qtoName}
+              onChangeText={setQtoName}
+            />
           </View>
           <View style={styles.flexField}>
             <LabeledInput
@@ -621,6 +631,45 @@ function isBodyAssignableEntity(entity?: NativeIfcEntity) {
     ].includes(entity?.type ?? "") &&
     (entity?.args.length ?? 0) >= 7
   );
+}
+
+function describeCoordinateClipboard(clipboard: CoordinateClipboard) {
+  const source = clipboard.fileName ?? clipboard.source;
+  const placement = coordinateClipboardToIfcPlacement(clipboard);
+  if (clipboard.source !== "thatopen") {
+    return `X ${clipboard.x}, Y ${clipboard.y}, Z ${clipboard.z} (${source}, ${clipboard.copiedAt})`;
+  }
+  return `Viewer X ${clipboard.x}, Y ${clipboard.y}, Z ${clipboard.z} -> IFC X ${placement.x}, Y ${placement.y}, Z ${placement.z} (${source}, ${clipboard.copiedAt})`;
+}
+
+function coordinateClipboardToIfcPlacement(clipboard: CoordinateClipboard) {
+  if (clipboard.source !== "thatopen") {
+    return {
+      x: clipboard.x,
+      y: clipboard.y,
+      z: clipboard.z,
+    };
+  }
+  const point = viewerWorldPointToIfcPlacementPoint({
+    x: readCoordinateNumber(clipboard.x),
+    y: readCoordinateNumber(clipboard.y),
+    z: readCoordinateNumber(clipboard.z),
+  });
+  return {
+    x: formatBodyCoordinate(point.x),
+    y: formatBodyCoordinate(point.y),
+    z: formatBodyCoordinate(point.z),
+  };
+}
+
+function readCoordinateNumber(value: string) {
+  const parsed = Number(value.trim().replace(",", "."));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatBodyCoordinate(value: number) {
+  const rounded = Math.round(value * 1000) / 1000;
+  return String(Object.is(rounded, -0) ? 0 : rounded);
 }
 
 function shortIfc(value: string) {

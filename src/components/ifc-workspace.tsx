@@ -1,11 +1,24 @@
-import { useEffect, useMemo, useState } from "react";
+import {
+    startTransition,
+    useEffect,
+    useMemo,
+    useState,
+    type SetStateAction,
+} from "react";
 import {
     Mosaic,
     MosaicWindow,
     type MosaicNode,
     type MosaicPath,
 } from "react-mosaic-component";
-import { SafeAreaView, Text, TextInput, View } from "react-native";
+import {
+    Pressable,
+    SafeAreaView,
+    ScrollView,
+    Text,
+    TextInput,
+    View,
+} from "react-native";
 
 import {
     addNativeBodyElement,
@@ -41,6 +54,7 @@ import {
     type CatalogValidationFinding,
     type IfcObjectCatalog,
     type NativeIfcDocument,
+    type NativeIfcEntity,
 } from "@/ifc";
 import { type NativeGraphPreset } from "@/ifc/nativeGraph";
 
@@ -77,29 +91,129 @@ import {
 import type { ViewerCoordinatePick } from "./that-open-viewer";
 import ThatOpenViewer from "./that-open-viewer";
 
-function createInitialWorkspaceDocument() {
-  const document = createNativeSampleDocument();
+interface WorkspaceDocumentSession {
+  id: string;
+  document: NativeIfcDocument;
+  documentText: string;
+  documentTextDirty: boolean;
+  graphAnchorId: number;
+  graphCollapsed: Set<number>;
+  graphExpanded: Set<number>;
+  graphPinned: Set<number>;
+  graphPositions: Map<number, Point>;
+  selectedId: number;
+  sourceIfcBytes: ArrayBuffer | null;
+  sourceIfcFile: File | null;
+  treeExpanded: Set<number>;
+  viewerModelBytes: ArrayBuffer | null;
+  viewerModelDeferredReason: string;
+  viewerModelFile: File | null;
+  viewerModelLoadRequested: boolean;
+  viewerModelRevision: number;
+  viewerModelText: string;
+}
+
+const AUTO_VIEWER_LOAD_LIMIT_BYTES = 80 * 1024 * 1024;
+
+let nextWorkspaceDocumentId = 0;
+
+function createWorkspaceDocumentSession(
+  document: NativeIfcDocument,
+  options?: {
+    bytes?: ArrayBuffer | null;
+    file?: File | null;
+    graphPositions?: Map<number, Point>;
+    id?: string;
+    selectedId?: number;
+    text?: string;
+    viewerModelLoadRequested?: boolean;
+    viewerModelRevision?: number;
+  },
+): WorkspaceDocumentSession {
+  const sourceBytes = options?.bytes ?? null;
+  const sourceFile = options?.file ?? null;
+  const text =
+    options?.text ?? (sourceBytes ? "" : serializeNativeIfcDocument(document));
+  const viewerModelLoadRequested =
+    options?.viewerModelLoadRequested ?? shouldAutoLoadViewer(sourceBytes);
+  const viewerModelDeferredReason = viewerModelLoadRequested
+    ? ""
+    : `3D-Konvertierung fuer grosse IFC (${formatByteSize(sourceBytes?.byteLength ?? 0)}) pausiert.`;
+  const fallbackId =
+    document.spatialRoots[0]?.id ?? document.entities[0]?.id ?? 0;
+  const selectedId = document.entityById.has(options?.selectedId ?? 0)
+    ? (options?.selectedId as number)
+    : fallbackId;
   return {
     document,
-    selectedId: document.spatialRoots[0]?.id ?? 1,
-    text: serializeNativeIfcDocument(document),
+    documentText: text,
+    documentTextDirty: false,
+    graphAnchorId: selectedId,
+    graphCollapsed: new Set(),
+    graphExpanded: new Set(),
+    graphPinned: new Set(),
+    graphPositions: options?.graphPositions ?? new Map(),
+    id: options?.id ?? createWorkspaceDocumentId(document.fileName),
+    selectedId,
+    sourceIfcBytes: sourceBytes,
+    sourceIfcFile: sourceFile,
+    treeExpanded: new Set(),
+    viewerModelBytes: sourceBytes,
+    viewerModelDeferredReason,
+    viewerModelFile: sourceFile,
+    viewerModelLoadRequested,
+    viewerModelRevision: options?.viewerModelRevision ?? 0,
+    viewerModelText: text,
   };
+}
+
+function shouldAutoLoadViewer(bytes: ArrayBuffer | null) {
+  return !bytes || bytes.byteLength <= AUTO_VIEWER_LOAD_LIMIT_BYTES;
+}
+
+function formatByteSize(bytes: number) {
+  if (bytes >= 1024 * 1024 * 1024) {
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  }
+  return `${Math.max(1, Math.round(bytes / (1024 * 1024)))} MB`;
+}
+
+function createWorkspaceDocumentId(fileName: string) {
+  nextWorkspaceDocumentId += 1;
+  return `${fileName || "IFC"}:${Date.now().toString(36)}:${nextWorkspaceDocumentId}`;
+}
+
+function matchesEntitySearch(entity: NativeIfcEntity, query: string) {
+  const id = String(entity.id);
+  return [
+    id,
+    `#${id}`,
+    entity.type,
+    entity.name,
+    entity.globalId,
+    entity.description,
+  ].some((value) => value.toLowerCase().includes(query));
+}
+
+function createInitialWorkspaceDocument() {
+  const document = createNativeSampleDocument();
+  return createWorkspaceDocumentSession(document);
+}
+
+function applyStateAction<T>(current: T, action: SetStateAction<T>) {
+  return typeof action === "function"
+    ? (action as (value: T) => T)(current)
+    : action;
 }
 
 export default function IfcWorkspace() {
   const [initialDocument] = useState(createInitialWorkspaceDocument);
-  const [document, setDocument] = useState<NativeIfcDocument>(
-    initialDocument.document,
-  );
-  const [selectedId, setSelectedId] = useState(initialDocument.selectedId);
-  const [graphAnchorId, setGraphAnchorId] = useState(
-    initialDocument.selectedId,
-  );
+  const [documentSessions, setDocumentSessions] = useState<
+    WorkspaceDocumentSession[]
+  >(() => [initialDocument]);
+  const [activeDocumentId, setActiveDocumentId] = useState(initialDocument.id);
   const [structureMode, setStructureMode] = useState<StructureMode>("tree");
   const [inspectorMode, setInspectorMode] = useState<InspectorMode>("info");
-  const [treeExpanded, setTreeExpanded] = useState<Set<number>>(
-    () => new Set(),
-  );
   const [mosaicValue, setMosaicValue] =
     useState<MosaicNode<MosaicViewId> | null>(DEFAULT_MOSAIC_LAYOUT);
   const [search, setSearch] = useState("");
@@ -108,22 +222,6 @@ export default function IfcWorkspace() {
   const [graphRelationshipTypes, setGraphRelationshipTypes] = useState<
     Set<string>
   >(() => new Set());
-  const [graphPinned, setGraphPinned] = useState<Set<number>>(() => new Set());
-  const [graphExpanded, setGraphExpanded] = useState<Set<number>>(
-    () => new Set(),
-  );
-  const [graphCollapsed, setGraphCollapsed] = useState<Set<number>>(
-    () => new Set(),
-  );
-  const [graphPositions, setGraphPositions] = useState<Map<number, Point>>(
-    () => new Map(),
-  );
-  const [documentText, setDocumentText] = useState(initialDocument.text);
-  const [documentTextDirty, setDocumentTextDirty] = useState(false);
-  const [viewerModelText, setViewerModelText] = useState(initialDocument.text);
-  const [viewerModelBytes, setViewerModelBytes] = useState<ArrayBuffer | null>(
-    null,
-  );
   const [loadingIfcName, setLoadingIfcName] = useState("");
   const [catalog, setCatalog] = useState<IfcObjectCatalog | null>(null);
   const [catalogImporting, setCatalogImporting] = useState(false);
@@ -135,11 +233,81 @@ export default function IfcWorkspace() {
     useState<CoordinateClipboard | null>(null);
   const desktopApi =
     typeof window === "undefined" ? undefined : window.ifcNativeDesktop;
-  const isElectronDesktop = Boolean(desktopApi?.isElectron);
+
+  const activeSession =
+    documentSessions.find((session) => session.id === activeDocumentId) ??
+    documentSessions[0];
+  const document = activeSession.document;
+  const selectedId = activeSession.selectedId;
+  const graphAnchorId = activeSession.graphAnchorId;
+  const treeExpanded = activeSession.treeExpanded;
+  const graphPinned = activeSession.graphPinned;
+  const graphExpanded = activeSession.graphExpanded;
+  const graphCollapsed = activeSession.graphCollapsed;
+  const graphPositions = activeSession.graphPositions;
+  const documentText = activeSession.documentText;
+  const documentTextDirty = activeSession.documentTextDirty;
+
+  const updateActiveSession = (
+    updater: (session: WorkspaceDocumentSession) => WorkspaceDocumentSession,
+  ) => {
+    setDocumentSessions((current) =>
+      current.map((session) =>
+        session.id === activeSession.id ? updater(session) : session,
+      ),
+    );
+  };
+
+  const setSelectedId = (action: SetStateAction<number>) => {
+    updateActiveSession((session) => ({
+      ...session,
+      selectedId: applyStateAction(session.selectedId, action),
+    }));
+  };
+
+  const setGraphAnchorId = (action: SetStateAction<number>) => {
+    updateActiveSession((session) => ({
+      ...session,
+      graphAnchorId: applyStateAction(session.graphAnchorId, action),
+    }));
+  };
+
+  const setTreeExpanded = (action: SetStateAction<Set<number>>) => {
+    updateActiveSession((session) => ({
+      ...session,
+      treeExpanded: applyStateAction(session.treeExpanded, action),
+    }));
+  };
+
+  const setGraphPinned = (action: SetStateAction<Set<number>>) => {
+    updateActiveSession((session) => ({
+      ...session,
+      graphPinned: applyStateAction(session.graphPinned, action),
+    }));
+  };
+
+  const setGraphExpanded = (action: SetStateAction<Set<number>>) => {
+    updateActiveSession((session) => ({
+      ...session,
+      graphExpanded: applyStateAction(session.graphExpanded, action),
+    }));
+  };
+
+  const setGraphCollapsed = (action: SetStateAction<Set<number>>) => {
+    updateActiveSession((session) => ({
+      ...session,
+      graphCollapsed: applyStateAction(session.graphCollapsed, action),
+    }));
+  };
+
+  const setGraphPositions = (action: SetStateAction<Map<number, Point>>) => {
+    updateActiveSession((session) => ({
+      ...session,
+      graphPositions: applyStateAction(session.graphPositions, action),
+    }));
+  };
 
   const viewerDocument = document;
-  const viewerIfcText = viewerModelText;
-  const viewerIfcBytes = viewerModelBytes;
   const selectedEntity =
     viewerDocument.entityById.get(selectedId) ??
     document.entityById.get(selectedId) ??
@@ -173,24 +341,50 @@ export default function IfcWorkspace() {
         : [],
     [activeCatalogObject, selectedId, viewerDocument],
   );
+  const viewerModels = useMemo(
+    () =>
+      documentSessions.flatMap((session) =>
+        session.viewerModelLoadRequested
+          ? [
+              {
+                documentId: session.id,
+                fileName: session.document.fileName,
+                ifcBytes: session.viewerModelBytes,
+                ifcFile: session.viewerModelFile,
+                ifcText: session.viewerModelText,
+                revision: session.viewerModelRevision,
+                selectedId: session.selectedId,
+                selectedName: session.document.entityById.get(
+                  session.selectedId,
+                )?.name,
+              },
+            ]
+          : [],
+      ),
+    [documentSessions],
+  );
   const closedMosaicIds = useMemo(() => {
     const visibleIds = new Set(getMosaicLeaves(mosaicValue));
     return MOSAIC_VIEW_IDS.filter((id) => !visibleIds.has(id));
   }, [mosaicValue]);
 
+  const normalizedSearch = search.trim().toLowerCase();
+  const searchMatchedEntities = useMemo(() => {
+    if (!normalizedSearch) {
+      return [];
+    }
+    return document.entities.filter((entity) =>
+      matchesEntitySearch(entity, normalizedSearch),
+    );
+  }, [document.entities, normalizedSearch]);
+
   const filteredEntities = useMemo(() => {
-    const query = search.trim().toLowerCase();
+    const query = normalizedSearch;
     if (!query) {
       return document.entities.slice(0, 120);
     }
-    return document.entities
-      .filter((entity) =>
-        [String(entity.id), entity.type, entity.name, entity.globalId].some(
-          (value) => value.toLowerCase().includes(query),
-        ),
-      )
-      .slice(0, 160);
-  }, [document.entities, search]);
+    return searchMatchedEntities.slice(0, 160);
+  }, [document.entities, normalizedSearch, searchMatchedEntities]);
 
   const logAction = (code: string) => {
     setConsoleLines((current) => [
@@ -216,21 +410,19 @@ export default function IfcWorkspace() {
     nextGraphPositions?: Map<number, Point>,
     nextText?: string,
     nextBytes?: ArrayBuffer | null,
+    nextFile?: File | null,
   ) => {
-    setDocument(next);
-    const replacementText = nextText ?? serializeNativeIfcDocument(next);
-    setDocumentText(replacementText);
-    setDocumentTextDirty(false);
-    setViewerModelText(replacementText);
-    setViewerModelBytes(nextBytes ?? null);
-    setTreeExpanded(new Set());
-    const fallbackId = next.spatialRoots[0]?.id ?? next.entities[0]?.id ?? 0;
-    const resolvedSelectedId = next.entityById.has(nextSelectedId ?? 0)
-      ? (nextSelectedId as number)
-      : fallbackId;
-    setSelectedId(resolvedSelectedId);
-    setGraphAnchorId(resolvedSelectedId);
-    setGraphPositions(nextGraphPositions ?? new Map());
+    const session = createWorkspaceDocumentSession(next, {
+      bytes: nextBytes,
+      file: nextFile,
+      graphPositions: nextGraphPositions,
+      selectedId: nextSelectedId,
+      text: nextText,
+    });
+    startTransition(() => {
+      setDocumentSessions([session]);
+      setActiveDocumentId(session.id);
+    });
     if (log) {
       logAction(log);
     }
@@ -244,33 +436,76 @@ export default function IfcWorkspace() {
     nextGraphPositions?: Map<number, Point>,
     options?: { reloadViewer?: boolean },
   ) => {
-    setDocument(next);
+    const committedSessionId = activeSession.id;
+    let resolvedSelectedId = selectedId;
+    let nextText: string | undefined;
     if (options?.reloadViewer) {
-      const nextText = serializeNativeIfcDocument(next);
-      setDocumentText(nextText);
-      setDocumentTextDirty(false);
-      setViewerModelText(nextText);
-      setViewerModelBytes(null);
-    } else {
-      setDocumentTextDirty(true);
+      nextText = serializeNativeIfcDocument(next);
     }
-    const fallbackId =
-      next.spatialRoots[0]?.id ?? next.entities[0]?.id ?? selectedId;
-    setSelectedId(
-      next.entityById.has(nextSelectedId ?? 0)
+    if (options?.reloadViewer) {
+      resolvedSelectedId = next.entityById.has(nextSelectedId ?? 0)
         ? (nextSelectedId as number)
-        : fallbackId,
-    );
-    if (nextGraphPositions) {
-      setGraphPositions(nextGraphPositions);
+        : (next.spatialRoots[0]?.id ?? next.entities[0]?.id ?? selectedId);
+    } else {
+      resolvedSelectedId = next.entityById.has(nextSelectedId ?? 0)
+        ? (nextSelectedId as number)
+        : (next.spatialRoots[0]?.id ?? next.entities[0]?.id ?? selectedId);
     }
+    setDocumentSessions((current) =>
+      current.map((session) => {
+        if (session.id !== committedSessionId) {
+          return session;
+        }
+        return {
+          ...session,
+          document: next,
+          documentText: nextText ?? session.documentText,
+          documentTextDirty: options?.reloadViewer ? false : true,
+          graphPositions: nextGraphPositions ?? session.graphPositions,
+          selectedId: resolvedSelectedId,
+          sourceIfcBytes: options?.reloadViewer ? null : session.sourceIfcBytes,
+          sourceIfcFile: options?.reloadViewer ? null : session.sourceIfcFile,
+          viewerModelBytes: options?.reloadViewer
+            ? null
+            : session.viewerModelBytes,
+          viewerModelDeferredReason: options?.reloadViewer
+            ? session.viewerModelLoadRequested
+              ? ""
+              : session.viewerModelDeferredReason ||
+                "3D-Konvertierung pausiert."
+            : session.viewerModelDeferredReason,
+          viewerModelFile: options?.reloadViewer
+            ? null
+            : session.viewerModelFile,
+          viewerModelLoadRequested: session.viewerModelLoadRequested,
+          viewerModelRevision: options?.reloadViewer
+            ? session.viewerModelRevision + 1
+            : session.viewerModelRevision,
+          viewerModelText: nextText ?? session.viewerModelText,
+        };
+      }),
+    );
     if (log) {
       logAction(log);
     }
   };
 
-  const selectEntity = (id: number, source = "ui", globalId?: string) => {
-    const selectionDocument = document;
+  const selectEntity = (
+    id: number,
+    source = "ui",
+    globalId?: string,
+    documentId = activeSession.id,
+  ) => {
+    if (documentId !== activeSession.id) {
+      const inactiveSession = documentSessions.find(
+        (session) => session.id === documentId,
+      );
+      logAction(
+        `${source}.selectInactiveIfc({ file: '${inactiveSession?.document.fileName ?? documentId}', id: ${id} });`,
+      );
+      return;
+    }
+    const selectionDocument = activeSession.document;
     const resolvedId =
       source === "thatopen"
         ? (resolveNativeMovableProductId(selectionDocument, id, globalId) ??
@@ -313,9 +548,47 @@ export default function IfcWorkspace() {
         undefined,
         `ui.openIfc({ file: '${asset.name}', parser: 'worker', ms: ${Math.round(parsed.elapsedMs)} });`,
         undefined,
-        parsed.text,
+        undefined,
         parsed.bytes,
+        asset.file,
       );
+    } catch (error) {
+      logAction(`ui.error(${JSON.stringify(String(error))});`);
+    } finally {
+      setLoadingIfcName("");
+    }
+  };
+
+  const addIfcFiles = async () => {
+    try {
+      const assets = await pickIfcFiles(true);
+      if (!assets.length) {
+        return;
+      }
+      setLoadingIfcName(
+        assets.length === 1
+          ? assets[0].name
+          : `${assets.length.toLocaleString()} IFC files`,
+      );
+      logAction(`ui.addIfc.start({ files: ${assets.length} });`);
+      const nextSessions: WorkspaceDocumentSession[] = [];
+      for (const asset of assets) {
+        const parsed = await parseNativeIfcFileInWorker(asset.file, asset.name);
+        nextSessions.push(
+          createWorkspaceDocumentSession(parsed.document, {
+            bytes: parsed.bytes,
+            file: asset.file,
+          }),
+        );
+        logAction(
+          `ui.addIfc.file({ file: '${asset.name}', parser: 'worker', ms: ${Math.round(parsed.elapsedMs)} });`,
+        );
+      }
+      startTransition(() => {
+        setDocumentSessions((current) => [...current, ...nextSessions]);
+        setActiveDocumentId(nextSessions[0].id);
+      });
+      logAction(`ui.addIfc({ files: ${nextSessions.length} });`);
     } catch (error) {
       logAction(`ui.error(${JSON.stringify(String(error))});`);
     } finally {
@@ -401,11 +674,13 @@ export default function IfcWorkspace() {
   };
 
   const exportIfc = async () => {
-    const text = documentTextDirty
+    const contents: BlobPart = documentTextDirty
       ? serializeNativeIfcDocument(document)
-      : documentText;
+      : documentText ||
+        activeSession.sourceIfcBytes ||
+        serializeNativeIfcDocument(document);
     const fileName = document.fileName.replace(/\.ifc$/i, "") || "IFCnative";
-    const blob = new Blob([text], { type: "application/x-step" });
+    const blob = new Blob([contents], { type: "application/x-step" });
     const url = URL.createObjectURL(blob);
     const anchor = globalThis.document.createElement("a");
     anchor.href = url;
@@ -422,6 +697,11 @@ export default function IfcWorkspace() {
 
     return desktopApi.onCommand((command) => {
       switch (command.type) {
+        case "add-ifc":
+          if (!loadingIfcName) {
+            void addIfcFiles();
+          }
+          break;
         case "open-ifc":
           if (!loadingIfcName) {
             void openIfc();
@@ -850,8 +1130,11 @@ export default function IfcWorkspace() {
     const copiedAt = new Date().toLocaleTimeString();
     const nextClipboard = {
       copiedAt,
+      documentId: pick.documentId,
       entityId: pick.entityId,
+      fileName: pick.fileName,
       localId: pick.localId,
+      modelId: pick.modelId,
       source: pick.source,
       x: formatCoordinate(pick.x),
       y: formatCoordinate(pick.y),
@@ -859,7 +1142,7 @@ export default function IfcWorkspace() {
     } satisfies CoordinateClipboard;
     setCoordinateClipboard(nextClipboard);
     logAction(
-      `viewer.coordinates.clipboard({ x: ${nextClipboard.x}, y: ${nextClipboard.y}, z: ${nextClipboard.z}${pick.entityId ? `, entityId: ${pick.entityId}` : ""} });`,
+      `viewer.coordinates.clipboard({ file: '${pick.fileName ?? document.fileName}', x: ${nextClipboard.x}, y: ${nextClipboard.y}, z: ${nextClipboard.z}${pick.entityId ? `, entityId: ${pick.entityId}` : ""} });`,
     );
   };
 
@@ -897,6 +1180,25 @@ export default function IfcWorkspace() {
       selectedId,
       `Add unit ${unitType} ${unitName}`,
       `addUnit({ unitType: '${unitType}', name: '${unitName}' });`,
+    );
+  };
+
+  const requestActiveViewerLoad = () => {
+    const sessionId = activeSession.id;
+    setDocumentSessions((current) =>
+      current.map((session) =>
+        session.id === sessionId
+          ? {
+              ...session,
+              viewerModelDeferredReason: "",
+              viewerModelLoadRequested: true,
+              viewerModelRevision: session.viewerModelRevision + 1,
+            }
+          : session,
+      ),
+    );
+    logAction(
+      `viewer.loadRequested({ file: '${activeSession.document.fileName}' });`,
     );
   };
 
@@ -943,6 +1245,8 @@ export default function IfcWorkspace() {
           preset={graphPreset}
           relationshipOptions={RELATION_TYPES.map(typeOption)}
           relationshipTypeFilters={graphRelationshipTypes}
+          search={search}
+          searchMatches={searchMatchedEntities}
           selectedId={selectedId}
           onConnectNodes={connectGraphNodes}
           onCreateNodeFromConnection={addGraphConnectedNode}
@@ -1036,12 +1340,15 @@ export default function IfcWorkspace() {
         return (
           <View style={styles.tileContent}>
             <ThatOpenViewer
-              fileName={document.fileName}
-              ifcBytes={viewerIfcBytes}
-              ifcText={viewerIfcText}
-              selectedId={selectedId}
-              selectedName={selectedEntity?.name}
+              activeDocumentId={activeSession.id}
+              activeModelDeferredReason={
+                activeSession.viewerModelDeferredReason
+              }
+              activeModelFileName={activeSession.document.fileName}
+              activeModelLoaded={activeSession.viewerModelLoadRequested}
+              models={viewerModels}
               onLog={logAction}
+              onLoadActiveModel={requestActiveViewerLoad}
               onMoveSelected={nudgeSelectedPlacement}
               onPickCoordinates={storePickedCoordinates}
               onSelect={selectEntity}
@@ -1121,39 +1428,98 @@ export default function IfcWorkspace() {
     </MosaicWindow>
   );
 
+  const renderDocumentTabs = () => (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={styles.documentTabs}
+      contentContainerStyle={styles.documentTabsContent}
+    >
+      {documentSessions.map((session) => {
+        const active = session.id === activeSession.id;
+        return (
+          <Pressable
+            accessibilityRole="tab"
+            accessibilityState={{ selected: active }}
+            key={session.id}
+            onPress={() => setActiveDocumentId(session.id)}
+            style={({ pressed }) => [
+              styles.documentTab,
+              active && styles.documentTabActive,
+              pressed && styles.documentTabPressed,
+            ]}
+          >
+            <Text
+              numberOfLines={1}
+              style={[
+                styles.documentTabTitle,
+                active && styles.documentTabTitleActive,
+              ]}
+            >
+              {session.document.fileName}
+            </Text>
+            <Text
+              numberOfLines={1}
+              style={[
+                styles.documentTabMeta,
+                active && styles.documentTabMetaActive,
+              ]}
+            >
+              {session.document.schema} ·{" "}
+              {session.document.entities.length.toLocaleString()} entities
+              {session.documentTextDirty ? " · unsaved" : ""}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </ScrollView>
+  );
+
   return (
     <SafeAreaView style={styles.safeArea}>
-      {isElectronDesktop ? null : (
-        <View style={styles.topbar}>
-          <View>
+      <View style={styles.topbar}>
+        <View style={styles.toolbarMain}>
+          <View style={styles.toolbarBrand}>
             <Text style={styles.appTitle}>IFCnative</Text>
+            <Text style={styles.appMeta}>
+              {documentSessions.length.toLocaleString()} IFC
+            </Text>
           </View>
-          <View style={styles.actions}>
-            <Button
-              disabled={Boolean(loadingIfcName)}
-              label={loadingIfcName ? "Loading IFC..." : "Open IFC"}
-              primary
-              onPress={() => void openIfc()}
-            />
-            <Button label="Sample" onPress={loadSample} />
-            <Button
-              disabled={catalogImporting}
-              label={catalog ? "Reload Catalog" : "Import Catalog"}
-              onPress={() => void importCatalog()}
-            />
-            <Button
-              disabled={Boolean(loadingIfcName)}
-              label="Export IFC"
-              onPress={() => void exportIfc()}
-            />
-            <Button label="Reset Layout" onPress={resetMosaicLayout} />
-            <MosaicWindowMenu
-              closedIds={closedMosaicIds}
-              onRestore={restoreMosaicView}
-            />
+          <View style={styles.activeDocumentControl}>
+            <Text style={styles.fieldLabel}>Aktive IFC</Text>
+            {renderDocumentTabs()}
           </View>
         </View>
-      )}
+        <View style={styles.actions}>
+          <Button
+            disabled={Boolean(loadingIfcName)}
+            label={loadingIfcName ? "Loading IFC..." : "Open IFC"}
+            primary
+            onPress={() => void openIfc()}
+          />
+          <Button
+            disabled={Boolean(loadingIfcName)}
+            label="Add IFC"
+            onPress={() => void addIfcFiles()}
+          />
+          <Button label="Sample" onPress={loadSample} />
+          <Button
+            disabled={catalogImporting}
+            label={catalog ? "Reload Catalog" : "Import Catalog"}
+            onPress={() => void importCatalog()}
+          />
+          <Button
+            disabled={Boolean(loadingIfcName)}
+            label="Export IFC"
+            onPress={() => void exportIfc()}
+          />
+          <Button label="Reset Layout" onPress={resetMosaicLayout} />
+          <MosaicWindowMenu
+            closedIds={closedMosaicIds}
+            onRestore={restoreMosaicView}
+          />
+        </View>
+      </View>
 
       <View style={styles.mosaicShell}>
         <Mosaic<MosaicViewId>
@@ -1178,20 +1544,26 @@ export default function IfcWorkspace() {
 }
 
 function pickIfcFile() {
-  return new Promise<{ file: File; name: string } | undefined>(
-    (resolve, reject) => {
-      const input = globalThis.document.createElement("input");
-      input.type = "file";
-      input.accept =
-        ".ifc,application/x-step,text/plain,application/octet-stream";
-      input.onchange = () => {
-        const file = input.files?.[0];
-        resolve(file ? { file, name: file.name } : undefined);
-      };
-      input.onerror = () => reject(new Error("File picker failed."));
-      input.click();
-    },
-  );
+  return pickIfcFiles(false).then((files) => files[0]);
+}
+
+function pickIfcFiles(multiple: boolean) {
+  return new Promise<{ file: File; name: string }[]>((resolve, reject) => {
+    const input = globalThis.document.createElement("input");
+    input.type = "file";
+    input.multiple = multiple;
+    input.accept =
+      ".ifc,application/x-step,text/plain,application/octet-stream";
+    input.onchange = () => {
+      const files = Array.from(input.files ?? []).map((file) => ({
+        file,
+        name: file.name,
+      }));
+      resolve(files);
+    };
+    input.onerror = () => reject(new Error("File picker failed."));
+    input.click();
+  });
 }
 
 function pickCatalogFile() {
@@ -1272,7 +1644,21 @@ function parseCoordinateClipboardText(
     const y = readClipboardCoordinate(data.y);
     const z = readClipboardCoordinate(data.z);
     if (x && y && z) {
-      return toParsedCoordinates(x, y, z);
+      const parsed = toParsedCoordinates(x, y, z);
+      const documentId = readClipboardString(data.documentId);
+      const entityId = readClipboardNumber(data.entityId);
+      const fileName = readClipboardString(data.fileName);
+      const localId = readClipboardNumber(data.localId);
+      const modelId = readClipboardString(data.modelId);
+      return {
+        ...parsed,
+        ...(documentId ? { documentId } : {}),
+        ...(entityId ? { entityId } : {}),
+        ...(fileName ? { fileName } : {}),
+        ...(localId ? { localId } : {}),
+        ...(modelId ? { modelId } : {}),
+        ...(data.source === "thatopen" ? { source: "thatopen" as const } : {}),
+      };
     }
   } catch {
     // fall through to plain text parsing
@@ -1324,6 +1710,16 @@ function readClipboardCoordinate(value: unknown) {
     return normalizeCoordinateText(value);
   }
   return undefined;
+}
+
+function readClipboardString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function readClipboardNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
 }
 
 function normalizeCoordinateText(value: string) {

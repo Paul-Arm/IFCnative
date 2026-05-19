@@ -1,6 +1,7 @@
 import type { MosaicViewId } from "./components/ifc-workspace/types";
 
 type IfcNativeDesktopCommand =
+  | { type: "add-ifc" }
   | { type: "export-ifc" }
   | { type: "import-catalog" }
   | { type: "load-sample" }

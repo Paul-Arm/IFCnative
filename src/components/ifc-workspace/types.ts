@@ -48,12 +48,21 @@ export interface BodyElementDraft {
 
 export interface CoordinateClipboard {
   copiedAt: string;
+  documentId?: string;
   entityId?: number;
+  fileName?: string;
   localId?: number;
+  modelId?: string;
   source: "thatopen" | "system";
   x: string;
   y: string;
   z: string;
 }
 
-export type ParsedCoordinates = Pick<CoordinateClipboard, "x" | "y" | "z">;
+export type ParsedCoordinates = Pick<CoordinateClipboard, "x" | "y" | "z"> &
+  Partial<
+    Pick<
+      CoordinateClipboard,
+      "documentId" | "entityId" | "fileName" | "localId" | "modelId" | "source"
+    >
+  >;

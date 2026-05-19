@@ -5,13 +5,22 @@ export const styles = StyleSheet.create({
     alignItems: "center",
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
+    gap: 6,
     overflow: "visible",
-    zIndex: 101,
+    zIndex: 105,
+  },
+  activeDocumentControl: {
+    flex: 1,
+    gap: 4,
+    minWidth: 280,
+  },
+  appMeta: {
+    color: "#64748b",
+    fontSize: 10,
   },
   appTitle: {
-    color: "#18181b",
-    fontSize: 18,
+    color: "#0f172a",
+    fontSize: 16,
   },
   button: {
     alignItems: "center",
@@ -19,9 +28,9 @@ export const styles = StyleSheet.create({
     borderColor: "#d4d4d8",
     borderRadius: 7,
     borderWidth: 1,
-    minHeight: 36,
+    minHeight: 34,
     justifyContent: "center",
-    paddingHorizontal: 12,
+    paddingHorizontal: 11,
   },
   buttonPressed: {
     opacity: 0.7,
@@ -35,6 +44,7 @@ export const styles = StyleSheet.create({
   },
   buttonText: {
     color: "#18181b",
+    fontSize: 12,
   },
   catalogFinding: {
     backgroundColor: "#ffffff",
@@ -214,6 +224,10 @@ export const styles = StyleSheet.create({
     fontSize: 10,
     marginTop: 2,
   },
+  dropdownFieldOverlay: {
+    marginBottom: 0,
+    position: "relative",
+  },
   dropdownList: {
     maxHeight: 230,
   },
@@ -224,6 +238,14 @@ export const styles = StyleSheet.create({
     borderWidth: 1,
     marginTop: 5,
     overflow: "hidden",
+  },
+  dropdownMenuOverlay: {
+    elevation: 16,
+    left: 0,
+    position: "absolute",
+    right: 0,
+    top: 63,
+    zIndex: 120,
   },
   dropdownOption: {
     borderBottomColor: "#f4f4f5",
@@ -619,13 +641,65 @@ export const styles = StyleSheet.create({
     elevation: 8,
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 12,
+    gap: 10,
     justifyContent: "space-between",
     overflow: "visible",
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     position: "relative",
     zIndex: 100,
+  },
+  toolbarBrand: {
+    flexShrink: 0,
+    gap: 1,
+    minWidth: 104,
+  },
+  toolbarMain: {
+    alignItems: "center",
+    flex: 1,
+    flexDirection: "row",
+    gap: 14,
+    minWidth: 360,
+  },
+  documentTab: {
+    backgroundColor: "#ffffff",
+    borderColor: "#cbd5e1",
+    borderRadius: 7,
+    borderWidth: 1,
+    justifyContent: "center",
+    minHeight: 42,
+    paddingHorizontal: 10,
+    width: 220,
+  },
+  documentTabActive: {
+    backgroundColor: "#ccfbf1",
+    borderColor: "#0f766e",
+  },
+  documentTabMeta: {
+    color: "#64748b",
+    fontSize: 10,
+    marginTop: 2,
+  },
+  documentTabMetaActive: {
+    color: "#0f766e",
+  },
+  documentTabPressed: {
+    opacity: 0.75,
+  },
+  documentTabs: {
+    flexGrow: 0,
+    flexShrink: 1,
+    maxHeight: 44,
+  },
+  documentTabsContent: {
+    gap: 6,
+  },
+  documentTabTitle: {
+    color: "#18181b",
+    fontSize: 11,
+  },
+  documentTabTitleActive: {
+    color: "#0f172a",
   },
   treeItem: {
     backgroundColor: "#ffffff",

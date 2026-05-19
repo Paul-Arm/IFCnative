@@ -174,11 +174,13 @@ export interface DropdownOption {
 
 export function DropdownField({
   label,
+  overlay,
   options,
   value,
   onChange,
 }: {
   label: string;
+  overlay?: boolean;
   options: (string | DropdownOption)[];
   value: string;
   onChange(value: string): void;
@@ -195,7 +197,7 @@ export function DropdownField({
   };
 
   return (
-    <View style={styles.field}>
+    <View style={[styles.field, overlay && styles.dropdownFieldOverlay]}>
       <Text style={styles.fieldLabel}>{label}</Text>
       <Pressable
         onPress={() => setOpen((current) => !current)}
@@ -214,7 +216,9 @@ export function DropdownField({
         <Text style={styles.dropdownCaret}>{open ? "^" : "v"}</Text>
       </Pressable>
       {open ? (
-        <View style={styles.dropdownMenu}>
+        <View
+          style={[styles.dropdownMenu, overlay && styles.dropdownMenuOverlay]}
+        >
           <ScrollView nestedScrollEnabled style={styles.dropdownList}>
             {normalized.map((option) => (
               <Pressable

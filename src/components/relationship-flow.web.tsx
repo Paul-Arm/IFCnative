@@ -44,6 +44,7 @@ interface IfcFlowNodeData extends Record<string, unknown> {
   onToggleChildren(id: number, loaded: boolean): void;
   onTogglePin(id: number, point?: FlowPoint): void;
   pinned: boolean;
+  searchMatch: boolean;
   selectedIfc: boolean;
   type: string;
 }
@@ -94,6 +95,10 @@ export default function RelationshipFlow({
   relationshipCount,
   relationshipTypeFilters,
   relationshipTypes,
+  search,
+  searchActiveId,
+  searchActiveIndex,
+  searchMatchCount,
   layoutMode,
   onClearPositions,
   onConnectNodes,
@@ -107,6 +112,7 @@ export default function RelationshipFlow({
   onMoveNodesEnd,
   onPreset,
   onRelationshipTypeFilters,
+  onSearchNavigate,
   onSelect,
   onToggleChildren,
   onTogglePin,
@@ -120,6 +126,13 @@ export default function RelationshipFlow({
   );
   const [pendingConnect, setPendingConnect] = useState<PendingConnect | null>(
     null,
+  );
+  const trimmedSearch = search.trim();
+  const searchFocusNodeId =
+    searchActiveId === null ? "" : String(searchActiveId);
+  const nodeSignature = useMemo(
+    () => nodes.map((node) => node.id).join(","),
+    [nodes],
   );
   const baseFlowNodes = useMemo<IfcFlowNode[]>(
     () =>
@@ -135,6 +148,7 @@ export default function RelationshipFlow({
           onToggleChildren,
           onTogglePin,
           pinned: node.pinned,
+          searchMatch: node.searchMatch,
           selectedIfc: node.selected,
           type: node.entity.type,
         },
@@ -205,6 +219,31 @@ export default function RelationshipFlow({
       });
     });
   }, [baseFlowNodes]);
+
+  const focusNode = useCallback((id: string) => {
+    const instance = flowRef.current;
+    const node = instance?.getNode(id);
+    if (!instance || !node) {
+      return;
+    }
+    const width = typeof node.width === "number" ? node.width : 260;
+    const height = typeof node.height === "number" ? node.height : 84;
+    void instance.setCenter(
+      node.position.x + width / 2,
+      node.position.y + height / 2,
+      { duration: 240, zoom: 1.35 },
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!trimmedSearch || !searchFocusNodeId || !flowRef.current) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      focusNode(searchFocusNodeId);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusNode, nodeSignature, searchFocusNodeId, trimmedSearch]);
 
   const handleNodesChange = useCallback(
     (changes: NodeChange<IfcFlowNode>[]) => {
@@ -385,6 +424,22 @@ export default function RelationshipFlow({
         <button type="button" onClick={autoLayout}>
           Auto
         </button>
+        <button
+          type="button"
+          disabled={!trimmedSearch || searchMatchCount === 0}
+          title="Previous search result"
+          onClick={() => onSearchNavigate("previous")}
+        >
+          Prev
+        </button>
+        <button
+          type="button"
+          disabled={!trimmedSearch || searchMatchCount === 0}
+          title="Next search result"
+          onClick={() => onSearchNavigate("next")}
+        >
+          Next
+        </button>
         <span
           className="ifc-graph-count"
           title={
@@ -398,6 +453,9 @@ export default function RelationshipFlow({
             ? ` · ${relationshipTypes.length} rel filters`
             : " · all rels"}
           {capped ? " capped" : ""}
+          {trimmedSearch
+            ? ` · ${searchMatchCount ? searchActiveIndex + 1 : 0}/${searchMatchCount.toLocaleString()} search matches`
+            : ""}
         </span>
       </div>
       <div
@@ -634,6 +692,7 @@ function IfcNode({ data, selected }: NodeProps<IfcFlowNode>) {
   const classes = [
     "ifc-flow-node",
     data.selectedIfc || selected ? "selected anchor" : "",
+    data.searchMatch ? "search-match" : "",
     data.pinned ? "pinned" : "",
     data.childrenLoaded ? "loaded" : "",
   ]

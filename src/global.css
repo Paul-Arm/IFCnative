@@ -249,6 +249,18 @@ textarea {
   color: #ffffff;
 }
 
+.ifcnative-thatopen-button.is-primary {
+  background: #0f766e;
+  border-color: #0f766e;
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.ifcnative-thatopen-button.is-primary:hover {
+  background: #115e59;
+  border-color: #115e59;
+}
+
 .ifcnative-thatopen-coordinate-readout {
   align-items: center;
   background: #ecfeff;
@@ -334,6 +346,57 @@ textarea {
   top: 12px;
   z-index: 3;
   padding: 8px 10px;
+}
+
+.ifcnative-thatopen-deferred-load {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.16);
+  color: #334155;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  left: 50%;
+  max-width: min(420px, calc(100% - 32px));
+  padding: 18px;
+  position: absolute;
+  text-align: center;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 4;
+}
+
+.ifcnative-thatopen-deferred-load strong {
+  color: #0f172a;
+  font-size: 13px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ifcnative-thatopen-deferred-load span {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.ifcnative-thatopen-deferred-load button {
+  background: #0f766e;
+  border: 1px solid #0f766e;
+  border-radius: 6px;
+  color: #ffffff;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  min-height: 34px;
+  padding: 0 14px;
+}
+
+.ifcnative-thatopen-deferred-load button:hover {
+  background: #115e59;
+  border-color: #115e59;
 }
 
 .ifcnative-thatopen-viewcube {
@@ -507,6 +570,20 @@ textarea {
 .ifc-flow-node.selected {
   border-color: #0f766e;
   box-shadow: 0 0 0 2px rgb(15 118 110 / 18%);
+}
+
+.ifc-flow-node.search-match {
+  border-color: #ca8a04;
+  border-left-color: #ca8a04;
+  box-shadow: 0 0 0 2px rgb(202 138 4 / 18%);
+}
+
+.ifc-flow-node.selected.search-match {
+  border-color: #0f766e;
+  border-left-color: #ca8a04;
+  box-shadow:
+    0 0 0 2px rgb(15 118 110 / 18%),
+    0 0 0 5px rgb(202 138 4 / 12%);
 }
 
 .ifc-flow-node-header {

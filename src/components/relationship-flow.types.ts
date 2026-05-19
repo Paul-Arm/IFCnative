@@ -22,6 +22,7 @@ export interface RelationshipFlowNode {
   };
   id: number;
   pinned: boolean;
+  searchMatch: boolean;
   selected: boolean;
   x: number;
   y: number;
@@ -55,6 +56,10 @@ export interface RelationshipFlowProps {
   relationshipCount: number;
   relationshipTypeFilters: string[];
   relationshipTypes: string[];
+  search: string;
+  searchActiveId: number | null;
+  searchActiveIndex: number;
+  searchMatchCount: number;
   onClearPositions(): void;
   onConnectNodes(
     sourceId: number,
@@ -77,6 +82,7 @@ export interface RelationshipFlowProps {
   onMoveNodes?(moves: RelationshipFlowMove[]): void;
   onMoveNodesEnd?(moves: RelationshipFlowMove[]): void;
   onPreset(preset: string): void;
+  onSearchNavigate(direction: "previous" | "next"): void;
   onSelect(id: number): void;
   onToggleChildren(id: number, loaded: boolean): void;
   onTogglePin(id: number, point?: FlowPoint): void;

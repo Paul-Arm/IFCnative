@@ -35,7 +35,6 @@ async function parseFile({
         elapsedMs: performance.now() - startedAt,
         ok: true,
         requestId,
-        text,
       },
       [bytes],
     );

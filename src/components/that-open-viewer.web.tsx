@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import {
+    convertIfcToFragmentsInWorker,
+    type ConvertIfcToFragmentsProgress,
+} from "../ifc/fragmentConversionWorker";
 import type {
+    ThatOpenViewerModel,
     ThatOpenViewerProps,
     ViewerCoordinatePick,
     ViewerMoveDelta,
@@ -9,10 +14,12 @@ import type {
 type ViewerRuntime = Awaited<ReturnType<typeof createThatOpenRuntime>>;
 
 export default function ThatOpenViewer({
-  fileName,
-  ifcBytes,
-  ifcText,
-  selectedId,
+  activeDocumentId,
+  activeModelDeferredReason,
+  activeModelFileName,
+  activeModelLoaded = true,
+  models,
+  onLoadActiveModel,
   onLog,
   onMoveSelected,
   onPickCoordinates,
@@ -20,7 +27,9 @@ export default function ThatOpenViewer({
 }: ThatOpenViewerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const runtimeRef = useRef<ViewerRuntime | null>(null);
-  const selectedRef = useRef(selectedId);
+  const activeDocumentIdRef = useRef(activeDocumentId);
+  const modelsRef = useRef(models);
+  const selectedByDocumentIdRef = useRef(new Map<string, number>());
   const onLogRef = useRef(onLog);
   const onMoveSelectedRef = useRef(onMoveSelected);
   const onPickCoordinatesRef = useRef(onPickCoordinates);
@@ -34,13 +43,36 @@ export default function ThatOpenViewer({
   const [pickerActive, setPickerActive] = useState(false);
   const [lastPick, setLastPick] = useState<ViewerCoordinatePick | null>(null);
   const [copyStatus, setCopyStatus] = useState("");
+  const activeModel = useMemo(
+    () => models.find((model) => model.documentId === activeDocumentId),
+    [activeDocumentId, models],
+  );
+  const activeSelectedId = activeModel?.selectedId ?? 0;
+  const activeModelVisible = Boolean(activeModel);
+  const hasVisibleModels = models.length > 0;
+  const showDeferredActiveModel =
+    !activeModelLoaded && Boolean(activeModelDeferredReason);
   const largeLoadWarning = useMemo(
-    () => describeLargeIfcWarning(ifcText, ifcBytes),
-    [ifcBytes, ifcText],
+    () => describeLargeIfcWarning(models),
+    [models],
+  );
+  const modelLoadSignature = useMemo(
+    () =>
+      models
+        .map(
+          (model) =>
+            `${model.documentId}:${model.revision}:${model.ifcBytes?.byteLength ?? model.ifcText.length}`,
+        )
+        .join("|"),
+    [models],
   );
   const lastWarningRef = useRef("");
 
-  selectedRef.current = selectedId;
+  activeDocumentIdRef.current = activeDocumentId;
+  modelsRef.current = models;
+  selectedByDocumentIdRef.current = new Map(
+    models.map((model) => [model.documentId, model.selectedId]),
+  );
   onLogRef.current = onLog;
   onMoveSelectedRef.current = onMoveSelected;
   onPickCoordinatesRef.current = onPickCoordinates;
@@ -69,7 +101,11 @@ export default function ThatOpenViewer({
       }
       setStatus("Initializing ThatOpen Components...");
       const runtime = await createThatOpenRuntime(containerRef.current, {
-        getSelectedId: () => selectedRef.current,
+        getActiveDocumentId: () => activeDocumentIdRef.current,
+        getSelectedId: (documentId) =>
+          selectedByDocumentIdRef.current.get(
+            documentId ?? activeDocumentIdRef.current,
+          ) ?? 0,
         onError: (message) => {
           setError(message);
           setStatus("ThatOpen viewer error");
@@ -89,8 +125,8 @@ export default function ThatOpenViewer({
         },
         isCoordinatePickerActive: () => pickerActiveRef.current,
         onCoordinatePickerUsed: () => setPickerActive(false),
-        onSelect: (id, source, globalId) =>
-          onSelectRef.current(id, source, globalId),
+        onSelect: (id, source, globalId, documentId) =>
+          onSelectRef.current(id, source, globalId, documentId),
         onStatus: setStatus,
       });
       if (disposed) {
@@ -132,37 +168,44 @@ export default function ThatOpenViewer({
         `viewer.largeFileWarning(${JSON.stringify(largeLoadWarning)});`,
       );
     }
-    void runtime
-      .load(ifcText, fileName, ifcBytes, { fitAfterLoad: true })
-      .then(async () => {
-        if (cancelled) {
-          return;
-        }
-        setModelReady((value) => value + 1);
-        await runtime.highlight(selectedRef.current);
-      })
-      .catch((reason) => {
-        if (cancelled) {
-          return;
-        }
-        const message = stringifyError(reason);
-        setError(message);
-        setStatus("ThatOpen IFC load failed");
-        onLogRef.current?.(`viewer.loadError(${JSON.stringify(message)});`);
-      });
+    const frameId = requestAnimationFrame(() => {
+      void runtime
+        .syncModels(modelsRef.current, { fitAfterLoad: true })
+        .then(async () => {
+          if (cancelled) {
+            return;
+          }
+          setModelReady((value) => value + 1);
+          const documentId = activeDocumentIdRef.current;
+          await runtime.highlight(
+            documentId,
+            selectedByDocumentIdRef.current.get(documentId) ?? 0,
+          );
+        })
+        .catch((reason) => {
+          if (cancelled) {
+            return;
+          }
+          const message = stringifyError(reason);
+          setError(message);
+          setStatus("ThatOpen IFC load failed");
+          onLogRef.current?.(`viewer.loadError(${JSON.stringify(message)});`);
+        });
+    });
 
     return () => {
       cancelled = true;
+      cancelAnimationFrame(frameId);
     };
-  }, [fileName, ifcBytes, ifcText, largeLoadWarning, runtimeReady]);
+  }, [largeLoadWarning, modelLoadSignature, runtimeReady]);
 
   useEffect(() => {
     const runtime = runtimeRef.current;
     if (!runtime || !modelReady) {
       return;
     }
-    void runtime.highlight(selectedId);
-  }, [modelReady, selectedId]);
+    void runtime.highlight(activeDocumentId, activeSelectedId);
+  }, [activeDocumentId, activeSelectedId, modelReady]);
 
   useEffect(() => {
     const runtime = runtimeRef.current;
@@ -178,6 +221,7 @@ export default function ThatOpenViewer({
         <div className="ifcnative-thatopen-actions">
           <button
             className="ifcnative-thatopen-button"
+            disabled={!hasVisibleModels}
             type="button"
             onClick={() => void runtimeRef.current?.fit()}
           >
@@ -185,6 +229,7 @@ export default function ThatOpenViewer({
           </button>
           <button
             className="ifcnative-thatopen-button"
+            disabled={!hasVisibleModels}
             type="button"
             onClick={() => void runtimeRef.current?.resetCamera()}
           >
@@ -192,6 +237,7 @@ export default function ThatOpenViewer({
           </button>
           <button
             className={`ifcnative-thatopen-button${pickerActive ? " is-active" : ""}`}
+            disabled={!hasVisibleModels}
             type="button"
             onClick={() => {
               setCopyStatus("");
@@ -202,11 +248,21 @@ export default function ThatOpenViewer({
           </button>
           <button
             className={`ifcnative-thatopen-button${moveGizmoActive ? " is-active" : ""}`}
+            disabled={!activeModelVisible}
             type="button"
             onClick={() => setMoveGizmoActive((current) => !current)}
           >
             {moveGizmoActive ? "Move-Gizmo aktiv" : "Move-Gizmo"}
           </button>
+          {showDeferredActiveModel ? (
+            <button
+              className="ifcnative-thatopen-button is-primary"
+              type="button"
+              onClick={onLoadActiveModel}
+            >
+              3D laden
+            </button>
+          ) : null}
           <button
             className="ifcnative-thatopen-button"
             disabled={!lastPick}
@@ -244,6 +300,15 @@ export default function ThatOpenViewer({
             Punkt im Modell anklicken
           </div>
         ) : null}
+        {showDeferredActiveModel ? (
+          <div className="ifcnative-thatopen-deferred-load">
+            <strong>{activeModelFileName ?? "Aktive IFC"}</strong>
+            <span>{activeModelDeferredReason}</span>
+            <button type="button" onClick={onLoadActiveModel}>
+              3D laden
+            </button>
+          </div>
+        ) : null}
         {error ? <div className="ifcnative-thatopen-error">{error}</div> : null}
       </div>
     </div>
@@ -252,15 +317,16 @@ export default function ThatOpenViewer({
 
 const LARGE_IFC_WARNING_BYTES = 120 * 1024 * 1024;
 
-function describeLargeIfcWarning(
-  ifcText: string,
-  ifcBytes?: ArrayBuffer | null,
-) {
-  const estimatedBytes = ifcBytes?.byteLength ?? ifcText.length;
+function describeLargeIfcWarning(models: ThatOpenViewerModel[]) {
+  const estimatedBytes = models.reduce(
+    (total, model) =>
+      total + (model.ifcBytes?.byteLength ?? model.ifcText.length),
+    0,
+  );
   if (estimatedBytes < LARGE_IFC_WARNING_BYTES) {
     return "";
   }
-  return `Große IFC (${formatByteSize(estimatedBytes)}): Viewer lädt weiterhin vollständig; Konvertierung kann spürbar dauern.`;
+  return `Große IFC-Auswahl (${formatByteSize(estimatedBytes)}): Viewer lädt alle sichtbaren Modelle vollständig; Konvertierung kann spürbar dauern.`;
 }
 
 function formatByteSize(bytes: number) {
@@ -270,17 +336,32 @@ function formatByteSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
 }
 
+function formatFragmentConversionProgress(
+  progress: ConvertIfcToFragmentsProgress,
+) {
+  const percent = Math.round(progress.progress * 100);
+  const process = progress.process ? ` ${progress.process}` : "";
+  const state = progress.state ? ` ${progress.state}` : "";
+  return `Converting ${progress.fileName}${process}${state} ${percent}%`;
+}
+
 async function createThatOpenRuntime(
   container: HTMLDivElement,
   callbacks: {
-    getSelectedId(): number;
+    getActiveDocumentId(): string;
+    getSelectedId(documentId?: string): number;
     isCoordinatePickerActive(): boolean;
     onError(message: string): void;
     onCoordinatePickerUsed(): void;
     onLog(line: string): void;
     onMoveSelected(delta: ViewerMoveDelta): void;
     onPickCoordinates(pick: ViewerCoordinatePick): void;
-    onSelect(id: number, source?: string, globalId?: string): void;
+    onSelect(
+      id: number,
+      source?: string,
+      globalId?: string,
+      documentId?: string,
+    ): void;
     onStatus(message: string): void;
   },
 ) {
@@ -340,18 +421,12 @@ async function createThatOpenRuntime(
   const fragments = components.get(OBC.FragmentsManager);
   const fragmentsWorkerUrl = resolvePublicAssetUrl("fragments/worker.mjs");
   fragments.init(fragmentsWorkerUrl);
-
-  const ifcLoader = components.get(OBC.IfcLoader);
-  await ifcLoader.setup({
-    autoSetWasm: false,
-    webIfc: {
-      COORDINATE_TO_ORIGIN: true,
-    },
-    wasm: {
-      absolute: true,
-      path: resolvePublicAssetUrl("wasm/"),
-    },
-  });
+  const coreWithSettings = fragments.core as typeof fragments.core & {
+    settings?: { autoCoordinate?: boolean };
+  };
+  if (coreWithSettings.settings) {
+    coreWithSettings.settings.autoCoordinate = true;
+  }
 
   const selectionMaterial = {
     color: new THREE.Color(0xffb703),
@@ -361,11 +436,17 @@ async function createThatOpenRuntime(
     transparent: false,
   };
 
-  let model: Awaited<ReturnType<typeof ifcLoader.load>> | null = null;
-  let fitItems: Record<string, Set<number>> | undefined;
-  let currentLoadKey = "";
+  type LoadedViewerModel = {
+    documentId: string;
+    fileName: string;
+    fitItems?: Set<number>;
+    loadKey: string;
+    model: import("@thatopen/fragments").FragmentsModel;
+  };
+
+  const modelsByDocumentId = new Map<string, LoadedViewerModel>();
+  const documentIdByModelId = new Map<string, string>();
   let loadCounter = 0;
-  const encoder = new TextEncoder();
   const resizeObserver = new ResizeObserver(() => {
     world.renderer?.resize();
   });
@@ -380,7 +461,7 @@ async function createThatOpenRuntime(
   const canvas = world.renderer.three.domElement;
 
   const selectFromPointer = async (event: MouseEvent) => {
-    if (!model || !world.renderer) {
+    if (!modelsByDocumentId.size || !world.renderer) {
       return;
     }
     if (moveGizmo.isDragging()) {
@@ -414,11 +495,18 @@ async function createThatOpenRuntime(
       callbacks.onLog("viewer.selectMiss({ engine: 'thatopen' });");
       return;
     }
-    const itemData = await readItemData(
-      fragments,
-      result.fragments.modelId,
-      localId,
-    );
+    const modelId = result.fragments.modelId;
+    const documentId = documentIdByModelId.get(modelId);
+    const loadedModel = documentId
+      ? modelsByDocumentId.get(documentId)
+      : undefined;
+    if (!documentId || !loadedModel) {
+      callbacks.onLog(
+        `viewer.selectUnknownModel({ engine: 'thatopen', modelId: '${modelId}' });`,
+      );
+      return;
+    }
+    const itemData = await readItemData(fragments, modelId, localId);
     const entityId = readNumericAttribute(itemData, [
       "expressID",
       "ExpressID",
@@ -440,114 +528,169 @@ async function createThatOpenRuntime(
       );
       callbacks.onCoordinatePickerUsed();
       callbacks.onPickCoordinates({
+        documentId,
         entityId: entityId ?? localId,
+        fileName: loadedModel.fileName,
         globalId,
         localId,
+        modelId,
         source: "thatopen",
         x: result.point.x,
         y: result.point.y,
         z: result.point.z,
       });
       callbacks.onLog(
-        `viewer.coordinates.pick({ x: ${formatCoordinate(result.point.x)}, y: ${formatCoordinate(result.point.y)}, z: ${formatCoordinate(result.point.z)}, localId: ${localId} });`,
+        `viewer.coordinates.pick({ file: '${loadedModel.fileName}', x: ${formatCoordinate(result.point.x)}, y: ${formatCoordinate(result.point.y)}, z: ${formatCoordinate(result.point.z)}, localId: ${localId} });`,
       );
       await fragments.core.update(true);
     }
-    callbacks.onSelect(entityId ?? localId, "thatopen", globalId);
+    callbacks.onSelect(entityId ?? localId, "thatopen", globalId, documentId);
     callbacks.onLog(
-      `viewer.select({ engine: 'thatopen', localId: ${localId}, entityId: ${entityId ?? localId}${globalId ? `, globalId: '${globalId}'` : ""} });`,
+      `viewer.select({ engine: 'thatopen', file: '${loadedModel.fileName}', localId: ${localId}, entityId: ${entityId ?? localId}${globalId ? `, globalId: '${globalId}'` : ""} });`,
     );
-    await highlight(localId);
+    if (documentId === callbacks.getActiveDocumentId()) {
+      await highlight(documentId, localId);
+    }
   };
 
   canvas.addEventListener("pointerdown", trackPointerDown, { capture: true });
   canvas.addEventListener("click", selectFromPointer, { capture: true });
 
-  async function load(
-    ifcText: string,
-    fileName: string,
-    ifcBytes?: ArrayBuffer | null,
+  async function syncModels(
+    nextModels: ThatOpenViewerModel[],
     options?: { fitAfterLoad?: boolean },
   ) {
-    const loadKey = `${fileName}:${ifcText.length}:${hashText(ifcText)}`;
-    if (currentLoadKey === loadKey) {
-      callbacks.onStatus("ThatOpen model already loaded");
-      return;
-    }
-    currentLoadKey = loadKey;
-
-    callbacks.onStatus("Disposing previous ThatOpen model...");
+    const nextDocumentIds = new Set(
+      nextModels.map((model) => model.documentId),
+    );
     coordinateCursor.hide();
-    if (model) {
-      model.object.removeFromParent();
-      await model.dispose();
-      model = null;
+    for (const [documentId, loaded] of modelsByDocumentId) {
+      if (!nextDocumentIds.has(documentId)) {
+        loaded.model.object.removeFromParent();
+        await loaded.model.dispose().catch(() => undefined);
+        modelsByDocumentId.delete(documentId);
+        documentIdByModelId.delete(loaded.model.modelId);
+      }
     }
-    fitItems = undefined;
     await fragments.resetHighlight().catch(() => undefined);
 
-    callbacks.onStatus("Converting IFC to ThatOpen fragments...");
-    const modelId = `${toModelId(fileName)}-${++loadCounter}`;
-    const source = ifcBytes
-      ? new Uint8Array(ifcBytes)
-      : encoder.encode(ifcText);
-    model = await ifcLoader.load(source, true, modelId, {
-      instanceCallback: (importer) => {
-        importer.webIfcSettings = {
-          ...importer.webIfcSettings,
-          COORDINATE_TO_ORIGIN: true,
-        };
-        importer.addAllAttributes();
-        importer.addAllRelations();
-      },
-    });
-    const fitModelItems = await getCameraFitLocalIds(model);
-    if (fitModelItems.ignored > 0) {
-      fitItems = { [model.modelId]: fitModelItems.localIds };
-      callbacks.onLog(
-        `viewer.fit.ignoreOriginMarkers({ count: ${fitModelItems.ignored} });`,
+    for (const nextModel of nextModels) {
+      const loadKey = `${nextModel.documentId}:${nextModel.revision}:${nextModel.ifcBytes?.byteLength ?? nextModel.ifcText.length}`;
+      const current = modelsByDocumentId.get(nextModel.documentId);
+      if (current?.loadKey === loadKey) {
+        continue;
+      }
+      if (current) {
+        current.model.object.removeFromParent();
+        await current.model.dispose().catch(() => undefined);
+        modelsByDocumentId.delete(nextModel.documentId);
+        documentIdByModelId.delete(current.model.modelId);
+      }
+
+      callbacks.onStatus(
+        `Converting ${nextModel.fileName} to ThatOpen fragments in worker...`,
       );
-    } else {
-      fitItems = undefined;
+      const modelId = `${toModelId(nextModel.fileName)}-${++loadCounter}`;
+      const converted = await convertIfcToFragmentsInWorker(
+        {
+          bytes: nextModel.ifcFile ? null : nextModel.ifcBytes,
+          file: nextModel.ifcFile,
+          fileName: nextModel.fileName,
+          text:
+            nextModel.ifcFile || nextModel.ifcBytes ? "" : nextModel.ifcText,
+          wasmPath: resolvePublicAssetUrl("wasm/"),
+        },
+        (progress) =>
+          callbacks.onStatus(formatFragmentConversionProgress(progress)),
+      );
+      callbacks.onLog(
+        `viewer.convert({ engine: 'worker', file: '${nextModel.fileName}', ms: ${Math.round(converted.elapsedMs)} });`,
+      );
+      const model = await fragments.core.load(converted.fragments, {
+        camera: world.camera.three,
+        modelId,
+      });
+      const fitModelItems = await getCameraFitLocalIds(model);
+      const fitItems =
+        fitModelItems.ignored > 0 ? fitModelItems.localIds : undefined;
+      if (fitModelItems.ignored > 0) {
+        callbacks.onLog(
+          `viewer.fit.ignoreOriginMarkers({ file: '${nextModel.fileName}', count: ${fitModelItems.ignored} });`,
+        );
+      }
+      model.useCamera(world.camera.three);
+      world.scene.three.add(model.object);
+      modelsByDocumentId.set(nextModel.documentId, {
+        documentId: nextModel.documentId,
+        fileName: nextModel.fileName,
+        fitItems,
+        loadKey,
+        model,
+      });
+      documentIdByModelId.set(model.modelId, nextModel.documentId);
+      callbacks.onLog(
+        `viewer.load({ engine: 'thatopen', file: '${nextModel.fileName}', modelId: '${model.modelId}' });`,
+      );
     }
-    model.useCamera(world.camera.three);
-    world.scene.three.add(model.object);
     await fragments.core.update(true);
     if (options?.fitAfterLoad ?? true) {
       await fit();
     }
-    callbacks.onStatus(`ThatOpen loaded ${fileName}`);
-    callbacks.onLog(
-      `viewer.load({ engine: 'thatopen', modelId: '${model.modelId}' });`,
+    callbacks.onStatus(
+      `ThatOpen loaded ${nextModels.length.toLocaleString()} IFC model(s)`,
+    );
+    const activeDocumentId = callbacks.getActiveDocumentId();
+    await highlight(
+      activeDocumentId,
+      callbacks.getSelectedId(activeDocumentId),
     );
   }
 
-  async function highlight(localId: number) {
-    if (!model || !Number.isFinite(localId) || localId <= 0) {
+  async function highlight(documentId: string, localId: number) {
+    const loaded = modelsByDocumentId.get(documentId);
+    if (!loaded || !Number.isFinite(localId) || localId <= 0) {
       return;
     }
     await fragments.resetHighlight();
     await fragments.highlight(selectionMaterial, {
-      [model.modelId]: new Set([localId]),
+      [loaded.model.modelId]: new Set([localId]),
     });
     await fragments.core.update(true);
-    await moveGizmo.updateSelection(localId, model);
+    await moveGizmo.updateSelection(localId, loaded.model);
   }
 
   async function fit() {
-    if (!model) {
+    if (!modelsByDocumentId.size) {
       return;
     }
-    await moveGizmo.updateSelection(callbacks.getSelectedId(), model);
-    await world.camera.fitToItems(fitItems);
+    const activeDocumentId = callbacks.getActiveDocumentId();
+    const activeModel = modelsByDocumentId.get(activeDocumentId);
+    if (activeModel) {
+      await moveGizmo.updateSelection(
+        callbacks.getSelectedId(activeDocumentId),
+        activeModel.model,
+      );
+    }
+    await world.camera.fitToItems(getFitItems());
   }
 
   async function resetCamera() {
     await world.camera.controls.setLookAt(8, 6, 8, 0, 0, 0, true);
-    if (model) {
+    if (modelsByDocumentId.size) {
       await fragments.core.update(true);
-      await highlight(callbacks.getSelectedId());
+      const activeDocumentId = callbacks.getActiveDocumentId();
+      await highlight(
+        activeDocumentId,
+        callbacks.getSelectedId(activeDocumentId),
+      );
     }
+  }
+
+  function getFitItems() {
+    const entries = [...modelsByDocumentId.values()].flatMap((loaded) =>
+      loaded.fitItems ? [[loaded.model.modelId, loaded.fitItems] as const] : [],
+    );
+    return entries.length ? Object.fromEntries(entries) : undefined;
   }
 
   async function dispose() {
@@ -556,16 +699,16 @@ async function createThatOpenRuntime(
     });
     canvas.removeEventListener("click", selectFromPointer, { capture: true });
     resizeObserver.disconnect();
-    if (model) {
-      model.object.removeFromParent();
-      await model.dispose().catch(() => undefined);
-      model = null;
+    for (const loaded of modelsByDocumentId.values()) {
+      loaded.model.object.removeFromParent();
+      await loaded.model.dispose().catch(() => undefined);
     }
+    modelsByDocumentId.clear();
+    documentIdByModelId.clear();
     fragments.dispose();
     moveGizmo.dispose();
     viewCube.dispose();
     coordinateCursor.dispose();
-    ifcLoader.dispose();
     components.dispose();
   }
 
@@ -574,9 +717,9 @@ async function createThatOpenRuntime(
     fit,
     highlight,
     hideCoordinateCursor: coordinateCursor.hide,
-    load,
     resetCamera,
     setMoveGizmoEnabled: moveGizmo.setEnabled,
+    syncModels,
   };
 }
 
@@ -997,15 +1140,6 @@ function resolvePublicAssetUrl(assetPath: string) {
   return new URL(cleanPath, `${globalThis.location.origin}/`).toString();
 }
 
-function hashText(text: string) {
-  let hash = 2166136261;
-  for (let index = 0; index < text.length; index += 1) {
-    hash ^= text.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(36);
-}
-
 function formatCoordinate(value: number) {
   return Number(value)
     .toFixed(4)
@@ -1014,13 +1148,17 @@ function formatCoordinate(value: number) {
 }
 
 function formatCoordinatePickLabel(pick: ViewerCoordinatePick) {
-  return `X ${formatCoordinate(pick.x)} · Y ${formatCoordinate(pick.y)} · Z ${formatCoordinate(pick.z)}`;
+  const source = pick.fileName ? `${pick.fileName} · ` : "";
+  return `${source}X ${formatCoordinate(pick.x)} · Y ${formatCoordinate(pick.y)} · Z ${formatCoordinate(pick.z)}`;
 }
 
 function formatCoordinatePickClipboard(pick: ViewerCoordinatePick) {
   return JSON.stringify({
+    documentId: pick.documentId,
     entityId: pick.entityId,
+    fileName: pick.fileName,
     localId: pick.localId,
+    modelId: pick.modelId,
     source: pick.source,
     x: formatCoordinate(pick.x),
     y: formatCoordinate(pick.y),
