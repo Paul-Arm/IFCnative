@@ -16,6 +16,7 @@ export type MosaicViewId =
   | "inspector"
   | "builder"
   | "catalog"
+  | "catalog-review"
   | "console"
   | "diagnostics";
 

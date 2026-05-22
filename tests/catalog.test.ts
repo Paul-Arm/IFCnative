@@ -47,6 +47,38 @@ test("catalog parser prefers master property rows by object code suffix", () => 
   );
 });
 
+test("catalog parser imports central class and property tables", () => {
+  const catalog = parseCatalogWorkbook(
+    createCatalogWorkbookWithCentralTables(),
+    "catalog.xlsx",
+  );
+
+  const codes = catalog.objectTypes.map((objectType) => objectType.code);
+  assert.ok(codes.includes("BWD - UZ"));
+  assert.ok(codes.includes("BWD - US"));
+  assert.ok(codes.includes("BWD - UB"));
+  assert.ok(
+    catalog.objectTypes.every(
+      (objectType) => objectType.ifcClass === "IFCBUILDINGELEMENTPROXY",
+    ),
+  );
+  const uz = catalog.objectTypes.find(
+    (objectType) => objectType.code === "BWD - UZ",
+  );
+  const us = catalog.objectTypes.find(
+    (objectType) => objectType.code === "BWD - US",
+  );
+  const ub = catalog.objectTypes.find(
+    (objectType) => objectType.code === "BWD - UB",
+  );
+  assert.equal(uz?.id, "bwd-uz");
+  assert.equal(uz?.sheetName, "Alle Merkmale (Propertys)");
+  assert.equal(uz?.name, "Untersuchungsziel");
+  assert.equal(uz?.propertyRules.length, 1);
+  assert.equal(us?.propertyRules.length, 2);
+  assert.equal(ub?.propertyRules.length, 1);
+});
+
 test("catalog validation can quick-fix missing psets and classification", () => {
   const catalog = parseCatalogWorkbook(createCatalogWorkbook(), "catalog.xlsx");
   const objectType = catalog.objectTypes[0];
@@ -331,6 +363,139 @@ function createCatalogWorkbookWithStaleClassSheet() {
     ],
   ]);
   XLSX.utils.book_append_sheet(workbook, objectSheet, "Chloridanalyse");
+  XLSX.utils.book_append_sheet(
+    workbook,
+    masterSheet,
+    "Alle Merkmale (Propertys)",
+  );
+  return XLSX.write(workbook, {
+    bookType: "xlsx",
+    type: "array",
+  }) as ArrayBuffer;
+}
+
+function createCatalogWorkbookWithCentralTables() {
+  const workbook = XLSX.utils.book_new();
+  const classSheet = XLSX.utils.aoa_to_sheet([
+    [
+      "Klasse / Domäne (Kurztext)",
+      "Bezeichnung",
+      "Version",
+      "Status",
+      "Datum letzte Änderung",
+      "Bearbeiter:in",
+      "Klasse / Domäne (Langtext)",
+    ],
+    ["Untersuchungsstelle", "BWD - US", "V001", "F", "", "MKP", "US"],
+    ["Untersuchungsbereich", "BWD - UB", "V001", "F", "", "MKP", "UB"],
+  ]);
+  const masterSheet = XLSX.utils.aoa_to_sheet([
+    [
+      "Element",
+      "Merkmal (Property) DEUTSCH",
+      "Merkmalsgruppe (Kategorie: PropertySet)",
+      "Herkunft",
+      "TM UP",
+      "TM EE",
+      "TM UE",
+      "LoI 100",
+      "LoI 200",
+      "LoI 300",
+      "LoI 400",
+      "LoI 500",
+      "Datentyp IFC",
+      "IFC-Typ",
+      "Format",
+      "Format Allplan",
+      "Einheit*",
+      "Eintrag",
+    ],
+    [
+      "Proxy",
+      "_Bezeichnung_UZ",
+      "ePset_Untersuchungsziel",
+      "openSIM",
+      "X",
+      "X",
+      "X",
+      "-",
+      "X",
+      "X",
+      "X",
+      "X",
+      "Text",
+      "ifcLabel",
+      "[Text]",
+      "Text",
+      "ohne",
+      "erforderlich",
+    ],
+    [
+      "Proxy",
+      "_AnzahlProben_US",
+      "ePset_Untersuchungsstelle",
+      "openSIM",
+      "X",
+      "X",
+      "-",
+      "X",
+      "X",
+      "X",
+      "X",
+      "X",
+      "Count",
+      "IfcReal",
+      "-",
+      "Ganzzahl",
+      "ohne",
+      "erforderlich",
+    ],
+    [
+      "Proxy",
+      "_Bauteil_US",
+      "ePset_Untersuchungsstelle",
+      "openSIM",
+      "X",
+      "X",
+      "-",
+      "-",
+      "X",
+      "X",
+      "X",
+      "X",
+      "Text",
+      "ifcLabel",
+      "[Text]",
+      "Text",
+      "ohne",
+      "erforderlich",
+    ],
+    [
+      "Proxy",
+      "_ID_UB",
+      "ePset_Untersuchungsbereich",
+      "openSIM",
+      "X",
+      "X",
+      "X",
+      "-",
+      "X",
+      "X",
+      "X",
+      "X",
+      "Text",
+      "ifcLabel",
+      "[Text]",
+      "Text",
+      "ohne",
+      "erforderlich",
+    ],
+  ]);
+  XLSX.utils.book_append_sheet(
+    workbook,
+    classSheet,
+    "Übersicht Klassen+Domänen",
+  );
   XLSX.utils.book_append_sheet(
     workbook,
     masterSheet,

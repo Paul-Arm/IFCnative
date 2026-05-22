@@ -15,29 +15,22 @@ import { Button, CollapsibleSection, LabeledInput } from "./ui";
 export function CatalogPanel({
   catalog,
   document,
-  findings,
   importing,
   selectedCatalogObjectId,
   selectedId,
-  onApplyFinding,
   onImportCatalog,
   onSelectCatalogObject,
 }: {
   catalog: IfcObjectCatalog | null;
   document: NativeIfcDocument;
-  findings: CatalogValidationFinding[];
   importing: boolean;
   selectedCatalogObjectId: string;
   selectedId: number;
-  onApplyFinding(finding: CatalogValidationFinding): void;
   onImportCatalog(): Promise<void>;
   onSelectCatalogObject(id: string): void;
 }) {
   const [query, setQuery] = useState("");
   const selectedEntity = document.entityById.get(selectedId);
-  const selectedObject = catalog?.objectTypes.find(
-    (objectType) => objectType.id === selectedCatalogObjectId,
-  );
   const visibleObjects = useMemo(() => {
     const token = normalizeCatalogToken(query);
     const objects = catalog?.objectTypes ?? [];
@@ -57,7 +50,6 @@ export function CatalogPanel({
       )
       .slice(0, 120);
   }, [catalog?.objectTypes, query]);
-  const quickFixCount = findings.filter((finding) => finding.quickFix).length;
 
   return (
     <View style={styles.console}>
@@ -118,65 +110,6 @@ export function CatalogPanel({
             </ScrollView>
           </CollapsibleSection>
 
-          <CollapsibleSection
-            defaultOpen
-            title="Pruefung"
-            meta={
-              selectedObject
-                ? `${catalogObjectLabel(selectedObject)} / ${findings.length.toLocaleString()} Findings`
-                : "Keine Klasse gewaehlt"
-            }
-          >
-            {selectedObject ? (
-              <View style={styles.editBlock}>
-                <Text style={styles.infoTitle}>
-                  {catalogObjectLabel(selectedObject)}
-                </Text>
-                <Text style={styles.treeMeta}>
-                  Sheet {selectedObject.sheetName}, {selectedObject.ifcClass},
-                  Version {selectedObject.version || "-"}
-                </Text>
-                <Text style={styles.treeMeta}>
-                  {selectedObject.propertyRules
-                    .filter((rule) => rule.requirement === "required")
-                    .length.toLocaleString()}{" "}
-                  erforderliche /{" "}
-                  {selectedObject.propertyRules.length.toLocaleString()} gesamte
-                  Properties
-                </Text>
-              </View>
-            ) : null}
-
-            {findings.length ? (
-              <View style={styles.catalogFindingStack}>
-                <Text style={styles.empty}>
-                  {findings.length.toLocaleString()} Warnungen,{" "}
-                  {quickFixCount.toLocaleString()} Quick-Fixes
-                </Text>
-                {findings.map((finding) => (
-                  <View key={finding.id} style={styles.catalogFinding}>
-                    <Text style={styles.diffSummaryTitle}>{finding.kind}</Text>
-                    <Text style={styles.diffSummaryText}>
-                      {finding.message}
-                    </Text>
-                    {finding.quickFix ? (
-                      <Button
-                        label={finding.quickFix.label}
-                        onPress={() => onApplyFinding(finding)}
-                      />
-                    ) : null}
-                  </View>
-                ))}
-              </View>
-            ) : (
-              <Text style={styles.empty}>
-                {selectedObject
-                  ? "Keine Katalogwarnungen fuer die aktuelle Kombination."
-                  : "Katalogklasse waehlen."}
-              </Text>
-            )}
-          </CollapsibleSection>
-
           <CollapsibleSection title="Importdiagnose" meta={catalog.fileName}>
             {catalog.diagnostics.map((diagnostic) => (
               <Text key={diagnostic} style={styles.monoLine}>
@@ -190,6 +123,98 @@ export function CatalogPanel({
           <Text style={styles.infoTitle}>Kein Katalog geladen</Text>
           <Text style={styles.empty}>
             Excel-Datei importieren, danach erscheint die Katalogpruefung.
+          </Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+export function CatalogReviewPanel({
+  catalog,
+  findings,
+  selectedCatalogObjectId,
+  onApplyFinding,
+}: {
+  catalog: IfcObjectCatalog | null;
+  findings: CatalogValidationFinding[];
+  selectedCatalogObjectId: string;
+  onApplyFinding(finding: CatalogValidationFinding): void;
+}) {
+  const selectedObject = catalog?.objectTypes.find(
+    (objectType) => objectType.id === selectedCatalogObjectId,
+  );
+  const quickFixCount = findings.filter((finding) => finding.quickFix).length;
+
+  return (
+    <View style={styles.console}>
+      <View style={styles.diffHeader}>
+        <View style={styles.diffHeaderText}>
+          <Text style={styles.infoTitle}>Objektkatalog: Pruefung</Text>
+          <Text style={styles.empty}>
+            {selectedObject
+              ? `${catalogObjectLabel(selectedObject)} / ${findings.length.toLocaleString()} Findings`
+              : catalog
+                ? "Keine Katalogklasse gewaehlt."
+                : "Kein Katalog geladen."}
+          </Text>
+        </View>
+      </View>
+
+      {catalog ? (
+        <ScrollView style={styles.panelScroll}>
+          {selectedObject ? (
+            <View style={styles.editBlock}>
+              <Text style={styles.infoTitle}>
+                {catalogObjectLabel(selectedObject)}
+              </Text>
+              <Text style={styles.treeMeta}>
+                Sheet {selectedObject.sheetName}, {selectedObject.ifcClass},
+                Version {selectedObject.version || "-"}
+              </Text>
+              <Text style={styles.treeMeta}>
+                {selectedObject.propertyRules
+                  .filter((rule) => rule.requirement === "required")
+                  .length.toLocaleString()}{" "}
+                erforderliche /{" "}
+                {selectedObject.propertyRules.length.toLocaleString()} gesamte
+                Properties
+              </Text>
+            </View>
+          ) : null}
+
+          {findings.length ? (
+            <View style={styles.catalogFindingStack}>
+              <Text style={styles.empty}>
+                {findings.length.toLocaleString()} Warnungen,{" "}
+                {quickFixCount.toLocaleString()} Quick-Fixes
+              </Text>
+              {findings.map((finding) => (
+                <View key={finding.id} style={styles.catalogFinding}>
+                  <Text style={styles.diffSummaryTitle}>{finding.kind}</Text>
+                  <Text style={styles.diffSummaryText}>{finding.message}</Text>
+                  {finding.quickFix ? (
+                    <Button
+                      label={finding.quickFix.label}
+                      onPress={() => onApplyFinding(finding)}
+                    />
+                  ) : null}
+                </View>
+              ))}
+            </View>
+          ) : (
+            <Text style={styles.empty}>
+              {selectedObject
+                ? "Keine Katalogwarnungen fuer die aktuelle Kombination."
+                : "Katalogklasse im Objektkatalog-Fenster waehlen."}
+            </Text>
+          )}
+        </ScrollView>
+      ) : (
+        <View style={styles.diffEmpty}>
+          <Text style={styles.infoTitle}>Kein Katalog geladen</Text>
+          <Text style={styles.empty}>
+            Excel-Datei im Objektkatalog-Fenster importieren.
           </Text>
         </View>
       )}

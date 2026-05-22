@@ -1149,6 +1149,213 @@ export function addNativePropertyToSet(
   );
 }
 
+export function removeNativePropertyFromSet(
+  document: NativeIfcDocument,
+  setId: number,
+  propertyId: number,
+) {
+  const set = document.entityById.get(setId);
+  if (
+    !set ||
+    (set.type !== "IFCPROPERTYSET" && set.type !== "IFCELEMENTQUANTITY")
+  ) {
+    return document;
+  }
+
+  const refIndex = set.type === "IFCELEMENTQUANTITY" ? 5 : 4;
+  const currentRefs = readReferences(set.args[refIndex]);
+  if (!currentRefs.includes(propertyId)) {
+    return document;
+  }
+
+  const next = cloneDocumentEntities(document);
+  const updatedSet = next.find((entity) => entity.id === setId);
+  if (!updatedSet) {
+    return document;
+  }
+
+  setArg(
+    updatedSet.args,
+    refIndex,
+    formatReferenceList(currentRefs.filter((id) => id !== propertyId)),
+  );
+
+  const removeProperty = !hasIncomingReferenceExcept(
+    document,
+    propertyId,
+    setId,
+  );
+  const nextEntities = removeProperty
+    ? next.filter((entity) => entity.id !== propertyId)
+    : next;
+
+  return parseNativeIfcText(
+    serializeEntities(document, nextEntities),
+    document.fileName,
+  );
+}
+
+export function updateNativePropertySetName(
+  document: NativeIfcDocument,
+  setId: number,
+  name: string,
+) {
+  const set = document.entityById.get(setId);
+  if (
+    !set ||
+    (set.type !== "IFCPROPERTYSET" && set.type !== "IFCELEMENTQUANTITY")
+  ) {
+    return document;
+  }
+
+  const updatedSet: NativeIfcEntity = { ...set, args: [...set.args] };
+  updatedSet.name = name.trim();
+  setArg(updatedSet.args, 2, quoteOrDollar(name));
+
+  return updatePropertySetSummaries(
+    replaceNativeEntities(document, [updatedSet]),
+    setId,
+  );
+}
+
+export function duplicateNativePropertySet(
+  document: NativeIfcDocument,
+  entityId: number,
+  setId: number,
+  name?: string,
+) {
+  const set = document.entityById.get(setId);
+  if (
+    !document.entityById.has(entityId) ||
+    !set ||
+    (set.type !== "IFCPROPERTYSET" && set.type !== "IFCELEMENTQUANTITY")
+  ) {
+    return document;
+  }
+
+  const refIndex = set.type === "IFCELEMENTQUANTITY" ? 5 : 4;
+  let nextId = getNextNativeEntityId(document);
+  const copiedValueIds: number[] = [];
+  const copiedEntities: NativeIfcEntity[] = [];
+  for (const valueId of readReferences(set.args[refIndex])) {
+    const value = document.entityById.get(valueId);
+    if (!value) {
+      continue;
+    }
+    const copiedId = nextId++;
+    copiedValueIds.push(copiedId);
+    copiedEntities.push({
+      ...value,
+      args: [...value.args],
+      globalId: "",
+      id: copiedId,
+    });
+  }
+
+  const copiedSetId = nextId++;
+  const copiedName = name?.trim() || `${set.name || `#${set.id}`} Copy`;
+  const copiedSet: NativeIfcEntity = {
+    ...set,
+    args: [...set.args],
+    globalId: createIfcGuid(copiedSetId),
+    id: copiedSetId,
+    name: copiedName,
+  };
+  setArg(copiedSet.args, 0, quote(createIfcGuid(copiedSetId)));
+  setArg(copiedSet.args, 2, quoteOrDollar(copiedName));
+  setArg(copiedSet.args, refIndex, formatReferenceList(copiedValueIds));
+
+  const relationshipId = nextId++;
+  const relationship: NativeIfcEntity = {
+    args: [
+      quote(createIfcGuid(relationshipId)),
+      "$",
+      "$",
+      "$",
+      `(#${entityId})`,
+      `#${copiedSetId}`,
+    ],
+    description: "",
+    globalId: createIfcGuid(relationshipId),
+    id: relationshipId,
+    name: "",
+    type: "IFCRELDEFINESBYPROPERTIES",
+  };
+
+  return appendNativeEntities(document, [
+    ...copiedEntities,
+    copiedSet,
+    relationship,
+  ]);
+}
+
+export function removeNativePropertySet(
+  document: NativeIfcDocument,
+  entityId: number,
+  setId: number,
+) {
+  const set = document.entityById.get(setId);
+  if (
+    !document.entityById.has(entityId) ||
+    !set ||
+    (set.type !== "IFCPROPERTYSET" && set.type !== "IFCELEMENTQUANTITY")
+  ) {
+    return document;
+  }
+
+  const next = cloneDocumentEntities(document);
+  const removedIds = new Set<number>();
+  let changed = false;
+
+  for (const relationship of next) {
+    if (relationship.type !== "IFCRELDEFINESBYPROPERTIES") {
+      continue;
+    }
+    if (!readReferences(relationship.args[5]).includes(setId)) {
+      continue;
+    }
+    const objectIds = readReferences(relationship.args[4]);
+    if (!objectIds.includes(entityId)) {
+      continue;
+    }
+    const remainingObjectIds = objectIds.filter((id) => id !== entityId);
+    if (remainingObjectIds.length > 0) {
+      setArg(relationship.args, 4, formatReferenceList(remainingObjectIds));
+    } else {
+      removedIds.add(relationship.id);
+    }
+    changed = true;
+  }
+
+  if (!changed) {
+    return document;
+  }
+
+  const setStillReferenced = next.some(
+    (entity) =>
+      !removedIds.has(entity.id) &&
+      entity.type === "IFCRELDEFINESBYPROPERTIES" &&
+      readReferences(entity.args[5]).includes(setId),
+  );
+  if (!setStillReferenced) {
+    removedIds.add(setId);
+    const refIndex = set.type === "IFCELEMENTQUANTITY" ? 5 : 4;
+    for (const propertyId of readReferences(set.args[refIndex])) {
+      if (!hasIncomingReferenceExcept(document, propertyId, setId)) {
+        removedIds.add(propertyId);
+      }
+    }
+  }
+
+  return parseNativeIfcText(
+    serializeEntities(
+      document,
+      next.filter((entity) => !removedIds.has(entity.id)),
+    ),
+    document.fileName,
+  );
+}
+
 export function addNativeQuantitySet(
   document: NativeIfcDocument,
   entityId: number,
@@ -2150,7 +2357,21 @@ function setArg(args: string[], index: number, value: string) {
 
 function appendReference(args: string[], index: number, id: number) {
   const refs = readReferences(args[index]);
-  setArg(args, index, `(${[...refs, id].map((ref) => `#${ref}`).join(",")})`);
+  setArg(args, index, formatReferenceList([...refs, id]));
+}
+
+function formatReferenceList(refs: number[]) {
+  return `(${refs.map((ref) => `#${ref}`).join(",")})`;
+}
+
+function hasIncomingReferenceExcept(
+  document: NativeIfcDocument,
+  entityId: number,
+  sourceId: number,
+) {
+  return (document.incomingRefs.get(entityId) ?? []).some(
+    (incoming) => incoming.id !== sourceId,
+  );
 }
 
 function appendNativeEntities(

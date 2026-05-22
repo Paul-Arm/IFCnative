@@ -36,11 +36,14 @@ import {
   applyCatalogQuickFix,
   assignNativeBodyRepresentation,
   createNativeSampleDocument,
+  duplicateNativePropertySet,
   findCatalogObject,
   getNativePlacement,
   getNextNativeEntityId,
   parseNativeIfcFileInWorker,
   removeNativeEntity,
+  removeNativePropertyFromSet,
+  removeNativePropertySet,
   removeNativeRelationship,
   resolveNativeMovableProductId,
   serializeNativeIfcDocument,
@@ -48,6 +51,7 @@ import {
   suggestCatalogObjectForEntity,
   updateNativeEntity,
   updateNativePlacement,
+  updateNativePropertySetName,
   updateNativePropertyValue,
   updateNativeRelationship,
   validateEntityAgainstCatalogObject,
@@ -60,7 +64,7 @@ import {
 import { type NativeGraphPreset } from "@/ifc/nativeGraph";
 
 import { BuilderPanel } from "./ifc-workspace/BuilderPanel";
-import { CatalogPanel } from "./ifc-workspace/CatalogPanel";
+import { CatalogPanel, CatalogReviewPanel } from "./ifc-workspace/CatalogPanel";
 import {
   DEFAULT_MOSAIC_LAYOUT,
   ENTITY_TYPES,
@@ -89,6 +93,7 @@ import {
   SegmentedControl,
   typeOption,
 } from "./ifc-workspace/ui";
+import type { RelationshipFlowClipboardNode } from "./relationship-flow.types";
 import type { ViewerCoordinatePick } from "./that-open-viewer";
 import ThatOpenViewer from "./that-open-viewer";
 
@@ -619,7 +624,9 @@ export default function IfcWorkspace() {
       setSelectedCatalogObjectId(
         suggested?.id ?? parsed.objectTypes[0]?.id ?? "",
       );
-      setMosaicValue((current) => addMosaicView(current, "catalog"));
+      setMosaicValue((current) =>
+        addMosaicView(addMosaicView(current, "catalog"), "catalog-review"),
+      );
       logAction(
         `ui.importCatalog({ file: '${asset.name}', classes: ${parsed.objectTypes.length} });`,
       );
@@ -869,6 +876,68 @@ export default function IfcWorkspace() {
     setGraphCollapsed((current) => removeFromSet(current, sourceId));
   };
 
+  const pasteGraphNodes = (
+    sourceId: number,
+    relationshipType: string,
+    copiedNodes: RelationshipFlowClipboardNode[],
+    connect: boolean,
+  ) => {
+    if (
+      (connect && !document.entityById.has(sourceId)) ||
+      copiedNodes.length === 0
+    ) {
+      return;
+    }
+    const pasteableNodes = copiedNodes.filter(
+      (node) => node.type !== "IFCPROJECT",
+    );
+    if (!pasteableNodes.length) {
+      logAction("graph.pasteNodesSkipped({ reason: 'no-pasteable-nodes' });");
+      return;
+    }
+
+    let next = document;
+    const nextPositions = new Map(graphPositions);
+    const pastedIds: number[] = [];
+    pasteableNodes.forEach((node, index) => {
+      const addedId = getNextNativeEntityId(next);
+      const withElement = addNativeElement(
+        next,
+        undefined,
+        node.type,
+        graphCopyName(node.name, node.type, index),
+      );
+      next = connect
+        ? addNativeRelationship(
+            withElement,
+            relationshipType,
+            sourceId,
+            addedId,
+          )
+        : withElement;
+      nextPositions.set(addedId, { x: node.x, y: node.y });
+      pastedIds.push(addedId);
+    });
+
+    commitDocument(
+      next,
+      pastedIds[pastedIds.length - 1],
+      connect
+        ? `Paste ${pastedIds.length.toLocaleString()} graph node${pastedIds.length === 1 ? "" : "s"} under #${sourceId}`
+        : `Paste ${pastedIds.length.toLocaleString()} graph node${pastedIds.length === 1 ? "" : "s"} without relationships`,
+      `graph.pasteNodesCommit({ sourceId: ${sourceId}, relationship: '${relationshipType}', connect: ${connect}, ids: [${pastedIds.join(", ")}] });`,
+      nextPositions,
+    );
+    setGraphPinned(
+      (current) =>
+        new Set([...current, ...(connect ? [sourceId] : []), ...pastedIds]),
+    );
+    if (connect) {
+      setGraphExpanded((current) => addToSet(current, sourceId));
+      setGraphCollapsed((current) => removeFromSet(current, sourceId));
+    }
+  };
+
   const addPset = (
     psetName: string,
     propertyName: string,
@@ -1032,6 +1101,69 @@ export default function IfcWorkspace() {
       selectedId,
       `Update property #${propertyId} '${propertyName}'`,
       `updateProperty({ id: ${propertyId}, name: '${propertyName}' });`,
+    );
+  };
+
+  const deletePsetProperty = (setId: number, propertyId: number) => {
+    const next = removeNativePropertyFromSet(document, setId, propertyId);
+    if (next === document) {
+      return;
+    }
+    commitDocument(
+      next,
+      selectedId,
+      `Delete property #${propertyId} from #${setId}`,
+      `deleteProperty({ setId: ${setId}, id: ${propertyId} });`,
+    );
+  };
+
+  const renamePset = (setId: number, name: string) => {
+    const next = updateNativePropertySetName(document, setId, name);
+    if (next === document) {
+      return;
+    }
+    commitDocument(
+      next,
+      selectedId,
+      `Rename Pset #${setId} to '${name}'`,
+      `renamePset({ setId: ${setId}, name: ${JSON.stringify(name)} });`,
+    );
+  };
+
+  const duplicatePset = (setId: number) => {
+    const set = document.propertySetsByEntity
+      .get(selectedId)
+      ?.find((item) => item.id === setId);
+    const next = duplicateNativePropertySet(
+      document,
+      selectedId,
+      setId,
+      `${set?.name || `#${setId}`} Copy`,
+    );
+    if (next === document) {
+      return;
+    }
+    commitDocument(
+      next,
+      selectedId,
+      `Duplicate ${set?.kind ?? "Pset"} #${setId}${set ? ` '${set.name}'` : ""}`,
+      `duplicatePset({ objectId: ${selectedId}, setId: ${setId} });`,
+    );
+  };
+
+  const deletePset = (setId: number) => {
+    const set = document.propertySetsByEntity
+      .get(selectedId)
+      ?.find((item) => item.id === setId);
+    const next = removeNativePropertySet(document, selectedId, setId);
+    if (next === document) {
+      return;
+    }
+    commitDocument(
+      next,
+      selectedId,
+      `Delete ${set?.kind ?? "Pset"} #${setId}${set ? ` '${set.name}'` : ""}`,
+      `deletePset({ objectId: ${selectedId}, setId: ${setId} });`,
     );
   };
 
@@ -1293,6 +1425,7 @@ export default function IfcWorkspace() {
           onCreateNodeFromConnection={addGraphConnectedNode}
           onDepth={setGraphDepth}
           onLog={logAction}
+          onPasteNodes={pasteGraphNodes}
           onPreset={setGraphPreset}
           onPositions={setGraphPositions}
           onRemoveNode={(id) => deleteEntity(id, "graph")}
@@ -1366,9 +1499,13 @@ export default function IfcWorkspace() {
         onAddUnit={addUnit}
         onApplyCatalogFindings={applyCatalogFindings}
         onAddRelationship={addRelationship}
+        onDuplicatePropertySet={duplicatePset}
         onRemoveRelationship={deleteRelationship}
+        onRemovePropertyFromSet={deletePsetProperty}
+        onRemovePropertySet={deletePset}
         onSaveEdit={saveSelectedEdit}
         onMovePlacement={moveSelectedPlacement}
+        onRenamePropertySet={renamePset}
         onUpdateProperty={updatePsetProperty}
         onUpdateRelationship={editRelationship}
       />
@@ -1428,13 +1565,22 @@ export default function IfcWorkspace() {
             <CatalogPanel
               catalog={catalog}
               document={viewerDocument}
-              findings={catalogFindings}
               importing={catalogImporting}
               selectedCatalogObjectId={activeCatalogObjectId}
               selectedId={selectedId}
-              onApplyFinding={applyCatalogFinding}
               onImportCatalog={importCatalog}
               onSelectCatalogObject={setSelectedCatalogObjectId}
+            />
+          </View>
+        );
+      case "catalog-review":
+        return (
+          <View style={styles.tileContent}>
+            <CatalogReviewPanel
+              catalog={catalog}
+              findings={catalogFindings}
+              selectedCatalogObjectId={activeCatalogObjectId}
+              onApplyFinding={applyCatalogFinding}
             />
           </View>
         );
@@ -1667,6 +1813,11 @@ function findNextSelectionAfterEntityDelete(
 
 function addToSet<T>(current: Set<T>, value: T) {
   return new Set(current).add(value);
+}
+
+function graphCopyName(name: string, type: string, index: number) {
+  const baseName = name.trim() || type.replace(/^IFC/i, "");
+  return `${baseName} Copy${index > 0 ? ` ${index + 1}` : ""}`;
 }
 
 function getMosaicLeaves<T extends string | number>(

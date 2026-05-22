@@ -392,6 +392,23 @@ export const styles = StyleSheet.create({
     color: "#0f172a",
     fontSize: 12,
   },
+  psetHeaderInput: {
+    backgroundColor: "transparent",
+    borderWidth: 0,
+    color: "#0f172a",
+    fontSize: 12,
+    minHeight: 24,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+  },
+  psetActionCell: {
+    alignItems: "center",
+    borderLeftColor: "#d4d4d8",
+    borderLeftWidth: 1,
+    justifyContent: "center",
+    paddingHorizontal: 4,
+    width: 86,
+  },
   psetNameCell: {
     borderRightColor: "#d4d4d8",
     borderRightWidth: 1,

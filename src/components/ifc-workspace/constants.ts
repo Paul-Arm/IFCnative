@@ -10,6 +10,7 @@ export const MOSAIC_VIEW_IDS: MosaicViewId[] = [
   "inspector",
   "builder",
   "catalog",
+  "catalog-review",
   "console",
   "diagnostics",
 ];
@@ -44,6 +45,7 @@ export const DEFAULT_MOSAIC_LAYOUT: MosaicNode<MosaicViewId> = {
 export const MOSAIC_TITLES: Record<MosaicViewId, string> = {
   builder: "Baukasten",
   catalog: "Objektkatalog",
+  "catalog-review": "Objektkatalog: Pruefung",
   console: "JS Console",
   diagnostics: "Diagnostics",
   inspector: "Inspector",

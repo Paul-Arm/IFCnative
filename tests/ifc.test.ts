@@ -26,13 +26,17 @@ import {
     addNativeTypeAssignment,
     assignNativeBodyRepresentation,
     createNativeSampleDocument,
+    duplicateNativePropertySet,
     getNativePlacement,
     parseNativeIfcText,
     removeNativeEntity,
+    removeNativePropertyFromSet,
+    removeNativePropertySet,
     removeNativeRelationship,
     resolveNativeMovableProductId,
     serializeNativeIfcDocument,
     updateNativePlacement,
+    updateNativePropertySetName,
     updateNativePropertyValue,
     updateNativeRelationship,
 } from "../src/ifc/nativeDocument";
@@ -633,6 +637,109 @@ test("native document removes relationships without removing endpoints", () => {
     ),
     false,
   );
+});
+
+test("native document removes pset rows and selected pset relationships", () => {
+  const sample = createNativeSampleDocument();
+  const storey = sample.entities.find(
+    (entity) => entity.type === "IFCBUILDINGSTOREY",
+  );
+  assert.ok(storey);
+  const withWall = addNativeElement(
+    sample,
+    storey.id,
+    "IFCWALL",
+    "Pset UI Wall",
+  );
+  const wall = withWall.entities.find(
+    (entity) => entity.type === "IFCWALL" && entity.name === "Pset UI Wall",
+  );
+  assert.ok(wall);
+  const withPset = addNativePropertySet(
+    withWall,
+    wall.id,
+    "Pset_UI",
+    "Status",
+    "Draft",
+  );
+  const pset = withPset.propertySetsByEntity.get(wall.id)?.[0];
+  const propertyId = pset?.values[0]?.id;
+  const relationship = withPset.relationshipsByEntity
+    .get(wall.id)
+    ?.find((item) => item.type === "IFCRELDEFINESBYPROPERTIES");
+  assert.ok(pset);
+  assert.ok(propertyId);
+  assert.ok(relationship);
+
+  const withoutRow = removeNativePropertyFromSet(withPset, pset.id, propertyId);
+  assert.equal(withoutRow.entityById.has(propertyId), false);
+  assert.equal(
+    withoutRow.propertySetsByEntity.get(wall.id)?.[0].values.length,
+    0,
+  );
+  assert.equal(withoutRow.entityById.has(pset.id), true);
+  assert.equal(withoutRow.entityById.has(relationship.id), true);
+
+  const withoutPset = removeNativePropertySet(withPset, wall.id, pset.id);
+  assert.equal(withoutPset.propertySetsByEntity.get(wall.id), undefined);
+  assert.equal(withoutPset.entityById.has(propertyId), false);
+  assert.equal(withoutPset.entityById.has(pset.id), false);
+  assert.equal(withoutPset.entityById.has(relationship.id), false);
+});
+
+test("native document renames and duplicates property sets", () => {
+  const sample = createNativeSampleDocument();
+  const storey = sample.entities.find(
+    (entity) => entity.type === "IFCBUILDINGSTOREY",
+  );
+  assert.ok(storey);
+  const withWall = addNativeElement(
+    sample,
+    storey.id,
+    "IFCWALL",
+    "Pset Copy Wall",
+  );
+  const wall = withWall.entities.find(
+    (entity) => entity.type === "IFCWALL" && entity.name === "Pset Copy Wall",
+  );
+  assert.ok(wall);
+  const withPset = addNativePropertySet(
+    withWall,
+    wall.id,
+    "Pset_Original",
+    "Status",
+    "Draft",
+  );
+  const pset = withPset.propertySetsByEntity.get(wall.id)?.[0];
+  assert.ok(pset);
+
+  const renamed = updateNativePropertySetName(
+    withPset,
+    pset.id,
+    "Pset_Renamed",
+  );
+  assert.equal(renamed.entityById.get(pset.id)?.name, "Pset_Renamed");
+  assert.equal(
+    renamed.propertySetsByEntity.get(wall.id)?.[0].name,
+    "Pset_Renamed",
+  );
+
+  const duplicated = duplicateNativePropertySet(
+    renamed,
+    wall.id,
+    pset.id,
+    "Pset_Renamed Copy",
+  );
+  const sets = duplicated.propertySetsByEntity.get(wall.id) ?? [];
+  assert.equal(sets.length, 2);
+  const copy = sets.find((set) => set.name === "Pset_Renamed Copy");
+  assert.ok(copy);
+  assert.notEqual(copy.id, pset.id);
+  assert.deepEqual(
+    copy.values.map((value) => [value.name, value.value]),
+    [["Status", "IFCLABEL('Draft')"]],
+  );
+  assert.notEqual(copy.values[0].id, pset.values[0].id);
 });
 
 test("native graph presets filter relationship neighborhoods", () => {

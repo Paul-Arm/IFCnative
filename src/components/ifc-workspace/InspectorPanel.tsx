@@ -70,8 +70,12 @@ export function InspectorPanel({
   onAddRelationship,
   onAddUnit,
   onApplyCatalogFindings,
+  onDuplicatePropertySet,
   onMovePlacement,
   onRemoveRelationship,
+  onRemovePropertyFromSet,
+  onRemovePropertySet,
+  onRenamePropertySet,
   onSaveEdit,
   onUpdateProperty,
   onUpdateRelationship,
@@ -110,8 +114,12 @@ export function InspectorPanel({
   onAddRelationship(type: string, sourceId: number, targetId: number): void;
   onAddUnit(unitType: string, unitName: string): void;
   onApplyCatalogFindings(findings: CatalogValidationFinding[]): void;
+  onDuplicatePropertySet(setId: number): void;
   onMovePlacement(x: string, y: string, z: string): void;
   onRemoveRelationship(relationshipId: number): void;
+  onRemovePropertyFromSet(setId: number, propertyId: number): void;
+  onRemovePropertySet(setId: number): void;
+  onRenamePropertySet(setId: number, name: string): void;
   onSaveEdit(draft: EntityEditDraft): void;
   onUpdateProperty(
     propertyId: number,
@@ -146,6 +154,10 @@ export function InspectorPanel({
         onAddPropertyToSet={onAddPropertyToSet}
         onAddQuantity={onAddQuantity}
         onApplyCatalogFindings={onApplyCatalogFindings}
+        onDuplicatePropertySet={onDuplicatePropertySet}
+        onRemovePropertyFromSet={onRemovePropertyFromSet}
+        onRemovePropertySet={onRemovePropertySet}
+        onRenamePropertySet={onRenamePropertySet}
         onUpdateProperty={onUpdateProperty}
       />
     );
@@ -432,6 +444,10 @@ function PsetPanel({
   onAddPropertyToSet,
   onAddQuantity,
   onApplyCatalogFindings,
+  onDuplicatePropertySet,
+  onRemovePropertyFromSet,
+  onRemovePropertySet,
+  onRenamePropertySet,
   onUpdateProperty,
 }: {
   activeCatalogObjectId: string;
@@ -453,6 +469,10 @@ function PsetPanel({
     quantityType?: string,
   ): void;
   onApplyCatalogFindings(findings: CatalogValidationFinding[]): void;
+  onDuplicatePropertySet(setId: number): void;
+  onRemovePropertyFromSet(setId: number, propertyId: number): void;
+  onRemovePropertySet(setId: number): void;
+  onRenamePropertySet(setId: number, name: string): void;
   onUpdateProperty(
     propertyId: number,
     propertyName: string,
@@ -551,6 +571,10 @@ function PsetPanel({
           set={set}
           stackIndex={sets.length - index}
           onAddPropertyToSet={onAddPropertyToSet}
+          onDuplicatePropertySet={onDuplicatePropertySet}
+          onRemovePropertyFromSet={onRemovePropertyFromSet}
+          onRemovePropertySet={onRemovePropertySet}
+          onRenamePropertySet={onRenamePropertySet}
           onUpdateProperty={onUpdateProperty}
         />
       ))}
@@ -615,6 +639,10 @@ function PsetTableSection({
   set,
   stackIndex,
   onAddPropertyToSet,
+  onDuplicatePropertySet,
+  onRemovePropertyFromSet,
+  onRemovePropertySet,
+  onRenamePropertySet,
   onUpdateProperty,
 }: {
   document: NativeIfcDocument;
@@ -626,6 +654,10 @@ function PsetTableSection({
     propertyValue: string,
     propertyValueType?: string,
   ): void;
+  onDuplicatePropertySet(setId: number): void;
+  onRemovePropertyFromSet(setId: number, propertyId: number): void;
+  onRemovePropertySet(setId: number): void;
+  onRenamePropertySet(setId: number, name: string): void;
   onUpdateProperty(
     propertyId: number,
     propertyName: string,
@@ -638,6 +670,7 @@ function PsetTableSection({
   const [newName, setNewName] = useState(
     set.kind === "Qto" ? "NeueMenge" : "NeueEigenschaft",
   );
+  const [setName, setSetName] = useState(set.name);
   const [newType, setNewType] = useState(typeOptions[0] ?? "IFCLABEL");
   const [newValue, setNewValue] = useState("");
 
@@ -645,13 +678,24 @@ function PsetTableSection({
     setNewType(typeOptions[0] ?? "IFCLABEL");
   }, [set.kind, typeOptions]);
 
+  useEffect(() => {
+    setSetName(set.name);
+  }, [set.id, set.name]);
+
+  const renameSet = (nextName: string) => {
+    setSetName(nextName);
+    onRenamePropertySet(set.id, nextName);
+  };
+
   return (
     <View style={[styles.psetSection, { zIndex: stackIndex }]}>
       <View style={styles.psetHeader}>
         <View style={styles.diffHeaderText}>
-          <Text style={styles.psetHeaderTitle} numberOfLines={1}>
-            {set.name}
-          </Text>
+          <TextInput
+            value={setName}
+            onChangeText={renameSet}
+            style={styles.psetHeaderInput}
+          />
           <Text style={styles.psetHeaderMeta}>
             {set.kind} #{set.id} / {set.values.length.toLocaleString()} Werte
           </Text>
@@ -664,12 +708,21 @@ function PsetTableSection({
             setNewValue("");
           }}
         />
+        <MiniButton
+          label="Duplizieren"
+          onPress={() => onDuplicatePropertySet(set.id)}
+        />
+        <MiniButton
+          label="Pset loeschen"
+          onPress={() => onRemovePropertySet(set.id)}
+        />
       </View>
       <View style={styles.psetTable}>
         <View style={[styles.psetTableRow, styles.psetTableHead]}>
           <Text style={[styles.psetHeadCell, styles.psetNameCell]}>Name</Text>
           <Text style={[styles.psetHeadCell, styles.psetTypeCell]}>Typ</Text>
           <Text style={[styles.psetHeadCell, styles.psetValueCell]}>Wert</Text>
+          <Text style={[styles.psetHeadCell, styles.psetActionCell]} />
         </View>
         {set.values.map((value) => (
           <EditablePropertyTableRow
@@ -679,7 +732,9 @@ function PsetTableSection({
               document.entityById.get(value.id),
               value.value,
             )}
+            setId={set.id}
             typeOptions={typeOptions}
+            onRemove={onRemovePropertyFromSet}
             onUpdate={onUpdateProperty}
           />
         ))}
@@ -706,6 +761,7 @@ function PsetTableSection({
             onChangeText={setNewValue}
             onSelectType={setNewType}
           />
+          <View style={styles.psetActionCell} />
         </View>
       </View>
     </View>
@@ -715,12 +771,16 @@ function PsetTableSection({
 function EditablePropertyTableRow({
   property,
   rawValue,
+  setId,
   typeOptions,
+  onRemove,
   onUpdate,
 }: {
   property: { id: number; name: string; value: string; type: string };
   rawValue: string;
+  setId: number;
   typeOptions: string[];
+  onRemove(setId: number, propertyId: number): void;
   onUpdate(
     propertyId: number,
     propertyName: string,
@@ -773,6 +833,12 @@ function EditablePropertyTableRow({
         onChangeText={updateValue}
         onSelectType={updateValueType}
       />
+      <View style={styles.psetActionCell}>
+        <MiniButton
+          label="Loeschen"
+          onPress={() => onRemove(setId, property.id)}
+        />
+      </View>
     </View>
   );
 }

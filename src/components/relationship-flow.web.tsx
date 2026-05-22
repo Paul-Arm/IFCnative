@@ -13,11 +13,11 @@ import {
     type Edge,
     type EdgeMouseHandler,
     type FinalConnectionState,
-    type Node,
     type NodeChange,
     type NodeProps,
     type OnConnectStartParams,
     type ReactFlowInstance,
+    type Node as ReactFlowNode,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import React, {
@@ -30,6 +30,7 @@ import React, {
 
 import type {
     FlowPoint,
+    RelationshipFlowClipboardNode,
     RelationshipFlowOption,
     RelationshipFlowProps,
 } from "./relationship-flow.types";
@@ -51,7 +52,7 @@ interface IfcFlowNodeData extends Record<string, unknown> {
   type: string;
 }
 
-type IfcFlowNode = Node<IfcFlowNodeData, "ifcNode">;
+type IfcFlowNode = ReactFlowNode<IfcFlowNodeData, "ifcNode">;
 
 interface IfcFlowEdgeData extends Record<string, unknown> {
   label: string;
@@ -129,6 +130,7 @@ export default function RelationshipFlow({
   onMoveNode,
   onMoveNodes,
   onMoveNodesEnd,
+  onPasteNodes,
   onPreset,
   onRemoveNode,
   onRemoveRelationship,
@@ -138,9 +140,13 @@ export default function RelationshipFlow({
   onToggleChildren,
   onTogglePin,
 }: RelationshipFlowProps) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const flowRef = useRef<ReactFlowInstance<IfcFlowNode, IfcFlowEdge> | null>(
     null,
   );
+  const flowNodesRef = useRef<IfcFlowNode[]>([]);
+  const flowEdgesRef = useRef<IfcFlowEdge[]>([]);
+  const pasteSerialRef = useRef(0);
   const connectionSourceRef = useRef<ConnectionDraftSource | null>(null);
   const [pendingCreate, setPendingCreate] = useState<PendingCreate | null>(
     null,
@@ -150,6 +156,9 @@ export default function RelationshipFlow({
   );
   const [selectedRelationship, setSelectedRelationship] =
     useState<SelectedRelationship | null>(null);
+  const [copiedNodes, setCopiedNodes] = useState<
+    RelationshipFlowClipboardNode[]
+  >([]);
   const trimmedSearch = search.trim();
   const searchFocusNodeId =
     searchActiveId === null ? "" : String(searchActiveId);
@@ -230,6 +239,14 @@ export default function RelationshipFlow({
       }),
     [edges],
   );
+
+  useEffect(() => {
+    flowNodesRef.current = flowNodes;
+  }, [flowNodes]);
+
+  useEffect(() => {
+    flowEdgesRef.current = flowEdges;
+  }, [flowEdges]);
 
   useEffect(() => {
     setFlowNodes((currentNodes) => {
@@ -404,6 +421,93 @@ export default function RelationshipFlow({
     window.requestAnimationFrame(fitView);
   };
 
+  const copySelectedNodes = useCallback(() => {
+    const currentNodes = flowNodesRef.current;
+    const selectedNodes = currentNodes.filter((node) => node.selected);
+    const sourceNodes = selectedNodes.length
+      ? selectedNodes
+      : currentNodes.filter((node) => node.data.selectedIfc);
+    if (!sourceNodes.length) {
+      return;
+    }
+    const copied = sourceNodes.map((node) => ({
+      id: node.data.ifcId,
+      name: node.data.name,
+      type: node.data.type,
+      x: node.position.x,
+      y: node.position.y,
+    }));
+    setCopiedNodes(copied);
+    onLog(
+      `graph.copyNodes({ count: ${copied.length}, ids: [${copied.map((node) => node.id).join(", ")}] });`,
+    );
+  }, [onLog]);
+
+  const pasteCopiedNodes = useCallback(
+    (connect: boolean) => {
+      if (!copiedNodes.length) {
+        return;
+      }
+      const currentNodes = flowNodesRef.current;
+      const sourceId =
+        currentNodes.find((node) => node.data.selectedIfc)?.data.ifcId ??
+        copiedNodes[0].id;
+      const copiedIds = new Set(copiedNodes.map((node) => node.id));
+      const copiedIncomingRelationship = flowEdgesRef.current.find((edge) => {
+        const data = edge.data;
+        return (
+          data && data.sourceId === sourceId && copiedIds.has(data.targetId)
+        );
+      })?.data?.relationshipType;
+      const relationshipType = preferredRelationship(
+        relationshipOptions,
+        copiedIncomingRelationship ?? AGGREGATE_RELATIONSHIP_TYPE,
+      );
+      pasteSerialRef.current += 1;
+      const offset = 36 * (((pasteSerialRef.current - 1) % 5) + 1);
+      onPasteNodes(
+        sourceId,
+        relationshipType,
+        copiedNodes.map((node) => ({
+          ...node,
+          x: node.x + offset,
+          y: node.y + offset,
+        })),
+        connect,
+      );
+      onLog(
+        `graph.pasteNodes({ sourceId: ${sourceId}, relationship: '${relationshipType}', connect: ${connect}, count: ${copiedNodes.length} });`,
+      );
+    },
+    [copiedNodes, onLog, onPasteNodes, relationshipOptions],
+  );
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!isCopyPasteShortcut(event)) {
+        return;
+      }
+      const targetNode = event.target as Node | null;
+      if (
+        !targetNode ||
+        !rootRef.current?.contains(targetNode) ||
+        isEditableEventTarget(event.target)
+      ) {
+        return;
+      }
+      const key = event.key.toLowerCase();
+      if (key === "c") {
+        event.preventDefault();
+        copySelectedNodes();
+      } else if (key === "v") {
+        event.preventDefault();
+        pasteCopiedNodes(!event.shiftKey);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [copySelectedNodes, pasteCopiedNodes]);
+
   const handleEdgeClick = useCallback<EdgeMouseHandler<IfcFlowEdge>>(
     (_event, edge) => {
       const data = edge.data;
@@ -427,7 +531,12 @@ export default function RelationshipFlow({
   );
 
   return (
-    <div className="ifc-relationship-graph">
+    <div
+      className="ifc-relationship-graph"
+      ref={rootRef}
+      tabIndex={0}
+      onMouseDown={() => rootRef.current?.focus()}
+    >
       <div className="ifc-graph-toolbar">
         <label>
           <span>Depth {depth}</span>
@@ -478,6 +587,24 @@ export default function RelationshipFlow({
         </button>
         <button type="button" onClick={autoLayout}>
           Auto
+        </button>
+        <button type="button" onClick={copySelectedNodes}>
+          Copy
+        </button>
+        <button
+          type="button"
+          disabled={!copiedNodes.length}
+          onClick={() => pasteCopiedNodes(true)}
+        >
+          Paste{copiedNodes.length ? ` ${copiedNodes.length}` : ""}
+        </button>
+        <button
+          type="button"
+          disabled={!copiedNodes.length}
+          title="Paste copied nodes without creating relationships (Shift+Ctrl+V)"
+          onClick={() => pasteCopiedNodes(false)}
+        >
+          Paste no rel
         </button>
         <button
           type="button"
@@ -942,6 +1069,24 @@ function optionValue(options: RelationshipFlowOption[], preferred: string) {
 
 function optionKey(option: RelationshipFlowOption, index: number) {
   return `${option.value}-${index}`;
+}
+
+function isCopyPasteShortcut(event: KeyboardEvent) {
+  return (event.ctrlKey || event.metaKey) && !event.altKey;
+}
+
+function isEditableEventTarget(target: EventTarget | null) {
+  const element = target as {
+    isContentEditable?: boolean;
+    tagName?: string;
+  } | null;
+  const tagName = element?.tagName?.toLowerCase();
+  return (
+    Boolean(element?.isContentEditable) ||
+    tagName === "input" ||
+    tagName === "textarea" ||
+    tagName === "select"
+  );
 }
 
 function shortType(type: string) {

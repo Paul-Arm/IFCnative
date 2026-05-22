@@ -25,6 +25,7 @@ const LOI_COLUMNS = [
 ];
 
 const MASTER_PROPERTY_SHEET = "Alle Merkmale (Propertys)";
+const MASTER_CLASS_SHEET = "Übersicht Klassen+Domänen";
 
 const MASTER_TRADE_COLUMNS = [
   { index: 4, label: "TM UP" },
@@ -40,20 +41,30 @@ const MASTER_LOI_COLUMNS = [
   { index: 11, label: "LoI 500" },
 ];
 
+const MASTER_ELEMENT_CLASSES: Record<string, string> = {
+  building: "IFCBUILDING",
+  proxy: "IFCBUILDINGELEMENTPROXY",
+};
+
 export function parseCatalogWorkbook(
   arrayBuffer: ArrayBuffer,
   fileName: string,
 ): IfcObjectCatalog {
   const workbook = XLSX.read(arrayBuffer, { cellDates: false });
   const diagnostics: string[] = [];
-  const objectTypes: CatalogObjectType[] = [];
+  let objectTypes: CatalogObjectType[] = [];
   const masterRows = readSheetRows(workbook, MASTER_PROPERTY_SHEET);
+  const masterClassRows = readSheetRows(workbook, MASTER_CLASS_SHEET);
 
-  for (const sheetName of workbook.SheetNames) {
-    const rows = readSheetRows(workbook, sheetName);
-    const parsed = parseObjectSheet(sheetName, rows, masterRows);
-    if (parsed) {
-      objectTypes.push(parsed);
+  objectTypes = parseMasterObjectTypes(masterClassRows, masterRows);
+
+  if (objectTypes.length === 0) {
+    for (const sheetName of workbook.SheetNames) {
+      const rows = readSheetRows(workbook, sheetName);
+      const parsed = parseObjectSheet(sheetName, rows, masterRows);
+      if (parsed) {
+        objectTypes.push(parsed);
+      }
     }
   }
 
@@ -76,7 +87,9 @@ export function parseCatalogWorkbook(
   );
   if (masterRows.length) {
     diagnostics.push(
-      `Preferred ${MASTER_PROPERTY_SHEET} rows for object classes with matching code suffixes.`,
+      objectTypes.length && masterClassRows.length
+        ? `Imported object classes from ${MASTER_CLASS_SHEET} and rules from ${MASTER_PROPERTY_SHEET}.`
+        : `Preferred ${MASTER_PROPERTY_SHEET} rows for object classes with matching code suffixes.`,
     );
   }
 
@@ -86,6 +99,118 @@ export function parseCatalogWorkbook(
     importedAt: new Date().toISOString(),
     objectTypes,
   };
+}
+
+function parseMasterObjectTypes(
+  classRows: unknown[][],
+  propertyRows: unknown[][],
+) {
+  if (classRows.length < 2 || propertyRows.length < 2) {
+    return [];
+  }
+  const objectTypes: CatalogObjectType[] = [];
+  const seenSuffixes = new Set<string>();
+  for (let index = 1; index < classRows.length; index += 1) {
+    const row = classRows[index];
+    const name = cleanCell(row[0]);
+    const code = cleanCell(row[1]);
+    const version = cleanCell(row[2]);
+    const longName = cleanCell(row[6]);
+    const id = makeCatalogId(code || name || longName);
+    const propertyRules = readMasterPropertyRules(propertyRows, id, code);
+    if (!name || !code || propertyRules.length === 0) {
+      continue;
+    }
+    const suffix = catalogCodeSuffix(code);
+    if (suffix) {
+      seenSuffixes.add(suffix);
+    }
+    objectTypes.push({
+      code,
+      id,
+      ifcClass: inferMasterIfcClass(propertyRows, code),
+      name,
+      propertyRules,
+      sheetName: MASTER_CLASS_SHEET,
+      version,
+    });
+  }
+  objectTypes.push(
+    ...inferMissingMasterObjectTypes(propertyRows, seenSuffixes),
+  );
+  return objectTypes;
+}
+
+function inferMissingMasterObjectTypes(
+  rows: unknown[][],
+  seenSuffixes: Set<string>,
+) {
+  const suffixes = new Set<string>();
+  for (let index = 1; index < rows.length; index += 1) {
+    const row = rows[index];
+    const psetName = cleanCell(row[2]);
+    const propertyName = cleanCell(row[1]);
+    const suffix = propertyNameSuffix(propertyName);
+    if (
+      !suffix ||
+      seenSuffixes.has(suffix) ||
+      !looksLikePropertyRule(psetName, propertyName)
+    ) {
+      continue;
+    }
+    suffixes.add(suffix);
+  }
+
+  return [...suffixes].flatMap<CatalogObjectType>((suffix) => {
+    const code = `BWD - ${suffix}`;
+    const id = makeCatalogId(code);
+    const propertyRules = readMasterPropertyRules(rows, id, code);
+    if (!propertyRules.length) {
+      return [];
+    }
+    return [
+      {
+        code,
+        id,
+        ifcClass: inferMasterIfcClass(rows, code),
+        name: inferMissingMasterObjectName(propertyRules, suffix),
+        propertyRules,
+        sheetName: MASTER_PROPERTY_SHEET,
+        version: "",
+      },
+    ];
+  });
+}
+
+function inferMissingMasterObjectName(
+  rules: CatalogPropertyRule[],
+  suffix: string,
+) {
+  const psetName = rules[0]?.psetName ?? "";
+  return (
+    psetName
+      .replace(/^e?pset[_\s-]*/i, "")
+      .replace(/_/g, " ")
+      .trim() || suffix
+  );
+}
+
+function inferMasterIfcClass(rows: unknown[][], code: string) {
+  const suffix = catalogCodeSuffix(code);
+  if (!suffix) {
+    return "IFCBUILDINGELEMENTPROXY";
+  }
+  for (let index = 1; index < rows.length; index += 1) {
+    const row = rows[index];
+    const propertyName = cleanCell(row[1]);
+    if (!hasPropertySuffix(propertyName, suffix)) {
+      continue;
+    }
+    const element = cleanCell(row[0]);
+    const mapped = MASTER_ELEMENT_CLASSES[normalizeCatalogToken(element)];
+    return mapped ?? normalizeIfcClass(element || "IfcBuildingElementProxy");
+  }
+  return "IFCBUILDINGELEMENTPROXY";
 }
 
 function parseObjectSheet(
@@ -241,7 +366,15 @@ function catalogCodeSuffix(code: string) {
 }
 
 function hasPropertySuffix(propertyName: string, suffix: string) {
-  return propertyName.toUpperCase().endsWith(`_${suffix}`);
+  return propertyNameSuffix(propertyName) === suffix;
+}
+
+function propertyNameSuffix(propertyName: string) {
+  return (
+    cleanCell(propertyName)
+      .match(/_([A-Z0-9]+)$/i)?.[1]
+      ?.toUpperCase() ?? ""
+  );
 }
 
 function makeCatalogId(value: string) {

@@ -10,6 +10,7 @@ import type { NativeGraphPreset } from "@/ifc/nativeGraph";
 
 import RelationshipFlow from "../relationship-flow";
 import type {
+    RelationshipFlowClipboardNode,
     RelationshipFlowEdge,
     RelationshipFlowLayoutMode,
     RelationshipFlowMove,
@@ -38,6 +39,7 @@ export function GraphPanel({
   onCreateNodeFromConnection,
   onDepth,
   onLog,
+  onPasteNodes,
   onPositions,
   onPreset,
   onRemoveNode,
@@ -75,6 +77,12 @@ export function GraphPanel({
   ): void;
   onDepth(depth: number): void;
   onLog(code: string): void;
+  onPasteNodes(
+    sourceId: number,
+    relationshipType: string,
+    nodes: RelationshipFlowClipboardNode[],
+    connect: boolean,
+  ): void;
   onPositions(positions: Map<number, Point>): void;
   onPreset(preset: NativeGraphPreset): void;
   onRemoveNode(id: number): void;
@@ -281,6 +289,7 @@ export function GraphPanel({
           .join(", ");
         onLog(`graph.moveNodes({ count: ${moves.length}, ids: [${ids}] });`);
       }}
+      onPasteNodes={onPasteNodes}
       onPreset={(value) => onPreset(value as NativeGraphPreset)}
       onRemoveNode={onRemoveNode}
       onRemoveRelationship={onRemoveRelationship}

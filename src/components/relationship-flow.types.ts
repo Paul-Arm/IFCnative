@@ -10,6 +10,14 @@ export interface RelationshipFlowMove {
   point: FlowPoint;
 }
 
+export interface RelationshipFlowClipboardNode {
+  id: number;
+  name: string;
+  type: string;
+  x: number;
+  y: number;
+}
+
 export interface RelationshipFlowNode {
   childCount: number;
   childrenLoaded: boolean;
@@ -83,6 +91,12 @@ export interface RelationshipFlowProps {
   onMoveNode(id: number, point: FlowPoint): void;
   onMoveNodes?(moves: RelationshipFlowMove[]): void;
   onMoveNodesEnd?(moves: RelationshipFlowMove[]): void;
+  onPasteNodes(
+    sourceId: number,
+    relationshipType: string,
+    nodes: RelationshipFlowClipboardNode[],
+    connect: boolean,
+  ): void;
   onPreset(preset: string): void;
   onSearchNavigate(direction: "previous" | "next"): void;
   onSelect(id: number): void;
