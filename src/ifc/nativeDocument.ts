@@ -98,6 +98,12 @@ const RELATIONSHIP_FAMILIES: Record<string, string> = {
   IFCRELASSIGNSTOGROUP: "group",
 };
 
+const HIERARCHY_RELATIONSHIP_TYPES = new Set([
+  "IFCRELAGGREGATES",
+  "IFCRELNESTS",
+  "IFCRELCONTAINEDINSPATIALSTRUCTURE",
+]);
+
 const QUANTITY_TYPES = new Set([
   "IFCQUANTITYLENGTH",
   "IFCQUANTITYAREA",
@@ -1411,6 +1417,29 @@ export function removeNativeRelationship(
   );
 }
 
+export function removeNativeEntity(
+  document: NativeIfcDocument,
+  entityId: number,
+) {
+  const entity = document.entityById.get(entityId);
+  if (!entity || entity.type === "IFCPROJECT") {
+    return document;
+  }
+
+  const removedIds = collectCascadeRemovalIds(document, entityId);
+  if (removedIds.size === 0 || removedIds.size >= document.entities.length) {
+    return document;
+  }
+
+  const next = cloneDocumentEntities(document).filter(
+    (current) => !removedIds.has(current.id),
+  );
+  return parseNativeIfcText(
+    serializeEntities(document, next),
+    document.fileName,
+  );
+}
+
 export function updateNativeRelationship(
   document: NativeIfcDocument,
   relationshipId: number,
@@ -1604,6 +1633,46 @@ function relationshipEnds(entity: NativeIfcEntity): [number[], number[]] {
   }
   const refs = readUniqueReferencesFromArgs(entity.args);
   return refs.length <= 1 ? [refs, []] : [[refs[0]], refs.slice(1)];
+}
+
+function collectCascadeRemovalIds(document: NativeIfcDocument, rootId: number) {
+  const removedIds = new Set<number>();
+  const queue = [rootId];
+
+  while (queue.length > 0) {
+    const currentId = queue.shift();
+    if (
+      !currentId ||
+      removedIds.has(currentId) ||
+      !document.entityById.has(currentId)
+    ) {
+      continue;
+    }
+
+    removedIds.add(currentId);
+
+    for (const relationship of document.relationshipsByEntity.get(currentId) ??
+      []) {
+      if (
+        HIERARCHY_RELATIONSHIP_TYPES.has(relationship.type) &&
+        relationship.sourceIds.includes(currentId)
+      ) {
+        for (const childId of relationship.targetIds) {
+          if (!removedIds.has(childId)) {
+            queue.push(childId);
+          }
+        }
+      }
+    }
+
+    for (const incoming of document.incomingRefs.get(currentId) ?? []) {
+      if (!removedIds.has(incoming.id)) {
+        queue.push(incoming.id);
+      }
+    }
+  }
+
+  return removedIds;
 }
 
 function readPropertySets(

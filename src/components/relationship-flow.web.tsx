@@ -11,6 +11,7 @@ import {
     SelectionMode,
     type Connection,
     type Edge,
+    type EdgeMouseHandler,
     type FinalConnectionState,
     type Node,
     type NodeChange,
@@ -41,6 +42,7 @@ interface IfcFlowNodeData extends Record<string, unknown> {
   ifcId: number;
   layoutPosition: FlowPoint;
   name: string;
+  onRemoveNode(id: number): void;
   onToggleChildren(id: number, loaded: boolean): void;
   onTogglePin(id: number, point?: FlowPoint): void;
   pinned: boolean;
@@ -50,7 +52,16 @@ interface IfcFlowNodeData extends Record<string, unknown> {
 }
 
 type IfcFlowNode = Node<IfcFlowNodeData, "ifcNode">;
-type IfcFlowEdge = Edge;
+
+interface IfcFlowEdgeData extends Record<string, unknown> {
+  label: string;
+  relationshipId: number;
+  relationshipType: string;
+  sourceId: number;
+  targetId: number;
+}
+
+type IfcFlowEdge = Edge<IfcFlowEdgeData>;
 
 interface PendingCreate {
   name: string;
@@ -61,6 +72,14 @@ interface PendingCreate {
 }
 
 interface PendingConnect {
+  relationshipType: string;
+  sourceId: number;
+  targetId: number;
+}
+
+interface SelectedRelationship {
+  label: string;
+  relationshipId: number;
   relationshipType: string;
   sourceId: number;
   targetId: number;
@@ -111,6 +130,8 @@ export default function RelationshipFlow({
   onMoveNodes,
   onMoveNodesEnd,
   onPreset,
+  onRemoveNode,
+  onRemoveRelationship,
   onRelationshipTypeFilters,
   onSearchNavigate,
   onSelect,
@@ -127,6 +148,8 @@ export default function RelationshipFlow({
   const [pendingConnect, setPendingConnect] = useState<PendingConnect | null>(
     null,
   );
+  const [selectedRelationship, setSelectedRelationship] =
+    useState<SelectedRelationship | null>(null);
   const trimmedSearch = search.trim();
   const searchFocusNodeId =
     searchActiveId === null ? "" : String(searchActiveId);
@@ -145,6 +168,7 @@ export default function RelationshipFlow({
           ifcId: node.id,
           layoutPosition: { x: node.x, y: node.y },
           name: node.entity.name,
+          onRemoveNode,
           onToggleChildren,
           onTogglePin,
           pinned: node.pinned,
@@ -175,6 +199,13 @@ export default function RelationshipFlow({
             : containedSpatial
               ? "ifc-flow-edge-contained"
               : "ifc-flow-edge-reference",
+          data: {
+            label: edge.label,
+            relationshipId: edge.rel,
+            relationshipType: edge.relationshipType,
+            sourceId: edge.source,
+            targetId: edge.target,
+          },
           id: `${edge.id}-${index}`,
           label: edge.label,
           markerEnd: { type: MarkerType.ArrowClosed },
@@ -292,6 +323,7 @@ export default function RelationshipFlow({
       ) {
         return;
       }
+      setSelectedRelationship(null);
       setPendingCreate(null);
       setPendingConnect({
         relationshipType: preferredRelationship(
@@ -340,6 +372,7 @@ export default function RelationshipFlow({
       const point = clientPointFromEvent(event);
       const position = flowRef.current?.screenToFlowPosition(point) ?? point;
       const type = preferredClass(classOptions);
+      setSelectedRelationship(null);
       setPendingConnect(null);
       setPendingCreate({
         name: `New ${shortType(type)}`,
@@ -370,6 +403,28 @@ export default function RelationshipFlow({
     setFlowNodes(baseFlowNodes);
     window.requestAnimationFrame(fitView);
   };
+
+  const handleEdgeClick = useCallback<EdgeMouseHandler<IfcFlowEdge>>(
+    (_event, edge) => {
+      const data = edge.data;
+      if (!data) {
+        return;
+      }
+      setPendingCreate(null);
+      setPendingConnect(null);
+      setSelectedRelationship({
+        label: data.label,
+        relationshipId: data.relationshipId,
+        relationshipType: data.relationshipType,
+        sourceId: data.sourceId,
+        targetId: data.targetId,
+      });
+      onLog(
+        `graph.selectRelationship({ id: ${data.relationshipId}, class: '${data.relationshipType}' });`,
+      );
+    },
+    [onLog],
+  );
 
   return (
     <div className="ifc-relationship-graph">
@@ -523,10 +578,12 @@ export default function RelationshipFlow({
           onConnect={handleConnect}
           onConnectEnd={handleConnectEnd}
           onConnectStart={handleConnectStart}
+          onEdgeClick={handleEdgeClick}
           onNodeClick={(_event, node) => onSelect(Number(node.id))}
           onNodeDragStop={(_event, node, draggedNodes) => {
             commitMovedNodes(draggedNodes.length ? draggedNodes : [node]);
           }}
+          onPaneClick={() => setSelectedRelationship(null)}
           onSelectionDragStop={(_event, selectedNodes) => {
             commitMovedNodes(selectedNodes);
           }}
@@ -671,6 +728,33 @@ export default function RelationshipFlow({
           </div>
         </FlowPopover>
       ) : null}
+      {selectedRelationship ? (
+        <FlowPopover
+          title={`Relationship #${selectedRelationship.relationshipId}`}
+          onCancel={() => setSelectedRelationship(null)}
+        >
+          <div className="ifc-flow-popover-summary">
+            <strong>{selectedRelationship.relationshipType}</strong>
+            <span>
+              #{selectedRelationship.sourceId} -&gt; #
+              {selectedRelationship.targetId}
+            </span>
+            <span>{selectedRelationship.label}</span>
+          </div>
+          <div className="ifc-flow-popover-actions">
+            <button
+              className="danger"
+              type="button"
+              onClick={() => {
+                onRemoveRelationship(selectedRelationship.relationshipId);
+                setSelectedRelationship(null);
+              }}
+            >
+              Delete relationship
+            </button>
+          </div>
+        </FlowPopover>
+      ) : null}
     </div>
   );
 }
@@ -759,6 +843,19 @@ function IfcNode({ data, selected }: NodeProps<IfcFlowNode>) {
           >
             {data.pinned ? "Fixed" : "Pin"}
           </button>
+          {data.type !== "IFCPROJECT" ? (
+            <button
+              className="nodrag nopan danger"
+              title={`Delete #${data.ifcId}`}
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                data.onRemoveNode(data.ifcId);
+              }}
+            >
+              Del
+            </button>
+          ) : null}
         </div>
       </div>
       <span

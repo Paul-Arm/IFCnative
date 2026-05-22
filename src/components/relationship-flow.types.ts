@@ -76,6 +76,8 @@ export interface RelationshipFlowProps {
   onDepth(depth: number): void;
   onLayoutMode(mode: RelationshipFlowLayoutMode): void;
   onLog(code: string): void;
+  onRemoveNode(id: number): void;
+  onRemoveRelationship(relationshipId: number): void;
   onRelationshipTypeFilters(filters: string[]): void;
   onMoveEnd(id: number, point: FlowPoint): void;
   onMoveNode(id: number, point: FlowPoint): void;

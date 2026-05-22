@@ -646,6 +646,18 @@ textarea {
   color: #ffffff;
 }
 
+.ifc-flow-node button.danger,
+.ifc-flow-popover-actions button.danger {
+  border-color: #e11d48;
+  color: #be123c;
+}
+
+.ifc-flow-node button.danger:hover,
+.ifc-flow-popover-actions button.danger:hover {
+  background: #fff1f2;
+  border-color: #e11d48;
+}
+
 .ifc-flow-handle {
   width: 11px;
   height: 11px;
@@ -733,6 +745,18 @@ textarea {
 .ifc-flow-popover label span {
   color: #5f6f7b;
   font-size: 10px;
+}
+
+.ifc-flow-popover-summary {
+  display: grid;
+  gap: 4px;
+  color: #475569;
+  font-size: 11px;
+}
+
+.ifc-flow-popover-summary strong {
+  color: #0f172a;
+  font-size: 12px;
 }
 
 .ifc-flow-popover input,

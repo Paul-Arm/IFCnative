@@ -40,6 +40,8 @@ export function GraphPanel({
   onLog,
   onPositions,
   onPreset,
+  onRemoveNode,
+  onRemoveRelationship,
   onRelationshipTypeFilters,
   onSelect,
   onToggleChildren,
@@ -75,6 +77,8 @@ export function GraphPanel({
   onLog(code: string): void;
   onPositions(positions: Map<number, Point>): void;
   onPreset(preset: NativeGraphPreset): void;
+  onRemoveNode(id: number): void;
+  onRemoveRelationship(relationshipId: number): void;
   onRelationshipTypeFilters(filters: string[]): void;
   onSelect(id: number, source?: string): void;
   onToggleChildren(id: number, loaded: boolean): void;
@@ -278,6 +282,8 @@ export function GraphPanel({
         onLog(`graph.moveNodes({ count: ${moves.length}, ids: [${ids}] });`);
       }}
       onPreset={(value) => onPreset(value as NativeGraphPreset)}
+      onRemoveNode={onRemoveNode}
+      onRemoveRelationship={onRemoveRelationship}
       onRelationshipTypeFilters={onRelationshipTypeFilters}
       onSearchNavigate={navigateSearchResult}
       onSelect={(id) => onSelect(id, "graph")}

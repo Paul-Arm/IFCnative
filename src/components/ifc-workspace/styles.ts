@@ -718,6 +718,32 @@ export const styles = StyleSheet.create({
     fontSize: 10,
     marginTop: 3,
   },
+  treeDeleteButton: {
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: "#fff1f2",
+    borderColor: "#fecdd3",
+    borderRadius: 6,
+    borderWidth: 1,
+    justifyContent: "center",
+    minHeight: 28,
+    minWidth: 34,
+    paddingHorizontal: 8,
+  },
+  treeDeleteButtonText: {
+    color: "#be123c",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  treeActionRow: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    gap: 8,
+  },
+  treePrimaryAction: {
+    flex: 1,
+    minWidth: 0,
+  },
   treeTitle: {
     color: "#18181b",
     flex: 1,

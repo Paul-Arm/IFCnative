@@ -1,71 +1,72 @@
 import {
-    startTransition,
-    useEffect,
-    useMemo,
-    useState,
-    type SetStateAction,
+  startTransition,
+  useEffect,
+  useMemo,
+  useState,
+  type SetStateAction,
 } from "react";
 import {
-    Mosaic,
-    MosaicWindow,
-    type MosaicNode,
-    type MosaicPath,
+  Mosaic,
+  MosaicWindow,
+  type MosaicNode,
+  type MosaicPath,
 } from "react-mosaic-component";
 import {
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    Text,
-    TextInput,
-    View,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
 
 import {
-    addNativeBodyElement,
-    addNativeClassification,
-    addNativeDocumentReference,
-    addNativeElement,
-    addNativeEmptyPropertySet,
-    addNativeMaterial,
-    addNativePropertySet,
-    addNativePropertyToSet,
-    addNativeQuantitySet,
-    addNativeRelationship,
-    addNativeSiUnit,
-    addNativeTypeAssignment,
-    applyCatalogQuickFix,
-    assignNativeBodyRepresentation,
-    createNativeSampleDocument,
-    findCatalogObject,
-    getNativePlacement,
-    getNextNativeEntityId,
-    parseNativeIfcFileInWorker,
-    removeNativeRelationship,
-    resolveNativeMovableProductId,
-    serializeNativeIfcDocument,
-    splitTopLevel,
-    suggestCatalogObjectForEntity,
-    updateNativeEntity,
-    updateNativePlacement,
-    updateNativePropertyValue,
-    updateNativeRelationship,
-    validateEntityAgainstCatalogObject,
-    viewerWorldDeltaToIfcPlacementDelta,
-    type CatalogValidationFinding,
-    type IfcObjectCatalog,
-    type NativeIfcDocument,
-    type NativeIfcEntity,
+  addNativeBodyElement,
+  addNativeClassification,
+  addNativeDocumentReference,
+  addNativeElement,
+  addNativeEmptyPropertySet,
+  addNativeMaterial,
+  addNativePropertySet,
+  addNativePropertyToSet,
+  addNativeQuantitySet,
+  addNativeRelationship,
+  addNativeSiUnit,
+  addNativeTypeAssignment,
+  applyCatalogQuickFix,
+  assignNativeBodyRepresentation,
+  createNativeSampleDocument,
+  findCatalogObject,
+  getNativePlacement,
+  getNextNativeEntityId,
+  parseNativeIfcFileInWorker,
+  removeNativeEntity,
+  removeNativeRelationship,
+  resolveNativeMovableProductId,
+  serializeNativeIfcDocument,
+  splitTopLevel,
+  suggestCatalogObjectForEntity,
+  updateNativeEntity,
+  updateNativePlacement,
+  updateNativePropertyValue,
+  updateNativeRelationship,
+  validateEntityAgainstCatalogObject,
+  viewerWorldDeltaToIfcPlacementDelta,
+  type CatalogValidationFinding,
+  type IfcObjectCatalog,
+  type NativeIfcDocument,
+  type NativeIfcEntity,
 } from "@/ifc";
 import { type NativeGraphPreset } from "@/ifc/nativeGraph";
 
 import { BuilderPanel } from "./ifc-workspace/BuilderPanel";
 import { CatalogPanel } from "./ifc-workspace/CatalogPanel";
 import {
-    DEFAULT_MOSAIC_LAYOUT,
-    ENTITY_TYPES,
-    MOSAIC_TITLES,
-    MOSAIC_VIEW_IDS,
-    RELATION_TYPES,
+  DEFAULT_MOSAIC_LAYOUT,
+  ENTITY_TYPES,
+  MOSAIC_TITLES,
+  MOSAIC_VIEW_IDS,
+  RELATION_TYPES,
 } from "./ifc-workspace/constants";
 import { GraphPanel } from "./ifc-workspace/GraphPanel";
 import { InspectorPanel } from "./ifc-workspace/InspectorPanel";
@@ -73,20 +74,20 @@ import { ConsolePanel, DiagnosticsPanel } from "./ifc-workspace/ReviewPanels";
 import { StructurePanel } from "./ifc-workspace/StructurePanel";
 import { styles } from "./ifc-workspace/styles";
 import type {
-    BodyElementDraft,
-    CoordinateClipboard,
-    EntityEditDraft,
-    InspectorMode,
-    MosaicViewId,
-    ParsedCoordinates,
-    Point,
-    StructureMode,
+  BodyElementDraft,
+  CoordinateClipboard,
+  EntityEditDraft,
+  InspectorMode,
+  MosaicViewId,
+  ParsedCoordinates,
+  Point,
+  StructureMode,
 } from "./ifc-workspace/types";
 import {
-    Button,
-    MosaicWindowMenu,
-    SegmentedControl,
-    typeOption,
+  Button,
+  MosaicWindowMenu,
+  SegmentedControl,
+  typeOption,
 } from "./ifc-workspace/ui";
 import type { ViewerCoordinatePick } from "./that-open-viewer";
 import ThatOpenViewer from "./that-open-viewer";
@@ -1071,6 +1072,45 @@ export default function IfcWorkspace() {
     );
   };
 
+  const deleteEntity = (entityId: number, source: "tree" | "graph") => {
+    const entity = document.entityById.get(entityId);
+    if (!entity || entity.type === "IFCPROJECT") {
+      return;
+    }
+
+    const next = removeNativeEntity(document, entityId);
+    if (next === document) {
+      return;
+    }
+
+    const nextSelection = findNextSelectionAfterEntityDelete(
+      document,
+      next,
+      entityId,
+    );
+    const nextAnchor = next.entityById.has(graphAnchorId)
+      ? graphAnchorId
+      : next.entityById.has(nextSelection ?? 0)
+        ? (nextSelection as number)
+        : (next.spatialRoots[0]?.id ?? next.entities[0]?.id ?? graphAnchorId);
+    const nextPositions = filterGraphPositions(graphPositions, next);
+
+    setTreeExpanded((current) => filterEntitySet(current, next));
+    setGraphPinned((current) => filterEntitySet(current, next));
+    setGraphExpanded((current) => filterEntitySet(current, next));
+    setGraphCollapsed((current) => filterEntitySet(current, next));
+    setGraphAnchorId(nextAnchor);
+
+    commitDocument(
+      next,
+      nextSelection,
+      `Delete #${entityId} ${entity.type}`,
+      `${source}.deleteEntity({ id: ${entityId}, class: '${entity.type}' });`,
+      nextPositions,
+      { reloadViewer: true },
+    );
+  };
+
   const moveSelectedPlacement = (x: string, y: string, z: string) => {
     const sourceDocument = document;
     const next = updateNativePlacement(sourceDocument, selectedId, { x, y, z });
@@ -1223,6 +1263,7 @@ export default function IfcWorkspace() {
           filteredEntities={filteredEntities}
           search={search}
           selectedId={selectedId}
+          onRemove={(id) => deleteEntity(id, "tree")}
           onSelect={selectEntity}
           onToggle={(id) => {
             setTreeExpanded((current) =>
@@ -1254,6 +1295,8 @@ export default function IfcWorkspace() {
           onLog={logAction}
           onPreset={setGraphPreset}
           onPositions={setGraphPositions}
+          onRemoveNode={(id) => deleteEntity(id, "graph")}
+          onRemoveRelationship={deleteRelationship}
           onRelationshipTypeFilters={(filters) =>
             setGraphRelationshipTypes(new Set(filters))
           }
@@ -1587,6 +1630,39 @@ function removeFromSet<T>(current: Set<T>, value: T) {
   const next = new Set(current);
   next.delete(value);
   return next;
+}
+
+function filterEntitySet(current: Set<number>, document: NativeIfcDocument) {
+  return new Set([...current].filter((id) => document.entityById.has(id)));
+}
+
+function filterGraphPositions(
+  current: Map<number, Point>,
+  document: NativeIfcDocument,
+) {
+  return new Map([...current].filter(([id]) => document.entityById.has(id)));
+}
+
+function findNextSelectionAfterEntityDelete(
+  current: NativeIfcDocument,
+  next: NativeIfcDocument,
+  entityId: number,
+) {
+  const related = current.relationshipsByEntity.get(entityId) ?? [];
+  const candidates = [
+    ...related.flatMap((relationship) =>
+      relationship.targetIds.includes(entityId) ? relationship.sourceIds : [],
+    ),
+    ...related.flatMap((relationship) => relationship.sourceIds),
+    ...related.flatMap((relationship) => relationship.targetIds),
+    next.spatialRoots[0]?.id,
+    next.entities[0]?.id,
+  ].filter(
+    (candidate): candidate is number =>
+      Number.isFinite(candidate) && candidate !== entityId,
+  );
+
+  return candidates.find((candidate) => next.entityById.has(candidate));
 }
 
 function addToSet<T>(current: Set<T>, value: T) {

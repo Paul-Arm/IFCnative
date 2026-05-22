@@ -28,6 +28,7 @@ import {
     createNativeSampleDocument,
     getNativePlacement,
     parseNativeIfcText,
+    removeNativeEntity,
     removeNativeRelationship,
     resolveNativeMovableProductId,
     serializeNativeIfcDocument,
@@ -39,6 +40,13 @@ import { buildNativeGraphNeighborhood } from "../src/ifc/nativeGraph";
 import { preflightIfcText } from "../src/ifc/preflight";
 import { buildPropertyIndex } from "../src/ifc/propertyIndex";
 import type { IfcEntitySummary } from "../src/ifc/types";
+
+type FragmentStubItem = {
+  GlobalId: { value: string };
+  Name: { value: string };
+  localId: { value: number };
+  [key: string]: unknown;
+};
 
 test("preflight reads a valid IFC4X3_ADD2 header", () => {
   const result = preflightIfcText(
@@ -70,7 +78,7 @@ test("preflight reports missing STEP markers", () => {
 });
 
 test("fragments adapter projects model data into the native document contract", async () => {
-  const items = new Map<number, Record<string, unknown>>();
+  const items = new Map<number, FragmentStubItem>();
   const project = fragmentItem(1, "Demo Project");
   const storey = fragmentItem(2, "Level 01");
   const wall = fragmentItem(3, "Basic Wall", {
@@ -102,7 +110,7 @@ test("fragments adapter projects model data into the native document contract", 
     ["IFCWALL", [3]],
     ["IFCPROPERTYSET", [10]],
   ]);
-  const model: FragmentDocumentModel = {
+  const model = {
     modelId: "demo-frag",
     getAttributeNames: async () => ["Name", "GlobalId"],
     getCategories: async () => [...categories.keys()],
@@ -142,7 +150,7 @@ test("fragments adapter projects model data into the native document contract", 
         },
       ],
     }),
-  };
+  } as FragmentDocumentModel;
 
   const document = await buildNativeDocumentFromFragments(model, {
     fileName: "demo.ifc",
@@ -183,7 +191,7 @@ function fragmentItem(
   localId: number,
   name: string,
   extra: Record<string, unknown> = {},
-) {
+): FragmentStubItem {
   return {
     GlobalId: { value: `guid-${localId}` },
     Name: { value: name },
@@ -464,6 +472,59 @@ test("native type assignments are indexed and endpoint-validated", () => {
     badRelationship.diagnostics.some((line) =>
       line.includes("IFCRELDEFINESBYTYPE expects type object definitions"),
     ),
+  );
+});
+
+test("removing an entity cascades hierarchy children and referencing relationships", () => {
+  const sample = createNativeSampleDocument();
+  const storey = sample.entities.find(
+    (entity) => entity.type === "IFCBUILDINGSTOREY",
+  );
+  assert.ok(storey);
+
+  const withWall = addNativeBodyElement(sample, {
+    depth: 0.3,
+    height: 3,
+    name: "Delete Me Wall",
+    parentId: storey.id,
+    placementMode: "parent",
+    type: "IFCWALL",
+    width: 4,
+    x: 1,
+    y: 2,
+    z: 0,
+  });
+  const wall = withWall.entities.find(
+    (entity) => entity.type === "IFCWALL" && entity.name === "Delete Me Wall",
+  );
+  assert.ok(wall);
+
+  const withMaterial = addNativeMaterial(
+    withWall,
+    wall.id,
+    "Delete Me Material",
+  );
+  const materialRelationship = withMaterial.relationshipsByEntity
+    .get(wall.id)
+    ?.find((relationship) => relationship.type === "IFCRELASSOCIATESMATERIAL");
+  assert.ok(materialRelationship);
+
+  const removed = removeNativeEntity(withMaterial, wall.id);
+
+  assert.equal(removed.entityById.has(wall.id), false);
+  assert.equal(
+    removed.relationships.some(
+      (relationship) => relationship.id === materialRelationship.id,
+    ),
+    false,
+  );
+  assert.equal(
+    removed.entities.some((entity) => entity.name === "Delete Me Wall"),
+    false,
+  );
+  assert.equal(
+    removed.entities.some((entity) => entity.name === "Delete Me Material"),
+    true,
   );
 });
 
