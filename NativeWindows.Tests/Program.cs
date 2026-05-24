@@ -20,6 +20,7 @@ internal sealed class NativeTestRunner
         Run("parser recovers after malformed entity arguments", ParserRecoversAfterMalformedEntityArguments);
         Run("parser recovers valid entity missing semicolon", ParserRecoversValidEntityMissingSemicolon);
         Run("parser keeps first entity when STEP ids duplicate", ParserKeepsFirstEntityWhenStepIdsDuplicate);
+        Run("parser recovers after entity missing type", ParserRecoversAfterEntityMissingType);
         Run("entity/property/relationship edits create targeted diffs", EditsCreateTargetedDiffs);
         Run("spatial reparent updates containment parent", SpatialReparentUpdatesContainmentParent);
         Run("spatial detach removes containment link", SpatialDetachRemovesContainmentLink);
@@ -212,6 +213,16 @@ internal sealed class NativeTestRunner
 
         var exported = document.ToStepText();
         Equal(exported.IndexOf("#41=", StringComparison.Ordinal), exported.LastIndexOf("#41=", StringComparison.Ordinal), "export should contain only one #41 row");
+    }
+
+    private static void ParserRecoversAfterEntityMissingType()
+    {
+        var document = IfcStepParser.Parse(MissingEntityTypeFixture, "missing-entity-type.ifc");
+
+        True(document.Diagnostics.Messages.Any(message => message.Contains("Skipped #40") && message.Contains("missing entity type")), "missing entity type diagnostic missing");
+        True(!document.EntityById.ContainsKey(40), "entity with missing type should be skipped");
+        True(document.EntityById.TryGetValue(41, out var recovered) && recovered.Name == "Recovered After Missing Type", "parser should recover following valid entity after missing type");
+        Equal(2, document.Entities.Count, "parser should skip malformed row without dropping surrounding entities");
     }
 
     private static void EditsCreateTargetedDiffs()
@@ -790,6 +801,21 @@ DATA;
 #41= IFCBUILDINGELEMENTPROXY('1Proxy8a9b2ff4l$IFCnative',$,'First Proxy',$,$,$,$,$,$);
 #41= IFCBUILDINGELEMENTPROXY('2Proxy8a9b2ff4l$IFCnative',$,'Second Proxy',$,$,$,$,$,$);
 #42= IFCBUILDINGELEMENTPROXY('3Proxy8a9b2ff4l$IFCnative',$,'Recovered After Duplicate',$,$,$,$,$,$);
+ENDSEC;
+END-ISO-10303-21;
+""";
+
+    private const string MissingEntityTypeFixture = """
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');
+FILE_NAME('missing-entity-type.ifc','2026-05-24T00:00:00',('IFCnative'),('IFCnative'),'IFCnative Native Windows','IFCnative','');
+FILE_SCHEMA(('IFC4X3_ADD2'));
+ENDSEC;
+DATA;
+#1= IFCPROJECT('2XQ2f8a9b2ff4l$IFCnative',$,'IFCnative Native Sample',$,$,$,$,$,$);
+#40= ('1Proxy8a9b2ff4l$IFCnative',$,'Missing Entity Type',$,$,$,$,$,$);
+#41= IFCBUILDINGELEMENTPROXY('2Proxy8a9b2ff4l$IFCnative',$,'Recovered After Missing Type',$,$,$,$,$,$);
 ENDSEC;
 END-ISO-10303-21;
 """;

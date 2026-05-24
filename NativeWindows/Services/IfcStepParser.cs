@@ -163,6 +163,12 @@ public static partial class IfcStepParser
             }
 
             var type = data[typeStart..index].Trim().ToUpperInvariant();
+            if (string.IsNullOrWhiteSpace(type))
+            {
+                diagnostics.Warn($"Skipped #{id}; missing entity type.");
+                continue;
+            }
+
             SkipWhitespaceAndComments(data, ref index);
 
             if (index >= data.Length || data[index] != '(')
