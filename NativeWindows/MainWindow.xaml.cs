@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -18,7 +19,7 @@ public partial class MainWindow : Window
         "Done: typed entity index",
         "Done: relationship index",
         "Done: property/resource/type/unit indexes",
-        "Done: product placement index",
+        "Done: product placement index/editor",
         "Done: duplicate GlobalId and containment diagnostics",
         "Done: spatial containment tree",
         "Done: entity inspector",
@@ -107,6 +108,19 @@ public partial class MainWindow : Window
         var refreshed = IfcStepParser.Parse(document.ToStepText(), document.FileName);
         LoadDocument(refreshed, selectedId);
         StatusText.Text = $"Saved edit for #{selectedId}";
+    }
+
+    private void SavePlacement_Click(object sender, RoutedEventArgs e)
+    {
+        if (document is null || selectedEntity is null)
+        {
+            return;
+        }
+
+        var selectedId = selectedEntity.Id;
+        var refreshed = IfcDocumentEditor.UpdatePlacement(document, selectedId, PlacementXBox.Text, PlacementYBox.Text, PlacementZBox.Text);
+        LoadDocument(refreshed, selectedId);
+        StatusText.Text = $"Saved placement for #{selectedId}";
     }
 
     private void StructureTree_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
@@ -224,11 +238,30 @@ public partial class MainWindow : Window
 
         IncomingList.ItemsSource = GetIncomingReferences(entity).ToList();
         RelationshipList.ItemsSource = GetRelationships(entity).ToList();
-        PlacementList.ItemsSource = GetPlacement(entity).ToList();
+        SetPlacementEditor(entity);
         PropertyList.ItemsSource = GetPropertySets(entity).ToList();
         TypeAssignmentList.ItemsSource = GetTypeAssignments(entity).ToList();
         ResourceList.ItemsSource = GetResources(entity).ToList();
         UnitList.ItemsSource = document?.Units.Count > 0 ? document.Units : ["No IFCUNITASSIGNMENT units indexed."];
+    }
+
+    private void SetPlacementEditor(IfcEntity entity)
+    {
+        if (document is null || !document.PlacementsByEntity.TryGetValue(entity.Id, out var placement))
+        {
+            PlacementList.ItemsSource = new[] { "No IFCLOCALPLACEMENT indexed for this entity." };
+            PlacementXBox.Text = string.Empty;
+            PlacementYBox.Text = string.Empty;
+            PlacementZBox.Text = string.Empty;
+            SavePlacementButton.IsEnabled = false;
+            return;
+        }
+
+        PlacementList.ItemsSource = new[] { placement.Label };
+        PlacementXBox.Text = placement.X.ToString("0.########", CultureInfo.InvariantCulture);
+        PlacementYBox.Text = placement.Y.ToString("0.########", CultureInfo.InvariantCulture);
+        PlacementZBox.Text = placement.Z.ToString("0.########", CultureInfo.InvariantCulture);
+        SavePlacementButton.IsEnabled = true;
     }
 
     private IEnumerable<string> GetPlacement(IfcEntity entity)
@@ -328,6 +361,10 @@ public partial class MainWindow : Window
         IncomingList.ItemsSource = Array.Empty<string>();
         RelationshipList.ItemsSource = Array.Empty<string>();
         PlacementList.ItemsSource = Array.Empty<string>();
+        PlacementXBox.Text = string.Empty;
+        PlacementYBox.Text = string.Empty;
+        PlacementZBox.Text = string.Empty;
+        SavePlacementButton.IsEnabled = false;
         PropertyList.ItemsSource = Array.Empty<string>();
         TypeAssignmentList.ItemsSource = Array.Empty<string>();
         ResourceList.ItemsSource = Array.Empty<string>();

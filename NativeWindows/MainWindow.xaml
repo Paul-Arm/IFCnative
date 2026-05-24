@@ -179,7 +179,18 @@
                             </ScrollViewer>
                         </TabItem>
                         <TabItem Header="Placement">
-                            <ListBox x:Name="PlacementList" />
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <StackPanel Margin="0,8,8,8">
+                                    <ListBox x:Name="PlacementList" MinHeight="80" Margin="0,0,0,12" />
+                                    <TextBlock Text="X" Foreground="{StaticResource MutedBrush}" />
+                                    <TextBox x:Name="PlacementXBox" Margin="0,2,0,8" />
+                                    <TextBlock Text="Y" Foreground="{StaticResource MutedBrush}" />
+                                    <TextBox x:Name="PlacementYBox" Margin="0,2,0,8" />
+                                    <TextBlock Text="Z" Foreground="{StaticResource MutedBrush}" />
+                                    <TextBox x:Name="PlacementZBox" Margin="0,2,0,12" />
+                                    <Button x:Name="SavePlacementButton" Content="Save placement" Click="SavePlacement_Click" HorizontalAlignment="Left" IsEnabled="False" />
+                                </StackPanel>
+                            </ScrollViewer>
                         </TabItem>
                         <TabItem Header="Psets/Qto">
                             <ListBox x:Name="PropertyList" />
