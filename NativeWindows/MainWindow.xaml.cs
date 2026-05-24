@@ -24,6 +24,7 @@ public partial class MainWindow : Window
         "Done: cancellable async IFC file loading",
         "Done: duplicate GlobalId and containment diagnostics",
         "Done: spatial containment tree",
+        "Done: pinned entity bookmarks",
         "Done: entity inspector",
         "Done: basic entity editing/export",
         "Next: web-ifc WASM geometry bridge",
@@ -38,6 +39,7 @@ public partial class MainWindow : Window
     private IfcDocument? pendingDocument;
     private IfcEntity? selectedEntity;
     private CancellationTokenSource? openCancellation;
+    private readonly HashSet<int> bookmarkedEntityIds = [];
     private bool updatingUi;
 
     public MainWindow()
@@ -235,6 +237,32 @@ public partial class MainWindow : Window
         StructureTree.ItemsSource = matches;
     }
 
+    private void BookmarkList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (updatingUi || BookmarkList.SelectedItem is not IfcTreeNode node)
+        {
+            return;
+        }
+
+        SelectEntity(node.Entity);
+    }
+
+    private void ToggleBookmark_Click(object sender, RoutedEventArgs e)
+    {
+        if (selectedEntity is null)
+        {
+            return;
+        }
+
+        if (!bookmarkedEntityIds.Add(selectedEntity.Id))
+        {
+            bookmarkedEntityIds.Remove(selectedEntity.Id);
+        }
+
+        RefreshBookmarks();
+        SelectEntity(selectedEntity);
+    }
+
     private void TypeList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (TypeList.SelectedItem is not string selected || document is null)
@@ -293,6 +321,9 @@ public partial class MainWindow : Window
             .Select(pair => $"{pair.Key} ({pair.Value.Count:N0})")
             .ToList();
 
+        bookmarkedEntityIds.RemoveWhere(id => !document.EntityById.ContainsKey(id));
+        RefreshBookmarks();
+
         EntitySearchBox.Text = string.Empty;
         StructureTree.ItemsSource = document.SpatialRoots;
         ViewportTitle.Text = "Native Viewport";
@@ -319,6 +350,21 @@ public partial class MainWindow : Window
         }
     }
 
+    private void RefreshBookmarks()
+    {
+        if (document is null)
+        {
+            BookmarkList.ItemsSource = Array.Empty<IfcTreeNode>();
+            return;
+        }
+
+        BookmarkList.ItemsSource = bookmarkedEntityIds
+            .Where(id => document.EntityById.ContainsKey(id))
+            .OrderBy(id => id)
+            .Select(id => new IfcTreeNode(document.EntityById[id], "pinned"))
+            .ToList();
+    }
+
     private void RefreshDraftUi()
     {
         var hasDraft = pendingDocument is not null && savedDocument is not null;
@@ -343,6 +389,7 @@ public partial class MainWindow : Window
         RawArgsBox.Text = string.Join(",", entity.Arguments);
         ViewportTitle.Text = entity.DisplayName;
         ViewportInfo.Text = $"Selected #{entity.Id}. Native graph selection is active.";
+        ToggleBookmarkButton.Content = bookmarkedEntityIds.Contains(entity.Id) ? "Unpin selection" : "Pin selection";
 
         IncomingList.ItemsSource = GetIncomingReferences(entity).ToList();
         RelationshipList.ItemsSource = GetRelationships(entity).ToList();
@@ -479,6 +526,7 @@ public partial class MainWindow : Window
         EntityNameBox.Text = string.Empty;
         EntityDescriptionBox.Text = string.Empty;
         RawArgsBox.Text = string.Empty;
+        ToggleBookmarkButton.Content = "Pin selection";
         IncomingList.ItemsSource = Array.Empty<string>();
         RelationshipList.ItemsSource = Array.Empty<string>();
         PlacementList.ItemsSource = Array.Empty<string>();

@@ -105,6 +105,9 @@
                         <TabItem Header="Types">
                             <ListBox x:Name="TypeList" SelectionChanged="TypeList_SelectionChanged" />
                         </TabItem>
+                        <TabItem Header="Pinned">
+                            <ListBox x:Name="BookmarkList" DisplayMemberPath="Label" SelectionChanged="BookmarkList_SelectionChanged" />
+                        </TabItem>
                         <TabItem Header="Capabilities">
                             <ListBox x:Name="CapabilityList" />
                         </TabItem>
@@ -187,7 +190,10 @@
                                              TextWrapping="Wrap"
                                              VerticalScrollBarVisibility="Auto" />
 
-                                    <Button Content="Save entity edit" Click="SaveEdit_Click" HorizontalAlignment="Left" />
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button Content="Save entity edit" Click="SaveEdit_Click" />
+                                        <Button x:Name="ToggleBookmarkButton" Content="Pin selection" Click="ToggleBookmark_Click" Background="#334155" BorderBrush="#475569" />
+                                    </StackPanel>
                                 </StackPanel>
                             </ScrollViewer>
                         </TabItem>
