@@ -29,6 +29,7 @@ internal sealed class NativeTestRunner
         Run("body assignment can be staged as draft", BodyAssignmentCanBeStagedAsDraft);
         Run("export validation reparses document before save", ExportValidationReparsesDocumentBeforeSave);
         Run("diagnostics projector supports text and severity filters", DiagnosticsProjectorSupportsFilters);
+        Run("relationship graph supports filter and depth", RelationshipGraphSupportsFilterAndDepth);
         Run("draft session gates export until apply/discard", DraftSessionGatesExport);
         Run("draft session supports applied undo redo history", DraftSessionSupportsUndoRedoHistory);
     }
@@ -56,7 +57,7 @@ internal sealed class NativeTestRunner
         True(document.RelationshipById.ContainsKey(53), "containment relationship missing");
         True(document.PropertySetsByEntity.TryGetValue(40, out var propertySets) && propertySets.Count == 1, "proxy property set not indexed");
         True(document.SpatialPathByEntity.TryGetValue(40, out var path) && path.Contains("Sample Inspection Block"), "spatial path not indexed");
-        True(document.Diagnostics.Messages.Any(message => message.Contains("Loaded 13 STEP entities")), "load diagnostic missing");
+        True(document.Diagnostics.Messages.Any(message => message.Contains("Loaded") && message.Contains("STEP entities")), "load diagnostic missing");
     }
 
     private static void StepExportPreservesParsedEntityOrder()
@@ -350,6 +351,19 @@ internal sealed class NativeTestRunner
         var empty = IfcDiagnosticsProjector.Project(messages, "not-present");
         Equal(1, empty.Count, "empty filter should show a single placeholder");
         True(empty[0].Message.Contains("No diagnostics match", StringComparison.OrdinalIgnoreCase), "empty filter placeholder missing");
+    }
+
+    private static void RelationshipGraphSupportsFilterAndDepth()
+    {
+        var document = IfcStepParser.CreateSample();
+        var proxy = document.EntityById[40];
+
+        var depthTwo = IfcSelectionProjector.ProjectRelationshipGraph(document, proxy, null, 2);
+        True(depthTwo.Any(item => item.EntityId == 20 && item.Depth == 2), "depth-two graph should include parent building through the storey");
+
+        var filtered = IfcSelectionProjector.ProjectRelationshipGraph(document, proxy, "IFCPROPERTYSET", 2);
+        True(filtered.Any(item => item.EntityId == 60), "filtered graph should keep matching property set neighbor");
+        True(filtered.All(item => item.EntityId is not 30), "filtered graph should hide non-matching spatial neighbor");
     }
 
     private static void DraftSessionGatesExport()

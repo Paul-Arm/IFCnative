@@ -758,6 +758,26 @@ public partial class MainWindow : Window
         graphTranslate.Y = 0;
     }
 
+    private void GraphFilter_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (updatingUi)
+        {
+            return;
+        }
+
+        RefreshRelationshipGraph();
+    }
+
+    private void GraphDepth_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (updatingUi)
+        {
+            return;
+        }
+
+        RefreshRelationshipGraph();
+    }
+
     private void RelationshipGraphCanvas_MouseWheel(object sender, MouseWheelEventArgs e)
     {
         var factor = e.Delta > 0 ? 1.12 : 0.88;
@@ -979,17 +999,23 @@ public partial class MainWindow : Window
         var nodes = currentGraphItems
             .Where(item => item.EntityId is not null)
             .GroupBy(item => item.EntityId!.Value)
-            .Select(group => group.First())
-            .Take(18)
+            .Select(group => group.OrderBy(item => item.Depth).First())
+            .OrderBy(item => item.Depth)
+            .ThenBy(item => item.EntityId)
+            .Take(24)
             .ToList();
         var center = new Point(210, 170);
-        var radius = Math.Max(110, 36 * nodes.Count / Math.PI);
         var positions = new Dictionary<int, Point>();
 
-        for (var index = 0; index < nodes.Count; index++)
+        foreach (var depthGroup in nodes.GroupBy(item => Math.Min(item.Depth, 2)).OrderBy(group => group.Key))
         {
-            var angle = nodes.Count == 1 ? -Math.PI / 2 : (2 * Math.PI * index / nodes.Count) - Math.PI / 2;
-            positions[nodes[index].EntityId!.Value] = new Point(center.X + Math.Cos(angle) * radius, center.Y + Math.Sin(angle) * radius);
+            var depthNodes = depthGroup.ToList();
+            var radius = Math.Max(110, 36 * depthNodes.Count / Math.PI) + Math.Max(0, depthGroup.Key - 1) * 120;
+            for (var index = 0; index < depthNodes.Count; index++)
+            {
+                var angle = depthNodes.Count == 1 ? -Math.PI / 2 : (2 * Math.PI * index / depthNodes.Count) - Math.PI / 2;
+                positions[depthNodes[index].EntityId!.Value] = new Point(center.X + Math.Cos(angle) * radius, center.Y + Math.Sin(angle) * radius);
+            }
         }
 
         foreach (var position in positions.Values)
@@ -1027,8 +1053,8 @@ public partial class MainWindow : Window
             Width = width,
             Height = height,
             CornerRadius = new CornerRadius(14),
-            Background = new SolidColorBrush(selected ? Color.FromRgb(29, 78, 216) : Color.FromRgb(15, 23, 42)),
-            BorderBrush = new SolidColorBrush(selected ? Color.FromRgb(147, 197, 253) : Color.FromRgb(51, 65, 85)),
+            Background = new SolidColorBrush(selected ? Color.FromRgb(29, 78, 216) : item?.Depth >= 2 ? Color.FromRgb(49, 46, 129) : Color.FromRgb(15, 23, 42)),
+            BorderBrush = new SolidColorBrush(selected ? Color.FromRgb(147, 197, 253) : item?.Depth >= 2 ? Color.FromRgb(129, 140, 248) : Color.FromRgb(51, 65, 85)),
             BorderThickness = new Thickness(1),
             Padding = new Thickness(8),
             Child = new TextBlock
@@ -1063,6 +1089,26 @@ public partial class MainWindow : Window
         graphScale.ScaleY = 1;
         graphTranslate.X = 0;
         graphTranslate.Y = 0;
+    }
+
+    private void RefreshRelationshipGraph()
+    {
+        if (document is null || selectedEntity is null)
+        {
+            currentGraphItems = Array.Empty<IfcRelationshipGraphItem>();
+            RenderRelationshipGraph();
+            return;
+        }
+
+        currentGraphItems = IfcSelectionProjector.ProjectRelationshipGraph(document, selectedEntity, GraphFilterBox.Text, GetGraphDepth());
+        RenderRelationshipGraph();
+    }
+
+    private int GetGraphDepth()
+    {
+        return GraphDepthBox.SelectedItem is ComboBoxItem item && int.TryParse(item.Tag?.ToString(), out var depth)
+            ? depth
+            : 1;
     }
 
     private void RefreshRecentFiles(IReadOnlyList<RecentIfcFile>? recentFiles = null)
@@ -1124,8 +1170,7 @@ public partial class MainWindow : Window
 
         IncomingList.ItemsSource = details.IncomingReferences;
         RelationshipList.ItemsSource = details.Relationships;
-        currentGraphItems = details.RelationshipGraph;
-        RenderRelationshipGraph();
+        RefreshRelationshipGraph();
         SetRelationshipEditor(IfcRelationshipDetails.Empty);
         SetSpatialEditor(details.Spatial);
         SetCreateProductEditor(entity);

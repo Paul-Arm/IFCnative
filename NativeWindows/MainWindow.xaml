@@ -55,6 +55,16 @@
             <Setter Property="SelectionBrush" Value="{StaticResource ControlSelectedBrush}" />
             <Setter Property="SelectionTextBrush" Value="White" />
         </Style>
+        <Style TargetType="ComboBox">
+            <Setter Property="Background" Value="{StaticResource ControlBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+            <Setter Property="Padding" Value="6,4" />
+        </Style>
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="Background" Value="{StaticResource ControlBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+        </Style>
         <Style TargetType="ListBox">
             <Setter Property="Background" Value="{StaticResource ControlBrush}" />
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
@@ -435,6 +445,21 @@
                             <DockPanel LastChildFill="True" Margin="0,8,8,8">
                                 <StackPanel DockPanel.Dock="Top" Margin="0,0,0,8">
                                     <TextBlock Text="Selected entity relationship neighborhood" Foreground="{StaticResource MutedBrush}" />
+                                    <Grid Margin="0,6,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="110" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox x:Name="GraphFilterBox"
+                                                 Grid.Column="0"
+                                                 Margin="0,0,8,0"
+                                                 TextChanged="GraphFilter_TextChanged"
+                                                 ToolTip="Filter by relationship type, STEP id, entity type, name, or GlobalId" />
+                                        <ComboBox x:Name="GraphDepthBox" Grid.Column="1" SelectionChanged="GraphDepth_SelectionChanged" SelectedIndex="0">
+                                            <ComboBoxItem Content="Depth 1" Tag="1" />
+                                            <ComboBoxItem Content="Depth 2" Tag="2" />
+                                        </ComboBox>
+                                    </Grid>
                                     <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
                                         <Button Content="Fit graph" Click="FitGraph_Click" Background="#334155" BorderBrush="#475569" />
                                         <Button Content="Reset zoom" Click="ResetGraph_Click" Background="#334155" BorderBrush="#475569" />

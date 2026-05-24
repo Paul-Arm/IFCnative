@@ -12,7 +12,7 @@ public static class IfcSelectionProjector
             document.SpatialPathByEntity.TryGetValue(entity.Id, out var path) ? path : "-",
             GetIncomingReferences(document, entity).ToList(),
             GetRelationships(document, entity).ToList(),
-            GetRelationshipGraph(document, entity).ToList(),
+            ProjectRelationshipGraph(document, entity).ToList(),
             GetSpatial(document, entity),
             GetPlacement(document, entity),
             GetRepresentations(document, entity).ToList(),
@@ -147,7 +147,12 @@ public static class IfcSelectionProjector
         }
     }
 
-    private static IEnumerable<IfcRelationshipGraphItem> GetRelationshipGraph(IfcDocument document, IfcEntity entity)
+    public static IReadOnlyList<IfcRelationshipGraphItem> ProjectRelationshipGraph(IfcDocument document, IfcEntity entity, string? filter = null, int maxDepth = 1)
+    {
+        return GetRelationshipGraph(document, entity, filter, Math.Clamp(maxDepth, 1, 2)).ToList();
+    }
+
+    private static IEnumerable<IfcRelationshipGraphItem> GetRelationshipGraph(IfcDocument document, IfcEntity entity, string? filter, int maxDepth)
     {
         if (!document.RelationshipsByEntity.TryGetValue(entity.Id, out var relationships))
         {
@@ -156,48 +161,118 @@ public static class IfcSelectionProjector
         }
 
         var emittedEntities = new HashSet<int> { entity.Id };
+        var secondHopSeeds = new List<int>();
 
         foreach (var relationship in relationships.OrderBy(relationship => relationship.Type).ThenBy(relationship => relationship.Id))
         {
-            var isSource = relationship.SourceIds.Contains(entity.Id);
-            var isTarget = relationship.TargetIds.Contains(entity.Id);
-            var direction = isSource && isTarget ? "↔" : isSource ? "→" : "←";
-            var neighborIds = isSource
-                ? relationship.TargetIds
-                : relationship.SourceIds.Count > 0
-                    ? relationship.SourceIds
-                    : relationship.TargetIds.Where(id => id != entity.Id).ToList();
-
-            yield return new IfcRelationshipGraphItem(
-                relationship.Id,
-                null,
-                $"{direction} #{relationship.Id} {relationship.Type}",
-                0,
-                false);
-
-            foreach (var neighborId in neighborIds.Where(id => id != entity.Id).Distinct().OrderBy(id => id))
+            foreach (var item in ProjectRelationshipNeighbors(document, entity.Id, relationship, filter, 0, emittedEntities, secondHopSeeds))
             {
-                if (!document.EntityById.TryGetValue(neighborId, out var neighbor))
+                yield return item;
+            }
+        }
+
+        if (maxDepth < 2)
+        {
+            yield break;
+        }
+
+        foreach (var seedId in secondHopSeeds.Distinct().OrderBy(id => id))
+        {
+            if (!document.RelationshipsByEntity.TryGetValue(seedId, out var seedRelationships))
+            {
+                continue;
+            }
+
+            foreach (var relationship in seedRelationships.OrderBy(relationship => relationship.Type).ThenBy(relationship => relationship.Id))
+            {
+                if (relationship.SourceIds.Contains(entity.Id) || relationship.TargetIds.Contains(entity.Id))
                 {
-                    yield return new IfcRelationshipGraphItem(
-                        relationship.Id,
-                        neighborId,
-                        $"  • missing #{neighborId}",
-                        1,
-                        false);
                     continue;
                 }
 
-                var repeated = !emittedEntities.Add(neighborId);
-                var suffix = repeated ? " (also linked above)" : string.Empty;
-                yield return new IfcRelationshipGraphItem(
-                    relationship.Id,
-                    neighborId,
-                    $"  • #{neighbor.Id} {neighbor.TypeName()} {neighbor.DisplayName}{suffix}",
-                    1,
-                    true);
+                foreach (var item in ProjectRelationshipNeighbors(document, seedId, relationship, filter, 1, emittedEntities, []))
+                {
+                    yield return item;
+                }
             }
         }
+    }
+
+    private static IEnumerable<IfcRelationshipGraphItem> ProjectRelationshipNeighbors(
+        IfcDocument document,
+        int focusId,
+        IfcRelationship relationship,
+        string? filter,
+        int depth,
+        HashSet<int> emittedEntities,
+        List<int> nextDepthSeeds)
+    {
+        var isSource = relationship.SourceIds.Contains(focusId);
+        var isTarget = relationship.TargetIds.Contains(focusId);
+        var direction = isSource && isTarget ? "↔" : isSource ? "→" : "←";
+        var neighborIds = isSource
+            ? relationship.TargetIds
+            : relationship.SourceIds.Count > 0
+                ? relationship.SourceIds
+                : relationship.TargetIds.Where(id => id != focusId).ToList();
+        var distinctNeighborIds = neighborIds.Where(id => id != focusId).Distinct().OrderBy(id => id).ToList();
+        var relationshipLabel = $"{new string(' ', depth * 2)}{direction} #{relationship.Id} {relationship.Type}";
+        var matchingNeighbors = distinctNeighborIds
+            .Where(id => MatchesGraphFilter(document, id, relationship, filter))
+            .ToList();
+
+        if (!MatchesGraphFilter(relationshipLabel, filter) && matchingNeighbors.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new IfcRelationshipGraphItem(relationship.Id, null, relationshipLabel, depth, false);
+
+        foreach (var neighborId in distinctNeighborIds)
+        {
+            if (!MatchesGraphFilter(document, neighborId, relationship, filter) && !MatchesGraphFilter(relationshipLabel, filter))
+            {
+                continue;
+            }
+
+            if (!document.EntityById.TryGetValue(neighborId, out var neighbor))
+            {
+                yield return new IfcRelationshipGraphItem(relationship.Id, neighborId, $"{new string(' ', (depth + 1) * 2)}• missing #{neighborId}", depth + 1, false);
+                continue;
+            }
+
+            var repeated = !emittedEntities.Add(neighborId);
+            var suffix = repeated ? " (also linked above)" : string.Empty;
+            nextDepthSeeds.Add(neighborId);
+            yield return new IfcRelationshipGraphItem(
+                relationship.Id,
+                neighborId,
+                $"{new string(' ', (depth + 1) * 2)}• #{neighbor.Id} {neighbor.TypeName()} {neighbor.DisplayName}{suffix}",
+                depth + 1,
+                true);
+        }
+    }
+
+    private static bool MatchesGraphFilter(IfcDocument document, int entityId, IfcRelationship relationship, string? filter)
+    {
+        if (string.IsNullOrWhiteSpace(filter))
+        {
+            return true;
+        }
+
+        if (MatchesGraphFilter($"#{relationship.Id} {relationship.Type} {relationship.Label}", filter))
+        {
+            return true;
+        }
+
+        return document.EntityById.TryGetValue(entityId, out var entity)
+            ? MatchesGraphFilter($"#{entity.Id} {entity.TypeName()} {entity.DisplayName} {entity.GlobalId}", filter)
+            : MatchesGraphFilter($"#{entityId}", filter);
+    }
+
+    private static bool MatchesGraphFilter(string text, string? filter)
+    {
+        return string.IsNullOrWhiteSpace(filter) || text.Contains(filter.Trim(), StringComparison.OrdinalIgnoreCase);
     }
 
     private static IEnumerable<string> GetIncomingReferences(IfcDocument document, IfcEntity entity)
