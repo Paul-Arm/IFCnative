@@ -411,7 +411,16 @@
                             <ListBox x:Name="TypeAssignmentList" />
                         </TabItem>
                         <TabItem Header="Resources">
-                            <ListBox x:Name="ResourceList" />
+                            <DockPanel LastChildFill="True" Margin="0,8,8,8">
+                                <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
+                                    <TextBlock Text="Simple material assignment" FontWeight="SemiBold" />
+                                    <TextBlock Text="Stage a new IFCMATERIAL and IFCRELASSOCIATESMATERIAL for the selected product." Foreground="{StaticResource MutedBrush}" Margin="0,2,0,8" />
+                                    <TextBlock Text="Material name" Foreground="{StaticResource MutedBrush}" />
+                                    <TextBox x:Name="MaterialNameBox" Text="Native material" Margin="0,2,0,8" />
+                                    <Button x:Name="AddMaterialButton" Content="Add material" Click="AddMaterial_Click" HorizontalAlignment="Left" IsEnabled="False" />
+                                </StackPanel>
+                                <ListBox x:Name="ResourceList" />
+                            </DockPanel>
                         </TabItem>
                         <TabItem Header="Units">
                             <ListBox x:Name="UnitList" />

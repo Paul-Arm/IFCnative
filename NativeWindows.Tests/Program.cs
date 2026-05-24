@@ -26,6 +26,7 @@ internal sealed class NativeTestRunner
         Run("opening void preset creates void relationship and body", OpeningVoidPresetCreatesVoidRelationshipAndBody);
         Run("opening filling preset creates fill relationship and body", OpeningFillingPresetCreatesFillRelationshipAndBody);
         Run("property templates create indexed pset and qto", PropertyTemplatesCreateIndexedPsetAndQto);
+        Run("material assignment creates indexed resource", MaterialAssignmentCreatesIndexedResource);
         Run("body assignment creates swept solid representation", BodyAssignmentCreatesSweptSolidRepresentation);
         Run("body assignment can be staged as draft", BodyAssignmentCanBeStagedAsDraft);
         Run("export validation reparses document before save", ExportValidationReparsesDocumentBeforeSave);
@@ -292,6 +293,21 @@ internal sealed class NativeTestRunner
         True(qto.Values.Any(value => value.Type == "IFCQUANTITYAREA" && value.Value == "4.5"), "area quantity not indexed");
         True(qto.Values.Any(value => value.Type == "IFCQUANTITYVOLUME" && value.Value == "6."), "volume quantity not indexed");
         True(IfcDiffService.Summarize(document, withQto).Any(line => line.Contains("IFCELEMENTQUANTITY")), "qto diff should show quantity set addition");
+    }
+
+    private static void MaterialAssignmentCreatesIndexedResource()
+    {
+        var document = IfcStepParser.CreateSample();
+
+        var assigned = IfcDocumentEditor.AddSimpleMaterialAssignment(document, 40, "Native Concrete");
+        var material = assigned.Entities.FirstOrDefault(entity => entity.Type == "IFCMATERIAL" && entity.Arguments.FirstOrDefault() == "'Native Concrete'");
+
+        True(material is not null, "material not created");
+        True(assigned.ResourcesByEntity.TryGetValue(40, out var resources) && resources.Any(resource => resource.Contains("Native Concrete")), "material resource not indexed for product");
+        True(assigned.RelationshipById.Values.Any(relationship => relationship.Type == "IFCRELASSOCIATESMATERIAL"
+            && relationship.SourceIds.Contains(material!.Id)
+            && relationship.TargetIds.Contains(40)), "material assignment relationship not indexed");
+        True(IfcDiffService.Summarize(document, assigned).Any(line => line.Contains("IFCRELASSOCIATESMATERIAL")), "material diff should show assignment relationship");
     }
 
     private static void ProductPresetCreatesContainedPlacedBody()

@@ -77,6 +77,30 @@ public static class IfcDocumentEditor
         return IfcStepParser.Parse(draft.ToStepText(), draft.FileName);
     }
 
+    public static IfcDocument AddSimpleMaterialAssignment(IfcDocument document, int productId, string materialNameText)
+    {
+        if (!CanAssignResource(document, productId))
+        {
+            return document;
+        }
+
+        var materialName = string.IsNullOrWhiteSpace(materialNameText) ? "Native material" : materialNameText.Trim();
+        var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
+        var nextId = IfcStepWriter.NextEntityId(draft);
+        var materialId = nextId++;
+        var relationshipId = nextId++;
+        var product = document.EntityById[productId];
+
+        AddEntity(draft, materialId, "IFCMATERIAL", [StepArgumentReader.Quote(materialName), "$", "$"]);
+        AddEntity(
+            draft,
+            relationshipId,
+            "IFCRELASSOCIATESMATERIAL",
+            [MakeGeneratedGlobalId("MatRel", relationshipId), "$", StepArgumentReader.Quote($"{product.DisplayName} material"), "$", $"(#{productId})", $"#{materialId}"]);
+
+        return IfcStepParser.Parse(draft.ToStepText(), draft.FileName);
+    }
+
     public static IfcDocument AddOpeningVoidWithBodyRepresentation(
         IfcDocument document,
         int hostElementId,
@@ -181,6 +205,14 @@ public static class IfcDocumentEditor
             && entity.Arguments.Count > 4
             && !entity.Type.StartsWith("IFCREL", StringComparison.OrdinalIgnoreCase)
             && entity.Type is not "IFCPROPERTYSET" and not "IFCELEMENTQUANTITY";
+    }
+
+    private static bool CanAssignResource(IfcDocument document, int productId)
+    {
+        return document.EntityById.TryGetValue(productId, out var entity)
+            && entity.Arguments.Count > 4
+            && !entity.Type.StartsWith("IFCREL", StringComparison.OrdinalIgnoreCase)
+            && entity.Type is not "IFCMATERIAL" and not "IFCCLASSIFICATIONREFERENCE" and not "IFCDOCUMENTREFERENCE" and not "IFCLIBRARYREFERENCE";
     }
 
     public static IfcDocument AddProductWithBodyRepresentation(

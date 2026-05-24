@@ -29,6 +29,7 @@ public partial class MainWindow : Window
         "Done: opening/void draft workflow with body presets",
         "Done: opening filling draft workflow with body presets",
         "Done: common Pset/base Qto template draft workflows",
+        "Done: simple material assignment draft workflow",
         "Done: geometry backend abstraction and STEP-reference viewport preview",
         "Done: cancellable async IFC file loading",
         "Done: duplicate GlobalId and containment diagnostics",
@@ -43,7 +44,7 @@ public partial class MainWindow : Window
         "Done: entity inspector",
         "Done: basic entity editing/export",
         "Done: centralized STEP writer helpers",
-        "Next: web-ifc WASM mesh/tessellation bridge",
+        "Next: native mesh/tessellation backend",
         "Next: richer psets/quantities normalization",
         "Unsupported: IDS/MVD validation",
         "Unsupported: ifcZIP/ifcXML",
@@ -408,6 +409,31 @@ public partial class MainWindow : Window
         }
 
         StageDraft(draft, selectedId, $"Staged base quantity set #{quantitySetId.Value} for #{selectedId}");
+    }
+
+    private void AddMaterial_Click(object sender, RoutedEventArgs e)
+    {
+        if (document is null || selectedEntity is null || !CanAssignResource(selectedEntity))
+        {
+            return;
+        }
+
+        var beforeResourceIds = document.ResourcesByEntity.TryGetValue(selectedEntity.Id, out var resources)
+            ? resources.Count
+            : 0;
+        var selectedId = selectedEntity.Id;
+        var draft = IfcDocumentEditor.AddSimpleMaterialAssignment(document, selectedId, MaterialNameBox.Text);
+        var afterResourceIds = draft.ResourcesByEntity.TryGetValue(selectedId, out var draftResources)
+            ? draftResources.Count
+            : 0;
+
+        if (afterResourceIds <= beforeResourceIds)
+        {
+            StatusText.Text = "No material assignment created for this selection.";
+            return;
+        }
+
+        StageDraft(draft, selectedId, $"Staged material assignment for #{selectedId}");
     }
 
     private void SaveRelationship_Click(object sender, RoutedEventArgs e)
@@ -1267,6 +1293,7 @@ public partial class MainWindow : Window
         AddBaseQtoButton.IsEnabled = CanAttachPropertyTemplates(entity);
         TypeAssignmentList.ItemsSource = details.TypeAssignments;
         ResourceList.ItemsSource = details.Resources;
+        AddMaterialButton.IsEnabled = CanAssignResource(entity);
         UnitList.ItemsSource = details.Units;
     }
 
@@ -1362,6 +1389,15 @@ public partial class MainWindow : Window
         AddBaseQtoButton.IsEnabled = false;
         TypeAssignmentList.ItemsSource = Array.Empty<string>();
         ResourceList.ItemsSource = Array.Empty<string>();
+        MaterialNameBox.Text = "Native material";
+        AddMaterialButton.IsEnabled = false;
         UnitList.ItemsSource = Array.Empty<string>();
+    }
+
+    private static bool CanAssignResource(IfcEntity entity)
+    {
+        return entity.Arguments.Count > 4
+            && !entity.Type.StartsWith("IFCREL", StringComparison.OrdinalIgnoreCase)
+            && entity.Type is not "IFCMATERIAL" and not "IFCCLASSIFICATIONREFERENCE" and not "IFCDOCUMENTREFERENCE" and not "IFCLIBRARYREFERENCE";
     }
 }
