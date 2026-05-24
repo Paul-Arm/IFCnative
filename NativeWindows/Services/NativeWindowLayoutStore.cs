@@ -57,6 +57,7 @@ public sealed class NativeWindowLayoutStore
             InspectorPaneWidth = Clamp(layout.InspectorPaneWidth, 320, 900, 380),
             WindowWidth = Clamp(layout.WindowWidth, 1100, 3840, 1440),
             WindowHeight = Clamp(layout.WindowHeight, 700, 2160, 900),
+            LastOpenedIfcPath = NormalizePath(layout.LastOpenedIfcPath),
         };
     }
 
@@ -68,5 +69,22 @@ public sealed class NativeWindowLayoutStore
         }
 
         return Math.Min(max, Math.Max(min, value));
+    }
+
+    private static string? NormalizePath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            return Path.GetFullPath(path);
+        }
+        catch
+        {
+            return null;
+        }
     }
 }

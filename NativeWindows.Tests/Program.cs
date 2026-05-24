@@ -373,7 +373,8 @@ internal sealed class NativeTestRunner
         try
         {
             var store = new NativeWindowLayoutStore(path);
-            store.Save(new(false, false, false, 40, 40, 10, 10));
+            var lastIfcPath = Path.Combine(Path.GetTempPath(), "model.ifc");
+            store.Save(new(false, false, false, 40, 40, 10, 10, lastIfcPath));
             var loaded = store.Load();
 
             True(!loaded.ShowModelPane, "model pane visibility should persist");
@@ -383,6 +384,7 @@ internal sealed class NativeTestRunner
             Equal(320d, loaded.InspectorPaneWidth, "inspector width should be clamped to minimum");
             Equal(1100d, loaded.WindowWidth, "window width should be clamped to minimum");
             Equal(700d, loaded.WindowHeight, "window height should be clamped to minimum");
+            Equal(Path.GetFullPath(lastIfcPath), loaded.LastOpenedIfcPath, "last opened IFC path should persist as a full path");
         }
         finally
         {

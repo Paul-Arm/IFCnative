@@ -7,4 +7,5 @@ public sealed record NativeWindowLayout(
     double ModelPaneWidth = 330,
     double InspectorPaneWidth = 380,
     double WindowWidth = 1440,
-    double WindowHeight = 900);
+    double WindowHeight = 900,
+    string? LastOpenedIfcPath = null);

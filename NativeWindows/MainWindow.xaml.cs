@@ -64,6 +64,7 @@ public partial class MainWindow : Window
     private readonly TranslateTransform graphTranslate = new(0, 0);
     private IReadOnlyList<IfcRelationshipGraphItem> currentGraphItems = Array.Empty<IfcRelationshipGraphItem>();
     private Point? graphDragStart;
+    private string? activeDocumentPath;
     private bool updatingUi;
 
     public MainWindow()
@@ -75,6 +76,7 @@ public partial class MainWindow : Window
         Closing += (_, _) => layoutStore.Save(CaptureCurrentLayout());
         RefreshRecentFiles();
         LoadDocument(IfcStepParser.CreateSample());
+        Loaded += RestoreLastDocumentOnStartup;
     }
 
     private void Exit_Click(object sender, RoutedEventArgs e)
@@ -137,7 +139,8 @@ public partial class MainWindow : Window
             GetPixelWidth(ModelColumn, 330),
             GetPixelWidth(InspectorColumn, 380),
             ActualWidth > 0 ? ActualWidth : Width,
-            ActualHeight > 0 ? ActualHeight : Height);
+            ActualHeight > 0 ? ActualHeight : Height,
+            activeDocumentPath);
     }
 
     private static double GetPixelWidth(ColumnDefinition column, double fallback)
@@ -178,6 +181,25 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void RestoreLastDocumentOnStartup(object sender, RoutedEventArgs e)
+    {
+        Loaded -= RestoreLastDocumentOnStartup;
+        var lastOpenedPath = layoutStore.Load().LastOpenedIfcPath;
+        if (string.IsNullOrWhiteSpace(lastOpenedPath))
+        {
+            return;
+        }
+
+        if (!File.Exists(lastOpenedPath))
+        {
+            StatusText.Text = $"Last opened IFC is missing: {Path.GetFileName(lastOpenedPath)}. Loaded sample instead.";
+            return;
+        }
+
+        StatusText.Text = $"Restoring last IFC workspace: {Path.GetFileName(lastOpenedPath)}…";
+        await OpenIfcFileAsync(lastOpenedPath);
+    }
+
     private async void OpenIfc_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFileDialog
@@ -206,9 +228,11 @@ public partial class MainWindow : Window
             var text = await IfcFileLoader.ReadTextAsync(path, progress, openCancellation.Token);
             StatusText.Text = $"Parsing {Path.GetFileName(path)}…";
             var parsed = await Task.Run(() => IfcStepParser.Parse(text, Path.GetFileName(path)), openCancellation.Token);
+            activeDocumentPath = Path.GetFullPath(path);
             LoadDocument(parsed);
             recentFileStore.Add(path);
             RefreshRecentFiles();
+            layoutStore.Save(CaptureCurrentLayout());
         }
         catch (OperationCanceledException)
         {
@@ -240,7 +264,9 @@ public partial class MainWindow : Window
 
     private void LoadSample_Click(object sender, RoutedEventArgs e)
     {
+        activeDocumentPath = null;
         LoadDocument(IfcStepParser.CreateSample());
+        layoutStore.Save(CaptureCurrentLayout());
     }
 
     private void ExportIfc_Click(object sender, RoutedEventArgs e)
