@@ -289,6 +289,12 @@ public static partial class IfcStepParser
 
             if (inString)
             {
+                if (IsLineBreakBeforeNextEntity(text, index))
+                {
+                    value = text[start..index];
+                    return false;
+                }
+
                 continue;
             }
 
@@ -316,6 +322,44 @@ public static partial class IfcStepParser
 
         value = text[start..];
         return false;
+    }
+
+    private static bool IsLineBreakBeforeNextEntity(string text, int index)
+    {
+        if (text[index] is not ('\r' or '\n'))
+        {
+            return false;
+        }
+
+        var lookahead = index + 1;
+        while (lookahead < text.Length && char.IsWhiteSpace(text[lookahead]))
+        {
+            lookahead++;
+        }
+
+        if (lookahead >= text.Length || text[lookahead] != '#')
+        {
+            return false;
+        }
+
+        lookahead++;
+        var digitStart = lookahead;
+        while (lookahead < text.Length && char.IsDigit(text[lookahead]))
+        {
+            lookahead++;
+        }
+
+        if (lookahead == digitStart)
+        {
+            return false;
+        }
+
+        while (lookahead < text.Length && char.IsWhiteSpace(text[lookahead]))
+        {
+            lookahead++;
+        }
+
+        return lookahead < text.Length && text[lookahead] == '=';
     }
 
     private static void BuildRelationshipIndex(IfcDocument document)

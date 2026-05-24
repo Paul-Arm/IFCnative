@@ -21,6 +21,7 @@ internal sealed class NativeTestRunner
         Run("parser recovers valid entity missing semicolon", ParserRecoversValidEntityMissingSemicolon);
         Run("parser keeps first entity when STEP ids duplicate", ParserKeepsFirstEntityWhenStepIdsDuplicate);
         Run("parser recovers after entity missing type", ParserRecoversAfterEntityMissingType);
+        Run("parser recovers after unterminated string", ParserRecoversAfterUnterminatedString);
         Run("parser repairs unexpected text before entity terminator", ParserRepairsUnexpectedTextBeforeEntityTerminator);
         Run("entity/property/relationship edits create targeted diffs", EditsCreateTargetedDiffs);
         Run("spatial reparent updates containment parent", SpatialReparentUpdatesContainmentParent);
@@ -224,6 +225,16 @@ internal sealed class NativeTestRunner
         True(!document.EntityById.ContainsKey(40), "entity with missing type should be skipped");
         True(document.EntityById.TryGetValue(41, out var recovered) && recovered.Name == "Recovered After Missing Type", "parser should recover following valid entity after missing type");
         Equal(2, document.Entities.Count, "parser should skip malformed row without dropping surrounding entities");
+    }
+
+    private static void ParserRecoversAfterUnterminatedString()
+    {
+        var document = IfcStepParser.Parse(UnterminatedStringFixture, "unterminated-string.ifc");
+
+        True(document.Diagnostics.Messages.Any(message => message.Contains("Skipped #40") && message.Contains("unterminated argument list")), "unterminated string diagnostic missing");
+        True(!document.EntityById.ContainsKey(40), "entity with unterminated string should be skipped");
+        True(document.EntityById.TryGetValue(41, out var recovered) && recovered.Name == "Recovered After Unterminated String", "parser should recover following valid entity after unterminated string");
+        Equal(2, document.Entities.Count, "parser should skip unterminated string row without swallowing following entities");
     }
 
     private static void ParserRepairsUnexpectedTextBeforeEntityTerminator()
@@ -831,6 +842,21 @@ DATA;
 #1= IFCPROJECT('2XQ2f8a9b2ff4l$IFCnative',$,'IFCnative Native Sample',$,$,$,$,$,$);
 #40= ('1Proxy8a9b2ff4l$IFCnative',$,'Missing Entity Type',$,$,$,$,$,$);
 #41= IFCBUILDINGELEMENTPROXY('2Proxy8a9b2ff4l$IFCnative',$,'Recovered After Missing Type',$,$,$,$,$,$);
+ENDSEC;
+END-ISO-10303-21;
+""";
+
+    private const string UnterminatedStringFixture = """
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');
+FILE_NAME('unterminated-string.ifc','2026-05-24T00:00:00',('IFCnative'),('IFCnative'),'IFCnative Native Windows','IFCnative','');
+FILE_SCHEMA(('IFC4X3_ADD2'));
+ENDSEC;
+DATA;
+#1= IFCPROJECT('2XQ2f8a9b2ff4l$IFCnative',$,'IFCnative Native Sample',$,$,$,$,$,$);
+#40= IFCBUILDINGELEMENTPROXY('1Proxy8a9b2ff4l$IFCnative',$,'Unterminated Proxy,$,$,$,$,$,$);
+#41= IFCBUILDINGELEMENTPROXY('2Proxy8a9b2ff4l$IFCnative',$,'Recovered After Unterminated String',$,$,$,$,$,$);
 ENDSEC;
 END-ISO-10303-21;
 """;

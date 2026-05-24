@@ -37,7 +37,7 @@ public partial class MainWindow : Window
         "Done: spatial containment tree",
         "Done: spatial reparent draft editor",
         "Done: native relationship create/edit/delete workflows",
-        "Done: relationship neighborhood graph panel",
+        "Done: relationship neighborhood graph panel with relationship hubs/edge labels",
         "Done: pinned entity bookmarks",
         "Done: persisted recent files",
         "Done: persisted native window layout",
@@ -871,6 +871,31 @@ public partial class MainWindow : Window
         }
     }
 
+    private void SelectGraphRelationship(IfcRelationshipGraphItem graphItem)
+    {
+        if (updatingUi || document is null || graphItem.RelationshipId is null)
+        {
+            return;
+        }
+
+        var relationship = RelationshipList.Items
+            .OfType<IfcRelationshipDetails>()
+            .FirstOrDefault(item => item.RelationshipId == graphItem.RelationshipId.Value);
+        if (relationship is not null)
+        {
+            RelationshipList.SelectedItem = relationship;
+            SetRelationshipEditor(relationship);
+            StatusText.Text = $"Selected relationship #{graphItem.RelationshipId.Value} from graph.";
+            return;
+        }
+
+        if (document.EntityById.TryGetValue(graphItem.RelationshipId.Value, out var relationshipEntity))
+        {
+            SelectEntity(relationshipEntity);
+            StatusText.Text = $"Opened relationship entity #{relationshipEntity.Id} from graph.";
+        }
+    }
+
     private void FitGraph_Click(object sender, RoutedEventArgs e)
     {
         FitGraph();
@@ -1167,7 +1192,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        var nodes = currentGraphItems
+        var entityNodes = currentGraphItems
             .Where(item => item.EntityId is not null)
             .GroupBy(item => item.EntityId!.Value)
             .Select(group => group.OrderBy(item => item.Depth).First())
@@ -1175,33 +1200,76 @@ public partial class MainWindow : Window
             .ThenBy(item => item.EntityId)
             .Take(24)
             .ToList();
-        var center = new Point(210, 170);
-        var positions = new Dictionary<int, Point>();
 
-        foreach (var depthGroup in nodes.GroupBy(item => Math.Min(item.Depth, 2)).OrderBy(group => group.Key))
+        var relationshipNodes = currentGraphItems
+            .Where(item => item.RelationshipId is not null && item.EntityId is null)
+            .GroupBy(item => item.RelationshipId!.Value)
+            .Select(group => group.OrderBy(item => item.Depth).First())
+            .OrderBy(item => item.Depth)
+            .ThenBy(item => item.RelationshipId)
+            .Take(18)
+            .ToList();
+
+        if (entityNodes.Count == 0 && relationshipNodes.Count == 0)
+        {
+            RelationshipGraphCanvas.Children.Add(new TextBlock
+            {
+                Text = currentGraphItems.FirstOrDefault()?.Label ?? "No relationship graph neighbors indexed for this entity.",
+                Foreground = (Brush)FindResource("MutedBrush"),
+                Margin = new Thickness(14),
+            });
+            return;
+        }
+
+        var center = new Point(210, 170);
+        var entityPositions = new Dictionary<int, Point>();
+        var relationshipPositions = new Dictionary<int, Point>();
+
+        for (var index = 0; index < relationshipNodes.Count; index++)
+        {
+            var radius = Math.Max(78, 20 * relationshipNodes.Count / Math.PI);
+            var angle = relationshipNodes.Count == 1 ? -Math.PI / 2 : (2 * Math.PI * index / relationshipNodes.Count) - Math.PI / 2;
+            relationshipPositions[relationshipNodes[index].RelationshipId!.Value] = new Point(center.X + Math.Cos(angle) * radius, center.Y + Math.Sin(angle) * radius);
+        }
+
+        foreach (var depthGroup in entityNodes.GroupBy(item => Math.Min(item.Depth, 2)).OrderBy(group => group.Key))
         {
             var depthNodes = depthGroup.ToList();
-            var radius = Math.Max(110, 36 * depthNodes.Count / Math.PI) + Math.Max(0, depthGroup.Key - 1) * 120;
+            var radius = Math.Max(150, 42 * depthNodes.Count / Math.PI) + Math.Max(0, depthGroup.Key - 1) * 120;
             for (var index = 0; index < depthNodes.Count; index++)
             {
                 var angle = depthNodes.Count == 1 ? -Math.PI / 2 : (2 * Math.PI * index / depthNodes.Count) - Math.PI / 2;
-                positions[depthNodes[index].EntityId!.Value] = new Point(center.X + Math.Cos(angle) * radius, center.Y + Math.Sin(angle) * radius);
+                entityPositions[depthNodes[index].EntityId!.Value] = new Point(center.X + Math.Cos(angle) * radius, center.Y + Math.Sin(angle) * radius);
             }
         }
 
-        foreach (var position in positions.Values)
+        foreach (var relationshipNode in relationshipNodes)
         {
-            AddGraphEdge(center, position);
+            var relationshipPosition = relationshipPositions[relationshipNode.RelationshipId!.Value];
+            AddGraphEdge(center, relationshipPosition, relationshipNode.Label);
+
+            foreach (var entityNode in entityNodes.Where(node => node.RelationshipId == relationshipNode.RelationshipId))
+            {
+                if (entityNode.EntityId is not null && entityPositions.TryGetValue(entityNode.EntityId.Value, out var entityPosition))
+                {
+                    AddGraphEdge(relationshipPosition, entityPosition, relationshipNode.Label);
+                }
+            }
         }
 
         AddGraphNode(center, selectedEntity?.Id is null ? "Selection" : $"#{selectedEntity.Id}\n{selectedEntity.TypeName()}", null, true);
-        foreach (var node in nodes)
+        foreach (var relationshipNode in relationshipNodes)
         {
-            AddGraphNode(positions[node.EntityId!.Value], node.Label, node, false);
+            AddGraphNode(relationshipPositions[relationshipNode.RelationshipId!.Value], relationshipNode.Label, relationshipNode, false);
+        }
+
+        foreach (var node in entityNodes)
+        {
+            AddGraphNode(entityPositions[node.EntityId!.Value], node.Label, node, false);
         }
     }
 
-    private void AddGraphEdge(Point from, Point to)
+    private void AddGraphEdge(Point from, Point to, string label)
     {
         RelationshipGraphCanvas.Children.Add(new Line
         {
@@ -1213,6 +1281,23 @@ public partial class MainWindow : Window
             StrokeThickness = 1.4,
             Opacity = 0.7,
         });
+
+        if (!string.IsNullOrWhiteSpace(label))
+        {
+            var text = new TextBlock
+            {
+                Text = CompactGraphLabel(label),
+                Foreground = (Brush)FindResource("MutedBrush"),
+                FontSize = 10,
+                Background = new SolidColorBrush(Color.FromArgb(190, 2, 6, 23)),
+                Padding = new Thickness(4, 1, 4, 1),
+                ToolTip = label,
+            };
+
+            RelationshipGraphCanvas.Children.Add(text);
+            Canvas.SetLeft(text, (from.X + to.X) / 2 - 36);
+            Canvas.SetTop(text, (from.Y + to.Y) / 2 - 10);
+        }
     }
 
     private void AddGraphNode(Point center, string label, IfcRelationshipGraphItem? item, bool selected)
@@ -1224,8 +1309,8 @@ public partial class MainWindow : Window
             Width = width,
             Height = height,
             CornerRadius = new CornerRadius(14),
-            Background = new SolidColorBrush(selected ? Color.FromRgb(29, 78, 216) : item?.Depth >= 2 ? Color.FromRgb(49, 46, 129) : Color.FromRgb(15, 23, 42)),
-            BorderBrush = new SolidColorBrush(selected ? Color.FromRgb(147, 197, 253) : item?.Depth >= 2 ? Color.FromRgb(129, 140, 248) : Color.FromRgb(51, 65, 85)),
+            Background = new SolidColorBrush(selected ? Color.FromRgb(29, 78, 216) : item?.EntityId is null ? Color.FromRgb(88, 28, 135) : item?.Depth >= 2 ? Color.FromRgb(49, 46, 129) : Color.FromRgb(15, 23, 42)),
+            BorderBrush = new SolidColorBrush(selected ? Color.FromRgb(147, 197, 253) : item?.EntityId is null ? Color.FromRgb(216, 180, 254) : item?.Depth >= 2 ? Color.FromRgb(129, 140, 248) : Color.FromRgb(51, 65, 85)),
             BorderThickness = new Thickness(1),
             Padding = new Thickness(8),
             Child = new TextBlock
@@ -1245,13 +1330,32 @@ public partial class MainWindow : Window
             border.MouseLeftButtonUp += (_, args) =>
             {
                 args.Handled = true;
-                SelectGraphEntity(item);
+                if (item.EntityId is not null)
+                {
+                    SelectGraphEntity(item);
+                }
+                else
+                {
+                    SelectGraphRelationship(item);
+                }
             };
         }
 
         Canvas.SetLeft(border, center.X - width / 2);
         Canvas.SetTop(border, center.Y - height / 2);
         RelationshipGraphCanvas.Children.Add(border);
+    }
+
+    private static string CompactGraphLabel(string label)
+    {
+        var compact = label.Trim();
+        if (compact.StartsWith('→') || compact.StartsWith('←') || compact.StartsWith('↔'))
+        {
+            compact = compact[1..].Trim();
+        }
+
+        var parts = compact.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length >= 2 ? $"{parts[0]} {parts[1]}" : compact;
     }
 
     private void FitGraph()
