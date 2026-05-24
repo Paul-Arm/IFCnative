@@ -27,6 +27,12 @@ public static partial class IfcStepParser
 
         foreach (var entity in ReadEntities(data, document.Diagnostics))
         {
+            if (document.EntityById.ContainsKey(entity.Id))
+            {
+                document.Diagnostics.Warn($"Skipped duplicate STEP entity #{entity.Id}; keeping first parsed entity.");
+                continue;
+            }
+
             document.Entities.Add(entity);
             document.EntityById[entity.Id] = entity;
 
@@ -165,18 +171,19 @@ public static partial class IfcStepParser
                 continue;
             }
 
-            var args = ReadParenthesized(data, ref index);
-            while (index < data.Length && data[index] != ';')
+            if (!TryReadParenthesized(data, ref index, out var args))
             {
-                index++;
+                diagnostics.Warn($"Skipped #{id}; unterminated argument list.");
+                continue;
             }
 
-            if (index < data.Length && data[index] == ';')
+            var hasTerminator = TryReadEntityTerminator(data, ref index);
+            if (!hasTerminator)
             {
-                index++;
+                diagnostics.Warn($"Parsed #{id}; missing terminating ';' before next STEP entity.");
             }
 
-            var originalStepLine = data[entityStart..index].Trim();
+            var originalStepLine = hasTerminator ? data[entityStart..index].Trim() : null;
             var entity = new IfcEntity { Id = id, Type = type, OriginalStepLine = originalStepLine };
             entity.Arguments.AddRange(StepArgumentReader.SplitTopLevel(args));
             entity.OriginalArguments.AddRange(entity.Arguments);
@@ -210,7 +217,40 @@ public static partial class IfcStepParser
         }
     }
 
-    private static string ReadParenthesized(string text, ref int index)
+    private static bool TryReadEntityTerminator(string text, ref int index)
+    {
+        while (index < text.Length)
+        {
+            if (char.IsWhiteSpace(text[index]))
+            {
+                index++;
+                continue;
+            }
+
+            if (index + 1 < text.Length && text[index] == '/' && text[index + 1] == '*')
+            {
+                SkipWhitespaceAndComments(text, ref index);
+                continue;
+            }
+
+            if (text[index] == ';')
+            {
+                index++;
+                return true;
+            }
+
+            if (text[index] == '#')
+            {
+                return false;
+            }
+
+            index++;
+        }
+
+        return false;
+    }
+
+    private static bool TryReadParenthesized(string text, ref int index, out string value)
     {
         var start = index + 1;
         var depth = 0;
@@ -245,14 +285,21 @@ public static partial class IfcStepParser
                 depth--;
                 if (depth == 0)
                 {
-                    var value = text[start..index];
+                    value = text[start..index];
                     index++;
-                    return value;
+                    return true;
                 }
+            }
+            else if (character == ';' && depth <= 1)
+            {
+                value = text[start..index];
+                index++;
+                return false;
             }
         }
 
-        return text[start..];
+        value = text[start..];
+        return false;
     }
 
     private static void BuildRelationshipIndex(IfcDocument document)

@@ -17,6 +17,9 @@ internal sealed class NativeTestRunner
         Run("STEP export preserves parsed entity order", StepExportPreservesParsedEntityOrder);
         Run("STEP writer exposes canonical entity helpers", StepWriterExposesCanonicalEntityHelpers);
         Run("STEP export preserves untouched entity text", StepExportPreservesUntouchedEntityText);
+        Run("parser recovers after malformed entity arguments", ParserRecoversAfterMalformedEntityArguments);
+        Run("parser recovers valid entity missing semicolon", ParserRecoversValidEntityMissingSemicolon);
+        Run("parser keeps first entity when STEP ids duplicate", ParserKeepsFirstEntityWhenStepIdsDuplicate);
         Run("entity/property/relationship edits create targeted diffs", EditsCreateTargetedDiffs);
         Run("spatial reparent updates containment parent", SpatialReparentUpdatesContainmentParent);
         Run("spatial detach removes containment link", SpatialDetachRemovesContainmentLink);
@@ -172,6 +175,43 @@ internal sealed class NativeTestRunner
 
         True(editedExport.Contains("#40 =\n  IFCBUILDINGELEMENTPROXY", StringComparison.Ordinal), "unrelated entity formatting should survive targeted edits");
         True(editedExport.Contains("#1= IFCPROJECT", StringComparison.Ordinal), "edited entity should be serialized canonically");
+    }
+
+    private static void ParserRecoversAfterMalformedEntityArguments()
+    {
+        var document = IfcStepParser.Parse(MalformedEntityFixture, "malformed-entity.ifc");
+
+        True(document.Diagnostics.Messages.Any(message => message.Contains("Skipped #40") && message.Contains("unterminated argument list")), "unterminated entity diagnostic missing");
+        True(!document.EntityById.ContainsKey(40), "malformed entity should be skipped");
+        True(document.EntityById.TryGetValue(41, out var recovered) && recovered.Name == "Recovered Proxy", "parser should recover following valid entity");
+        Equal(2, document.Entities.Count, "parser should preserve valid entities around malformed row");
+    }
+
+    private static void ParserRecoversValidEntityMissingSemicolon()
+    {
+        var document = IfcStepParser.Parse(MissingSemicolonFixture, "missing-semicolon.ifc");
+
+        True(document.Diagnostics.Messages.Any(message => message.Contains("Parsed #40") && message.Contains("missing terminating ';'", StringComparison.OrdinalIgnoreCase)), "missing semicolon diagnostic missing");
+        True(document.EntityById.TryGetValue(40, out var missingTerminator) && missingTerminator.Name == "Missing Semicolon Proxy", "entity before missing semicolon should still parse");
+        True(document.EntityById.TryGetValue(41, out var recovered) && recovered.Name == "Recovered After Missing Semicolon", "parser should recover following entity after missing semicolon");
+        Equal(3, document.Entities.Count, "parser should keep valid entities around missing semicolon");
+
+        var exported = document.ToStepText();
+        True(exported.Contains("#40= IFCBUILDINGELEMENTPROXY", StringComparison.Ordinal), "missing-semicolon entity should export canonically");
+        True(exported.Contains("#40= IFCBUILDINGELEMENTPROXY('1Proxy8a9b2ff4l$IFCnative',$,'Missing Semicolon Proxy',$,$,$,$,$,$);", StringComparison.Ordinal), "export should repair the missing semicolon");
+    }
+
+    private static void ParserKeepsFirstEntityWhenStepIdsDuplicate()
+    {
+        var document = IfcStepParser.Parse(DuplicateStepIdFixture, "duplicate-step-id.ifc");
+
+        True(document.Diagnostics.Messages.Any(message => message.Contains("duplicate STEP entity #41", StringComparison.OrdinalIgnoreCase)), "duplicate STEP id diagnostic missing");
+        True(document.EntityById.TryGetValue(41, out var duplicate) && duplicate.Name == "First Proxy", "first parsed duplicate id should be kept");
+        True(document.EntityById.TryGetValue(42, out var recovered) && recovered.Name == "Recovered After Duplicate", "parser should continue after duplicate STEP id");
+        Equal(3, document.Entities.Count, "duplicate row should be skipped without dropping following valid entities");
+
+        var exported = document.ToStepText();
+        Equal(exported.IndexOf("#41=", StringComparison.Ordinal), exported.LastIndexOf("#41=", StringComparison.Ordinal), "export should contain only one #41 row");
     }
 
     private static void EditsCreateTargetedDiffs()
@@ -704,6 +744,52 @@ DATA;
 #1= IFCPROJECT('2XQ2f8a9b2ff4l$IFCnative',$,'IFCnative Native Sample',$,$,$,$,$,$);
 #40 =
   IFCBUILDINGELEMENTPROXY('0Proxy8a9b2ff4l$IFCnative',$,'Sample Inspection Block',$,$,$,$,$,$);
+ENDSEC;
+END-ISO-10303-21;
+""";
+
+    private const string MalformedEntityFixture = """
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');
+FILE_NAME('malformed-entity.ifc','2026-05-24T00:00:00',('IFCnative'),('IFCnative'),'IFCnative Native Windows','IFCnative','');
+FILE_SCHEMA(('IFC4X3_ADD2'));
+ENDSEC;
+DATA;
+#1= IFCPROJECT('2XQ2f8a9b2ff4l$IFCnative',$,'IFCnative Native Sample',$,$,$,$,$,$);
+#40= IFCBUILDINGELEMENTPROXY('0Proxy8a9b2ff4l$IFCnative',$,'Broken Proxy',$,$,$,$,$,$;
+#41= IFCBUILDINGELEMENTPROXY('1Proxy8a9b2ff4l$IFCnative',$,'Recovered Proxy',$,$,$,$,$,$);
+ENDSEC;
+END-ISO-10303-21;
+""";
+
+    private const string MissingSemicolonFixture = """
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');
+FILE_NAME('missing-semicolon.ifc','2026-05-24T00:00:00',('IFCnative'),('IFCnative'),'IFCnative Native Windows','IFCnative','');
+FILE_SCHEMA(('IFC4X3_ADD2'));
+ENDSEC;
+DATA;
+#1= IFCPROJECT('2XQ2f8a9b2ff4l$IFCnative',$,'IFCnative Native Sample',$,$,$,$,$,$);
+#40= IFCBUILDINGELEMENTPROXY('1Proxy8a9b2ff4l$IFCnative',$,'Missing Semicolon Proxy',$,$,$,$,$,$)
+#41= IFCBUILDINGELEMENTPROXY('2Proxy8a9b2ff4l$IFCnative',$,'Recovered After Missing Semicolon',$,$,$,$,$,$);
+ENDSEC;
+END-ISO-10303-21;
+""";
+
+    private const string DuplicateStepIdFixture = """
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');
+FILE_NAME('duplicate-step-id.ifc','2026-05-24T00:00:00',('IFCnative'),('IFCnative'),'IFCnative Native Windows','IFCnative','');
+FILE_SCHEMA(('IFC4X3_ADD2'));
+ENDSEC;
+DATA;
+#1= IFCPROJECT('2XQ2f8a9b2ff4l$IFCnative',$,'IFCnative Native Sample',$,$,$,$,$,$);
+#41= IFCBUILDINGELEMENTPROXY('1Proxy8a9b2ff4l$IFCnative',$,'First Proxy',$,$,$,$,$,$);
+#41= IFCBUILDINGELEMENTPROXY('2Proxy8a9b2ff4l$IFCnative',$,'Second Proxy',$,$,$,$,$,$);
+#42= IFCBUILDINGELEMENTPROXY('3Proxy8a9b2ff4l$IFCnative',$,'Recovered After Duplicate',$,$,$,$,$,$);
 ENDSEC;
 END-ISO-10303-21;
 """;
