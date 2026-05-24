@@ -413,6 +413,26 @@ public partial class MainWindow : Window
 
     private void AddMaterial_Click(object sender, RoutedEventArgs e)
     {
+        StageResourceAssignment("material", document => IfcDocumentEditor.AddSimpleMaterialAssignment(document, selectedEntity!.Id, MaterialNameBox.Text));
+    }
+
+    private void AddClassification_Click(object sender, RoutedEventArgs e)
+    {
+        StageResourceAssignment("classification", document => IfcDocumentEditor.AddSimpleClassificationAssignment(document, selectedEntity!.Id, MaterialNameBox.Text, ResourceIdentificationBox.Text));
+    }
+
+    private void AddDocument_Click(object sender, RoutedEventArgs e)
+    {
+        StageResourceAssignment("document", document => IfcDocumentEditor.AddSimpleDocumentAssignment(document, selectedEntity!.Id, MaterialNameBox.Text, ResourceIdentificationBox.Text));
+    }
+
+    private void AddLibrary_Click(object sender, RoutedEventArgs e)
+    {
+        StageResourceAssignment("library reference", document => IfcDocumentEditor.AddSimpleLibraryAssignment(document, selectedEntity!.Id, MaterialNameBox.Text, ResourceIdentificationBox.Text));
+    }
+
+    private void StageResourceAssignment(string resourceLabel, Func<IfcDocument, IfcDocument> createDraft)
+    {
         if (document is null || selectedEntity is null || !CanAssignResource(selectedEntity))
         {
             return;
@@ -422,18 +442,18 @@ public partial class MainWindow : Window
             ? resources.Count
             : 0;
         var selectedId = selectedEntity.Id;
-        var draft = IfcDocumentEditor.AddSimpleMaterialAssignment(document, selectedId, MaterialNameBox.Text);
+        var draft = createDraft(document);
         var afterResourceIds = draft.ResourcesByEntity.TryGetValue(selectedId, out var draftResources)
             ? draftResources.Count
             : 0;
 
         if (afterResourceIds <= beforeResourceIds)
         {
-            StatusText.Text = "No material assignment created for this selection.";
+            StatusText.Text = $"No {resourceLabel} assignment created for this selection.";
             return;
         }
 
-        StageDraft(draft, selectedId, $"Staged material assignment for #{selectedId}");
+        StageDraft(draft, selectedId, $"Staged {resourceLabel} assignment for #{selectedId}");
     }
 
     private void SaveRelationship_Click(object sender, RoutedEventArgs e)
@@ -1293,7 +1313,11 @@ public partial class MainWindow : Window
         AddBaseQtoButton.IsEnabled = CanAttachPropertyTemplates(entity);
         TypeAssignmentList.ItemsSource = details.TypeAssignments;
         ResourceList.ItemsSource = details.Resources;
-        AddMaterialButton.IsEnabled = CanAssignResource(entity);
+        var canAssignResource = CanAssignResource(entity);
+        AddMaterialButton.IsEnabled = canAssignResource;
+        AddClassificationButton.IsEnabled = canAssignResource;
+        AddDocumentButton.IsEnabled = canAssignResource;
+        AddLibraryButton.IsEnabled = canAssignResource;
         UnitList.ItemsSource = details.Units;
     }
 
@@ -1390,7 +1414,11 @@ public partial class MainWindow : Window
         TypeAssignmentList.ItemsSource = Array.Empty<string>();
         ResourceList.ItemsSource = Array.Empty<string>();
         MaterialNameBox.Text = "Native material";
+        ResourceIdentificationBox.Text = "NATIVE-REF";
         AddMaterialButton.IsEnabled = false;
+        AddClassificationButton.IsEnabled = false;
+        AddDocumentButton.IsEnabled = false;
+        AddLibraryButton.IsEnabled = false;
         UnitList.ItemsSource = Array.Empty<string>();
     }
 

@@ -79,24 +79,85 @@ public static class IfcDocumentEditor
 
     public static IfcDocument AddSimpleMaterialAssignment(IfcDocument document, int productId, string materialNameText)
     {
+        var materialName = string.IsNullOrWhiteSpace(materialNameText) ? "Native material" : materialNameText.Trim();
+        return AddSimpleResourceAssignment(
+            document,
+            productId,
+            "IFCMATERIAL",
+            "IFCRELASSOCIATESMATERIAL",
+            "MatRel",
+            "material",
+            [StepArgumentReader.Quote(materialName), "$", "$"]);
+    }
+
+    public static IfcDocument AddSimpleClassificationAssignment(IfcDocument document, int productId, string classificationNameText, string identificationText)
+    {
+        var classificationName = string.IsNullOrWhiteSpace(classificationNameText) ? "Native classification" : classificationNameText.Trim();
+        var identification = string.IsNullOrWhiteSpace(identificationText) ? "NATIVE-CLASS" : identificationText.Trim();
+        return AddSimpleResourceAssignment(
+            document,
+            productId,
+            "IFCCLASSIFICATIONREFERENCE",
+            "IFCRELASSOCIATESCLASSIFICATION",
+            "ClassRel",
+            "classification",
+            ["$", StepArgumentReader.Quote(identification), StepArgumentReader.Quote(classificationName), "$", "$"]);
+    }
+
+    public static IfcDocument AddSimpleDocumentAssignment(IfcDocument document, int productId, string documentNameText, string identificationText)
+    {
+        var documentName = string.IsNullOrWhiteSpace(documentNameText) ? "Native document" : documentNameText.Trim();
+        var identification = string.IsNullOrWhiteSpace(identificationText) ? "NATIVE-DOC" : identificationText.Trim();
+        return AddSimpleResourceAssignment(
+            document,
+            productId,
+            "IFCDOCUMENTREFERENCE",
+            "IFCRELASSOCIATESDOCUMENT",
+            "DocRel",
+            "document",
+            [StepArgumentReader.Quote(identification), "$", StepArgumentReader.Quote(documentName), "$"]);
+    }
+
+    public static IfcDocument AddSimpleLibraryAssignment(IfcDocument document, int productId, string libraryNameText, string identificationText)
+    {
+        var libraryName = string.IsNullOrWhiteSpace(libraryNameText) ? "Native library item" : libraryNameText.Trim();
+        var identification = string.IsNullOrWhiteSpace(identificationText) ? "NATIVE-LIB" : identificationText.Trim();
+        return AddSimpleResourceAssignment(
+            document,
+            productId,
+            "IFCLIBRARYREFERENCE",
+            "IFCRELASSOCIATESLIBRARY",
+            "LibRel",
+            "library reference",
+            ["$", StepArgumentReader.Quote(identification), StepArgumentReader.Quote(libraryName), "$", "$"]);
+    }
+
+    private static IfcDocument AddSimpleResourceAssignment(
+        IfcDocument document,
+        int productId,
+        string resourceType,
+        string relationshipType,
+        string relationshipGlobalIdPrefix,
+        string relationshipLabel,
+        string[] resourceArguments)
+    {
         if (!CanAssignResource(document, productId))
         {
             return document;
         }
 
-        var materialName = string.IsNullOrWhiteSpace(materialNameText) ? "Native material" : materialNameText.Trim();
         var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
         var nextId = IfcStepWriter.NextEntityId(draft);
-        var materialId = nextId++;
+        var resourceId = nextId++;
         var relationshipId = nextId++;
         var product = document.EntityById[productId];
 
-        AddEntity(draft, materialId, "IFCMATERIAL", [StepArgumentReader.Quote(materialName), "$", "$"]);
+        AddEntity(draft, resourceId, resourceType, resourceArguments);
         AddEntity(
             draft,
             relationshipId,
-            "IFCRELASSOCIATESMATERIAL",
-            [MakeGeneratedGlobalId("MatRel", relationshipId), "$", StepArgumentReader.Quote($"{product.DisplayName} material"), "$", $"(#{productId})", $"#{materialId}"]);
+            relationshipType,
+            [MakeGeneratedGlobalId(relationshipGlobalIdPrefix, relationshipId), "$", StepArgumentReader.Quote($"{product.DisplayName} {relationshipLabel}"), "$", $"(#{productId})", $"#{resourceId}"]);
 
         return IfcStepParser.Parse(draft.ToStepText(), draft.FileName);
     }

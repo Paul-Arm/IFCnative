@@ -413,11 +413,18 @@
                         <TabItem Header="Resources">
                             <DockPanel LastChildFill="True" Margin="0,8,8,8">
                                 <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
-                                    <TextBlock Text="Simple material assignment" FontWeight="SemiBold" />
-                                    <TextBlock Text="Stage a new IFCMATERIAL and IFCRELASSOCIATESMATERIAL for the selected product." Foreground="{StaticResource MutedBrush}" Margin="0,2,0,8" />
-                                    <TextBlock Text="Material name" Foreground="{StaticResource MutedBrush}" />
+                                    <TextBlock Text="Resource assignments" FontWeight="SemiBold" />
+                                    <TextBlock Text="Stage simple IFC material, classification, document, or library references for the selected product." Foreground="{StaticResource MutedBrush}" Margin="0,2,0,8" />
+                                    <TextBlock Text="Resource name" Foreground="{StaticResource MutedBrush}" />
                                     <TextBox x:Name="MaterialNameBox" Text="Native material" Margin="0,2,0,8" />
-                                    <Button x:Name="AddMaterialButton" Content="Add material" Click="AddMaterial_Click" HorizontalAlignment="Left" IsEnabled="False" />
+                                    <TextBlock Text="Identification/code" Foreground="{StaticResource MutedBrush}" />
+                                    <TextBox x:Name="ResourceIdentificationBox" Text="NATIVE-REF" Margin="0,2,0,8" />
+                                    <WrapPanel>
+                                        <Button x:Name="AddMaterialButton" Content="Add material" Click="AddMaterial_Click" IsEnabled="False" />
+                                        <Button x:Name="AddClassificationButton" Content="Add classification" Click="AddClassification_Click" IsEnabled="False" Background="#334155" BorderBrush="#475569" />
+                                        <Button x:Name="AddDocumentButton" Content="Add document" Click="AddDocument_Click" IsEnabled="False" Background="#334155" BorderBrush="#475569" />
+                                        <Button x:Name="AddLibraryButton" Content="Add library" Click="AddLibrary_Click" IsEnabled="False" Background="#334155" BorderBrush="#475569" />
+                                    </WrapPanel>
                                 </StackPanel>
                                 <ListBox x:Name="ResourceList" />
                             </DockPanel>

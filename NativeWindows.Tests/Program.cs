@@ -26,7 +26,7 @@ internal sealed class NativeTestRunner
         Run("opening void preset creates void relationship and body", OpeningVoidPresetCreatesVoidRelationshipAndBody);
         Run("opening filling preset creates fill relationship and body", OpeningFillingPresetCreatesFillRelationshipAndBody);
         Run("property templates create indexed pset and qto", PropertyTemplatesCreateIndexedPsetAndQto);
-        Run("material assignment creates indexed resource", MaterialAssignmentCreatesIndexedResource);
+        Run("resource assignments create indexed references", ResourceAssignmentsCreateIndexedReferences);
         Run("body assignment creates swept solid representation", BodyAssignmentCreatesSweptSolidRepresentation);
         Run("body assignment can be staged as draft", BodyAssignmentCanBeStagedAsDraft);
         Run("export validation reparses document before save", ExportValidationReparsesDocumentBeforeSave);
@@ -295,7 +295,7 @@ internal sealed class NativeTestRunner
         True(IfcDiffService.Summarize(document, withQto).Any(line => line.Contains("IFCELEMENTQUANTITY")), "qto diff should show quantity set addition");
     }
 
-    private static void MaterialAssignmentCreatesIndexedResource()
+    private static void ResourceAssignmentsCreateIndexedReferences()
     {
         var document = IfcStepParser.CreateSample();
 
@@ -303,11 +303,38 @@ internal sealed class NativeTestRunner
         var material = assigned.Entities.FirstOrDefault(entity => entity.Type == "IFCMATERIAL" && entity.Arguments.FirstOrDefault() == "'Native Concrete'");
 
         True(material is not null, "material not created");
-        True(assigned.ResourcesByEntity.TryGetValue(40, out var resources) && resources.Any(resource => resource.Contains("Native Concrete")), "material resource not indexed for product");
+        True(assigned.ResourcesByEntity.TryGetValue(40, out var materialResources) && materialResources.Any(resource => resource.Contains("Native Concrete")), "material resource not indexed for product");
         True(assigned.RelationshipById.Values.Any(relationship => relationship.Type == "IFCRELASSOCIATESMATERIAL"
             && relationship.SourceIds.Contains(material!.Id)
             && relationship.TargetIds.Contains(40)), "material assignment relationship not indexed");
-        True(IfcDiffService.Summarize(document, assigned).Any(line => line.Contains("IFCRELASSOCIATESMATERIAL")), "material diff should show assignment relationship");
+
+        assigned = IfcDocumentEditor.AddSimpleClassificationAssignment(assigned, 40, "Native Class", "NATIVE-42");
+        var classification = assigned.Entities.FirstOrDefault(entity => entity.Type == "IFCCLASSIFICATIONREFERENCE" && entity.Arguments.Contains("'Native Class'"));
+
+        True(classification is not null, "classification reference not created");
+        True(assigned.ResourcesByEntity[40].Any(resource => resource.Contains("Native Class")), "classification resource not indexed for product");
+        True(assigned.RelationshipById.Values.Any(relationship => relationship.Type == "IFCRELASSOCIATESCLASSIFICATION"
+            && relationship.SourceIds.Contains(classification!.Id)
+            && relationship.TargetIds.Contains(40)), "classification assignment relationship not indexed");
+
+        assigned = IfcDocumentEditor.AddSimpleDocumentAssignment(assigned, 40, "Native Manual", "DOC-1");
+        var documentReference = assigned.Entities.FirstOrDefault(entity => entity.Type == "IFCDOCUMENTREFERENCE" && entity.Arguments.Contains("'Native Manual'"));
+
+        True(documentReference is not null, "document reference not created");
+        True(assigned.ResourcesByEntity[40].Any(resource => resource.Contains("Native Manual")), "document resource not indexed for product");
+        True(assigned.RelationshipById.Values.Any(relationship => relationship.Type == "IFCRELASSOCIATESDOCUMENT"
+            && relationship.SourceIds.Contains(documentReference!.Id)
+            && relationship.TargetIds.Contains(40)), "document assignment relationship not indexed");
+
+        assigned = IfcDocumentEditor.AddSimpleLibraryAssignment(assigned, 40, "Native Library Item", "LIB-1");
+        var libraryReference = assigned.Entities.FirstOrDefault(entity => entity.Type == "IFCLIBRARYREFERENCE" && entity.Arguments.Contains("'Native Library Item'"));
+
+        True(libraryReference is not null, "library reference not created");
+        True(assigned.ResourcesByEntity[40].Any(resource => resource.Contains("Native Library Item")), "library resource not indexed for product");
+        True(assigned.RelationshipById.Values.Any(relationship => relationship.Type == "IFCRELASSOCIATESLIBRARY"
+            && relationship.SourceIds.Contains(libraryReference!.Id)
+            && relationship.TargetIds.Contains(40)), "library assignment relationship not indexed");
+        True(IfcDiffService.Summarize(document, assigned).Any(line => line.Contains("IFCRELASSOCIATESLIBRARY")), "resource diff should show final assignment relationship");
     }
 
     private static void ProductPresetCreatesContainedPlacedBody()

@@ -446,16 +446,40 @@ public static partial class IfcStepParser
 
     private static string ReadEntityLabel(IfcEntity entity)
     {
-        var nameArgumentIndex = entity.Type switch
+        var label = entity.Type switch
+        {
+            "IFCMATERIAL" => FirstLabelArgument(entity, 0),
+            "IFCCLASSIFICATIONREFERENCE" or "IFCLIBRARYREFERENCE" => FirstLabelArgument(entity, 2, 1, 0),
+            "IFCDOCUMENTREFERENCE" => FirstLabelArgument(entity, 2, 0),
+            _ => FirstLabelArgument(entity, DefaultLabelArgumentIndex(entity)),
+        };
+
+        return label ?? entity.Name;
+    }
+
+    private static int DefaultLabelArgumentIndex(IfcEntity entity)
+    {
+        return entity.Type switch
         {
             "IFCPROPERTYSET" or "IFCELEMENTQUANTITY" => 2,
             "IFCPROPERTYSINGLEVALUE" => 0,
             "IFCQUANTITYLENGTH" or "IFCQUANTITYAREA" or "IFCQUANTITYVOLUME" or "IFCQUANTITYCOUNT" or "IFCQUANTITYWEIGHT" or "IFCQUANTITYTIME" => 0,
-            "IFCMATERIAL" or "IFCCLASSIFICATIONREFERENCE" or "IFCDOCUMENTREFERENCE" or "IFCLIBRARYREFERENCE" => 0,
             _ => 2,
         };
+    }
 
-        return StepArgumentReader.Unquote(entity.Arguments.ElementAtOrDefault(nameArgumentIndex)) ?? entity.Name;
+    private static string? FirstLabelArgument(IfcEntity entity, params int[] argumentIndexes)
+    {
+        foreach (var argumentIndex in argumentIndexes)
+        {
+            var label = StepArgumentReader.Unquote(entity.Arguments.ElementAtOrDefault(argumentIndex));
+            if (!string.IsNullOrWhiteSpace(label))
+            {
+                return label;
+            }
+        }
+
+        return null;
     }
 
     private static string ReadPropertyDisplayValue(IfcEntity valueEntity)
