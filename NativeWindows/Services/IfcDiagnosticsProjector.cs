@@ -57,7 +57,8 @@ public static class IfcDiagnosticsProjector
         var entityIds = ExtractEntityIds(message).ToList();
         var entityId = entityIds.Count == 0 ? (int?)null : entityIds[0];
         var canRepairDuplicateGlobalId = message.Contains("Duplicate GlobalId", StringComparison.OrdinalIgnoreCase) && entityIds.Count > 1;
-        return new IfcDiagnosticDetails(severity, message, Suggest(message), entityId, canRepairDuplicateGlobalId);
+        var canRepairSpatialContainment = message.Contains("multiple primary spatial containment", StringComparison.OrdinalIgnoreCase) && entityIds.Count > 2;
+        return new IfcDiagnosticDetails(severity, message, Suggest(message), entityId, canRepairDuplicateGlobalId, canRepairSpatialContainment);
     }
 
     private static IEnumerable<int> ExtractEntityIds(string message)

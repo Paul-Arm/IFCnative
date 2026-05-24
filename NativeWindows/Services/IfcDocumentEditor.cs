@@ -167,6 +167,55 @@ public static class IfcDocumentEditor
         return changed ? IfcStepParser.Parse(draft.ToStepText(), draft.FileName) : document;
     }
 
+    public static IfcDocument KeepFirstPrimarySpatialContainment(IfcDocument document, string diagnosticMessage)
+    {
+        var ids = ReadIds(diagnosticMessage).ToList();
+        if (ids.Count < 3)
+        {
+            return document;
+        }
+
+        var productId = ids[0];
+        var relationshipIds = ids
+            .Skip(1)
+            .Where(id => document.RelationshipById.TryGetValue(id, out var relationship)
+                && relationship.Type == "IFCRELCONTAINEDINSPATIALSTRUCTURE"
+                && relationship.TargetIds.Contains(productId))
+            .Distinct()
+            .OrderBy(id => id)
+            .ToList();
+        if (relationshipIds.Count < 2)
+        {
+            return document;
+        }
+
+        var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
+        var changed = false;
+        foreach (var relationshipId in relationshipIds.Skip(1))
+        {
+            if (!draft.EntityById.TryGetValue(relationshipId, out var draftRelationship)
+                || !document.RelationshipById.TryGetValue(relationshipId, out var originalRelationship))
+            {
+                continue;
+            }
+
+            var remainingTargets = originalRelationship.TargetIds.Where(id => id != productId).Distinct().ToList();
+            if (remainingTargets.Count == 0)
+            {
+                draft.Entities.RemoveAll(entity => entity.Id == relationshipId);
+                draft.EntityById.Remove(relationshipId);
+            }
+            else
+            {
+                SetArgument(draftRelationship, 4, FormatReferenceArgument(remainingTargets, asList: true));
+            }
+
+            changed = true;
+        }
+
+        return changed ? IfcStepParser.Parse(draft.ToStepText(), draft.FileName) : document;
+    }
+
     private static IfcDocument AddSimpleResourceAssignment(
         IfcDocument document,
         int productId,

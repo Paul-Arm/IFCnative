@@ -31,6 +31,7 @@ internal sealed class NativeTestRunner
         Run("body assignment can be staged as draft", BodyAssignmentCanBeStagedAsDraft);
         Run("export validation reparses document before save", ExportValidationReparsesDocumentBeforeSave);
         Run("duplicate GlobalId diagnostics can be repaired", DuplicateGlobalIdDiagnosticsCanBeRepaired);
+        Run("spatial containment diagnostics can be repaired", SpatialContainmentDiagnosticsCanBeRepaired);
         Run("diagnostics projector supports text and severity filters", DiagnosticsProjectorSupportsFilters);
         Run("relationship graph supports filter and depth", RelationshipGraphSupportsFilterAndDepth);
         Run("native window layout store persists sanitized layout", NativeWindowLayoutStorePersistsSanitizedLayout);
@@ -427,6 +428,23 @@ internal sealed class NativeTestRunner
         True(IfcDiffService.Summarize(document, repaired).Any(line => line.Contains("#41") && line.Contains("arg 1")), "repair diff should show the regenerated GlobalId argument");
     }
 
+    private static void SpatialContainmentDiagnosticsCanBeRepaired()
+    {
+        var document = IfcStepParser.Parse(MultipleContainmentFixture, "multiple-containment.ifc");
+        var containmentDiagnostic = IfcDiagnosticsProjector.Project(document.Diagnostics.Messages, "multiple primary spatial containment").Single();
+
+        True(containmentDiagnostic.CanRepair, "multiple containment diagnostic should expose a repair action");
+        True(containmentDiagnostic.CanRepairSpatialContainment, "multiple containment diagnostic should expose spatial containment repair kind");
+        Equal(40, containmentDiagnostic.EntityId, "multiple containment diagnostic should navigate to affected product");
+
+        var repaired = IfcDocumentEditor.KeepFirstPrimarySpatialContainment(document, containmentDiagnostic.Message);
+
+        True(repaired.RelationshipById.ContainsKey(53), "first containment relationship should be preserved");
+        True(!repaired.RelationshipById.ContainsKey(54), "duplicate empty containment relationship should be removed");
+        True(!repaired.Diagnostics.Messages.Any(message => message.Contains("multiple primary spatial containment", StringComparison.OrdinalIgnoreCase)), "multiple containment warning should clear after repair");
+        True(IfcDiffService.Summarize(document, repaired).Any(line => line.StartsWith("- #54", StringComparison.Ordinal)), "repair diff should show removed duplicate containment relationship");
+    }
+
     private static void RelationshipGraphSupportsFilterAndDepth()
     {
         var document = IfcStepParser.CreateSample();
@@ -644,6 +662,26 @@ DATA;
 #1= IFCPROJECT('2XQ2f8a9b2ff4l$IFCnative',$,'IFCnative Native Sample',$,$,$,$,$,$);
 #40= IFCBUILDINGELEMENTPROXY('DUPLICATE-GLOBALID',$,'Duplicate A',$,$,$,$,$,$);
 #41= IFCBUILDINGELEMENTPROXY('DUPLICATE-GLOBALID',$,'Duplicate B',$,$,$,$,$,$);
+ENDSEC;
+END-ISO-10303-21;
+""";
+
+    private const string MultipleContainmentFixture = """
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');
+FILE_NAME('multiple-containment.ifc','2026-05-24T00:00:00',('IFCnative'),('IFCnative'),'IFCnative Native Windows','IFCnative','');
+FILE_SCHEMA(('IFC4X3_ADD2'));
+ENDSEC;
+DATA;
+#1= IFCPROJECT('2XQ2f8a9b2ff4l$IFCnative',$,'IFCnative Native Sample',$,$,$,$,$,$);
+#20= IFCBUILDING('2Building000000000000000',$,'Building A',$,$,$,$,$,$,$,$,$,$);
+#30= IFCBUILDINGSTOREY('2Storey0000000000000000',$,'Storey A',$,$,$,$,$,$,$);
+#31= IFCBUILDINGSTOREY('2Storey0000000000000001',$,'Storey B',$,$,$,$,$,$,$);
+#40= IFCBUILDINGELEMENTPROXY('2Proxy00000000000000000',$,'Duplicate containment proxy',$,$,$,$,$,$);
+#52= IFCRELAGGREGATES('1AggLevel00000000000000',$,'Building aggregates storeys',$,#20,(#30,#31));
+#53= IFCRELCONTAINEDINSPATIALSTRUCTURE('1ContLevelProxy0000000',$,'Storey A Contains Proxy',$,(#40),#30);
+#54= IFCRELCONTAINEDINSPATIALSTRUCTURE('1ContLevelProxy0000001',$,'Storey B Also Contains Proxy',$,(#40),#31);
 ENDSEC;
 END-ISO-10303-21;
 """;

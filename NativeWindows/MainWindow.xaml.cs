@@ -951,6 +951,9 @@ public partial class MainWindow : Window
         RepairDiagnosticButton.IsEnabled = document is not null
             && DiagnosticsList.SelectedItem is IfcDiagnosticDetails selectedDiagnostic
             && selectedDiagnostic.CanRepair;
+        RepairDiagnosticButton.Content = DiagnosticsList.SelectedItem is IfcDiagnosticDetails repairDiagnostic && repairDiagnostic.CanRepair
+            ? repairDiagnostic.RepairLabel
+            : "Stage diagnostic repair";
 
         if (updatingUi || document is null || DiagnosticsList.SelectedItem is not IfcDiagnosticDetails diagnostic || diagnostic.EntityId is null)
         {
@@ -976,14 +979,18 @@ public partial class MainWindow : Window
         }
 
         var selectedId = diagnostic.EntityId ?? selectedEntity?.Id ?? document.Entities.FirstOrDefault()?.Id ?? 0;
-        var draft = IfcDocumentEditor.RegenerateDuplicateGlobalIds(document, diagnostic.Message);
+        var draft = diagnostic.CanRepairSpatialContainment
+            ? IfcDocumentEditor.KeepFirstPrimarySpatialContainment(document, diagnostic.Message)
+            : IfcDocumentEditor.RegenerateDuplicateGlobalIds(document, diagnostic.Message);
         if (draft.ToStepText() == document.ToStepText())
         {
-            StatusText.Text = "No duplicate GlobalId repair was staged for this diagnostic.";
+            StatusText.Text = "No diagnostic repair was staged for this diagnostic.";
             return;
         }
 
-        StageDraft(draft, selectedId, "Staged duplicate GlobalId repair from diagnostic.");
+        StageDraft(draft, selectedId, diagnostic.CanRepairSpatialContainment
+            ? "Staged spatial containment repair from diagnostic."
+            : "Staged duplicate GlobalId repair from diagnostic.");
     }
 
     private void FitViewport_Click(object sender, RoutedEventArgs e)
@@ -1278,6 +1285,7 @@ public partial class MainWindow : Window
 
         DiagnosticsList.ItemsSource = IfcDiagnosticsProjector.Project(document.Diagnostics.Messages, DiagnosticFilterBox.Text);
         RepairDiagnosticButton.IsEnabled = false;
+        RepairDiagnosticButton.Content = "Stage diagnostic repair";
     }
 
     private void RefreshDraftUi()

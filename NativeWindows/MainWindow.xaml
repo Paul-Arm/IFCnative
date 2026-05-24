@@ -503,7 +503,7 @@
                                              TextChanged="DiagnosticFilter_TextChanged"
                                              ToolTip="Filter by severity, message text, or repair suggestion, for example Error, Warning, GlobalId, placement" />
                                     <Button x:Name="RepairDiagnosticButton"
-                                            Content="Stage duplicate GlobalId repair"
+                                            Content="Stage diagnostic repair"
                                             Click="RepairDiagnostic_Click"
                                             Margin="0,8,0,0"
                                             IsEnabled="False"
