@@ -42,9 +42,9 @@ public partial class MainWindow : Window
         "Done: persisted native window layout",
         "Done: entity inspector",
         "Done: basic entity editing/export",
+        "Done: centralized STEP writer helpers",
         "Next: web-ifc WASM mesh/tessellation bridge",
         "Next: richer psets/quantities normalization",
-        "Next: native writer helpers",
         "Unsupported: IDS/MVD validation",
         "Unsupported: ifcZIP/ifcXML",
     ];

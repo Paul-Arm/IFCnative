@@ -14,7 +14,7 @@ public static class IfcDocumentEditor
         }
 
         var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
-        var nextId = draft.Entities.Count == 0 ? 1 : draft.Entities.Max(entity => entity.Id) + 1;
+        var nextId = IfcStepWriter.NextEntityId(draft);
         var propertySetId = nextId++;
         var referencePropertyId = nextId++;
         var statusPropertyId = nextId++;
@@ -52,7 +52,7 @@ public static class IfcDocumentEditor
         var area = Math.Max(0, ParseCoordinate(areaText, 1));
         var volume = Math.Max(0, ParseCoordinate(volumeText, 1));
         var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
-        var nextId = draft.Entities.Count == 0 ? 1 : draft.Entities.Max(entity => entity.Id) + 1;
+        var nextId = IfcStepWriter.NextEntityId(draft);
         var quantitySetId = nextId++;
         var lengthQuantityId = nextId++;
         var areaQuantityId = nextId++;
@@ -93,7 +93,7 @@ public static class IfcDocumentEditor
 
         var name = string.IsNullOrWhiteSpace(nameText) ? "Native opening" : nameText.Trim();
         var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
-        var nextId = draft.Entities.Count == 0 ? 1 : draft.Entities.Max(entity => entity.Id) + 1;
+        var nextId = IfcStepWriter.NextEntityId(draft);
         var openingId = nextId++;
         var placementId = nextId++;
         var axisPlacementId = nextId++;
@@ -139,7 +139,7 @@ public static class IfcDocumentEditor
         var productType = NormalizeProductType(productTypeText);
         var name = string.IsNullOrWhiteSpace(nameText) ? "Native filling element" : nameText.Trim();
         var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
-        var nextId = draft.Entities.Count == 0 ? 1 : draft.Entities.Max(entity => entity.Id) + 1;
+        var nextId = IfcStepWriter.NextEntityId(draft);
         var fillingId = nextId++;
         var placementId = nextId++;
         var axisPlacementId = nextId++;
@@ -201,7 +201,7 @@ public static class IfcDocumentEditor
         var productType = NormalizeProductType(productTypeText);
         var name = string.IsNullOrWhiteSpace(nameText) ? "New native product" : nameText.Trim();
         var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
-        var nextId = draft.Entities.Count == 0 ? 1 : draft.Entities.Max(entity => entity.Id) + 1;
+        var nextId = IfcStepWriter.NextEntityId(draft);
         var productId = nextId++;
         var placementId = nextId++;
         var axisPlacementId = nextId++;
@@ -253,7 +253,7 @@ public static class IfcDocumentEditor
             return document;
         }
 
-        var nextId = draft.Entities.Count == 0 ? 1 : draft.Entities.Max(entity => entity.Id) + 1;
+        var nextId = IfcStepWriter.NextEntityId(draft);
         var contextId = EnsureRepresentationContext(draft, ref nextId);
         var shapeId = nextId++;
         var representationId = nextId++;
@@ -529,7 +529,7 @@ public static class IfcDocumentEditor
         }
 
         var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
-        var relationshipId = draft.Entities.Count == 0 ? 1 : draft.Entities.Max(entity => entity.Id) + 1;
+        var relationshipId = IfcStepWriter.NextEntityId(draft);
         var name = string.IsNullOrWhiteSpace(nameText) ? $"Native {relationshipType}" : nameText.Trim();
         var arguments = Enumerable.Repeat("$", Math.Max(map.SourceArgumentIndex, map.TargetArgumentIndex) + 1).ToList();
         arguments[0] = MakeGeneratedGlobalId("Rel", relationshipId);

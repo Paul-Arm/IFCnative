@@ -12,6 +12,7 @@ internal sealed class NativeTestRunner
     {
         Run("sample parser builds core indexes", SampleParserBuildsCoreIndexes);
         Run("STEP export preserves parsed entity order", StepExportPreservesParsedEntityOrder);
+        Run("STEP writer exposes canonical entity helpers", StepWriterExposesCanonicalEntityHelpers);
         Run("STEP export preserves untouched entity text", StepExportPreservesUntouchedEntityText);
         Run("entity/property/relationship edits create targeted diffs", EditsCreateTargetedDiffs);
         Run("spatial reparent updates containment parent", SpatialReparentUpdatesContainmentParent);
@@ -78,6 +79,18 @@ internal sealed class NativeTestRunner
         var newPropertySetId = expanded.Entities.Max(entity => entity.Id);
 
         True(expandedExport.IndexOf("#20=", StringComparison.Ordinal) < expandedExport.IndexOf($"#{newPropertySetId}=", StringComparison.Ordinal), "newly created entities should append after original rows");
+    }
+
+    private static void StepWriterExposesCanonicalEntityHelpers()
+    {
+        var document = IfcStepParser.Parse(UnorderedFixture, "unordered-fixture.ifc");
+        var entity = document.EntityById[1];
+
+        Equal(41, IfcStepWriter.NextEntityId(document), "next STEP id should follow highest parsed id");
+        Equal(entity.ToStepLine(), IfcStepWriter.SerializeEntity(entity), "entity model should delegate to writer helper");
+
+        entity.Name = "Writer Canonical Name";
+        Equal("#1= IFCPROJECT('2XQ2f8a9b2ff4l$IFCnative',$,'Writer Canonical Name',$,$,$,$,$,$);", IfcStepWriter.SerializeEntity(entity), "edited entity should serialize canonically");
     }
 
     private static void StepExportPreservesUntouchedEntityText()

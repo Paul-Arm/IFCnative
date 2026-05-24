@@ -55,13 +55,6 @@ public sealed class IfcEntity
 
     public string ToStepLine()
     {
-        if (!string.IsNullOrWhiteSpace(OriginalStepLine)
-            && OriginalArguments.SequenceEqual(Arguments, StringComparer.Ordinal)
-            && OriginalStepLine.Contains($"#{Id}", StringComparison.Ordinal))
-        {
-            return OriginalStepLine.TrimEnd();
-        }
-
-        return $"#{Id}= {Type}({string.Join(",", Arguments)});";
+        return IFCnative.NativeWindows.Services.IfcStepWriter.SerializeEntity(this);
     }
 }

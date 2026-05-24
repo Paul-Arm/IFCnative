@@ -1,4 +1,3 @@
-using System.Text;
 using IFCnative.NativeWindows.Models;
 
 namespace IFCnative.NativeWindows.Services;
@@ -45,20 +44,7 @@ public sealed class IfcDocument
 
     public string ToStepText()
     {
-        var builder = new StringBuilder();
-        builder.AppendLine("ISO-10303-21;");
-        builder.Append(HeaderText.TrimEnd());
-        builder.AppendLine();
-        builder.AppendLine("DATA;");
-
-        foreach (var entity in Entities)
-        {
-            builder.AppendLine(entity.ToStepLine());
-        }
-
-        builder.AppendLine("ENDSEC;");
-        builder.AppendLine("END-ISO-10303-21;");
-        return builder.ToString();
+        return IfcStepWriter.Serialize(this);
     }
 }
 
