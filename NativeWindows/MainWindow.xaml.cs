@@ -18,6 +18,7 @@ public partial class MainWindow : Window
         "Done: typed entity index",
         "Done: relationship index",
         "Done: property/resource/type/unit indexes",
+        "Done: product placement index",
         "Done: duplicate GlobalId and containment diagnostics",
         "Done: spatial containment tree",
         "Done: entity inspector",
@@ -223,10 +224,22 @@ public partial class MainWindow : Window
 
         IncomingList.ItemsSource = GetIncomingReferences(entity).ToList();
         RelationshipList.ItemsSource = GetRelationships(entity).ToList();
+        PlacementList.ItemsSource = GetPlacement(entity).ToList();
         PropertyList.ItemsSource = GetPropertySets(entity).ToList();
         TypeAssignmentList.ItemsSource = GetTypeAssignments(entity).ToList();
         ResourceList.ItemsSource = GetResources(entity).ToList();
         UnitList.ItemsSource = document?.Units.Count > 0 ? document.Units : ["No IFCUNITASSIGNMENT units indexed."];
+    }
+
+    private IEnumerable<string> GetPlacement(IfcEntity entity)
+    {
+        if (document is null || !document.PlacementsByEntity.TryGetValue(entity.Id, out var placement))
+        {
+            yield return "No IFCLOCALPLACEMENT indexed for this entity.";
+            yield break;
+        }
+
+        yield return placement.Label;
     }
 
     private IEnumerable<string> GetPropertySets(IfcEntity entity)
@@ -314,6 +327,7 @@ public partial class MainWindow : Window
         RawArgsBox.Text = string.Empty;
         IncomingList.ItemsSource = Array.Empty<string>();
         RelationshipList.ItemsSource = Array.Empty<string>();
+        PlacementList.ItemsSource = Array.Empty<string>();
         PropertyList.ItemsSource = Array.Empty<string>();
         TypeAssignmentList.ItemsSource = Array.Empty<string>();
         ResourceList.ItemsSource = Array.Empty<string>();

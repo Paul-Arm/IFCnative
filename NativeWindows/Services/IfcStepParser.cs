@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 using IFCnative.NativeWindows;
 using IFCnative.NativeWindows.Models;
@@ -54,11 +55,13 @@ public static partial class IfcStepParser
 
         BuildRelationshipIndex(document);
         BuildPropertyAndResourceIndexes(document);
+        BuildPlacementIndex(document);
         BuildSpatialTree(document);
         ValidateDocument(document);
         document.Diagnostics.Info($"Loaded {document.Entities.Count:N0} STEP entities.");
         document.Diagnostics.Info($"Indexed {document.RelationshipById.Count:N0} IFC relationships.");
         document.Diagnostics.Info($"Indexed {document.PropertySetById.Count:N0} property/quantity sets.");
+        document.Diagnostics.Info($"Indexed {document.PlacementsByEntity.Count:N0} product placements.");
         document.Diagnostics.Info($"Detected schema: {document.Schema}.");
 
         return document;
@@ -465,6 +468,70 @@ public static partial class IfcStepParser
         }
 
         bucket.Add(value);
+    }
+
+    private static void BuildPlacementIndex(IfcDocument document)
+    {
+        foreach (var product in document.Entities.Where(entity => entity.Arguments.Count > 5))
+        {
+            var placementId = StepArgumentReader.ReadReferences(product.Arguments[5]).FirstOrDefault();
+            if (placementId == 0 || !document.EntityById.TryGetValue(placementId, out var placement) || placement.Type != "IFCLOCALPLACEMENT")
+            {
+                continue;
+            }
+
+            var axisPlacementId = StepArgumentReader.ReadReferences(placement.Arguments.ElementAtOrDefault(1) ?? string.Empty).FirstOrDefault();
+            if (axisPlacementId == 0 || !document.EntityById.TryGetValue(axisPlacementId, out var axisPlacement) || axisPlacement.Type != "IFCAXIS2PLACEMENT3D")
+            {
+                continue;
+            }
+
+            var pointId = StepArgumentReader.ReadReferences(axisPlacement.Arguments.FirstOrDefault() ?? string.Empty).FirstOrDefault();
+            if (pointId == 0 || !document.EntityById.TryGetValue(pointId, out var point) || point.Type != "IFCCARTESIANPOINT")
+            {
+                continue;
+            }
+
+            var coordinates = ReadCoordinateTuple(point.Arguments.FirstOrDefault() ?? string.Empty);
+            if (coordinates is null)
+            {
+                continue;
+            }
+
+            var relativeToId = StepArgumentReader.ReadReferences(placement.Arguments.FirstOrDefault() ?? string.Empty).FirstOrDefault();
+            document.PlacementsByEntity[product.Id] = new IfcPlacementSummary
+            {
+                ProductId = product.Id,
+                PlacementId = placement.Id,
+                RelativeToId = relativeToId == 0 ? null : relativeToId,
+                AxisPlacementId = axisPlacement.Id,
+                PointId = point.Id,
+                X = coordinates.Value.X,
+                Y = coordinates.Value.Y,
+                Z = coordinates.Value.Z,
+            };
+        }
+    }
+
+    private static (double X, double Y, double Z)? ReadCoordinateTuple(string value)
+    {
+        var trimmed = value.Trim();
+        if (!trimmed.StartsWith('(') || !trimmed.EndsWith(')'))
+        {
+            return null;
+        }
+
+        var parts = StepArgumentReader.SplitTopLevel(trimmed[1..^1]);
+        if (parts.Count < 3)
+        {
+            return null;
+        }
+
+        return double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var x)
+            && double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var y)
+            && double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var z)
+            ? (x, y, z)
+            : null;
     }
 
     private static void ValidateDocument(IfcDocument document)

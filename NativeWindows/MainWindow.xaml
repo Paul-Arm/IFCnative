@@ -178,6 +178,9 @@
                                 </StackPanel>
                             </ScrollViewer>
                         </TabItem>
+                        <TabItem Header="Placement">
+                            <ListBox x:Name="PlacementList" />
+                        </TabItem>
                         <TabItem Header="Psets/Qto">
                             <ListBox x:Name="PropertyList" />
                         </TabItem>
