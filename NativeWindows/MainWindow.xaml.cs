@@ -31,7 +31,7 @@ public partial class MainWindow : Window
         "Done: common Pset/base Qto template draft workflows",
         "Done: simple material assignment draft workflow",
         "Done: geometry backend abstraction and STEP-reference viewport preview",
-        "Done: cancellable async IFC file loading",
+        "Done: cancellable async IFC/ifcZIP file loading",
         "Done: duplicate GlobalId and containment diagnostics",
         "Done: grouped diagnostics with repair suggestions",
         "Done: spatial containment tree",
@@ -47,7 +47,7 @@ public partial class MainWindow : Window
         "Next: native mesh/tessellation backend",
         "Next: richer psets/quantities normalization",
         "Unsupported: IDS/MVD validation",
-        "Unsupported: ifcZIP/ifcXML",
+        "Unsupported: ifcXML",
     ];
 
     private IfcDocument? document;
@@ -285,9 +285,9 @@ public partial class MainWindow : Window
 
         var dialog = new SaveFileDialog
         {
-            Filter = "IFC files (*.ifc)|*.ifc|All files (*.*)|*.*",
+            Filter = "IFC files (*.ifc)|*.ifc|ifcZIP archives (*.ifczip)|*.ifczip|All files (*.*)|*.*",
             FileName = document.FileName,
-            Title = "Export IFC file",
+            Title = "Export IFC or ifcZIP file",
         };
 
         if (dialog.ShowDialog(this) != true)
@@ -308,7 +308,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        File.WriteAllText(dialog.FileName, document.ToStepText());
+        IfcFileLoader.WriteText(dialog.FileName, document.ToStepText(), document.FileName);
         var warningSuffix = validation.Warnings.Count == 0 ? string.Empty : $" with {validation.Warnings.Count:N0} warning(s)";
         StatusText.Text = $"Exported {Path.GetFileName(dialog.FileName)} after validation{warningSuffix}.";
     }

@@ -32,6 +32,17 @@ public static class IfcFileLoader
         return (await ReadAsync(path, progress, cancellationToken)).Text;
     }
 
+    public static void WriteText(string path, string stepText, string documentFileName)
+    {
+        if (IsIfcZip(path))
+        {
+            WriteZip(path, stepText, documentFileName);
+            return;
+        }
+
+        File.WriteAllText(path, stepText, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+    }
+
     private static async Task<string> ReadPlainTextAsync(
         string path,
         FileInfo fileInfo,
@@ -97,11 +108,33 @@ public static class IfcFileLoader
         return new LoadedIfcText(text, entry.Name);
     }
 
+    private static void WriteZip(string path, string stepText, string documentFileName)
+    {
+        using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None);
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: false);
+        var entry = archive.CreateEntry(CreateIfcZipEntryName(documentFileName), CompressionLevel.Optimal);
+        using var writer = new StreamWriter(entry.Open(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        writer.Write(stepText);
+    }
+
     private static bool IsIfcZip(string path)
     {
         var extension = Path.GetExtension(path);
         return extension.Equals(".ifczip", StringComparison.OrdinalIgnoreCase)
             || extension.Equals(".zip", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string CreateIfcZipEntryName(string documentFileName)
+    {
+        var fileName = Path.GetFileName(documentFileName);
+        var extension = Path.GetExtension(fileName);
+        if (extension.Equals(".ifc", StringComparison.OrdinalIgnoreCase))
+        {
+            return fileName;
+        }
+
+        var stem = Path.GetFileNameWithoutExtension(fileName);
+        return string.IsNullOrWhiteSpace(stem) ? "model.ifc" : $"{stem}.ifc";
     }
 
     private static bool IsIfcTextEntry(string name)

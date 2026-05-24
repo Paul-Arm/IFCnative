@@ -13,6 +13,7 @@ internal sealed class NativeTestRunner
     {
         Run("sample parser builds core indexes", SampleParserBuildsCoreIndexes);
         Run("IFC file loader reads ifcZIP archives", IfcFileLoaderReadsIfcZipArchives);
+        Run("IFC file loader writes ifcZIP archives", IfcFileLoaderWritesIfcZipArchives);
         Run("STEP export preserves parsed entity order", StepExportPreservesParsedEntityOrder);
         Run("STEP writer exposes canonical entity helpers", StepWriterExposesCanonicalEntityHelpers);
         Run("STEP export preserves untouched entity text", StepExportPreservesUntouchedEntityText);
@@ -94,6 +95,30 @@ internal sealed class NativeTestRunner
 
             var document = IfcStepParser.Parse(loaded.Text, loaded.FileName);
             Equal("IFC4X3_ADD2", document.Schema, "ifcZIP parsed schema");
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+        }
+    }
+
+    private static void IfcFileLoaderWritesIfcZipArchives()
+    {
+        var tempPath = Path.Combine(Path.GetTempPath(), $"ifcnative-export-{Guid.NewGuid():N}.ifczip");
+        try
+        {
+            IfcFileLoader.WriteText(tempPath, UnorderedFixture, "source-model.step");
+
+            using var archive = ZipFile.OpenRead(tempPath);
+            Equal(1, archive.Entries.Count, "ifcZIP should contain one IFC entry");
+            Equal("source-model.ifc", archive.Entries[0].Name, "ifcZIP export entry filename");
+
+            using var reader = new StreamReader(archive.Entries[0].Open());
+            var exported = reader.ReadToEnd();
+            True(exported.Contains("IFCPROJECT", StringComparison.Ordinal), "ifcZIP export should contain STEP text");
         }
         finally
         {
