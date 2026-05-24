@@ -7,16 +7,26 @@ public sealed record IfcDiagnosticDetails(
     int? EntityId = null,
     bool CanRepairDuplicateGlobalId = false,
     bool CanRepairSpatialContainment = false,
-    bool CanRepairMissingReference = false)
+    bool CanRepairMissingReference = false,
+    bool CanRepairPlacement = false,
+    bool CanRepairRepresentation = false)
 {
     public bool CanNavigate => EntityId is not null;
 
-    public bool CanRepair => CanRepairDuplicateGlobalId || CanRepairSpatialContainment || CanRepairMissingReference;
+    public bool CanRepair => CanRepairDuplicateGlobalId
+        || CanRepairSpatialContainment
+        || CanRepairMissingReference
+        || CanRepairPlacement
+        || CanRepairRepresentation;
 
     public string RepairLabel => CanRepairSpatialContainment
         ? "Stage spatial containment repair"
         : CanRepairMissingReference
             ? "Stage missing reference repair"
+        : CanRepairPlacement
+            ? "Stage placement repair"
+        : CanRepairRepresentation
+            ? "Stage representation repair"
         : "Stage duplicate GlobalId repair";
 
     public string Label => string.IsNullOrWhiteSpace(Suggestion)

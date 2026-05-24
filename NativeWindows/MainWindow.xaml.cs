@@ -983,6 +983,10 @@ public partial class MainWindow : Window
             ? IfcDocumentEditor.KeepFirstPrimarySpatialContainment(document, diagnostic.Message)
             : diagnostic.CanRepairMissingReference
                 ? IfcDocumentEditor.RemoveMissingRelationshipReferences(document, diagnostic.Message)
+            : diagnostic.CanRepairPlacement
+                ? IfcDocumentEditor.AssignDefaultPlacementFromDiagnostic(document, diagnostic.Message)
+            : diagnostic.CanRepairRepresentation
+                ? IfcDocumentEditor.AssignDefaultRepresentationFromDiagnostic(document, diagnostic.Message)
                 : IfcDocumentEditor.RegenerateDuplicateGlobalIds(document, diagnostic.Message);
         if (draft.ToStepText() == document.ToStepText())
         {
@@ -994,6 +998,10 @@ public partial class MainWindow : Window
             ? "Staged spatial containment repair from diagnostic."
             : diagnostic.CanRepairMissingReference
                 ? "Staged missing reference repair from diagnostic."
+            : diagnostic.CanRepairPlacement
+                ? "Staged default placement repair from diagnostic."
+            : diagnostic.CanRepairRepresentation
+                ? "Staged default representation repair from diagnostic."
                 : "Staged duplicate GlobalId repair from diagnostic.");
     }
 

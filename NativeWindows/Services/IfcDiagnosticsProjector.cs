@@ -59,7 +59,22 @@ public static class IfcDiagnosticsProjector
         var canRepairDuplicateGlobalId = message.Contains("Duplicate GlobalId", StringComparison.OrdinalIgnoreCase) && entityIds.Count > 1;
         var canRepairSpatialContainment = message.Contains("multiple primary spatial containment", StringComparison.OrdinalIgnoreCase) && entityIds.Count > 2;
         var canRepairMissingReference = message.Contains("references missing entity", StringComparison.OrdinalIgnoreCase) && entityIds.Count > 1;
-        return new IfcDiagnosticDetails(severity, message, Suggest(message), entityId, canRepairDuplicateGlobalId, canRepairSpatialContainment, canRepairMissingReference);
+        var canRepairPlacement = entityId is not null
+            && (message.Contains("has no ObjectPlacement", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("ObjectPlacement points to", StringComparison.OrdinalIgnoreCase));
+        var canRepairRepresentation = entityId is not null
+            && (message.Contains("has no Representation", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("Representation points to", StringComparison.OrdinalIgnoreCase));
+        return new IfcDiagnosticDetails(
+            severity,
+            message,
+            Suggest(message),
+            entityId,
+            canRepairDuplicateGlobalId,
+            canRepairSpatialContainment,
+            canRepairMissingReference,
+            canRepairPlacement,
+            canRepairRepresentation);
     }
 
     private static IEnumerable<int> ExtractEntityIds(string message)

@@ -265,6 +265,60 @@ public static class IfcDocumentEditor
         return IfcStepParser.Parse(draft.ToStepText(), draft.FileName);
     }
 
+    public static IfcDocument AssignDefaultPlacementFromDiagnostic(IfcDocument document, string diagnosticMessage)
+    {
+        var productId = ReadIds(diagnosticMessage).FirstOrDefault(document.EntityById.ContainsKey);
+        if (productId == 0 || !document.EntityById.TryGetValue(productId, out var product) || product.Arguments.Count <= 5)
+        {
+            return document;
+        }
+
+        var currentPlacementId = StepArgumentReader.ReadReferences(product.Arguments[5]).FirstOrDefault();
+        if (currentPlacementId != 0
+            && document.EntityById.TryGetValue(currentPlacementId, out var currentPlacement)
+            && currentPlacement.Type == "IFCLOCALPLACEMENT")
+        {
+            return document;
+        }
+
+        var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
+        if (!draft.EntityById.TryGetValue(productId, out var draftProduct))
+        {
+            return document;
+        }
+
+        var nextId = IfcStepWriter.NextEntityId(draft);
+        var placementId = nextId++;
+        var axisPlacementId = nextId++;
+        var pointId = nextId++;
+
+        SetArgument(draftProduct, 5, $"#{placementId}");
+        AddEntity(draft, placementId, "IFCLOCALPLACEMENT", ["$", $"#{axisPlacementId}"]);
+        AddEntity(draft, axisPlacementId, "IFCAXIS2PLACEMENT3D", [$"#{pointId}", "$", "$"]);
+        AddEntity(draft, pointId, "IFCCARTESIANPOINT", ["(0.,0.,0.)"]);
+
+        return IfcStepParser.Parse(draft.ToStepText(), draft.FileName);
+    }
+
+    public static IfcDocument AssignDefaultRepresentationFromDiagnostic(IfcDocument document, string diagnosticMessage)
+    {
+        var productId = ReadIds(diagnosticMessage).FirstOrDefault(document.EntityById.ContainsKey);
+        if (productId == 0 || !document.EntityById.TryGetValue(productId, out var product) || product.Arguments.Count <= 6)
+        {
+            return document;
+        }
+
+        var currentRepresentationId = StepArgumentReader.ReadReferences(product.Arguments[6]).FirstOrDefault();
+        if (currentRepresentationId != 0
+            && document.EntityById.TryGetValue(currentRepresentationId, out var currentRepresentation)
+            && currentRepresentation.Type == "IFCPRODUCTDEFINITIONSHAPE")
+        {
+            return document;
+        }
+
+        return AssignBodyRepresentation(document, productId, "1", "1", "1", "rectangle");
+    }
+
     private static IfcDocument AddSimpleResourceAssignment(
         IfcDocument document,
         int productId,

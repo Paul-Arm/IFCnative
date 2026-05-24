@@ -33,6 +33,7 @@ internal sealed class NativeTestRunner
         Run("missing relationship reference diagnostics can be repaired", MissingRelationshipReferenceDiagnosticsCanBeRepaired);
         Run("duplicate GlobalId diagnostics can be repaired", DuplicateGlobalIdDiagnosticsCanBeRepaired);
         Run("spatial containment diagnostics can be repaired", SpatialContainmentDiagnosticsCanBeRepaired);
+        Run("placement and representation diagnostics can be repaired", PlacementAndRepresentationDiagnosticsCanBeRepaired);
         Run("diagnostics projector supports text and severity filters", DiagnosticsProjectorSupportsFilters);
         Run("relationship graph supports filter and depth", RelationshipGraphSupportsFilterAndDepth);
         Run("native window layout store persists sanitized layout", NativeWindowLayoutStorePersistsSanitizedLayout);
@@ -460,6 +461,28 @@ internal sealed class NativeTestRunner
         True(!repaired.RelationshipById.ContainsKey(54), "duplicate empty containment relationship should be removed");
         True(!repaired.Diagnostics.Messages.Any(message => message.Contains("multiple primary spatial containment", StringComparison.OrdinalIgnoreCase)), "multiple containment warning should clear after repair");
         True(IfcDiffService.Summarize(document, repaired).Any(line => line.StartsWith("- #54", StringComparison.Ordinal)), "repair diff should show removed duplicate containment relationship");
+    }
+
+    private static void PlacementAndRepresentationDiagnosticsCanBeRepaired()
+    {
+        var document = IfcStepParser.Parse(MissingRelationshipReferenceFixture, "missing-placement-representation.ifc");
+        var placementDiagnostic = IfcDiagnosticsProjector.Project(document.Diagnostics.Messages, "has no ObjectPlacement").Single();
+        var representationDiagnostic = IfcDiagnosticsProjector.Project(document.Diagnostics.Messages, "has no Representation").Single();
+
+        True(placementDiagnostic.CanRepair, "missing placement diagnostic should expose a repair action");
+        True(placementDiagnostic.CanRepairPlacement, "missing placement diagnostic should expose placement repair kind");
+        True(representationDiagnostic.CanRepair, "missing representation diagnostic should expose a repair action");
+        True(representationDiagnostic.CanRepairRepresentation, "missing representation diagnostic should expose representation repair kind");
+
+        var withPlacement = IfcDocumentEditor.AssignDefaultPlacementFromDiagnostic(document, placementDiagnostic.Message);
+        True(withPlacement.PlacementsByEntity.ContainsKey(40), "placement repair should index the generated placement");
+        True(!withPlacement.Diagnostics.Messages.Any(message => message.Contains("#40 IFCBUILDINGELEMENTPROXY has no ObjectPlacement", StringComparison.OrdinalIgnoreCase)), "missing placement warning should clear after repair");
+        True(IfcDiffService.Summarize(document, withPlacement).Any(line => line.Contains("#40") && line.Contains("arg 6")), "placement repair diff should show edited ObjectPlacement argument");
+
+        var withRepresentation = IfcDocumentEditor.AssignDefaultRepresentationFromDiagnostic(document, representationDiagnostic.Message);
+        True(withRepresentation.RepresentationsByEntity.ContainsKey(40), "representation repair should index the generated body representation");
+        True(!withRepresentation.Diagnostics.Messages.Any(message => message.Contains("#40 IFCBUILDINGELEMENTPROXY has no Representation", StringComparison.OrdinalIgnoreCase)), "missing representation warning should clear after repair");
+        True(IfcDiffService.Summarize(document, withRepresentation).Any(line => line.Contains("#40") && line.Contains("arg 7")), "representation repair diff should show edited Representation argument");
     }
 
     private static void RelationshipGraphSupportsFilterAndDepth()
