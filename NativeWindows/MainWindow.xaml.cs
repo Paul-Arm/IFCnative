@@ -225,7 +225,9 @@ public partial class MainWindow : Window
                 entity.Id.ToString().Contains(search, StringComparison.OrdinalIgnoreCase)
                 || entity.Type.Contains(search, StringComparison.OrdinalIgnoreCase)
                 || entity.Name.Contains(search, StringComparison.OrdinalIgnoreCase)
-                || entity.GlobalId.Contains(search, StringComparison.OrdinalIgnoreCase))
+                || entity.GlobalId.Contains(search, StringComparison.OrdinalIgnoreCase)
+                || (document.SpatialPathByEntity.TryGetValue(entity.Id, out var path)
+                    && path.Contains(search, StringComparison.OrdinalIgnoreCase)))
             .Take(500)
             .Select(entity => new IfcTreeNode(entity, "match"))
             .ToList();
@@ -335,6 +337,7 @@ public partial class MainWindow : Window
         EntityIdText.Text = $"#{entity.Id}";
         EntityTypeText.Text = entity.Type;
         EntityGlobalIdText.Text = string.IsNullOrWhiteSpace(entity.GlobalId) ? "-" : entity.GlobalId;
+        EntityPathText.Text = document?.SpatialPathByEntity.TryGetValue(entity.Id, out var path) == true ? path : "-";
         EntityNameBox.Text = entity.Name;
         EntityDescriptionBox.Text = entity.Description;
         RawArgsBox.Text = string.Join(",", entity.Arguments);
@@ -472,6 +475,7 @@ public partial class MainWindow : Window
         EntityIdText.Text = "-";
         EntityTypeText.Text = "-";
         EntityGlobalIdText.Text = "-";
+        EntityPathText.Text = "-";
         EntityNameBox.Text = string.Empty;
         EntityDescriptionBox.Text = string.Empty;
         RawArgsBox.Text = string.Empty;

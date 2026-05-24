@@ -87,9 +87,9 @@ Status legend: `[x] current`, `[~] partial`, `[ ] planned/native rewrite target`
 - [x] Entity inspector.
 - [x] Incoming references panel.
 - [x] Type counts.
-- [ ] Global search with indexed text and filters.
+- [~] Global search by id/type/name/GlobalId/spatial path; advanced filters still pending.
 - [ ] Pinned selections/bookmarks.
-- [ ] Full path display for selected entity.
+- [x] Full spatial path display for selected entity.
 
 ### Editing
 
@@ -173,3 +173,4 @@ Status legend: `[x] current`, `[~] partial`, `[ ] planned/native rewrite target`
 - 2026-05-24 13:18 Europe/Berlin: added native product representation index for IFCPRODUCTDEFINITIONSHAPE/IFCSHAPEREPRESENTATION geometry references and physical product diagnostics for missing/invalid placements and representations. Existing web tests/build still pass on macOS.
 - 2026-05-24 13:28 Europe/Berlin: added native draft/diff workflow for entity and placement edits with apply/discard controls and export disabled while a draft is pending. Existing web tests/build still pass on macOS.
 - 2026-05-24 13:38 Europe/Berlin: added native async sequential IFC file loader with progress updates and cancellation wiring in the Windows shell. Existing web tests/build still pass on macOS.
+- 2026-05-24 13:48 Europe/Berlin: added native spatial path indexing, full path display in the entity inspector, and path-aware entity search. Existing web tests/build still pass on macOS.

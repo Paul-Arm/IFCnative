@@ -168,7 +168,10 @@
                                     <TextBlock x:Name="EntityTypeText" FontWeight="SemiBold" Margin="0,0,0,8" />
 
                                     <TextBlock Text="GlobalId" Foreground="{StaticResource MutedBrush}" />
-                                    <TextBlock x:Name="EntityGlobalIdText" FontWeight="SemiBold" Margin="0,0,0,12" />
+                                    <TextBlock x:Name="EntityGlobalIdText" FontWeight="SemiBold" Margin="0,0,0,8" />
+
+                                    <TextBlock Text="Spatial path" Foreground="{StaticResource MutedBrush}" />
+                                    <TextBlock x:Name="EntityPathText" FontWeight="SemiBold" Margin="0,0,0,12" />
 
                                     <TextBlock Text="Name" Foreground="{StaticResource MutedBrush}" />
                                     <TextBox x:Name="EntityNameBox" Margin="0,2,0,8" />

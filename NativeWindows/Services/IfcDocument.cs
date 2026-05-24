@@ -39,6 +39,8 @@ public sealed class IfcDocument
 
     public List<IfcTreeNode> SpatialRoots { get; } = [];
 
+    public Dictionary<int, string> SpatialPathByEntity { get; } = [];
+
     public IfcDiagnostics Diagnostics { get; } = new();
 
     public string ToStepText()

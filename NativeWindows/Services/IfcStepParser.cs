@@ -677,7 +677,7 @@ public static partial class IfcStepParser
 
         foreach (var root in roots)
         {
-            document.SpatialRoots.Add(BuildNode(document, root, "root", childrenByParent, []));
+            document.SpatialRoots.Add(BuildNode(document, root, "root", childrenByParent, [], []));
         }
     }
 
@@ -711,9 +711,13 @@ public static partial class IfcStepParser
         IfcEntity entity,
         string relation,
         Dictionary<int, List<(int ChildId, string Relation)>> childrenByParent,
-        HashSet<int> path)
+        HashSet<int> path,
+        IReadOnlyList<string> parentLabels)
     {
         var node = new IfcTreeNode(entity, relation);
+        var currentLabels = parentLabels.Concat([$"{entity.DisplayName} ({entity.TypeName()})"]).ToList();
+        document.SpatialPathByEntity[entity.Id] = string.Join(" / ", currentLabels);
+
         if (!path.Add(entity.Id))
         {
             return node;
@@ -725,7 +729,7 @@ public static partial class IfcStepParser
             {
                 if (document.EntityById.TryGetValue(child.ChildId, out var childEntity))
                 {
-                    node.Children.Add(BuildNode(document, childEntity, child.Relation, childrenByParent, path));
+                    node.Children.Add(BuildNode(document, childEntity, child.Relation, childrenByParent, path, currentLabels));
                 }
             }
         }
