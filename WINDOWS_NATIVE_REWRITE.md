@@ -66,7 +66,7 @@ Status legend: `[x] current`, `[~] partial`, `[ ] planned/native rewrite target`
 - [x] Export IFC text.
 - [x] Extract schema/header.
 - [~] Preserve original STEP ids and order during export. Current native export sorts by id.
-- [ ] Large-file memory strategy: streaming parser, lazy indexes, cancellation, progress reporting.
+- [~] Large-file memory strategy: async sequential file loading with progress/cancellation; streaming parser and lazy indexes still pending.
 - [ ] Recent files/session restore.
 - [ ] ifcZIP/ifcXML support.
 
@@ -155,7 +155,7 @@ Status legend: `[x] current`, `[~] partial`, `[ ] planned/native rewrite target`
 4. [ ] Split native shell into UI + services + view models so large lists can be virtualized and tested.
 5. [~] Port TypeScript native document capabilities to C# services: first-pass relationship model/indexing, property/resource/type/unit/placement/representation read indexes, and numeric placement edit helper done; broader edit helpers and body helpers remain.
 6. [~] Implement draft transaction model and native diff summary. Entity and placement edits now stage drafts with apply/discard; broader edit operations still need integration.
-7. [ ] Add large-file parser/index strategy with progress and cancellation.
+7. [~] Add large-file parser/index strategy with progress and cancellation. Async sequential file loading with cancel/progress is done; parser/index streaming still pending.
 8. [ ] Implement native relationship/spatial/property editor panels.
 9. [ ] Implement geometry backend abstraction and first viewport.
 10. [ ] Add native test project for parser/index/edit/diff services.
@@ -172,3 +172,4 @@ Status legend: `[x] current`, `[~] partial`, `[ ] planned/native rewrite target`
 - 2026-05-24 13:08 Europe/Berlin: added native numeric placement editing for indexed product placements, reparsing/exporting through the C# document service. Existing web tests/build still pass on macOS.
 - 2026-05-24 13:18 Europe/Berlin: added native product representation index for IFCPRODUCTDEFINITIONSHAPE/IFCSHAPEREPRESENTATION geometry references and physical product diagnostics for missing/invalid placements and representations. Existing web tests/build still pass on macOS.
 - 2026-05-24 13:28 Europe/Berlin: added native draft/diff workflow for entity and placement edits with apply/discard controls and export disabled while a draft is pending. Existing web tests/build still pass on macOS.
+- 2026-05-24 13:38 Europe/Berlin: added native async sequential IFC file loader with progress updates and cancellation wiring in the Windows shell. Existing web tests/build still pass on macOS.

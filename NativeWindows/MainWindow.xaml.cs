@@ -21,6 +21,7 @@ public partial class MainWindow : Window
         "Done: property/resource/type/unit indexes",
         "Done: product placement index/editor",
         "Done: product representation index",
+        "Done: cancellable async IFC file loading",
         "Done: duplicate GlobalId and containment diagnostics",
         "Done: spatial containment tree",
         "Done: entity inspector",
@@ -36,6 +37,7 @@ public partial class MainWindow : Window
     private IfcDocument? savedDocument;
     private IfcDocument? pendingDocument;
     private IfcEntity? selectedEntity;
+    private CancellationTokenSource? openCancellation;
     private bool updatingUi;
 
     public MainWindow()
@@ -45,7 +47,7 @@ public partial class MainWindow : Window
         LoadDocument(IfcStepParser.CreateSample());
     }
 
-    private void OpenIfc_Click(object sender, RoutedEventArgs e)
+    private async void OpenIfc_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFileDialog
         {
@@ -58,8 +60,44 @@ public partial class MainWindow : Window
             return;
         }
 
-        var text = File.ReadAllText(dialog.FileName);
-        LoadDocument(IfcStepParser.Parse(text, Path.GetFileName(dialog.FileName)));
+        openCancellation?.Cancel();
+        openCancellation = new CancellationTokenSource();
+        SetOpenInProgress(true);
+
+        try
+        {
+            var progress = new Progress<string>(message => StatusText.Text = message);
+            var text = await IfcFileLoader.ReadTextAsync(dialog.FileName, progress, openCancellation.Token);
+            StatusText.Text = $"Parsing {Path.GetFileName(dialog.FileName)}…";
+            var parsed = await Task.Run(() => IfcStepParser.Parse(text, Path.GetFileName(dialog.FileName)), openCancellation.Token);
+            LoadDocument(parsed);
+        }
+        catch (OperationCanceledException)
+        {
+            StatusText.Text = "Open cancelled.";
+        }
+        catch (Exception exception)
+        {
+            StatusText.Text = $"Open failed: {exception.Message}";
+        }
+        finally
+        {
+            SetOpenInProgress(false);
+            openCancellation?.Dispose();
+            openCancellation = null;
+        }
+    }
+
+    private void CancelOpen_Click(object sender, RoutedEventArgs e)
+    {
+        openCancellation?.Cancel();
+    }
+
+    private void SetOpenInProgress(bool inProgress)
+    {
+        OpenButton.IsEnabled = !inProgress;
+        LoadSampleButton.IsEnabled = !inProgress;
+        CancelOpenButton.IsEnabled = inProgress;
     }
 
     private void LoadSample_Click(object sender, RoutedEventArgs e)

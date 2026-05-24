@@ -65,8 +65,9 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <StackPanel Orientation="Horizontal">
-                    <Button Content="Open IFC" Click="OpenIfc_Click" />
-                    <Button Content="Load sample" Click="LoadSample_Click" Background="#334155" BorderBrush="#475569" />
+                    <Button x:Name="OpenButton" Content="Open IFC" Click="OpenIfc_Click" />
+                    <Button x:Name="CancelOpenButton" Content="Cancel" Click="CancelOpen_Click" Background="#991b1b" BorderBrush="#ef4444" IsEnabled="False" />
+                    <Button x:Name="LoadSampleButton" Content="Load sample" Click="LoadSample_Click" Background="#334155" BorderBrush="#475569" />
                     <Button x:Name="ExportButton" Content="Export IFC" Click="ExportIfc_Click" Background="#16a34a" BorderBrush="#22c55e" />
                 </StackPanel>
                 <StackPanel Grid.Column="1" Margin="16,0" VerticalAlignment="Center">
