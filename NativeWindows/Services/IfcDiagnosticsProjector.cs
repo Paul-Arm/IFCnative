@@ -4,20 +4,36 @@ namespace IFCnative.NativeWindows.Services;
 
 public static class IfcDiagnosticsProjector
 {
-    public static IReadOnlyList<IfcDiagnosticDetails> Project(IEnumerable<string> messages)
+    public static IReadOnlyList<IfcDiagnosticDetails> Project(IEnumerable<string> messages, string? filter = null)
     {
+        var normalizedFilter = filter?.Trim();
         var projected = messages
             .Select(Parse)
+            .Where(item => MatchesFilter(item, normalizedFilter))
             .OrderBy(item => SeverityRank(item.Severity))
             .ThenBy(item => item.Message, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         if (projected.Count == 0)
         {
-            projected.Add(new IfcDiagnosticDetails("Info", "No diagnostics were reported.", string.Empty));
+            projected.Add(string.IsNullOrWhiteSpace(normalizedFilter)
+                ? new IfcDiagnosticDetails("Info", "No diagnostics were reported.", string.Empty)
+                : new IfcDiagnosticDetails("Info", $"No diagnostics match '{normalizedFilter}'.", "Clear the filter or search for a different severity/message."));
         }
 
         return projected;
+    }
+
+    private static bool MatchesFilter(IfcDiagnosticDetails item, string? filter)
+    {
+        if (string.IsNullOrWhiteSpace(filter))
+        {
+            return true;
+        }
+
+        return item.Severity.Contains(filter, StringComparison.OrdinalIgnoreCase)
+            || item.Message.Contains(filter, StringComparison.OrdinalIgnoreCase)
+            || item.Suggestion.Contains(filter, StringComparison.OrdinalIgnoreCase);
     }
 
     private static IfcDiagnosticDetails Parse(string rawMessage)
@@ -38,7 +54,30 @@ public static class IfcDiagnosticsProjector
             break;
         }
 
-        return new IfcDiagnosticDetails(severity, message, Suggest(message));
+        return new IfcDiagnosticDetails(severity, message, Suggest(message), ExtractEntityId(message));
+    }
+
+    private static int? ExtractEntityId(string message)
+    {
+        var hashIndex = message.IndexOf('#', StringComparison.Ordinal);
+        while (hashIndex >= 0 && hashIndex + 1 < message.Length)
+        {
+            var start = hashIndex + 1;
+            var end = start;
+            while (end < message.Length && char.IsDigit(message[end]))
+            {
+                end++;
+            }
+
+            if (end > start && int.TryParse(message[start..end], out var entityId))
+            {
+                return entityId;
+            }
+
+            hashIndex = message.IndexOf('#', hashIndex + 1);
+        }
+
+        return null;
     }
 
     private static int SeverityRank(string severity)

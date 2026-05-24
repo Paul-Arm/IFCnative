@@ -15,28 +15,48 @@
         <SolidColorBrush x:Key="BorderBrush" Color="#263244" />
         <SolidColorBrush x:Key="TextBrush" Color="#e5e7eb" />
         <SolidColorBrush x:Key="MutedBrush" Color="#9ca3af" />
+        <SolidColorBrush x:Key="AccentBrush" Color="#2563eb" />
+        <SolidColorBrush x:Key="ControlBrush" Color="#0b1220" />
+        <SolidColorBrush x:Key="ControlHoverBrush" Color="#1e293b" />
+        <SolidColorBrush x:Key="ControlSelectedBrush" Color="#1d4ed8" />
+        <SolidColorBrush x:Key="DisabledTextBrush" Color="#64748b" />
         <Style TargetType="TextBlock">
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
             <Setter Property="TextWrapping" Value="Wrap" />
         </Style>
+        <Style TargetType="Label">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+        </Style>
         <Style TargetType="Button">
             <Setter Property="Padding" Value="12,7" />
             <Setter Property="Margin" Value="0,0,8,0" />
-            <Setter Property="Background" Value="#2563eb" />
+            <Setter Property="Background" Value="{StaticResource AccentBrush}" />
             <Setter Property="Foreground" Value="White" />
             <Setter Property="BorderBrush" Value="#3b82f6" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="FontWeight" Value="SemiBold" />
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#1d4ed8" />
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Background" Value="#1e293b" />
+                    <Setter Property="BorderBrush" Value="#334155" />
+                    <Setter Property="Foreground" Value="{StaticResource DisabledTextBrush}" />
+                </Trigger>
+            </Style.Triggers>
         </Style>
         <Style TargetType="TextBox">
-            <Setter Property="Background" Value="#0b1220" />
+            <Setter Property="Background" Value="{StaticResource ControlBrush}" />
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
             <Setter Property="CaretBrush" Value="White" />
             <Setter Property="Padding" Value="8,5" />
+            <Setter Property="SelectionBrush" Value="{StaticResource ControlSelectedBrush}" />
+            <Setter Property="SelectionTextBrush" Value="White" />
         </Style>
         <Style TargetType="ListBox">
-            <Setter Property="Background" Value="#0b1220" />
+            <Setter Property="Background" Value="{StaticResource ControlBrush}" />
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
             <Setter Property="ScrollViewer.CanContentScroll" Value="True" />
@@ -44,12 +64,79 @@
             <Setter Property="VirtualizingPanel.VirtualizationMode" Value="Recycling" />
         </Style>
         <Style TargetType="TreeView">
-            <Setter Property="Background" Value="#0b1220" />
+            <Setter Property="Background" Value="{StaticResource ControlBrush}" />
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
             <Setter Property="ScrollViewer.CanContentScroll" Value="True" />
             <Setter Property="VirtualizingPanel.IsVirtualizing" Value="True" />
             <Setter Property="VirtualizingPanel.VirtualizationMode" Value="Recycling" />
+        </Style>
+        <Style TargetType="ListBoxItem">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Padding" Value="6,4" />
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{StaticResource ControlHoverBrush}" />
+                </Trigger>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="{StaticResource ControlSelectedBrush}" />
+                    <Setter Property="Foreground" Value="White" />
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Foreground" Value="{StaticResource DisabledTextBrush}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style TargetType="TreeViewItem">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Style.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="{StaticResource ControlSelectedBrush}" />
+                    <Setter Property="Foreground" Value="White" />
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Foreground" Value="{StaticResource DisabledTextBrush}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style TargetType="TabControl">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+        </Style>
+        <Style TargetType="TabItem">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="Background" Value="#111827" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+            <Setter Property="Padding" Value="10,5" />
+            <Style.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="#1e293b" />
+                    <Setter Property="Foreground" Value="White" />
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Foreground" Value="{StaticResource DisabledTextBrush}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style TargetType="Menu">
+            <Setter Property="Background" Value="#020617" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+        </Style>
+        <Style TargetType="MenuItem">
+            <Setter Property="Background" Value="#020617" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+            <Style.Triggers>
+                <Trigger Property="IsHighlighted" Value="True">
+                    <Setter Property="Background" Value="{StaticResource ControlHoverBrush}" />
+                    <Setter Property="Foreground" Value="White" />
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Foreground" Value="{StaticResource DisabledTextBrush}" />
+                </Trigger>
+            </Style.Triggers>
         </Style>
         <HierarchicalDataTemplate DataType="{x:Type models:IfcTreeNode}" ItemsSource="{Binding Children}">
             <TextBlock Text="{Binding Label}" />
@@ -57,6 +144,23 @@
     </Window.Resources>
 
     <DockPanel LastChildFill="True">
+        <Menu DockPanel.Dock="Top">
+            <MenuItem Header="_File">
+                <MenuItem Header="_Open…" Click="OpenIfc_Click" InputGestureText="Ctrl+O" />
+                <MenuItem Header="Load _Sample" Click="LoadSample_Click" />
+                <Separator />
+                <MenuItem Header="_Export…" Click="ExportIfc_Click" InputGestureText="Ctrl+S" />
+                <Separator />
+                <MenuItem Header="E_xit" Click="Exit_Click" />
+            </MenuItem>
+            <MenuItem Header="_View">
+                <MenuItem x:Name="ShowModelPaneMenuItem" Header="Show _Model pane" IsCheckable="True" IsChecked="True" Click="PaneVisibility_Click" />
+                <MenuItem x:Name="ShowViewportPaneMenuItem" Header="Show _Viewport pane" IsCheckable="True" IsChecked="True" Click="PaneVisibility_Click" />
+                <MenuItem x:Name="ShowInspectorPaneMenuItem" Header="Show _Inspector pane" IsCheckable="True" IsChecked="True" Click="PaneVisibility_Click" />
+                <Separator />
+                <MenuItem Header="Reset _Layout" Click="ResetLayout_Click" />
+            </MenuItem>
+        </Menu>
         <Border DockPanel.Dock="Top" Background="#020617" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="14,10">
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -85,14 +189,14 @@
 
         <Grid Margin="12">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="330" MinWidth="260" />
-                <ColumnDefinition Width="6" />
-                <ColumnDefinition Width="*" MinWidth="420" />
-                <ColumnDefinition Width="6" />
-                <ColumnDefinition Width="380" MinWidth="320" />
+                <ColumnDefinition x:Name="ModelColumn" Width="330" MinWidth="260" />
+                <ColumnDefinition x:Name="ModelSplitterColumn" Width="6" />
+                <ColumnDefinition x:Name="ViewportColumn" Width="*" MinWidth="420" />
+                <ColumnDefinition x:Name="InspectorSplitterColumn" Width="6" />
+                <ColumnDefinition x:Name="InspectorColumn" Width="380" MinWidth="320" />
             </Grid.ColumnDefinitions>
 
-            <Border Grid.Column="0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12">
+            <Border x:Name="ModelPane" Grid.Column="0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12">
                 <DockPanel LastChildFill="True">
                     <StackPanel DockPanel.Dock="Top">
                         <TextBlock Text="Model" FontSize="16" FontWeight="SemiBold" />
@@ -121,9 +225,9 @@
                 </DockPanel>
             </Border>
 
-            <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch" Background="Transparent" />
+            <GridSplitter x:Name="ModelSplitter" Grid.Column="1" Width="6" HorizontalAlignment="Stretch" Background="Transparent" />
 
-            <Border Grid.Column="2" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12">
+            <Border x:Name="ViewportPane" Grid.Column="2" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12">
                 <DockPanel LastChildFill="True">
                     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,10">
                         <TextBlock x:Name="ViewportTitle" Text="Native Viewport" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
@@ -138,15 +242,13 @@
                                 <RowDefinition Height="*" />
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
-                            <DockPanel Margin="16">
-                                <TextBlock DockPanel.Dock="Top"
-                                           Text="Geometry preview"
-                                           Foreground="#64748b"
-                                           FontSize="22"
-                                           FontWeight="SemiBold"
-                                           Margin="0,0,0,12" />
-                                <ListBox x:Name="ViewportGeometryList" DisplayMemberPath="Label" />
-                            </DockPanel>
+                            <Viewport3D x:Name="NativeViewport3D" Margin="8" ClipToBounds="True" />
+                            <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="16" Background="#99020617" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="10" MaxWidth="420">
+                                <StackPanel>
+                                    <TextBlock Text="Native 3D preview" Foreground="#cbd5e1" FontSize="18" FontWeight="SemiBold" />
+                                    <ListBox x:Name="ViewportGeometryList" DisplayMemberPath="Label" Margin="0,8,0,0" MaxHeight="150" />
+                                </StackPanel>
+                            </Border>
                             <Border Grid.Row="1" Background="#0b1220" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="12">
                                 <TextBlock x:Name="ViewportInfo" Foreground="{StaticResource MutedBrush}" />
                             </Border>
@@ -155,9 +257,9 @@
                 </DockPanel>
             </Border>
 
-            <GridSplitter Grid.Column="3" Width="6" HorizontalAlignment="Stretch" Background="Transparent" />
+            <GridSplitter x:Name="InspectorSplitter" Grid.Column="3" Width="6" HorizontalAlignment="Stretch" Background="Transparent" />
 
-            <Border Grid.Column="4" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12">
+            <Border x:Name="InspectorPane" Grid.Column="4" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12">
                 <DockPanel LastChildFill="True">
                     <TextBlock DockPanel.Dock="Top" x:Name="InspectorTitle" Text="Inspector" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10" />
                     <TabControl Background="Transparent" BorderThickness="0">
@@ -331,15 +433,37 @@
                         </TabItem>
                         <TabItem Header="Graph">
                             <DockPanel LastChildFill="True" Margin="0,8,8,8">
-                                <TextBlock DockPanel.Dock="Top" Text="Selected entity relationship neighborhood" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,8" />
-                                <ListBox x:Name="RelationshipGraphList" DisplayMemberPath="Label" SelectionChanged="RelationshipGraphList_SelectionChanged" />
+                                <StackPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+                                    <TextBlock Text="Selected entity relationship neighborhood" Foreground="{StaticResource MutedBrush}" />
+                                    <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                        <Button Content="Fit graph" Click="FitGraph_Click" Background="#334155" BorderBrush="#475569" />
+                                        <Button Content="Reset zoom" Click="ResetGraph_Click" Background="#334155" BorderBrush="#475569" />
+                                    </StackPanel>
+                                </StackPanel>
+                                <Border Background="#020617" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6" ClipToBounds="True">
+                                    <Canvas x:Name="RelationshipGraphCanvas"
+                                            Background="#020617"
+                                            MouseLeftButtonDown="RelationshipGraphCanvas_MouseLeftButtonDown"
+                                            MouseLeftButtonUp="RelationshipGraphCanvas_MouseLeftButtonUp"
+                                            MouseMove="RelationshipGraphCanvas_MouseMove"
+                                            MouseWheel="RelationshipGraphCanvas_MouseWheel" />
+                                </Border>
                             </DockPanel>
                         </TabItem>
                         <TabItem Header="Incoming">
                             <ListBox x:Name="IncomingList" />
                         </TabItem>
                         <TabItem Header="Diagnostics">
-                            <ListBox x:Name="DiagnosticsList" DisplayMemberPath="Label" />
+                            <DockPanel LastChildFill="True" Margin="0,8,8,8">
+                                <StackPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+                                    <TextBlock Text="Filter diagnostics" Foreground="{StaticResource MutedBrush}" />
+                                    <TextBox x:Name="DiagnosticFilterBox"
+                                             Margin="0,2,0,0"
+                                             TextChanged="DiagnosticFilter_TextChanged"
+                                             ToolTip="Filter by severity, message text, or repair suggestion, for example Error, Warning, GlobalId, placement" />
+                                </StackPanel>
+                                <ListBox x:Name="DiagnosticsList" DisplayMemberPath="Label" SelectionChanged="DiagnosticsList_SelectionChanged" />
+                            </DockPanel>
                         </TabItem>
                     </TabControl>
                 </DockPanel>

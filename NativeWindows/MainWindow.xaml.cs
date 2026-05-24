@@ -1,6 +1,10 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Media3D;
+using System.Windows.Shapes;
 using IFCnative.NativeWindows.Models;
 using IFCnative.NativeWindows.Services;
 using IFCnative.NativeWindows.ViewModels;
@@ -54,14 +58,70 @@ public partial class MainWindow : Window
     private readonly IfcDraftSession draftSession = new();
     private readonly IIfcGeometryBackend geometryBackend = new StepReferenceGeometryBackend();
     private readonly HashSet<int> bookmarkedEntityIds = [];
+    private readonly ScaleTransform graphScale = new(1, 1);
+    private readonly TranslateTransform graphTranslate = new(0, 0);
+    private IReadOnlyList<IfcRelationshipGraphItem> currentGraphItems = Array.Empty<IfcRelationshipGraphItem>();
+    private Point? graphDragStart;
     private bool updatingUi;
 
     public MainWindow()
     {
         InitializeComponent();
+        RelationshipGraphCanvas.RenderTransform = new TransformGroup { Children = { graphScale, graphTranslate } };
         CapabilityList.ItemsSource = capabilities;
         RefreshRecentFiles();
         LoadDocument(IfcStepParser.CreateSample());
+    }
+
+    private void Exit_Click(object sender, RoutedEventArgs e)
+    {
+        Close();
+    }
+
+    private void PaneVisibility_Click(object sender, RoutedEventArgs e)
+    {
+        ApplyPaneLayout();
+    }
+
+    private void ResetLayout_Click(object sender, RoutedEventArgs e)
+    {
+        ShowModelPaneMenuItem.IsChecked = true;
+        ShowViewportPaneMenuItem.IsChecked = true;
+        ShowInspectorPaneMenuItem.IsChecked = true;
+        ModelColumn.Width = new GridLength(330);
+        ViewportColumn.Width = new GridLength(1, GridUnitType.Star);
+        InspectorColumn.Width = new GridLength(380);
+        ApplyPaneLayout();
+        StatusText.Text = "Window layout reset.";
+    }
+
+    private void ApplyPaneLayout()
+    {
+        SetPane(ModelPane, ModelSplitter, ModelColumn, ModelSplitterColumn, ShowModelPaneMenuItem.IsChecked, 330);
+        SetPane(ViewportPane, null, ViewportColumn, null, ShowViewportPaneMenuItem.IsChecked, 1, true);
+        SetPane(InspectorPane, InspectorSplitter, InspectorColumn, InspectorSplitterColumn, ShowInspectorPaneMenuItem.IsChecked, 380);
+
+        if (!ShowModelPaneMenuItem.IsChecked && !ShowViewportPaneMenuItem.IsChecked && !ShowInspectorPaneMenuItem.IsChecked)
+        {
+            ShowViewportPaneMenuItem.IsChecked = true;
+            SetPane(ViewportPane, null, ViewportColumn, null, true, 1, true);
+        }
+    }
+
+    private static void SetPane(UIElement pane, UIElement? splitter, ColumnDefinition column, ColumnDefinition? splitterColumn, bool visible, double width, bool star = false)
+    {
+        pane.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        if (splitter is not null)
+        {
+            splitter.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        column.Width = visible ? new GridLength(width, star ? GridUnitType.Star : GridUnitType.Pixel) : new GridLength(0);
+        column.MinWidth = visible ? (star ? 420 : Math.Min(width, 260)) : 0;
+        if (splitterColumn is not null)
+        {
+            splitterColumn.Width = visible ? new GridLength(6) : new GridLength(0);
+        }
     }
 
     private async void OpenIfc_Click(object sender, RoutedEventArgs e)
@@ -672,9 +732,9 @@ public partial class MainWindow : Window
         SetRelationshipEditor(relationship);
     }
 
-    private void RelationshipGraphList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void SelectGraphEntity(IfcRelationshipGraphItem graphItem)
     {
-        if (updatingUi || document is null || RelationshipGraphList.SelectedItem is not IfcRelationshipGraphItem graphItem || graphItem.EntityId is null)
+        if (updatingUi || document is null || graphItem.EntityId is null)
         {
             return;
         }
@@ -682,6 +742,79 @@ public partial class MainWindow : Window
         if (document.EntityById.TryGetValue(graphItem.EntityId.Value, out var entity))
         {
             SelectEntity(entity);
+        }
+    }
+
+    private void FitGraph_Click(object sender, RoutedEventArgs e)
+    {
+        FitGraph();
+    }
+
+    private void ResetGraph_Click(object sender, RoutedEventArgs e)
+    {
+        graphScale.ScaleX = 1;
+        graphScale.ScaleY = 1;
+        graphTranslate.X = 0;
+        graphTranslate.Y = 0;
+    }
+
+    private void RelationshipGraphCanvas_MouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        var factor = e.Delta > 0 ? 1.12 : 0.88;
+        graphScale.ScaleX = Math.Clamp(graphScale.ScaleX * factor, 0.35, 2.8);
+        graphScale.ScaleY = graphScale.ScaleX;
+    }
+
+    private void RelationshipGraphCanvas_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        graphDragStart = e.GetPosition(this);
+        RelationshipGraphCanvas.CaptureMouse();
+    }
+
+    private void RelationshipGraphCanvas_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (graphDragStart is null || e.LeftButton != MouseButtonState.Pressed)
+        {
+            return;
+        }
+
+        var current = e.GetPosition(this);
+        graphTranslate.X += current.X - graphDragStart.Value.X;
+        graphTranslate.Y += current.Y - graphDragStart.Value.Y;
+        graphDragStart = current;
+    }
+
+    private void RelationshipGraphCanvas_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        graphDragStart = null;
+        RelationshipGraphCanvas.ReleaseMouseCapture();
+    }
+
+    private void DiagnosticFilter_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (updatingUi || document is null)
+        {
+            return;
+        }
+
+        RefreshDiagnostics();
+    }
+
+    private void DiagnosticsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (updatingUi || document is null || DiagnosticsList.SelectedItem is not IfcDiagnosticDetails diagnostic || diagnostic.EntityId is null)
+        {
+            return;
+        }
+
+        if (document.EntityById.TryGetValue(diagnostic.EntityId.Value, out var entity))
+        {
+            SelectEntity(entity);
+            StatusText.Text = $"Navigated to diagnostic target #{entity.Id}.";
+        }
+        else
+        {
+            StatusText.Text = $"Diagnostic target #{diagnostic.EntityId.Value} is not present in the indexed entities.";
         }
     }
 
@@ -697,10 +830,64 @@ public partial class MainWindow : Window
         if (document is not null)
         {
             ViewportTitle.Text = "Native Viewport";
-            ViewportGeometryList.ItemsSource = geometryBackend.ProjectDocument(document);
+            var viewportItems = geometryBackend.ProjectDocument(document);
+            ViewportGeometryList.ItemsSource = viewportItems;
+            RenderNativeViewport(viewportItems);
         }
 
         ViewportInfo.Text = "Native geometry preview reset.";
+    }
+
+    private void RenderNativeViewport(IReadOnlyList<IfcViewportItem> items)
+    {
+        NativeViewport3D.Children.Clear();
+        NativeViewport3D.Camera = new PerspectiveCamera(new Point3D(7, -9, 6), new Vector3D(-7, 9, -6), new Vector3D(0, 0, 1), 45);
+
+        var group = new Model3DGroup();
+        group.Children.Add(new AmbientLight(Color.FromRgb(90, 110, 140)));
+        group.Children.Add(new DirectionalLight(Colors.White, new Vector3D(-0.8, 1.0, -1.2)));
+
+        var visibleItems = items.Where(item => item.EntityId is not null).Take(24).ToList();
+        if (visibleItems.Count == 0)
+        {
+            visibleItems.Add(new IfcViewportItem(null, "Generated sample preview volume"));
+        }
+
+        var columns = Math.Max(1, (int)Math.Ceiling(Math.Sqrt(visibleItems.Count)));
+        for (var index = 0; index < visibleItems.Count; index++)
+        {
+            var row = index / columns;
+            var column = index % columns;
+            var center = new Point3D((column - (columns - 1) / 2.0) * 1.7, row * 1.7, 0.45);
+            var height = 0.7 + (index % 4) * 0.18;
+            group.Children.Add(CreateBox(center, 1.15, 1.15, height, index == 0 ? Color.FromRgb(59, 130, 246) : Color.FromRgb(34, 197, 94)));
+        }
+
+        NativeViewport3D.Children.Add(new ModelVisual3D { Content = group });
+    }
+
+    private static GeometryModel3D CreateBox(Point3D center, double width, double depth, double height, Color color)
+    {
+        var x = width / 2;
+        var y = depth / 2;
+        var z = height / 2;
+        var points = new Point3DCollection
+        {
+            new(center.X - x, center.Y - y, center.Z - z), new(center.X + x, center.Y - y, center.Z - z), new(center.X + x, center.Y + y, center.Z - z), new(center.X - x, center.Y + y, center.Z - z),
+            new(center.X - x, center.Y - y, center.Z + z), new(center.X + x, center.Y - y, center.Z + z), new(center.X + x, center.Y + y, center.Z + z), new(center.X - x, center.Y + y, center.Z + z),
+        };
+        var indices = new Int32Collection
+        {
+            0,2,1, 0,3,2, 4,5,6, 4,6,7, 0,1,5, 0,5,4,
+            1,2,6, 1,6,5, 2,3,7, 2,7,6, 3,0,4, 3,4,7,
+        };
+
+        return new GeometryModel3D(
+            new MeshGeometry3D { Positions = points, TriangleIndices = indices },
+            new DiffuseMaterial(new SolidColorBrush(color)))
+        {
+            BackMaterial = new DiffuseMaterial(new SolidColorBrush(Color.FromRgb(15, 23, 42))),
+        };
     }
 
     private void StageDraft(IfcDocument draftDocument, int selectedId, string message)
@@ -729,7 +916,7 @@ public partial class MainWindow : Window
         SchemaText.Text = document.Schema;
         EntityCountText.Text = $"{document.Entities.Count:N0} entities";
         StatusText.Text = document.FileName;
-        DiagnosticsList.ItemsSource = IfcDiagnosticsProjector.Project(document.Diagnostics.Messages);
+        RefreshDiagnostics();
         TypeList.ItemsSource = IfcNavigationProjector.GetTypeCounts(document);
 
         bookmarkedEntityIds.RemoveWhere(id => !document.EntityById.ContainsKey(id));
@@ -739,7 +926,9 @@ public partial class MainWindow : Window
         StructureTree.ItemsSource = document.SpatialRoots;
         ViewportTitle.Text = "Native Viewport";
         ViewportInfo.Text = IfcNavigationProjector.GetDocumentViewportSummary(document);
-        ViewportGeometryList.ItemsSource = geometryBackend.ProjectDocument(document);
+        var documentViewportItems = geometryBackend.ProjectDocument(document);
+        ViewportGeometryList.ItemsSource = documentViewportItems;
+        RenderNativeViewport(documentViewportItems);
         RefreshDraftUi();
 
         updatingUi = false;
@@ -773,12 +962,126 @@ public partial class MainWindow : Window
         BookmarkList.ItemsSource = IfcNavigationProjector.GetBookmarks(document, bookmarkedEntityIds);
     }
 
+    private void RenderRelationshipGraph()
+    {
+        RelationshipGraphCanvas.Children.Clear();
+        if (currentGraphItems.Count == 0)
+        {
+            RelationshipGraphCanvas.Children.Add(new TextBlock
+            {
+                Text = "Select an entity to visualize its relationship neighborhood.",
+                Foreground = (Brush)FindResource("MutedBrush"),
+                Margin = new Thickness(14),
+            });
+            return;
+        }
+
+        var nodes = currentGraphItems
+            .Where(item => item.EntityId is not null)
+            .GroupBy(item => item.EntityId!.Value)
+            .Select(group => group.First())
+            .Take(18)
+            .ToList();
+        var center = new Point(210, 170);
+        var radius = Math.Max(110, 36 * nodes.Count / Math.PI);
+        var positions = new Dictionary<int, Point>();
+
+        for (var index = 0; index < nodes.Count; index++)
+        {
+            var angle = nodes.Count == 1 ? -Math.PI / 2 : (2 * Math.PI * index / nodes.Count) - Math.PI / 2;
+            positions[nodes[index].EntityId!.Value] = new Point(center.X + Math.Cos(angle) * radius, center.Y + Math.Sin(angle) * radius);
+        }
+
+        foreach (var position in positions.Values)
+        {
+            AddGraphEdge(center, position);
+        }
+
+        AddGraphNode(center, selectedEntity?.Id is null ? "Selection" : $"#{selectedEntity.Id}\n{selectedEntity.TypeName()}", null, true);
+        foreach (var node in nodes)
+        {
+            AddGraphNode(positions[node.EntityId!.Value], node.Label, node, false);
+        }
+    }
+
+    private void AddGraphEdge(Point from, Point to)
+    {
+        RelationshipGraphCanvas.Children.Add(new Line
+        {
+            X1 = from.X,
+            Y1 = from.Y,
+            X2 = to.X,
+            Y2 = to.Y,
+            Stroke = new SolidColorBrush(Color.FromRgb(71, 85, 105)),
+            StrokeThickness = 1.4,
+            Opacity = 0.7,
+        });
+    }
+
+    private void AddGraphNode(Point center, string label, IfcRelationshipGraphItem? item, bool selected)
+    {
+        const double width = 150;
+        const double height = 54;
+        var border = new Border
+        {
+            Width = width,
+            Height = height,
+            CornerRadius = new CornerRadius(14),
+            Background = new SolidColorBrush(selected ? Color.FromRgb(29, 78, 216) : Color.FromRgb(15, 23, 42)),
+            BorderBrush = new SolidColorBrush(selected ? Color.FromRgb(147, 197, 253) : Color.FromRgb(51, 65, 85)),
+            BorderThickness = new Thickness(1),
+            Padding = new Thickness(8),
+            Child = new TextBlock
+            {
+                Text = label,
+                Foreground = Brushes.White,
+                FontSize = 11,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                TextWrapping = TextWrapping.Wrap,
+            },
+            ToolTip = label,
+        };
+
+        if (item is not null)
+        {
+            border.Cursor = Cursors.Hand;
+            border.MouseLeftButtonUp += (_, args) =>
+            {
+                args.Handled = true;
+                SelectGraphEntity(item);
+            };
+        }
+
+        Canvas.SetLeft(border, center.X - width / 2);
+        Canvas.SetTop(border, center.Y - height / 2);
+        RelationshipGraphCanvas.Children.Add(border);
+    }
+
+    private void FitGraph()
+    {
+        graphScale.ScaleX = 1;
+        graphScale.ScaleY = 1;
+        graphTranslate.X = 0;
+        graphTranslate.Y = 0;
+    }
+
     private void RefreshRecentFiles(IReadOnlyList<RecentIfcFile>? recentFiles = null)
     {
         updatingUi = true;
         RecentFileList.ItemsSource = recentFiles ?? recentFileStore.Load();
         RecentFileList.SelectedItem = null;
         updatingUi = false;
+    }
+
+    private void RefreshDiagnostics()
+    {
+        if (document is null)
+        {
+            DiagnosticsList.ItemsSource = Array.Empty<IfcDiagnosticDetails>();
+            return;
+        }
+
+        DiagnosticsList.ItemsSource = IfcDiagnosticsProjector.Project(document.Diagnostics.Messages, DiagnosticFilterBox.Text);
     }
 
     private void RefreshDraftUi()
@@ -814,12 +1117,15 @@ public partial class MainWindow : Window
         RawArgsBox.Text = string.Join(",", entity.Arguments);
         ViewportTitle.Text = entity.DisplayName;
         ViewportInfo.Text = $"Selected #{entity.Id}. {geometryBackend.Status}";
-        ViewportGeometryList.ItemsSource = geometryBackend.ProjectSelection(document, entity.Id);
+        var selectionViewportItems = geometryBackend.ProjectSelection(document, entity.Id);
+        ViewportGeometryList.ItemsSource = selectionViewportItems;
+        RenderNativeViewport(selectionViewportItems);
         ToggleBookmarkButton.Content = bookmarkedEntityIds.Contains(entity.Id) ? "Unpin selection" : "Pin selection";
 
         IncomingList.ItemsSource = details.IncomingReferences;
         RelationshipList.ItemsSource = details.Relationships;
-        RelationshipGraphList.ItemsSource = details.RelationshipGraph;
+        currentGraphItems = details.RelationshipGraph;
+        RenderRelationshipGraph();
         SetRelationshipEditor(IfcRelationshipDetails.Empty);
         SetSpatialEditor(details.Spatial);
         SetCreateProductEditor(entity);
@@ -902,8 +1208,10 @@ public partial class MainWindow : Window
         ToggleBookmarkButton.Content = "Pin selection";
         IncomingList.ItemsSource = Array.Empty<string>();
         RelationshipList.ItemsSource = Array.Empty<IfcRelationshipDetails>();
-        RelationshipGraphList.ItemsSource = Array.Empty<IfcRelationshipGraphItem>();
+        currentGraphItems = Array.Empty<IfcRelationshipGraphItem>();
+        RenderRelationshipGraph();
         ViewportGeometryList.ItemsSource = Array.Empty<IfcViewportItem>();
+        RenderNativeViewport(Array.Empty<IfcViewportItem>());
         SetRelationshipEditor(IfcRelationshipDetails.Empty);
         CreateRelationshipButton.IsEnabled = false;
         SetSpatialEditor(IfcSpatialDetails.None);

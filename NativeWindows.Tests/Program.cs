@@ -28,6 +28,7 @@ internal sealed class NativeTestRunner
         Run("body assignment creates swept solid representation", BodyAssignmentCreatesSweptSolidRepresentation);
         Run("body assignment can be staged as draft", BodyAssignmentCanBeStagedAsDraft);
         Run("export validation reparses document before save", ExportValidationReparsesDocumentBeforeSave);
+        Run("diagnostics projector supports text and severity filters", DiagnosticsProjectorSupportsFilters);
         Run("draft session gates export until apply/discard", DraftSessionGatesExport);
         Run("draft session supports applied undo redo history", DraftSessionSupportsUndoRedoHistory);
     }
@@ -325,6 +326,30 @@ internal sealed class NativeTestRunner
         var geometryInvalid = IfcExportValidator.Validate(IfcStepParser.Parse(MissingGeometryFixture, "missing-geometry.ifc"), new StepReferenceGeometryBackend());
         True(!geometryInvalid.CanExport, "missing geometry references should be blocked by geometry backend validation");
         True(geometryInvalid.Errors.Any(error => error.Contains("missing geometry item #999", StringComparison.OrdinalIgnoreCase)), "geometry validation should surface missing item references");
+    }
+
+    private static void DiagnosticsProjectorSupportsFilters()
+    {
+        var messages = new[]
+        {
+            "Info: Loaded 3 STEP entities.",
+            "Warning: #40 has no ObjectPlacement.",
+            "Error: #80 references missing entity #999.",
+        };
+
+        var errors = IfcDiagnosticsProjector.Project(messages, "error");
+        Equal(1, errors.Count, "severity filter should return only errors");
+        Equal("Error", errors[0].Severity, "severity filter result");
+
+        var placement = IfcDiagnosticsProjector.Project(messages, "placement");
+        Equal(1, placement.Count, "message/suggestion filter should return placement warning");
+        Equal("Warning", placement[0].Severity, "placement filter result");
+        Equal(40, placement[0].EntityId, "diagnostic navigation target should parse first STEP id");
+        True(placement[0].CanNavigate, "diagnostic row with STEP id should be navigable");
+
+        var empty = IfcDiagnosticsProjector.Project(messages, "not-present");
+        Equal(1, empty.Count, "empty filter should show a single placeholder");
+        True(empty[0].Message.Contains("No diagnostics match", StringComparison.OrdinalIgnoreCase), "empty filter placeholder missing");
     }
 
     private static void DraftSessionGatesExport()
