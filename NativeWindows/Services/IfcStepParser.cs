@@ -183,13 +183,19 @@ public static partial class IfcStepParser
                 continue;
             }
 
-            var hasTerminator = TryReadEntityTerminator(data, ref index);
-            if (!hasTerminator)
+            var terminator = ReadEntityTerminator(data, ref index);
+            if (!terminator.HasSemicolon)
             {
                 diagnostics.Warn($"Parsed #{id}; missing terminating ';' before next STEP entity.");
             }
+            else if (terminator.HasUnexpectedTrailingText)
+            {
+                diagnostics.Warn($"Parsed #{id}; ignored unexpected text between argument list and terminating ';'.");
+            }
 
-            var originalStepLine = hasTerminator ? data[entityStart..index].Trim() : null;
+            var originalStepLine = terminator is { HasSemicolon: true, HasUnexpectedTrailingText: false }
+                ? data[entityStart..index].Trim()
+                : null;
             var entity = new IfcEntity { Id = id, Type = type, OriginalStepLine = originalStepLine };
             entity.Arguments.AddRange(StepArgumentReader.SplitTopLevel(args));
             entity.OriginalArguments.AddRange(entity.Arguments);
@@ -223,8 +229,9 @@ public static partial class IfcStepParser
         }
     }
 
-    private static bool TryReadEntityTerminator(string text, ref int index)
+    private static EntityTerminator ReadEntityTerminator(string text, ref int index)
     {
+        var hasUnexpectedTrailingText = false;
         while (index < text.Length)
         {
             if (char.IsWhiteSpace(text[index]))
@@ -242,19 +249,22 @@ public static partial class IfcStepParser
             if (text[index] == ';')
             {
                 index++;
-                return true;
+                return new EntityTerminator(true, hasUnexpectedTrailingText);
             }
 
             if (text[index] == '#')
             {
-                return false;
+                return new EntityTerminator(false, hasUnexpectedTrailingText);
             }
 
+            hasUnexpectedTrailingText = true;
             index++;
         }
 
-        return false;
+        return new EntityTerminator(false, hasUnexpectedTrailingText);
     }
+
+    private readonly record struct EntityTerminator(bool HasSemicolon, bool HasUnexpectedTrailingText);
 
     private static bool TryReadParenthesized(string text, ref int index, out string value)
     {
