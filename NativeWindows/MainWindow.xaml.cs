@@ -16,6 +16,8 @@ public partial class MainWindow : Window
         "Done: IFC/STEP preflight",
         "Done: header/schema extraction",
         "Done: typed entity index",
+        "Done: relationship index",
+        "Done: duplicate GlobalId and containment diagnostics",
         "Done: spatial containment tree",
         "Done: entity inspector",
         "Done: basic entity editing/export",
@@ -219,6 +221,21 @@ public partial class MainWindow : Window
         ViewportInfo.Text = $"Selected #{entity.Id}. Native graph selection is active.";
 
         IncomingList.ItemsSource = GetIncomingReferences(entity).ToList();
+        RelationshipList.ItemsSource = GetRelationships(entity).ToList();
+    }
+
+    private IEnumerable<string> GetRelationships(IfcEntity entity)
+    {
+        if (document is null || !document.RelationshipsByEntity.TryGetValue(entity.Id, out var relationships))
+        {
+            yield return "No indexed IFC relationships for this entity.";
+            yield break;
+        }
+
+        foreach (var relationship in relationships.OrderBy(relationship => relationship.Type).ThenBy(relationship => relationship.Id))
+        {
+            yield return relationship.Label;
+        }
     }
 
     private IEnumerable<string> GetIncomingReferences(IfcEntity entity)
@@ -245,6 +262,7 @@ public partial class MainWindow : Window
         EntityDescriptionBox.Text = string.Empty;
         RawArgsBox.Text = string.Empty;
         IncomingList.ItemsSource = Array.Empty<string>();
+        RelationshipList.ItemsSource = Array.Empty<string>();
     }
 }
 

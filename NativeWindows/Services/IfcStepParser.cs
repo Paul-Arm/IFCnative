@@ -52,8 +52,11 @@ public static partial class IfcStepParser
             }
         }
 
+        BuildRelationshipIndex(document);
         BuildSpatialTree(document);
+        ValidateDocument(document);
         document.Diagnostics.Info($"Loaded {document.Entities.Count:N0} STEP entities.");
+        document.Diagnostics.Info($"Indexed {document.RelationshipById.Count:N0} IFC relationships.");
         document.Diagnostics.Info($"Detected schema: {document.Schema}.");
 
         return document;
@@ -240,6 +243,116 @@ public static partial class IfcStepParser
         }
 
         return text[start..];
+    }
+
+    private static void BuildRelationshipIndex(IfcDocument document)
+    {
+        foreach (var entity in document.Entities.Where(entity => entity.Type.StartsWith("IFCREL", StringComparison.OrdinalIgnoreCase)))
+        {
+            var relationship = CreateRelationship(entity);
+            document.RelationshipById[relationship.Id] = relationship;
+
+            foreach (var entityId in relationship.SourceIds.Concat(relationship.TargetIds).Distinct())
+            {
+                if (!document.RelationshipsByEntity.TryGetValue(entityId, out var bucket))
+                {
+                    bucket = [];
+                    document.RelationshipsByEntity[entityId] = bucket;
+                }
+
+                bucket.Add(relationship);
+            }
+        }
+    }
+
+    private static IfcRelationship CreateRelationship(IfcEntity entity)
+    {
+        var relationship = new IfcRelationship { Id = entity.Id, Type = entity.Type };
+
+        switch (entity.Type)
+        {
+            case "IFCRELAGGREGATES":
+            case "IFCRELNESTS":
+                AddRefs(relationship.SourceIds, entity, 4);
+                AddRefs(relationship.TargetIds, entity, 5);
+                break;
+            case "IFCRELCONTAINEDINSPATIALSTRUCTURE":
+            case "IFCRELREFERENCEDINSPATIALSTRUCTURE":
+                AddRefs(relationship.SourceIds, entity, 5);
+                AddRefs(relationship.TargetIds, entity, 4);
+                break;
+            case "IFCRELDEFINESBYPROPERTIES":
+            case "IFCRELDEFINESBYTYPE":
+            case "IFCRELASSIGNSTOGROUP":
+            case "IFCRELASSIGNSTOPROCESS":
+            case "IFCRELASSIGNSTOCONTROL":
+            case "IFCRELASSIGNSTOPRODUCT":
+            case "IFCRELASSOCIATESMATERIAL":
+            case "IFCRELASSOCIATESCLASSIFICATION":
+            case "IFCRELASSOCIATESDOCUMENT":
+            case "IFCRELASSOCIATESLIBRARY":
+                AddRefs(relationship.SourceIds, entity, 5);
+                AddRefs(relationship.TargetIds, entity, 4);
+                break;
+            case "IFCRELVOIDSELEMENT":
+            case "IFCRELFILLSELEMENT":
+            case "IFCRELCONNECTSELEMENTS":
+            case "IFCRELCONNECTSPORTS":
+            case "IFCRELCONNECTSPORTTOELEMENT":
+            case "IFCRELINTERFERESELEMENTS":
+            case "IFCRELPROJECTSELEMENT":
+                AddRefs(relationship.SourceIds, entity, 4);
+                AddRefs(relationship.TargetIds, entity, 5);
+                break;
+            default:
+                foreach (var id in entity.Arguments.SelectMany(StepArgumentReader.ReadReferences).Distinct())
+                {
+                    relationship.TargetIds.Add(id);
+                }
+                break;
+        }
+
+        return relationship;
+    }
+
+    private static void AddRefs(List<int> target, IfcEntity entity, int argumentIndex)
+    {
+        target.AddRange(StepArgumentReader.ReadReferences(entity.Arguments.ElementAtOrDefault(argumentIndex) ?? string.Empty));
+    }
+
+    private static void ValidateDocument(IfcDocument document)
+    {
+        foreach (var relationship in document.RelationshipById.Values)
+        {
+            foreach (var id in relationship.SourceIds.Concat(relationship.TargetIds).Distinct())
+            {
+                if (!document.EntityById.ContainsKey(id))
+                {
+                    document.Diagnostics.Warn($"Relationship #{relationship.Id} {relationship.Type} references missing entity #{id}.");
+                }
+            }
+        }
+
+        var duplicateGlobalIds = document.Entities
+            .Where(entity => !string.IsNullOrWhiteSpace(entity.GlobalId))
+            .GroupBy(entity => entity.GlobalId, StringComparer.Ordinal)
+            .Where(group => group.Count() > 1);
+
+        foreach (var duplicate in duplicateGlobalIds)
+        {
+            document.Diagnostics.Warn($"Duplicate GlobalId {duplicate.Key}: {string.Join(", ", duplicate.Select(entity => $"#{entity.Id}"))}.");
+        }
+
+        var primaryContainersByProduct = document.RelationshipById.Values
+            .Where(relationship => relationship.Type == "IFCRELCONTAINEDINSPATIALSTRUCTURE")
+            .SelectMany(relationship => relationship.TargetIds.Select(targetId => new { TargetId = targetId, RelationshipId = relationship.Id }))
+            .GroupBy(item => item.TargetId)
+            .Where(group => group.Count() > 1);
+
+        foreach (var duplicateContainer in primaryContainersByProduct)
+        {
+            document.Diagnostics.Warn($"Entity #{duplicateContainer.Key} has multiple primary spatial containment relationships: {string.Join(", ", duplicateContainer.Select(item => $"#{item.RelationshipId}"))}.");
+        }
     }
 
     private static void BuildSpatialTree(IfcDocument document)

@@ -19,6 +19,10 @@ public sealed class IfcDocument
 
     public Dictionary<int, List<IfcEntity>> IncomingReferences { get; } = [];
 
+    public Dictionary<int, IfcRelationship> RelationshipById { get; } = [];
+
+    public Dictionary<int, List<IfcRelationship>> RelationshipsByEntity { get; } = [];
+
     public List<IfcTreeNode> SpatialRoots { get; } = [];
 
     public IfcDiagnostics Diagnostics { get; } = new();

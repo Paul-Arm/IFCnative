@@ -1,0 +1,195 @@
+﻿<Window x:Class="IFCnative.NativeWindows.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:models="clr-namespace:IFCnative.NativeWindows.Models"
+        Title="IFCnative — Windows Native"
+        Width="1440"
+        Height="900"
+        MinWidth="1100"
+        MinHeight="700"
+        WindowStartupLocation="CenterScreen"
+        Background="#0f172a">
+    <Window.Resources>
+        <SolidColorBrush x:Key="PanelBrush" Color="#111827" />
+        <SolidColorBrush x:Key="PanelAltBrush" Color="#172033" />
+        <SolidColorBrush x:Key="BorderBrush" Color="#263244" />
+        <SolidColorBrush x:Key="TextBrush" Color="#e5e7eb" />
+        <SolidColorBrush x:Key="MutedBrush" Color="#9ca3af" />
+        <Style TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="12,7" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+            <Setter Property="Background" Value="#2563eb" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="BorderBrush" Value="#3b82f6" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="Background" Value="#0b1220" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+            <Setter Property="CaretBrush" Value="White" />
+            <Setter Property="Padding" Value="8,5" />
+        </Style>
+        <Style TargetType="ListBox">
+            <Setter Property="Background" Value="#0b1220" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+            <Setter Property="ScrollViewer.CanContentScroll" Value="True" />
+            <Setter Property="VirtualizingPanel.IsVirtualizing" Value="True" />
+            <Setter Property="VirtualizingPanel.VirtualizationMode" Value="Recycling" />
+        </Style>
+        <Style TargetType="TreeView">
+            <Setter Property="Background" Value="#0b1220" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+            <Setter Property="ScrollViewer.CanContentScroll" Value="True" />
+            <Setter Property="VirtualizingPanel.IsVirtualizing" Value="True" />
+            <Setter Property="VirtualizingPanel.VirtualizationMode" Value="Recycling" />
+        </Style>
+        <HierarchicalDataTemplate DataType="{x:Type models:IfcTreeNode}" ItemsSource="{Binding Children}">
+            <TextBlock Text="{Binding Label}" />
+        </HierarchicalDataTemplate>
+    </Window.Resources>
+
+    <DockPanel LastChildFill="True">
+        <Border DockPanel.Dock="Top" Background="#020617" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="14,10">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Orientation="Horizontal">
+                    <Button Content="Open IFC" Click="OpenIfc_Click" />
+                    <Button Content="Load sample" Click="LoadSample_Click" Background="#334155" BorderBrush="#475569" />
+                    <Button Content="Export IFC" Click="ExportIfc_Click" Background="#16a34a" BorderBrush="#22c55e" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Margin="16,0" VerticalAlignment="Center">
+                    <TextBlock Text="IFCnative Windows Native" FontSize="18" FontWeight="SemiBold" />
+                    <TextBlock x:Name="StatusText" Foreground="{StaticResource MutedBrush}" Text="Ready" />
+                </StackPanel>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="Schema: " Foreground="{StaticResource MutedBrush}" />
+                    <TextBlock x:Name="SchemaText" FontWeight="SemiBold" Margin="0,0,18,0" />
+                    <TextBlock Text="Entities: " Foreground="{StaticResource MutedBrush}" />
+                    <TextBlock x:Name="EntityCountText" FontWeight="SemiBold" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Grid Margin="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="330" MinWidth="260" />
+                <ColumnDefinition Width="6" />
+                <ColumnDefinition Width="*" MinWidth="420" />
+                <ColumnDefinition Width="6" />
+                <ColumnDefinition Width="380" MinWidth="320" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12">
+                <DockPanel LastChildFill="True">
+                    <StackPanel DockPanel.Dock="Top">
+                        <TextBlock Text="Model" FontSize="16" FontWeight="SemiBold" />
+                        <TextBox x:Name="EntitySearchBox" Margin="0,10,0,10" TextChanged="EntitySearch_TextChanged" ToolTip="Search by STEP id, type, name, or GlobalId" />
+                    </StackPanel>
+                    <TabControl Background="Transparent" BorderThickness="0">
+                        <TabItem Header="Spatial">
+                            <TreeView x:Name="StructureTree" SelectedItemChanged="StructureTree_SelectedItemChanged" />
+                        </TabItem>
+                        <TabItem Header="Types">
+                            <ListBox x:Name="TypeList" SelectionChanged="TypeList_SelectionChanged" />
+                        </TabItem>
+                        <TabItem Header="Capabilities">
+                            <ListBox x:Name="CapabilityList" />
+                        </TabItem>
+                    </TabControl>
+                </DockPanel>
+            </Border>
+
+            <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch" Background="Transparent" />
+
+            <Border Grid.Column="2" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12">
+                <DockPanel LastChildFill="True">
+                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,10">
+                        <TextBlock x:Name="ViewportTitle" Text="Native Viewport" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="16,0,0,0">
+                            <Button Content="Fit" Click="FitViewport_Click" Background="#334155" BorderBrush="#475569" />
+                            <Button Content="Reset" Click="ResetViewport_Click" Background="#334155" BorderBrush="#475569" />
+                        </StackPanel>
+                    </StackPanel>
+                    <Border Background="#020617" BorderBrush="#1f2937" BorderThickness="1" CornerRadius="6">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="3D geometry backend placeholder"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       Foreground="#64748b"
+                                       FontSize="22"
+                                       FontWeight="SemiBold" />
+                            <Border Grid.Row="1" Background="#0b1220" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="12">
+                                <TextBlock x:Name="ViewportInfo" Foreground="{StaticResource MutedBrush}" />
+                            </Border>
+                        </Grid>
+                    </Border>
+                </DockPanel>
+            </Border>
+
+            <GridSplitter Grid.Column="3" Width="6" HorizontalAlignment="Stretch" Background="Transparent" />
+
+            <Border Grid.Column="4" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12">
+                <DockPanel LastChildFill="True">
+                    <TextBlock DockPanel.Dock="Top" x:Name="InspectorTitle" Text="Inspector" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10" />
+                    <TabControl Background="Transparent" BorderThickness="0">
+                        <TabItem Header="Entity">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <StackPanel Margin="0,8,8,8">
+                                    <TextBlock Text="STEP id" Foreground="{StaticResource MutedBrush}" />
+                                    <TextBlock x:Name="EntityIdText" FontWeight="SemiBold" Margin="0,0,0,8" />
+
+                                    <TextBlock Text="Type" Foreground="{StaticResource MutedBrush}" />
+                                    <TextBlock x:Name="EntityTypeText" FontWeight="SemiBold" Margin="0,0,0,8" />
+
+                                    <TextBlock Text="GlobalId" Foreground="{StaticResource MutedBrush}" />
+                                    <TextBlock x:Name="EntityGlobalIdText" FontWeight="SemiBold" Margin="0,0,0,12" />
+
+                                    <TextBlock Text="Name" Foreground="{StaticResource MutedBrush}" />
+                                    <TextBox x:Name="EntityNameBox" Margin="0,2,0,8" />
+
+                                    <TextBlock Text="Description" Foreground="{StaticResource MutedBrush}" />
+                                    <TextBox x:Name="EntityDescriptionBox" Margin="0,2,0,8" />
+
+                                    <TextBlock Text="Raw arguments" Foreground="{StaticResource MutedBrush}" />
+                                    <TextBox x:Name="RawArgsBox"
+                                             Margin="0,2,0,12"
+                                             MinHeight="120"
+                                             AcceptsReturn="True"
+                                             TextWrapping="Wrap"
+                                             VerticalScrollBarVisibility="Auto" />
+
+                                    <Button Content="Save entity edit" Click="SaveEdit_Click" HorizontalAlignment="Left" />
+                                </StackPanel>
+                            </ScrollViewer>
+                        </TabItem>
+                        <TabItem Header="Relationships">
+                            <ListBox x:Name="RelationshipList" />
+                        </TabItem>
+                        <TabItem Header="Incoming">
+                            <ListBox x:Name="IncomingList" />
+                        </TabItem>
+                        <TabItem Header="Diagnostics">
+                            <ListBox x:Name="DiagnosticsList" />
+                        </TabItem>
+                    </TabControl>
+                </DockPanel>
+            </Border>
+        </Grid>
+    </DockPanel>
+</Window>
