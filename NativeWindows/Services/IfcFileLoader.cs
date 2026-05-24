@@ -1,4 +1,5 @@
 using System.IO;
+using System.IO.Compression;
 using System.Text;
 
 namespace IFCnative.NativeWindows.Services;
@@ -7,13 +8,36 @@ public static class IfcFileLoader
 {
     private const int BufferSize = 1024 * 1024;
 
-    public static async Task<string> ReadTextAsync(
+    public static async Task<LoadedIfcText> ReadAsync(
         string path,
         IProgress<string>? progress = null,
         CancellationToken cancellationToken = default)
     {
         var fileInfo = new FileInfo(path);
         progress?.Report($"Opening {fileInfo.Name} ({FormatBytes(fileInfo.Length)})…");
+
+        if (IsIfcZip(path))
+        {
+            return await ReadZipAsync(path, progress, cancellationToken);
+        }
+
+        return new LoadedIfcText(await ReadPlainTextAsync(path, fileInfo, progress, cancellationToken), fileInfo.Name);
+    }
+
+    public static async Task<string> ReadTextAsync(
+        string path,
+        IProgress<string>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        return (await ReadAsync(path, progress, cancellationToken)).Text;
+    }
+
+    private static async Task<string> ReadPlainTextAsync(
+        string path,
+        FileInfo fileInfo,
+        IProgress<string>? progress,
+        CancellationToken cancellationToken)
+    {
 
         await using var stream = new FileStream(
             path,
@@ -42,6 +66,52 @@ public static class IfcFileLoader
         return builder.ToString();
     }
 
+    private static async Task<LoadedIfcText> ReadZipAsync(
+        string path,
+        IProgress<string>? progress,
+        CancellationToken cancellationToken)
+    {
+        await using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            BufferSize,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: false);
+        var entry = archive.Entries
+            .Where(candidate => !string.IsNullOrWhiteSpace(candidate.Name) && IsIfcTextEntry(candidate.Name))
+            .OrderByDescending(candidate => candidate.Name.EndsWith(".ifc", StringComparison.OrdinalIgnoreCase))
+            .ThenBy(candidate => candidate.FullName, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+
+        if (entry is null)
+        {
+            throw new InvalidDataException("ifcZIP archive does not contain an .ifc, .stp, or .step file.");
+        }
+
+        progress?.Report($"Extracting {entry.FullName} from {Path.GetFileName(path)} ({FormatBytes(entry.Length)})…");
+        await using var entryStream = entry.Open();
+        using var reader = new StreamReader(entryStream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: BufferSize, leaveOpen: false);
+        var text = await reader.ReadToEndAsync(cancellationToken);
+        return new LoadedIfcText(text, entry.Name);
+    }
+
+    private static bool IsIfcZip(string path)
+    {
+        var extension = Path.GetExtension(path);
+        return extension.Equals(".ifczip", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".zip", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsIfcTextEntry(string name)
+    {
+        var extension = Path.GetExtension(name);
+        return extension.Equals(".ifc", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".stp", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".step", StringComparison.OrdinalIgnoreCase);
+    }
+
     public static string FormatBytes(long bytes)
     {
         string[] units = ["B", "KB", "MB", "GB"];
@@ -56,3 +126,5 @@ public static class IfcFileLoader
         return $"{value:0.#} {units[unit]}";
     }
 }
+
+public sealed record LoadedIfcText(string Text, string FileName);

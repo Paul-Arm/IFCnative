@@ -205,8 +205,8 @@ public partial class MainWindow : Window
     {
         var dialog = new OpenFileDialog
         {
-            Filter = "IFC files (*.ifc)|*.ifc|STEP files (*.stp;*.step)|*.stp;*.step|All files (*.*)|*.*",
-            Title = "Open IFC file",
+            Filter = "IFC files (*.ifc)|*.ifc|ifcZIP archives (*.ifczip;*.zip)|*.ifczip;*.zip|STEP files (*.stp;*.step)|*.stp;*.step|All files (*.*)|*.*",
+            Title = "Open IFC or ifcZIP file",
         };
 
         if (dialog.ShowDialog(this) != true)
@@ -226,9 +226,9 @@ public partial class MainWindow : Window
         try
         {
             var progress = new Progress<string>(message => StatusText.Text = message);
-            var text = await IfcFileLoader.ReadTextAsync(path, progress, openCancellation.Token);
-            StatusText.Text = $"Parsing {Path.GetFileName(path)}…";
-            var parsed = await Task.Run(() => IfcStepParser.Parse(text, Path.GetFileName(path)), openCancellation.Token);
+            var loaded = await IfcFileLoader.ReadAsync(path, progress, openCancellation.Token);
+            StatusText.Text = $"Parsing {loaded.FileName}…";
+            var parsed = await Task.Run(() => IfcStepParser.Parse(loaded.Text, loaded.FileName), openCancellation.Token);
             activeDocumentPath = Path.GetFullPath(path);
             LoadDocument(parsed);
             recentFileStore.Add(path);

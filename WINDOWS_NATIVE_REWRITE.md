@@ -39,7 +39,7 @@ Important constraint from Paul: the native app is a separate/additional folder/p
 - `NativeWindows/IFCnative.NativeWindows.csproj` targets `net9.0-windows` with WPF enabled.
 - `NativeWindows.Tests/` contains a lightweight native service test runner for parser/index/edit/diff/draft behavior; execution still needs a Windows/dotnet environment.
 - Current C# shell code already includes:
-  - Open IFC file dialog.
+  - Open IFC/STEP/ifcZIP file dialog.
   - Export IFC file dialog.
   - Sample IFC loader.
   - STEP preflight diagnostics.
@@ -69,7 +69,7 @@ Status legend: `[x] current`, `[~] partial`, `[ ] planned/native rewrite target`
 - [x] Preserve original STEP ids and order during export. Native serialization now keeps parsed DATA entity order and appends newly created entities after existing rows.
 - [~] Large-file memory strategy: async sequential file loading with progress/cancellation; streaming parser and lazy indexes still pending.
 - [~] Recent files/session restore. Native shell now persists recent IFC paths, can reopen/clean missing entries, restores window/pane visibility plus pane widths, and automatically reopens the last IFC workspace on startup when the file is still available.
-- [ ] ifcZIP/ifcXML support.
+- [~] ifcZIP/ifcXML support. Native file loader can open `.ifczip`/`.zip` archives and extract the first IFC/STEP entry; ifcXML remains pending.
 
 ### Parsing/indexing
 
@@ -218,3 +218,4 @@ Status legend: `[x] current`, `[~] partial`, `[ ] planned/native rewrite target`
 - 2026-05-24 20:28 Europe/Berlin: expanded native diagnostic repair actions to missing relationship references: diagnostic projection now marks dangling relationship endpoint warnings as repairable, the Diagnostics tab stages a missing-reference repair through the existing draft/export gate, `IfcDocumentEditor.RemoveMissingRelationshipReferences` removes dangling endpoints or deletes relationships left without a valid side, and `NativeWindows.Tests` covers the projected repair/diff behavior. `git diff --check`, `npm run test:ifc`, `npm run lint`, and `npm run build` pass on macOS; `dotnet --info` still fails because `dotnet` is not installed on this host, so native build/test execution remains pending on Windows/dotnet.
 - 2026-05-24 20:38 Europe/Berlin: expanded native diagnostic repair actions to physical-product placement/representation warnings: diagnostics now expose staged repairs for missing/invalid `ObjectPlacement` and `Representation`, the Diagnostics tab routes them through the existing draft/export gate, `IfcDocumentEditor` can create a default local placement or default 1x1x1 swept-solid body from the diagnostic target, and `NativeWindows.Tests` covers projection plus diff behavior. `git diff --check`, `npm run test:ifc`, `npm run lint`, and `npm run build` pass on macOS; `dotnet --info` still fails because `dotnet` is not installed on this host, so native build/test execution remains pending on Windows/dotnet.
 - 2026-05-24 20:49 Europe/Berlin: added native missing-GlobalId diagnostics and repair flow for rooted IFC objects: the parser warns when rooted/project/spatial/product/relationship/property/type objects have an empty GlobalId, diagnostics project a staged repair action, the WPF Diagnostics tab routes it through the existing draft/export gate, `IfcDocumentEditor` generates a unique replacement id, and `NativeWindows.Tests` covers projection/diff behavior. `git diff --check`, `npm run test:ifc`, `npm run lint`, and `npm run build` pass on macOS; `dotnet --info` still fails because `dotnet` is not installed on this host, so native build/test execution remains pending on Windows/dotnet.
+- 2026-05-24 20:58 Europe/Berlin: added first-pass native ifcZIP loading: `IfcFileLoader` now recognizes `.ifczip`/`.zip`, extracts the first `.ifc`/`.stp`/`.step` archive entry with progress text, the WPF open dialog includes ifcZIP archives and parses using the inner IFC filename, and `NativeWindows.Tests` covers zipped IFC extraction/parsing. `git diff --check`, `npm run test:ifc`, `npm run lint`, and `npm run build` pass on macOS; `dotnet --info` still fails because `dotnet` is not installed on this host, so native build/test execution remains pending on Windows/dotnet.

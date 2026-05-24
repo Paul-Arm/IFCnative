@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using IFCnative.NativeWindows.Services;
 
 var tests = new NativeTestRunner();
@@ -11,6 +12,7 @@ internal sealed class NativeTestRunner
     public void RunAll()
     {
         Run("sample parser builds core indexes", SampleParserBuildsCoreIndexes);
+        Run("IFC file loader reads ifcZIP archives", IfcFileLoaderReadsIfcZipArchives);
         Run("STEP export preserves parsed entity order", StepExportPreservesParsedEntityOrder);
         Run("STEP writer exposes canonical entity helpers", StepWriterExposesCanonicalEntityHelpers);
         Run("STEP export preserves untouched entity text", StepExportPreservesUntouchedEntityText);
@@ -66,6 +68,40 @@ internal sealed class NativeTestRunner
         True(document.PropertySetsByEntity.TryGetValue(40, out var propertySets) && propertySets.Count == 1, "proxy property set not indexed");
         True(document.SpatialPathByEntity.TryGetValue(40, out var path) && path.Contains("Sample Inspection Block"), "spatial path not indexed");
         True(document.Diagnostics.Messages.Any(message => message.Contains("Loaded") && message.Contains("STEP entities")), "load diagnostic missing");
+    }
+
+    private static void IfcFileLoaderReadsIfcZipArchives()
+    {
+        var tempPath = Path.Combine(Path.GetTempPath(), $"ifcnative-test-{Guid.NewGuid():N}.ifczip");
+        try
+        {
+            using (var archive = ZipFile.Open(tempPath, ZipArchiveMode.Create))
+            {
+                var ignored = archive.CreateEntry("notes.txt");
+                using (var ignoredWriter = new StreamWriter(ignored.Open()))
+                {
+                    ignoredWriter.Write("not an IFC file");
+                }
+
+                var entry = archive.CreateEntry("models/zipped-sample.ifc");
+                using var writer = new StreamWriter(entry.Open());
+                writer.Write(UnorderedFixture);
+            }
+
+            var loaded = IfcFileLoader.ReadAsync(tempPath).GetAwaiter().GetResult();
+            Equal("zipped-sample.ifc", loaded.FileName, "ifcZIP entry filename");
+            True(loaded.Text.Contains("IFCPROJECT", StringComparison.Ordinal), "ifcZIP text should contain IFC content");
+
+            var document = IfcStepParser.Parse(loaded.Text, loaded.FileName);
+            Equal("IFC4X3_ADD2", document.Schema, "ifcZIP parsed schema");
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+        }
     }
 
     private static void StepExportPreservesParsedEntityOrder()
