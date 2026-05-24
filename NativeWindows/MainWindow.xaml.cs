@@ -948,6 +948,10 @@ public partial class MainWindow : Window
 
     private void DiagnosticsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        RepairDiagnosticButton.IsEnabled = document is not null
+            && DiagnosticsList.SelectedItem is IfcDiagnosticDetails selectedDiagnostic
+            && selectedDiagnostic.CanRepair;
+
         if (updatingUi || document is null || DiagnosticsList.SelectedItem is not IfcDiagnosticDetails diagnostic || diagnostic.EntityId is null)
         {
             return;
@@ -962,6 +966,24 @@ public partial class MainWindow : Window
         {
             StatusText.Text = $"Diagnostic target #{diagnostic.EntityId.Value} is not present in the indexed entities.";
         }
+    }
+
+    private void RepairDiagnostic_Click(object sender, RoutedEventArgs e)
+    {
+        if (document is null || DiagnosticsList.SelectedItem is not IfcDiagnosticDetails diagnostic || !diagnostic.CanRepair)
+        {
+            return;
+        }
+
+        var selectedId = diagnostic.EntityId ?? selectedEntity?.Id ?? document.Entities.FirstOrDefault()?.Id ?? 0;
+        var draft = IfcDocumentEditor.RegenerateDuplicateGlobalIds(document, diagnostic.Message);
+        if (draft.ToStepText() == document.ToStepText())
+        {
+            StatusText.Text = "No duplicate GlobalId repair was staged for this diagnostic.";
+            return;
+        }
+
+        StageDraft(draft, selectedId, "Staged duplicate GlobalId repair from diagnostic.");
     }
 
     private void FitViewport_Click(object sender, RoutedEventArgs e)
@@ -1250,10 +1272,12 @@ public partial class MainWindow : Window
         if (document is null)
         {
             DiagnosticsList.ItemsSource = Array.Empty<IfcDiagnosticDetails>();
+            RepairDiagnosticButton.IsEnabled = false;
             return;
         }
 
         DiagnosticsList.ItemsSource = IfcDiagnosticsProjector.Project(document.Diagnostics.Messages, DiagnosticFilterBox.Text);
+        RepairDiagnosticButton.IsEnabled = false;
     }
 
     private void RefreshDraftUi()

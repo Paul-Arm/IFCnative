@@ -54,10 +54,13 @@ public static class IfcDiagnosticsProjector
             break;
         }
 
-        return new IfcDiagnosticDetails(severity, message, Suggest(message), ExtractEntityId(message));
+        var entityIds = ExtractEntityIds(message).ToList();
+        var entityId = entityIds.Count == 0 ? (int?)null : entityIds[0];
+        var canRepairDuplicateGlobalId = message.Contains("Duplicate GlobalId", StringComparison.OrdinalIgnoreCase) && entityIds.Count > 1;
+        return new IfcDiagnosticDetails(severity, message, Suggest(message), entityId, canRepairDuplicateGlobalId);
     }
 
-    private static int? ExtractEntityId(string message)
+    private static IEnumerable<int> ExtractEntityIds(string message)
     {
         var hashIndex = message.IndexOf('#', StringComparison.Ordinal);
         while (hashIndex >= 0 && hashIndex + 1 < message.Length)
@@ -71,13 +74,11 @@ public static class IfcDiagnosticsProjector
 
             if (end > start && int.TryParse(message[start..end], out var entityId))
             {
-                return entityId;
+                yield return entityId;
             }
 
             hashIndex = message.IndexOf('#', hashIndex + 1);
         }
-
-        return null;
     }
 
     private static int SeverityRank(string severity)

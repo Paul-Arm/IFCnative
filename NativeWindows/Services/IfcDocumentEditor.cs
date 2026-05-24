@@ -132,6 +132,41 @@ public static class IfcDocumentEditor
             ["$", StepArgumentReader.Quote(identification), StepArgumentReader.Quote(libraryName), "$", "$"]);
     }
 
+    public static IfcDocument RegenerateDuplicateGlobalIds(IfcDocument document, string diagnosticMessage)
+    {
+        var duplicateIds = ReadIds(diagnosticMessage)
+            .Where(document.EntityById.ContainsKey)
+            .Distinct()
+            .ToList();
+        if (duplicateIds.Count < 2)
+        {
+            return document;
+        }
+
+        var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
+        var existingGlobalIds = draft.Entities
+            .Select(entity => entity.GlobalId)
+            .Where(globalId => !string.IsNullOrWhiteSpace(globalId))
+            .ToHashSet(StringComparer.Ordinal);
+
+        var changed = false;
+        foreach (var entityId in duplicateIds.Skip(1))
+        {
+            if (!draft.EntityById.TryGetValue(entityId, out var entity) || entity.Arguments.Count == 0)
+            {
+                continue;
+            }
+
+            existingGlobalIds.Remove(entity.GlobalId);
+            var replacement = MakeUniqueGeneratedGlobalId(entityId, existingGlobalIds);
+            entity.Arguments[0] = StepArgumentReader.Quote(replacement);
+            existingGlobalIds.Add(replacement);
+            changed = true;
+        }
+
+        return changed ? IfcStepParser.Parse(draft.ToStepText(), draft.FileName) : document;
+    }
+
     private static IfcDocument AddSimpleResourceAssignment(
         IfcDocument document,
         int productId,
@@ -569,6 +604,20 @@ public static class IfcDocumentEditor
     {
         var raw = $"IFCnative{prefix}{id:000000000000}";
         return StepArgumentReader.Quote(raw.Length <= 22 ? raw : raw[..22]);
+    }
+
+    private static string MakeUniqueGeneratedGlobalId(int entityId, ISet<string> existingGlobalIds)
+    {
+        for (var attempt = 1; attempt < 10_000; attempt++)
+        {
+            var candidate = $"IFCnatFix{entityId:000000}{attempt:0000}";
+            if (!existingGlobalIds.Contains(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return $"IFCnatFix{Guid.NewGuid():N}"[..22];
     }
 
     public static IfcDocument UpdatePropertyValue(IfcDocument document, int propertyValueId, string rawValue)

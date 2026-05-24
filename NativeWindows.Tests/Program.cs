@@ -30,6 +30,7 @@ internal sealed class NativeTestRunner
         Run("body assignment creates swept solid representation", BodyAssignmentCreatesSweptSolidRepresentation);
         Run("body assignment can be staged as draft", BodyAssignmentCanBeStagedAsDraft);
         Run("export validation reparses document before save", ExportValidationReparsesDocumentBeforeSave);
+        Run("duplicate GlobalId diagnostics can be repaired", DuplicateGlobalIdDiagnosticsCanBeRepaired);
         Run("diagnostics projector supports text and severity filters", DiagnosticsProjectorSupportsFilters);
         Run("relationship graph supports filter and depth", RelationshipGraphSupportsFilterAndDepth);
         Run("native window layout store persists sanitized layout", NativeWindowLayoutStorePersistsSanitizedLayout);
@@ -410,6 +411,22 @@ internal sealed class NativeTestRunner
         True(empty[0].Message.Contains("No diagnostics match", StringComparison.OrdinalIgnoreCase), "empty filter placeholder missing");
     }
 
+    private static void DuplicateGlobalIdDiagnosticsCanBeRepaired()
+    {
+        var document = IfcStepParser.Parse(DuplicateGlobalIdFixture, "duplicate-globalid.ifc");
+        var duplicateDiagnostic = IfcDiagnosticsProjector.Project(document.Diagnostics.Messages, "Duplicate GlobalId").Single();
+
+        True(duplicateDiagnostic.CanRepair, "duplicate GlobalId diagnostic should expose a repair action");
+        Equal(40, duplicateDiagnostic.EntityId, "duplicate GlobalId diagnostic should navigate to first duplicate entity");
+
+        var repaired = IfcDocumentEditor.RegenerateDuplicateGlobalIds(document, duplicateDiagnostic.Message);
+
+        Equal("DUPLICATE-GLOBALID", repaired.EntityById[40].GlobalId, "first duplicate GlobalId should remain stable");
+        True(repaired.EntityById[41].GlobalId != "DUPLICATE-GLOBALID", "second duplicate GlobalId should be regenerated");
+        True(!repaired.Diagnostics.Messages.Any(message => message.Contains("Duplicate GlobalId", StringComparison.OrdinalIgnoreCase)), "duplicate GlobalId warning should clear after repair");
+        True(IfcDiffService.Summarize(document, repaired).Any(line => line.Contains("#41") && line.Contains("arg 1")), "repair diff should show the regenerated GlobalId argument");
+    }
+
     private static void RelationshipGraphSupportsFilterAndDepth()
     {
         var document = IfcStepParser.CreateSample();
@@ -612,6 +629,21 @@ DATA;
 #75= IFCCARTESIANPOINT((1.,0.,0.));
 #80= IFCPRODUCTDEFINITIONSHAPE($,$,());
 #81= IFCPRODUCTDEFINITIONSHAPE($,$,());
+ENDSEC;
+END-ISO-10303-21;
+""";
+
+    private const string DuplicateGlobalIdFixture = """
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');
+FILE_NAME('duplicate-globalid.ifc','2026-05-24T00:00:00',('IFCnative'),('IFCnative'),'IFCnative Native Windows','IFCnative','');
+FILE_SCHEMA(('IFC4X3_ADD2'));
+ENDSEC;
+DATA;
+#1= IFCPROJECT('2XQ2f8a9b2ff4l$IFCnative',$,'IFCnative Native Sample',$,$,$,$,$,$);
+#40= IFCBUILDINGELEMENTPROXY('DUPLICATE-GLOBALID',$,'Duplicate A',$,$,$,$,$,$);
+#41= IFCBUILDINGELEMENTPROXY('DUPLICATE-GLOBALID',$,'Duplicate B',$,$,$,$,$,$);
 ENDSEC;
 END-ISO-10303-21;
 """;

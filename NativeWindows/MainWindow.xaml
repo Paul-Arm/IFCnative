@@ -502,6 +502,13 @@
                                              Margin="0,2,0,0"
                                              TextChanged="DiagnosticFilter_TextChanged"
                                              ToolTip="Filter by severity, message text, or repair suggestion, for example Error, Warning, GlobalId, placement" />
+                                    <Button x:Name="RepairDiagnosticButton"
+                                            Content="Stage duplicate GlobalId repair"
+                                            Click="RepairDiagnostic_Click"
+                                            Margin="0,8,0,0"
+                                            IsEnabled="False"
+                                            Background="#334155"
+                                            BorderBrush="#475569" />
                                 </StackPanel>
                                 <ListBox x:Name="DiagnosticsList" DisplayMemberPath="Label" SelectionChanged="DiagnosticsList_SelectionChanged" />
                             </DockPanel>
