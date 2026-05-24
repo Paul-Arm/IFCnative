@@ -127,6 +127,7 @@ public static partial class IfcStepParser
                 continue;
             }
 
+            var entityStart = index;
             var idStart = ++index;
             while (index < data.Length && char.IsDigit(data[index]))
             {
@@ -175,8 +176,10 @@ public static partial class IfcStepParser
                 index++;
             }
 
-            var entity = new IfcEntity { Id = id, Type = type };
+            var originalStepLine = data[entityStart..index].Trim();
+            var entity = new IfcEntity { Id = id, Type = type, OriginalStepLine = originalStepLine };
             entity.Arguments.AddRange(StepArgumentReader.SplitTopLevel(args));
+            entity.OriginalArguments.AddRange(entity.Arguments);
             yield return entity;
         }
     }
@@ -303,13 +306,16 @@ public static partial class IfcStepParser
                 break;
             case "IFCRELVOIDSELEMENT":
             case "IFCRELFILLSELEMENT":
-            case "IFCRELCONNECTSELEMENTS":
             case "IFCRELCONNECTSPORTS":
             case "IFCRELCONNECTSPORTTOELEMENT":
             case "IFCRELINTERFERESELEMENTS":
             case "IFCRELPROJECTSELEMENT":
                 AddRefs(relationship.SourceIds, entity, 4);
                 AddRefs(relationship.TargetIds, entity, 5);
+                break;
+            case "IFCRELCONNECTSELEMENTS":
+                AddRefs(relationship.SourceIds, entity, 5);
+                AddRefs(relationship.TargetIds, entity, 6);
                 break;
             default:
                 foreach (var id in entity.Arguments.SelectMany(StepArgumentReader.ReadReferences).Distinct())
@@ -418,7 +424,8 @@ public static partial class IfcStepParser
             Name = ReadEntityLabel(propertySetEntity),
         };
 
-        foreach (var valueId in StepArgumentReader.ReadReferences(propertySetEntity.Arguments.ElementAtOrDefault(4) ?? string.Empty))
+        var valueArgumentIndex = propertySetEntity.Type == "IFCELEMENTQUANTITY" ? 5 : 4;
+        foreach (var valueId in StepArgumentReader.ReadReferences(propertySetEntity.Arguments.ElementAtOrDefault(valueArgumentIndex) ?? string.Empty))
         {
             if (!document.EntityById.TryGetValue(valueId, out var valueEntity))
             {

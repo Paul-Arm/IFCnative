@@ -51,7 +51,7 @@ public sealed class IfcDocument
         builder.AppendLine();
         builder.AppendLine("DATA;");
 
-        foreach (var entity in Entities.OrderBy(entity => entity.Id))
+        foreach (var entity in Entities)
         {
             builder.AppendLine(entity.ToStepLine());
         }

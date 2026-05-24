@@ -103,7 +103,7 @@
                             <TreeView x:Name="StructureTree" SelectedItemChanged="StructureTree_SelectedItemChanged" />
                         </TabItem>
                         <TabItem Header="Types">
-                            <ListBox x:Name="TypeList" SelectionChanged="TypeList_SelectionChanged" />
+                            <ListBox x:Name="TypeList" DisplayMemberPath="Label" SelectionChanged="TypeList_SelectionChanged" />
                         </TabItem>
                         <TabItem Header="Pinned">
                             <ListBox x:Name="BookmarkList" DisplayMemberPath="Label" SelectionChanged="BookmarkList_SelectionChanged" />
@@ -138,12 +138,15 @@
                                 <RowDefinition Height="*" />
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
-                            <TextBlock Text="3D geometry backend placeholder"
-                                       HorizontalAlignment="Center"
-                                       VerticalAlignment="Center"
-                                       Foreground="#64748b"
-                                       FontSize="22"
-                                       FontWeight="SemiBold" />
+                            <DockPanel Margin="16">
+                                <TextBlock DockPanel.Dock="Top"
+                                           Text="Geometry preview"
+                                           Foreground="#64748b"
+                                           FontSize="22"
+                                           FontWeight="SemiBold"
+                                           Margin="0,0,0,12" />
+                                <ListBox x:Name="ViewportGeometryList" DisplayMemberPath="Label" />
+                            </DockPanel>
                             <Border Grid.Row="1" Background="#0b1220" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="12">
                                 <TextBlock x:Name="ViewportInfo" Foreground="{StaticResource MutedBrush}" />
                             </Border>
@@ -160,9 +163,15 @@
                     <TabControl Background="Transparent" BorderThickness="0">
                         <TabItem Header="Draft">
                             <DockPanel LastChildFill="True" Margin="0,8,8,8">
-                                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
-                                    <Button x:Name="ApplyDraftButton" Content="Apply" Click="ApplyDraft_Click" IsEnabled="False" />
-                                    <Button x:Name="DiscardDraftButton" Content="Discard" Click="DiscardDraft_Click" Background="#991b1b" BorderBrush="#ef4444" IsEnabled="False" />
+                                <StackPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+                                    <TextBlock Text="Changeset name" Foreground="{StaticResource MutedBrush}" />
+                                    <TextBox x:Name="ChangesetNameBox" Margin="0,2,0,8" ToolTip="Optional label stored with the applied draft checkpoint" />
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button x:Name="ApplyDraftButton" Content="Apply" Click="ApplyDraft_Click" IsEnabled="False" />
+                                        <Button x:Name="DiscardDraftButton" Content="Discard" Click="DiscardDraft_Click" Background="#991b1b" BorderBrush="#ef4444" IsEnabled="False" />
+                                        <Button x:Name="UndoDraftButton" Content="Undo" Click="UndoDraft_Click" IsEnabled="False" />
+                                        <Button x:Name="RedoDraftButton" Content="Redo" Click="RedoDraft_Click" IsEnabled="False" />
+                                    </StackPanel>
                                 </StackPanel>
                                 <ListBox x:Name="DraftList" />
                             </DockPanel>
@@ -203,6 +212,30 @@
                                 </StackPanel>
                             </ScrollViewer>
                         </TabItem>
+                        <TabItem Header="Spatial edit">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <StackPanel Margin="0,8,8,8">
+                                    <ListBox x:Name="SpatialEditList" MinHeight="80" Margin="0,0,0,12" />
+                                    <TextBlock Text="Parent STEP id" Foreground="{StaticResource MutedBrush}" />
+                                    <TextBox x:Name="SpatialParentBox" Margin="0,2,0,12" ToolTip="Enter a spatial parent id, for example #30" />
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button x:Name="SaveSpatialParentButton" Content="Save spatial parent" Click="SaveSpatialParent_Click" IsEnabled="False" />
+                                        <Button x:Name="DetachSpatialParentButton" Content="Detach from parent" Click="DetachSpatialParent_Click" IsEnabled="False" Background="#7f1d1d" BorderBrush="#991b1b" />
+                                    </StackPanel>
+                                    <Border BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Margin="0,14,0,10" />
+                                    <TextBlock Text="Create child product" FontWeight="SemiBold" />
+                                    <TextBlock Text="Adds a placed product under the selected spatial parent with a rectangle/cylinder body draft." Foreground="{StaticResource MutedBrush}" Margin="0,2,0,8" />
+                                    <TextBlock Text="IFC type" Foreground="{StaticResource MutedBrush}" />
+                                    <TextBox x:Name="NewProductTypeBox" Text="IFCBUILDINGELEMENTPROXY" Margin="0,2,0,8" />
+                                    <TextBlock Text="Name" Foreground="{StaticResource MutedBrush}" />
+                                    <TextBox x:Name="NewProductNameBox" Text="New native product" Margin="0,2,0,8" />
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button x:Name="CreateRectangleProductButton" Content="Create rectangle product" Click="CreateRectangleProduct_Click" IsEnabled="False" />
+                                        <Button x:Name="CreateCylinderProductButton" Content="Create cylinder product" Click="CreateCylinderProduct_Click" IsEnabled="False" Background="#334155" BorderBrush="#475569" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </TabItem>
                         <TabItem Header="Placement">
                             <ScrollViewer VerticalScrollBarVisibility="Auto">
                                 <StackPanel Margin="0,8,8,8">
@@ -218,10 +251,49 @@
                             </ScrollViewer>
                         </TabItem>
                         <TabItem Header="Representation">
-                            <ListBox x:Name="RepresentationList" />
+                            <DockPanel LastChildFill="True" Margin="0,8,8,8">
+                                <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
+                                    <TextBlock Text="Body preset dimensions" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4" />
+                                    <UniformGrid Columns="3" Margin="0,0,0,8">
+                                        <StackPanel Margin="0,0,6,0">
+                                            <TextBlock Text="Width / diameter" Foreground="{StaticResource MutedBrush}" />
+                                            <TextBox x:Name="BodyWidthBox" Text="1" />
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,6,0">
+                                            <TextBlock Text="Depth" Foreground="{StaticResource MutedBrush}" />
+                                            <TextBox x:Name="BodyDepthBox" Text="1" />
+                                        </StackPanel>
+                                        <StackPanel>
+                                            <TextBlock Text="Height" Foreground="{StaticResource MutedBrush}" />
+                                            <TextBox x:Name="BodyHeightBox" Text="1" />
+                                        </StackPanel>
+                                    </UniformGrid>
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button x:Name="AssignRectangleBodyButton" Content="Stage rectangle body" Click="AssignRectangleBody_Click" IsEnabled="False" />
+                                        <Button x:Name="AssignCylinderBodyButton" Content="Stage cylinder body" Click="AssignCylinderBody_Click" IsEnabled="False" Background="#334155" BorderBrush="#475569" />
+                                        <Button x:Name="CreateOpeningVoidButton" Content="Create opening void" Click="CreateOpeningVoid_Click" Margin="8,0,0,0" IsEnabled="False" Background="#334155" BorderBrush="#475569" />
+                                        <Button x:Name="CreateFillingElementButton" Content="Create filling element" Click="CreateFillingElement_Click" IsEnabled="False" Background="#334155" BorderBrush="#475569" />
+                                    </StackPanel>
+                                </StackPanel>
+                                <ListBox x:Name="RepresentationList" />
+                            </DockPanel>
                         </TabItem>
                         <TabItem Header="Psets/Qto">
-                            <ListBox x:Name="PropertyList" />
+                            <DockPanel LastChildFill="True" Margin="0,8,8,8">
+                                <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
+                                    <TextBlock Text="Raw value" Foreground="{StaticResource MutedBrush}" />
+                                    <TextBox x:Name="PropertyValueBox" Margin="0,2,0,8" />
+                                    <Button x:Name="SavePropertyButton" Content="Save property value" Click="SaveProperty_Click" HorizontalAlignment="Left" IsEnabled="False" />
+                                    <Border BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Margin="0,12,0,10" />
+                                    <TextBlock Text="Property templates" FontWeight="SemiBold" />
+                                    <TextBlock Text="Stage a common Pset or base Qto assignment for the selected product. Qto uses the body dimension boxes." Foreground="{StaticResource MutedBrush}" Margin="0,2,0,8" />
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button x:Name="AddCommonPsetButton" Content="Add common Pset" Click="AddCommonPset_Click" IsEnabled="False" />
+                                        <Button x:Name="AddBaseQtoButton" Content="Add base Qto" Click="AddBaseQto_Click" IsEnabled="False" Background="#334155" BorderBrush="#475569" />
+                                    </StackPanel>
+                                </StackPanel>
+                                <ListBox x:Name="PropertyList" DisplayMemberPath="Label" SelectionChanged="PropertyList_SelectionChanged" />
+                            </DockPanel>
                         </TabItem>
                         <TabItem Header="Types">
                             <ListBox x:Name="TypeAssignmentList" />
@@ -233,13 +305,41 @@
                             <ListBox x:Name="UnitList" />
                         </TabItem>
                         <TabItem Header="Relationships">
-                            <ListBox x:Name="RelationshipList" />
+                            <DockPanel LastChildFill="True" Margin="0,8,8,8">
+                                <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
+                                    <TextBlock Text="Create/edit indexed relationship" FontWeight="SemiBold" />
+                                    <TextBlock Text="Type" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0" />
+                                    <TextBox x:Name="RelationshipTypeBox" Text="IFCRELDEFINESBYPROPERTIES" Margin="0,2,0,8" />
+                                    <TextBlock Text="Name" Foreground="{StaticResource MutedBrush}" />
+                                    <TextBox x:Name="RelationshipNameBox" Text="Native relationship" Margin="0,2,0,8" />
+                                    <TextBlock Text="Source IDs" Foreground="{StaticResource MutedBrush}" />
+                                    <TextBox x:Name="RelationshipSourceBox" Margin="0,2,0,8" />
+                                    <TextBlock Text="Target IDs" Foreground="{StaticResource MutedBrush}" />
+                                    <TextBox x:Name="RelationshipTargetBox" Margin="0,2,0,8" />
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button x:Name="CreateRelationshipButton" Content="Create relationship" Click="CreateRelationship_Click" IsEnabled="False" />
+                                        <Button x:Name="SaveRelationshipButton" Content="Save relationship endpoints" Click="SaveRelationship_Click" IsEnabled="False" />
+                                        <Button x:Name="DeleteRelationshipButton" Content="Delete relationship" Click="DeleteRelationship_Click" Margin="8,0,0,0" IsEnabled="False" Background="#7f1d1d" BorderBrush="#991b1b" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                        <Button x:Name="ConnectElementButton" Content="Connect selected to target" Click="ConnectElement_Click" IsEnabled="False" Background="#334155" BorderBrush="#475569" />
+                                        <Button x:Name="DisconnectElementButton" Content="Disconnect selected/target" Click="DisconnectElement_Click" IsEnabled="False" Background="#334155" BorderBrush="#475569" />
+                                    </StackPanel>
+                                </StackPanel>
+                                <ListBox x:Name="RelationshipList" DisplayMemberPath="Label" SelectionChanged="RelationshipList_SelectionChanged" />
+                            </DockPanel>
+                        </TabItem>
+                        <TabItem Header="Graph">
+                            <DockPanel LastChildFill="True" Margin="0,8,8,8">
+                                <TextBlock DockPanel.Dock="Top" Text="Selected entity relationship neighborhood" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,8" />
+                                <ListBox x:Name="RelationshipGraphList" DisplayMemberPath="Label" SelectionChanged="RelationshipGraphList_SelectionChanged" />
+                            </DockPanel>
                         </TabItem>
                         <TabItem Header="Incoming">
                             <ListBox x:Name="IncomingList" />
                         </TabItem>
                         <TabItem Header="Diagnostics">
-                            <ListBox x:Name="DiagnosticsList" />
+                            <ListBox x:Name="DiagnosticsList" DisplayMemberPath="Label" />
                         </TabItem>
                     </TabControl>
                 </DockPanel>
