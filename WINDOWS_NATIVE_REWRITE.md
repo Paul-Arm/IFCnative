@@ -46,7 +46,7 @@ Important constraint from Paul: the native app is a separate/additional folder/p
   - Entity parser and typed entity index.
   - Incoming reference index.
   - Relationship index for common IFC relationship classes.
-  - Property/quantity, type assignment, resource, unit, and product placement indexes.
+  - Property/quantity, type assignment, resource, unit, product placement, and product representation indexes.
   - Spatial containment tree.
   - Entity search.
   - Entity inspector for id/type/GlobalId/name/description/raw arguments.
@@ -122,7 +122,7 @@ Status legend: `[x] current`, `[~] partial`, `[ ] planned/native rewrite target`
 
 - [x] Web app has `web-ifc` geometry streaming/indexing.
 - [~] TypeScript native document supports simple rectangle/cylinder body generation and placement updates.
-- [~] C# native project has viewport placeholders only.
+- [~] C# native project has viewport placeholders and product representation indexing.
 - [ ] Native 3D viewport implementation.
 - [ ] Efficient large-model mesh streaming/chunking.
 - [ ] Selection sync between tree/graph/viewport.
@@ -143,7 +143,7 @@ Status legend: `[x] current`, `[~] partial`, `[ ] planned/native rewrite target`
 - [x] Basic STEP frame diagnostics.
 - [~] TypeScript diagnostics for schema/units/references/product shape issues.
 - [ ] Native validation panel with grouped severity.
-- [~] Duplicate GlobalId, missing refs, and multiple primary containment diagnostics.
+- [~] Duplicate GlobalId, missing refs, physical product placement/representation, and multiple primary containment diagnostics.
 - [ ] Repair suggestions.
 - [ ] IDS/MVD validation.
 
@@ -153,7 +153,7 @@ Status legend: `[x] current`, `[~] partial`, `[ ] planned/native rewrite target`
 2. [x] Create this inventory/tracking document.
 3. [~] Make native WPF project structurally complete and buildable by adding missing XAML and project defaults. XAML is present; Windows/dotnet build verification still pending.
 4. [ ] Split native shell into UI + services + view models so large lists can be virtualized and tested.
-5. [~] Port TypeScript native document capabilities to C# services: first-pass relationship model/indexing, property/resource/type/unit/placement read indexes, and numeric placement edit helper done; broader edit helpers and body helpers remain.
+5. [~] Port TypeScript native document capabilities to C# services: first-pass relationship model/indexing, property/resource/type/unit/placement/representation read indexes, and numeric placement edit helper done; broader edit helpers and body helpers remain.
 6. [ ] Implement draft transaction model and native diff summary.
 7. [ ] Add large-file parser/index strategy with progress and cancellation.
 8. [ ] Implement native relationship/spatial/property editor panels.
@@ -170,3 +170,4 @@ Status legend: `[x] current`, `[~] partial`, `[ ] planned/native rewrite target`
 - 2026-05-24 12:48 Europe/Berlin: added native IFC type assignment index and inspector tab so occurrences can show their assigned IFC type objects. Existing web tests/build still pass on macOS.
 - 2026-05-24 12:58 Europe/Berlin: added native product placement index for IFCLOCALPLACEMENT/IFCAXIS2PLACEMENT3D/IFCCARTESIANPOINT and a Placement inspector tab. Existing web tests/build still pass on macOS.
 - 2026-05-24 13:08 Europe/Berlin: added native numeric placement editing for indexed product placements, reparsing/exporting through the C# document service. Existing web tests/build still pass on macOS.
+- 2026-05-24 13:18 Europe/Berlin: added native product representation index for IFCPRODUCTDEFINITIONSHAPE/IFCSHAPEREPRESENTATION geometry references and physical product diagnostics for missing/invalid placements and representations. Existing web tests/build still pass on macOS.

@@ -20,6 +20,7 @@ public partial class MainWindow : Window
         "Done: relationship index",
         "Done: property/resource/type/unit indexes",
         "Done: product placement index/editor",
+        "Done: product representation index",
         "Done: duplicate GlobalId and containment diagnostics",
         "Done: spatial containment tree",
         "Done: entity inspector",
@@ -239,6 +240,7 @@ public partial class MainWindow : Window
         IncomingList.ItemsSource = GetIncomingReferences(entity).ToList();
         RelationshipList.ItemsSource = GetRelationships(entity).ToList();
         SetPlacementEditor(entity);
+        RepresentationList.ItemsSource = GetRepresentation(entity).ToList();
         PropertyList.ItemsSource = GetPropertySets(entity).ToList();
         TypeAssignmentList.ItemsSource = GetTypeAssignments(entity).ToList();
         ResourceList.ItemsSource = GetResources(entity).ToList();
@@ -273,6 +275,17 @@ public partial class MainWindow : Window
         }
 
         yield return placement.Label;
+    }
+
+    private IEnumerable<string> GetRepresentation(IfcEntity entity)
+    {
+        if (document is null || !document.RepresentationsByEntity.TryGetValue(entity.Id, out var representation))
+        {
+            yield return "No IFCPRODUCTDEFINITIONSHAPE indexed for this entity.";
+            yield break;
+        }
+
+        yield return representation.Label;
     }
 
     private IEnumerable<string> GetPropertySets(IfcEntity entity)
@@ -361,6 +374,7 @@ public partial class MainWindow : Window
         IncomingList.ItemsSource = Array.Empty<string>();
         RelationshipList.ItemsSource = Array.Empty<string>();
         PlacementList.ItemsSource = Array.Empty<string>();
+        RepresentationList.ItemsSource = Array.Empty<string>();
         PlacementXBox.Text = string.Empty;
         PlacementYBox.Text = string.Empty;
         PlacementZBox.Text = string.Empty;

@@ -33,6 +33,8 @@ public sealed class IfcDocument
 
     public Dictionary<int, IfcPlacementSummary> PlacementsByEntity { get; } = [];
 
+    public Dictionary<int, IfcRepresentationSummary> RepresentationsByEntity { get; } = [];
+
     public List<string> Units { get; } = [];
 
     public List<IfcTreeNode> SpatialRoots { get; } = [];

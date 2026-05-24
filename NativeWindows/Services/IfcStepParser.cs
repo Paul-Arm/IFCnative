@@ -56,12 +56,14 @@ public static partial class IfcStepParser
         BuildRelationshipIndex(document);
         BuildPropertyAndResourceIndexes(document);
         BuildPlacementIndex(document);
+        BuildRepresentationIndex(document);
         BuildSpatialTree(document);
         ValidateDocument(document);
         document.Diagnostics.Info($"Loaded {document.Entities.Count:N0} STEP entities.");
         document.Diagnostics.Info($"Indexed {document.RelationshipById.Count:N0} IFC relationships.");
         document.Diagnostics.Info($"Indexed {document.PropertySetById.Count:N0} property/quantity sets.");
         document.Diagnostics.Info($"Indexed {document.PlacementsByEntity.Count:N0} product placements.");
+        document.Diagnostics.Info($"Indexed {document.RepresentationsByEntity.Count:N0} product representations.");
         document.Diagnostics.Info($"Detected schema: {document.Schema}.");
 
         return document;
@@ -534,6 +536,41 @@ public static partial class IfcStepParser
             : null;
     }
 
+    private static void BuildRepresentationIndex(IfcDocument document)
+    {
+        foreach (var product in document.Entities.Where(entity => entity.Arguments.Count > 6))
+        {
+            var definitionShapeId = StepArgumentReader.ReadReferences(product.Arguments[6]).FirstOrDefault();
+            if (definitionShapeId == 0
+                || !document.EntityById.TryGetValue(definitionShapeId, out var definitionShape)
+                || definitionShape.Type != "IFCPRODUCTDEFINITIONSHAPE")
+            {
+                continue;
+            }
+
+            var summary = new IfcRepresentationSummary
+            {
+                ProductId = product.Id,
+                ProductDefinitionShapeId = definitionShape.Id,
+            };
+
+            var shapeRepresentationIds = StepArgumentReader.ReadReferences(definitionShape.Arguments.ElementAtOrDefault(2) ?? string.Empty);
+            foreach (var shapeRepresentationId in shapeRepresentationIds)
+            {
+                if (!document.EntityById.TryGetValue(shapeRepresentationId, out var shapeRepresentation)
+                    || shapeRepresentation.Type != "IFCSHAPEREPRESENTATION")
+                {
+                    continue;
+                }
+
+                summary.ShapeRepresentationIds.Add(shapeRepresentation.Id);
+                summary.GeometryItemIds.AddRange(StepArgumentReader.ReadReferences(shapeRepresentation.Arguments.ElementAtOrDefault(3) ?? string.Empty));
+            }
+
+            document.RepresentationsByEntity[product.Id] = summary;
+        }
+    }
+
     private static void ValidateDocument(IfcDocument document)
     {
         foreach (var relationship in document.RelationshipById.Values)
@@ -557,6 +594,8 @@ public static partial class IfcStepParser
             document.Diagnostics.Warn($"Duplicate GlobalId {duplicate.Key}: {string.Join(", ", duplicate.Select(entity => $"#{entity.Id}"))}.");
         }
 
+        ValidatePhysicalProducts(document);
+
         var primaryContainersByProduct = document.RelationshipById.Values
             .Where(relationship => relationship.Type == "IFCRELCONTAINEDINSPATIALSTRUCTURE")
             .SelectMany(relationship => relationship.TargetIds.Select(targetId => new { TargetId = targetId, RelationshipId = relationship.Id }))
@@ -567,6 +606,48 @@ public static partial class IfcStepParser
         {
             document.Diagnostics.Warn($"Entity #{duplicateContainer.Key} has multiple primary spatial containment relationships: {string.Join(", ", duplicateContainer.Select(item => $"#{item.RelationshipId}"))}.");
         }
+    }
+
+    private static void ValidatePhysicalProducts(IfcDocument document)
+    {
+        foreach (var product in document.Entities.Where(entity => IsPhysicalProduct(entity.Type)))
+        {
+            var placementId = product.Arguments.Count > 5
+                ? StepArgumentReader.ReadReferences(product.Arguments[5]).FirstOrDefault()
+                : 0;
+            if (placementId == 0)
+            {
+                document.Diagnostics.Warn($"#{product.Id} {product.Type} has no ObjectPlacement.");
+            }
+            else if (!document.EntityById.TryGetValue(placementId, out var placement) || placement.Type != "IFCLOCALPLACEMENT")
+            {
+                document.Diagnostics.Warn($"#{product.Id} {product.Type} ObjectPlacement points to #{placementId}, not IFCLOCALPLACEMENT.");
+            }
+
+            var representationId = product.Arguments.Count > 6
+                ? StepArgumentReader.ReadReferences(product.Arguments[6]).FirstOrDefault()
+                : 0;
+            if (representationId == 0)
+            {
+                document.Diagnostics.Warn($"#{product.Id} {product.Type} has no Representation.");
+            }
+            else if (!document.EntityById.TryGetValue(representationId, out var representation) || representation.Type != "IFCPRODUCTDEFINITIONSHAPE")
+            {
+                document.Diagnostics.Warn($"#{product.Id} {product.Type} Representation points to #{representationId}, not IFCPRODUCTDEFINITIONSHAPE.");
+            }
+        }
+    }
+
+    private static bool IsPhysicalProduct(string type)
+    {
+        return type is "IFCBUILTELEMENT" or "IFCBUILDINGELEMENTPROXY" or "IFCPROXY" or "IFCANNOTATION"
+            or "IFCROOF" or "IFCBEAM" or "IFCCOLUMN" or "IFCMEMBER" or "IFCPLATE" or "IFCDOOR"
+            or "IFCWINDOW" or "IFCCURTAINWALL" or "IFCSTAIR" or "IFCRAMP" or "IFCRAILING"
+            or "IFCFURNISHINGELEMENT" or "IFCFLOWTERMINAL" or "IFCDISTRIBUTIONELEMENT"
+            or "IFCOPENINGELEMENT" or "IFCVOIDINGFEATURE" or "IFCPROJECTIONELEMENT" or "IFCELEMENTASSEMBLY"
+            or "IFCTRANSPORTELEMENT"
+            || type.StartsWith("IFCWALL", StringComparison.OrdinalIgnoreCase)
+            || type.StartsWith("IFCSLAB", StringComparison.OrdinalIgnoreCase);
     }
 
     private static void BuildSpatialTree(IfcDocument document)
