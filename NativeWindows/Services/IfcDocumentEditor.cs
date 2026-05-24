@@ -6,8 +6,13 @@ public static class IfcDocumentEditor
 {
     public static IfcDocument UpdatePlacement(IfcDocument document, int productId, string xText, string yText, string zText)
     {
-        if (!document.PlacementsByEntity.TryGetValue(productId, out var placement)
-            || !document.EntityById.TryGetValue(placement.PointId, out var point))
+        if (!document.PlacementsByEntity.TryGetValue(productId, out var placement))
+        {
+            return document;
+        }
+
+        var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
+        if (!draft.EntityById.TryGetValue(placement.PointId, out var point))
         {
             return document;
         }
@@ -22,7 +27,7 @@ public static class IfcDocumentEditor
         }
 
         point.Arguments[0] = $"({FormatCoordinate(x)},{FormatCoordinate(y)},{FormatCoordinate(z)})";
-        return IfcStepParser.Parse(document.ToStepText(), document.FileName);
+        return IfcStepParser.Parse(draft.ToStepText(), draft.FileName);
     }
 
     private static double ParseCoordinate(string value, double fallback)

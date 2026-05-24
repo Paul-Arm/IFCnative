@@ -67,7 +67,7 @@
                 <StackPanel Orientation="Horizontal">
                     <Button Content="Open IFC" Click="OpenIfc_Click" />
                     <Button Content="Load sample" Click="LoadSample_Click" Background="#334155" BorderBrush="#475569" />
-                    <Button Content="Export IFC" Click="ExportIfc_Click" Background="#16a34a" BorderBrush="#22c55e" />
+                    <Button x:Name="ExportButton" Content="Export IFC" Click="ExportIfc_Click" Background="#16a34a" BorderBrush="#22c55e" />
                 </StackPanel>
                 <StackPanel Grid.Column="1" Margin="16,0" VerticalAlignment="Center">
                     <TextBlock Text="IFCnative Windows Native" FontSize="18" FontWeight="SemiBold" />
@@ -148,6 +148,15 @@
                 <DockPanel LastChildFill="True">
                     <TextBlock DockPanel.Dock="Top" x:Name="InspectorTitle" Text="Inspector" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10" />
                     <TabControl Background="Transparent" BorderThickness="0">
+                        <TabItem Header="Draft">
+                            <DockPanel LastChildFill="True" Margin="0,8,8,8">
+                                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
+                                    <Button x:Name="ApplyDraftButton" Content="Apply" Click="ApplyDraft_Click" IsEnabled="False" />
+                                    <Button x:Name="DiscardDraftButton" Content="Discard" Click="DiscardDraft_Click" Background="#991b1b" BorderBrush="#ef4444" IsEnabled="False" />
+                                </StackPanel>
+                                <ListBox x:Name="DraftList" />
+                            </DockPanel>
+                        </TabItem>
                         <TabItem Header="Entity">
                             <ScrollViewer VerticalScrollBarVisibility="Auto">
                                 <StackPanel Margin="0,8,8,8">

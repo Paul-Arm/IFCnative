@@ -33,6 +33,8 @@ public partial class MainWindow : Window
     ];
 
     private IfcDocument? document;
+    private IfcDocument? savedDocument;
+    private IfcDocument? pendingDocument;
     private IfcEntity? selectedEntity;
     private bool updatingUi;
 
@@ -72,6 +74,12 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (pendingDocument is not null)
+        {
+            StatusText.Text = "Apply or discard the pending draft before exporting.";
+            return;
+        }
+
         var dialog = new SaveFileDialog
         {
             Filter = "IFC files (*.ifc)|*.ifc|All files (*.*)|*.*",
@@ -95,20 +103,24 @@ public partial class MainWindow : Window
             return;
         }
 
-        selectedEntity.Name = EntityNameBox.Text.Trim();
-        selectedEntity.Description = EntityDescriptionBox.Text.Trim();
+        var selectedId = selectedEntity.Id;
+        var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
+        if (!draft.EntityById.TryGetValue(selectedId, out var draftEntity))
+        {
+            return;
+        }
+
+        draftEntity.Name = EntityNameBox.Text.Trim();
+        draftEntity.Description = EntityDescriptionBox.Text.Trim();
 
         var rawArguments = RawArgsBox.Text.Trim();
         if (!string.IsNullOrWhiteSpace(rawArguments))
         {
-            selectedEntity.Arguments.Clear();
-            selectedEntity.Arguments.AddRange(StepArgumentReader.SplitTopLevel(rawArguments));
+            draftEntity.Arguments.Clear();
+            draftEntity.Arguments.AddRange(StepArgumentReader.SplitTopLevel(rawArguments));
         }
 
-        var selectedId = selectedEntity.Id;
-        var refreshed = IfcStepParser.Parse(document.ToStepText(), document.FileName);
-        LoadDocument(refreshed, selectedId);
-        StatusText.Text = $"Saved edit for #{selectedId}";
+        StageDraft(IfcStepParser.Parse(draft.ToStepText(), draft.FileName), selectedId, $"Staged entity edit for #{selectedId}");
     }
 
     private void SavePlacement_Click(object sender, RoutedEventArgs e)
@@ -119,9 +131,33 @@ public partial class MainWindow : Window
         }
 
         var selectedId = selectedEntity.Id;
-        var refreshed = IfcDocumentEditor.UpdatePlacement(document, selectedId, PlacementXBox.Text, PlacementYBox.Text, PlacementZBox.Text);
-        LoadDocument(refreshed, selectedId);
-        StatusText.Text = $"Saved placement for #{selectedId}";
+        StageDraft(IfcDocumentEditor.UpdatePlacement(document, selectedId, PlacementXBox.Text, PlacementYBox.Text, PlacementZBox.Text), selectedId, $"Staged placement edit for #{selectedId}");
+    }
+
+    private void ApplyDraft_Click(object sender, RoutedEventArgs e)
+    {
+        if (pendingDocument is null)
+        {
+            return;
+        }
+
+        savedDocument = pendingDocument;
+        pendingDocument = null;
+        RefreshDraftUi();
+        StatusText.Text = "Draft applied.";
+    }
+
+    private void DiscardDraft_Click(object sender, RoutedEventArgs e)
+    {
+        if (pendingDocument is null || savedDocument is null)
+        {
+            return;
+        }
+
+        var selectedId = selectedEntity?.Id;
+        pendingDocument = null;
+        LoadDocument(savedDocument, selectedId);
+        StatusText.Text = "Draft discarded.";
     }
 
     private void StructureTree_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
@@ -183,10 +219,28 @@ public partial class MainWindow : Window
         ViewportInfo.Text = "Native camera reset.";
     }
 
-    private void LoadDocument(IfcDocument nextDocument, int? selectId = null)
+    private void StageDraft(IfcDocument draftDocument, int selectedId, string message)
+    {
+        if (savedDocument is null)
+        {
+            savedDocument = document;
+        }
+
+        pendingDocument = draftDocument;
+        LoadDocument(draftDocument, selectedId, preserveSaved: true);
+        StatusText.Text = message;
+    }
+
+    private void LoadDocument(IfcDocument nextDocument, int? selectId = null, bool preserveSaved = false)
     {
         updatingUi = true;
         document = nextDocument;
+        if (!preserveSaved)
+        {
+            savedDocument = nextDocument;
+            pendingDocument = null;
+        }
+
         selectedEntity = null;
 
         SchemaText.Text = document.Schema;
@@ -203,6 +257,7 @@ public partial class MainWindow : Window
         StructureTree.ItemsSource = document.SpatialRoots;
         ViewportTitle.Text = "Native Viewport";
         ViewportInfo.Text = $"{document.FileName}: {document.SpatialRoots.Count:N0} root nodes, {document.EntitiesByType.Count:N0} entity types.";
+        RefreshDraftUi();
 
         updatingUi = false;
 
@@ -222,6 +277,17 @@ public partial class MainWindow : Window
                 ClearInspector();
             }
         }
+    }
+
+    private void RefreshDraftUi()
+    {
+        var hasDraft = pendingDocument is not null && savedDocument is not null;
+        ApplyDraftButton.IsEnabled = hasDraft;
+        DiscardDraftButton.IsEnabled = hasDraft;
+        ExportButton.IsEnabled = !hasDraft;
+        DraftList.ItemsSource = hasDraft && savedDocument is not null && pendingDocument is not null
+            ? IfcDiffService.Summarize(savedDocument, pendingDocument)
+            : ["No pending draft."];
     }
 
     private void SelectEntity(IfcEntity entity)

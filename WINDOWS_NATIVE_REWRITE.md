@@ -133,9 +133,9 @@ Status legend: `[x] current`, `[~] partial`, `[ ] planned/native rewrite target`
 
 - [x] TypeScript entity-aware diff helpers.
 - [x] Web app disables export with pending draft according to prior plan.
-- [ ] Native diff/review panel.
-- [ ] Native human summary: operation, affected STEP ids, entity types.
-- [ ] Native export guarded by pending draft state.
+- [~] Native diff/review panel for staged entity and placement edits.
+- [~] Native human summary with added/removed/changed STEP ids and argument-level change preview.
+- [~] Native export guarded by pending draft state.
 - [ ] Validate exported IFC with parser/geometry backend before final save where possible.
 
 ### Validation/diagnostics
@@ -154,7 +154,7 @@ Status legend: `[x] current`, `[~] partial`, `[ ] planned/native rewrite target`
 3. [~] Make native WPF project structurally complete and buildable by adding missing XAML and project defaults. XAML is present; Windows/dotnet build verification still pending.
 4. [ ] Split native shell into UI + services + view models so large lists can be virtualized and tested.
 5. [~] Port TypeScript native document capabilities to C# services: first-pass relationship model/indexing, property/resource/type/unit/placement/representation read indexes, and numeric placement edit helper done; broader edit helpers and body helpers remain.
-6. [ ] Implement draft transaction model and native diff summary.
+6. [~] Implement draft transaction model and native diff summary. Entity and placement edits now stage drafts with apply/discard; broader edit operations still need integration.
 7. [ ] Add large-file parser/index strategy with progress and cancellation.
 8. [ ] Implement native relationship/spatial/property editor panels.
 9. [ ] Implement geometry backend abstraction and first viewport.
@@ -171,3 +171,4 @@ Status legend: `[x] current`, `[~] partial`, `[ ] planned/native rewrite target`
 - 2026-05-24 12:58 Europe/Berlin: added native product placement index for IFCLOCALPLACEMENT/IFCAXIS2PLACEMENT3D/IFCCARTESIANPOINT and a Placement inspector tab. Existing web tests/build still pass on macOS.
 - 2026-05-24 13:08 Europe/Berlin: added native numeric placement editing for indexed product placements, reparsing/exporting through the C# document service. Existing web tests/build still pass on macOS.
 - 2026-05-24 13:18 Europe/Berlin: added native product representation index for IFCPRODUCTDEFINITIONSHAPE/IFCSHAPEREPRESENTATION geometry references and physical product diagnostics for missing/invalid placements and representations. Existing web tests/build still pass on macOS.
+- 2026-05-24 13:28 Europe/Berlin: added native draft/diff workflow for entity and placement edits with apply/discard controls and export disabled while a draft is pending. Existing web tests/build still pass on macOS.
