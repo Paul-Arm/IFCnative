@@ -30,6 +30,7 @@ internal sealed class NativeTestRunner
         Run("export validation reparses document before save", ExportValidationReparsesDocumentBeforeSave);
         Run("diagnostics projector supports text and severity filters", DiagnosticsProjectorSupportsFilters);
         Run("relationship graph supports filter and depth", RelationshipGraphSupportsFilterAndDepth);
+        Run("native window layout store persists sanitized layout", NativeWindowLayoutStorePersistsSanitizedLayout);
         Run("draft session gates export until apply/discard", DraftSessionGatesExport);
         Run("draft session supports applied undo redo history", DraftSessionSupportsUndoRedoHistory);
     }
@@ -364,6 +365,32 @@ internal sealed class NativeTestRunner
         var filtered = IfcSelectionProjector.ProjectRelationshipGraph(document, proxy, "IFCPROPERTYSET", 2);
         True(filtered.Any(item => item.EntityId == 60), "filtered graph should keep matching property set neighbor");
         True(filtered.All(item => item.EntityId is not 30), "filtered graph should hide non-matching spatial neighbor");
+    }
+
+    private static void NativeWindowLayoutStorePersistsSanitizedLayout()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"ifcnative-layout-{Guid.NewGuid():N}.json");
+        try
+        {
+            var store = new NativeWindowLayoutStore(path);
+            store.Save(new(false, false, false, 40, 40, 10, 10));
+            var loaded = store.Load();
+
+            True(!loaded.ShowModelPane, "model pane visibility should persist");
+            True(loaded.ShowViewportPane, "viewport pane should be forced visible when all panes were hidden");
+            True(!loaded.ShowInspectorPane, "inspector pane visibility should persist");
+            Equal(260d, loaded.ModelPaneWidth, "model width should be clamped to minimum");
+            Equal(320d, loaded.InspectorPaneWidth, "inspector width should be clamped to minimum");
+            Equal(1100d, loaded.WindowWidth, "window width should be clamped to minimum");
+            Equal(700d, loaded.WindowHeight, "window height should be clamped to minimum");
+        }
+        finally
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
     }
 
     private static void DraftSessionGatesExport()

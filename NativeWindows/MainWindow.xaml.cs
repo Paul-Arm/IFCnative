@@ -39,6 +39,7 @@ public partial class MainWindow : Window
         "Done: relationship neighborhood graph panel",
         "Done: pinned entity bookmarks",
         "Done: persisted recent files",
+        "Done: persisted native window layout",
         "Done: entity inspector",
         "Done: basic entity editing/export",
         "Next: web-ifc WASM mesh/tessellation bridge",
@@ -55,6 +56,7 @@ public partial class MainWindow : Window
     private IfcPropertyDetails selectedProperty = IfcPropertyDetails.Empty;
     private CancellationTokenSource? openCancellation;
     private readonly RecentFileStore recentFileStore = new();
+    private readonly NativeWindowLayoutStore layoutStore = new();
     private readonly IfcDraftSession draftSession = new();
     private readonly IIfcGeometryBackend geometryBackend = new StepReferenceGeometryBackend();
     private readonly HashSet<int> bookmarkedEntityIds = [];
@@ -69,6 +71,8 @@ public partial class MainWindow : Window
         InitializeComponent();
         RelationshipGraphCanvas.RenderTransform = new TransformGroup { Children = { graphScale, graphTranslate } };
         CapabilityList.ItemsSource = capabilities;
+        RestoreSavedLayout();
+        Closing += (_, _) => layoutStore.Save(CaptureCurrentLayout());
         RefreshRecentFiles();
         LoadDocument(IfcStepParser.CreateSample());
     }
@@ -81,6 +85,7 @@ public partial class MainWindow : Window
     private void PaneVisibility_Click(object sender, RoutedEventArgs e)
     {
         ApplyPaneLayout();
+        layoutStore.Save(CaptureCurrentLayout());
     }
 
     private void ResetLayout_Click(object sender, RoutedEventArgs e)
@@ -92,23 +97,60 @@ public partial class MainWindow : Window
         ViewportColumn.Width = new GridLength(1, GridUnitType.Star);
         InspectorColumn.Width = new GridLength(380);
         ApplyPaneLayout();
+        layoutStore.Save(CaptureCurrentLayout());
         StatusText.Text = "Window layout reset.";
     }
 
     private void ApplyPaneLayout()
     {
-        SetPane(ModelPane, ModelSplitter, ModelColumn, ModelSplitterColumn, ShowModelPaneMenuItem.IsChecked, 330);
-        SetPane(ViewportPane, null, ViewportColumn, null, ShowViewportPaneMenuItem.IsChecked, 1, true);
-        SetPane(InspectorPane, InspectorSplitter, InspectorColumn, InspectorSplitterColumn, ShowInspectorPaneMenuItem.IsChecked, 380);
+        SetPane(ModelPane, ModelSplitter, ModelColumn, ModelSplitterColumn, ShowModelPaneMenuItem.IsChecked, 330, minWidth: 260);
+        SetPane(ViewportPane, null, ViewportColumn, null, ShowViewportPaneMenuItem.IsChecked, 1, minWidth: 420, star: true);
+        SetPane(InspectorPane, InspectorSplitter, InspectorColumn, InspectorSplitterColumn, ShowInspectorPaneMenuItem.IsChecked, 380, minWidth: 320);
 
         if (!ShowModelPaneMenuItem.IsChecked && !ShowViewportPaneMenuItem.IsChecked && !ShowInspectorPaneMenuItem.IsChecked)
         {
             ShowViewportPaneMenuItem.IsChecked = true;
-            SetPane(ViewportPane, null, ViewportColumn, null, true, 1, true);
+            SetPane(ViewportPane, null, ViewportColumn, null, true, 1, minWidth: 420, star: true);
         }
     }
 
-    private static void SetPane(UIElement pane, UIElement? splitter, ColumnDefinition column, ColumnDefinition? splitterColumn, bool visible, double width, bool star = false)
+    private void RestoreSavedLayout()
+    {
+        var layout = layoutStore.Load();
+        Width = layout.WindowWidth;
+        Height = layout.WindowHeight;
+        ShowModelPaneMenuItem.IsChecked = layout.ShowModelPane;
+        ShowViewportPaneMenuItem.IsChecked = layout.ShowViewportPane;
+        ShowInspectorPaneMenuItem.IsChecked = layout.ShowInspectorPane;
+        ModelColumn.Width = new GridLength(layout.ModelPaneWidth);
+        InspectorColumn.Width = new GridLength(layout.InspectorPaneWidth);
+        ViewportColumn.Width = new GridLength(1, GridUnitType.Star);
+        ApplyPaneLayout();
+    }
+
+    private NativeWindowLayout CaptureCurrentLayout()
+    {
+        return new NativeWindowLayout(
+            ShowModelPaneMenuItem.IsChecked,
+            ShowViewportPaneMenuItem.IsChecked,
+            ShowInspectorPaneMenuItem.IsChecked,
+            GetPixelWidth(ModelColumn, 330),
+            GetPixelWidth(InspectorColumn, 380),
+            ActualWidth > 0 ? ActualWidth : Width,
+            ActualHeight > 0 ? ActualHeight : Height);
+    }
+
+    private static double GetPixelWidth(ColumnDefinition column, double fallback)
+    {
+        if (column.ActualWidth > 0)
+        {
+            return column.ActualWidth;
+        }
+
+        return column.Width.IsAbsolute && column.Width.Value > 0 ? column.Width.Value : fallback;
+    }
+
+    private static void SetPane(UIElement pane, UIElement? splitter, ColumnDefinition column, ColumnDefinition? splitterColumn, bool visible, double width, double minWidth, bool star = false)
     {
         pane.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
         if (splitter is not null)
@@ -116,8 +158,20 @@ public partial class MainWindow : Window
             splitter.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
         }
 
-        column.Width = visible ? new GridLength(width, star ? GridUnitType.Star : GridUnitType.Pixel) : new GridLength(0);
-        column.MinWidth = visible ? (star ? 420 : Math.Min(width, 260)) : 0;
+        column.MinWidth = visible ? minWidth : 0;
+        if (visible)
+        {
+            var needsDefaultWidth = column.Width.Value <= 0 || (column.Width.IsAbsolute && column.Width.Value < minWidth);
+            if (needsDefaultWidth)
+            {
+                column.Width = new GridLength(width, star ? GridUnitType.Star : GridUnitType.Pixel);
+            }
+        }
+        else
+        {
+            column.Width = new GridLength(0);
+        }
+
         if (splitterColumn is not null)
         {
             splitterColumn.Width = visible ? new GridLength(6) : new GridLength(0);
