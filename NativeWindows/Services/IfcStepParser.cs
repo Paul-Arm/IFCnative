@@ -625,6 +625,11 @@ public static partial class IfcStepParser
             document.Diagnostics.Warn($"Duplicate GlobalId {duplicate.Key}: {string.Join(", ", duplicate.Select(entity => $"#{entity.Id}"))}.");
         }
 
+        foreach (var entity in document.Entities.Where(entity => IsRootedEntity(entity.Type) && string.IsNullOrWhiteSpace(entity.GlobalId)))
+        {
+            document.Diagnostics.Warn($"#{entity.Id} {entity.Type} has no GlobalId.");
+        }
+
         ValidatePhysicalProducts(document);
 
         var primaryContainersByProduct = document.RelationshipById.Values
@@ -679,6 +684,15 @@ public static partial class IfcStepParser
             or "IFCTRANSPORTELEMENT"
             || type.StartsWith("IFCWALL", StringComparison.OrdinalIgnoreCase)
             || type.StartsWith("IFCSLAB", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsRootedEntity(string type)
+    {
+        return type is "IFCPROJECT" or "IFCSITE" or "IFCBUILDING" or "IFCBUILDINGSTOREY" or "IFCSPACE"
+            or "IFCPROPERTYSET" or "IFCELEMENTQUANTITY" or "IFCTYPEOBJECT" or "IFCBUILDINGELEMENTPROXYTYPE"
+            || IsPhysicalProduct(type)
+            || type.StartsWith("IFCREL", StringComparison.OrdinalIgnoreCase)
+            || type.EndsWith("TYPE", StringComparison.OrdinalIgnoreCase);
     }
 
     private static void BuildSpatialTree(IfcDocument document)

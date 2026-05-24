@@ -167,6 +167,30 @@ public static class IfcDocumentEditor
         return changed ? IfcStepParser.Parse(draft.ToStepText(), draft.FileName) : document;
     }
 
+    public static IfcDocument GenerateMissingGlobalIdFromDiagnostic(IfcDocument document, string diagnosticMessage)
+    {
+        var entityId = ReadIds(diagnosticMessage).FirstOrDefault(document.EntityById.ContainsKey);
+        if (entityId == 0 || !document.EntityById.TryGetValue(entityId, out var entity) || !string.IsNullOrWhiteSpace(entity.GlobalId))
+        {
+            return document;
+        }
+
+        var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
+        if (!draft.EntityById.TryGetValue(entityId, out var draftEntity))
+        {
+            return document;
+        }
+
+        var existingGlobalIds = draft.Entities
+            .Where(candidate => candidate.Id != entityId)
+            .Select(candidate => candidate.GlobalId)
+            .Where(globalId => !string.IsNullOrWhiteSpace(globalId))
+            .ToHashSet(StringComparer.Ordinal);
+        SetArgument(draftEntity, 0, StepArgumentReader.Quote(MakeUniqueGeneratedGlobalId(entityId, existingGlobalIds)));
+
+        return IfcStepParser.Parse(draft.ToStepText(), draft.FileName);
+    }
+
     public static IfcDocument KeepFirstPrimarySpatialContainment(IfcDocument document, string diagnosticMessage)
     {
         var ids = ReadIds(diagnosticMessage).ToList();

@@ -8,6 +8,7 @@ public sealed record IfcDiagnosticDetails(
     bool CanRepairDuplicateGlobalId = false,
     bool CanRepairSpatialContainment = false,
     bool CanRepairMissingReference = false,
+    bool CanRepairMissingGlobalId = false,
     bool CanRepairPlacement = false,
     bool CanRepairRepresentation = false)
 {
@@ -16,6 +17,7 @@ public sealed record IfcDiagnosticDetails(
     public bool CanRepair => CanRepairDuplicateGlobalId
         || CanRepairSpatialContainment
         || CanRepairMissingReference
+        || CanRepairMissingGlobalId
         || CanRepairPlacement
         || CanRepairRepresentation;
 
@@ -23,6 +25,8 @@ public sealed record IfcDiagnosticDetails(
         ? "Stage spatial containment repair"
         : CanRepairMissingReference
             ? "Stage missing reference repair"
+        : CanRepairMissingGlobalId
+            ? "Stage missing GlobalId repair"
         : CanRepairPlacement
             ? "Stage placement repair"
         : CanRepairRepresentation

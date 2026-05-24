@@ -32,6 +32,7 @@ internal sealed class NativeTestRunner
         Run("export validation reparses document before save", ExportValidationReparsesDocumentBeforeSave);
         Run("missing relationship reference diagnostics can be repaired", MissingRelationshipReferenceDiagnosticsCanBeRepaired);
         Run("duplicate GlobalId diagnostics can be repaired", DuplicateGlobalIdDiagnosticsCanBeRepaired);
+        Run("missing GlobalId diagnostics can be repaired", MissingGlobalIdDiagnosticsCanBeRepaired);
         Run("spatial containment diagnostics can be repaired", SpatialContainmentDiagnosticsCanBeRepaired);
         Run("placement and representation diagnostics can be repaired", PlacementAndRepresentationDiagnosticsCanBeRepaired);
         Run("diagnostics projector supports text and severity filters", DiagnosticsProjectorSupportsFilters);
@@ -428,6 +429,26 @@ internal sealed class NativeTestRunner
         True(repaired.EntityById[41].GlobalId != "DUPLICATE-GLOBALID", "second duplicate GlobalId should be regenerated");
         True(!repaired.Diagnostics.Messages.Any(message => message.Contains("Duplicate GlobalId", StringComparison.OrdinalIgnoreCase)), "duplicate GlobalId warning should clear after repair");
         True(IfcDiffService.Summarize(document, repaired).Any(line => line.Contains("#41") && line.Contains("arg 1")), "repair diff should show the regenerated GlobalId argument");
+    }
+
+    private static void MissingGlobalIdDiagnosticsCanBeRepaired()
+    {
+        var fixture = MissingRelationshipReferenceFixture.Replace(
+            "#40= IFCBUILDINGELEMENTPROXY('0Proxy8a9b2ff4l$IFCnative'",
+            "#40= IFCBUILDINGELEMENTPROXY($",
+            StringComparison.Ordinal);
+        var document = IfcStepParser.Parse(fixture, "missing-globalid.ifc");
+        var missingGlobalIdDiagnostic = IfcDiagnosticsProjector.Project(document.Diagnostics.Messages, "has no GlobalId").Single();
+
+        True(missingGlobalIdDiagnostic.CanRepair, "missing GlobalId diagnostic should expose a repair action");
+        True(missingGlobalIdDiagnostic.CanRepairMissingGlobalId, "missing GlobalId diagnostic should expose missing-GlobalId repair kind");
+        Equal(40, missingGlobalIdDiagnostic.EntityId, "missing GlobalId diagnostic should navigate to affected entity");
+
+        var repaired = IfcDocumentEditor.GenerateMissingGlobalIdFromDiagnostic(document, missingGlobalIdDiagnostic.Message);
+
+        True(!string.IsNullOrWhiteSpace(repaired.EntityById[40].GlobalId), "repair should generate a GlobalId");
+        True(!repaired.Diagnostics.Messages.Any(message => message.Contains("has no GlobalId", StringComparison.OrdinalIgnoreCase)), "missing GlobalId warning should clear after repair");
+        True(IfcDiffService.Summarize(document, repaired).Any(line => line.Contains("#40") && line.Contains("arg 1")), "repair diff should show generated GlobalId argument");
     }
 
     private static void MissingRelationshipReferenceDiagnosticsCanBeRepaired()

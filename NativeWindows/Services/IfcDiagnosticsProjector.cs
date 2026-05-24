@@ -59,6 +59,8 @@ public static class IfcDiagnosticsProjector
         var canRepairDuplicateGlobalId = message.Contains("Duplicate GlobalId", StringComparison.OrdinalIgnoreCase) && entityIds.Count > 1;
         var canRepairSpatialContainment = message.Contains("multiple primary spatial containment", StringComparison.OrdinalIgnoreCase) && entityIds.Count > 2;
         var canRepairMissingReference = message.Contains("references missing entity", StringComparison.OrdinalIgnoreCase) && entityIds.Count > 1;
+        var canRepairMissingGlobalId = entityId is not null
+            && message.Contains("has no GlobalId", StringComparison.OrdinalIgnoreCase);
         var canRepairPlacement = entityId is not null
             && (message.Contains("has no ObjectPlacement", StringComparison.OrdinalIgnoreCase)
                 || message.Contains("ObjectPlacement points to", StringComparison.OrdinalIgnoreCase));
@@ -73,6 +75,7 @@ public static class IfcDiagnosticsProjector
             canRepairDuplicateGlobalId,
             canRepairSpatialContainment,
             canRepairMissingReference,
+            canRepairMissingGlobalId,
             canRepairPlacement,
             canRepairRepresentation);
     }
@@ -125,6 +128,11 @@ public static class IfcDiagnosticsProjector
         if (normalized.Contains("DUPLICATE GLOBALID"))
         {
             return "Regenerate one of the duplicated GlobalIds so each rooted object remains uniquely identifiable.";
+        }
+
+        if (normalized.Contains("NO GLOBALID"))
+        {
+            return "Generate a stable GlobalId before using this rooted IFC object in edits, exports, or external references.";
         }
 
         if (normalized.Contains("MULTIPLE PRIMARY SPATIAL CONTAINMENT"))
