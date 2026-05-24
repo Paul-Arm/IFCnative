@@ -67,7 +67,7 @@ Status legend: `[x] current`, `[~] partial`, `[ ] planned/native rewrite target`
 - [x] Extract schema/header.
 - [~] Preserve original STEP ids and order during export. Current native export sorts by id.
 - [~] Large-file memory strategy: async sequential file loading with progress/cancellation; streaming parser and lazy indexes still pending.
-- [ ] Recent files/session restore.
+- [~] Recent files/session restore. Native shell now persists recent IFC paths and can reopen/clean missing entries; automatic full workspace restore is still pending.
 - [ ] ifcZIP/ifcXML support.
 
 ### Parsing/indexing
@@ -175,3 +175,4 @@ Status legend: `[x] current`, `[~] partial`, `[ ] planned/native rewrite target`
 - 2026-05-24 13:38 Europe/Berlin: added native async sequential IFC file loader with progress updates and cancellation wiring in the Windows shell. Existing web tests/build still pass on macOS.
 - 2026-05-24 13:48 Europe/Berlin: added native spatial path indexing, full path display in the entity inspector, and path-aware entity search. Existing web tests/build still pass on macOS.
 - 2026-05-24 13:58 Europe/Berlin: added native pinned entity bookmarks with a Pinned navigation tab and inspector pin/unpin action. Existing web tests/build still pass on macOS.
+- 2026-05-24 14:08 Europe/Berlin: added persisted native recent-file storage with a Recent navigation tab, one-click reopen, and missing-file cleanup. Existing web tests/build still pass on macOS; native dotnet build remains blocked because `dotnet` is not installed on this host.

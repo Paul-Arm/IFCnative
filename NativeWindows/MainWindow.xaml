@@ -108,6 +108,12 @@
                         <TabItem Header="Pinned">
                             <ListBox x:Name="BookmarkList" DisplayMemberPath="Label" SelectionChanged="BookmarkList_SelectionChanged" />
                         </TabItem>
+                        <TabItem Header="Recent">
+                            <DockPanel LastChildFill="True">
+                                <Button DockPanel.Dock="Top" Content="Clear missing" Click="ClearMissingRecent_Click" Margin="0,0,0,8" Background="#334155" BorderBrush="#475569" />
+                                <ListBox x:Name="RecentFileList" DisplayMemberPath="Label" SelectionChanged="RecentFileList_SelectionChanged" />
+                            </DockPanel>
+                        </TabItem>
                         <TabItem Header="Capabilities">
                             <ListBox x:Name="CapabilityList" />
                         </TabItem>

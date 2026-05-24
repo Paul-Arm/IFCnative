@@ -25,6 +25,7 @@ public partial class MainWindow : Window
         "Done: duplicate GlobalId and containment diagnostics",
         "Done: spatial containment tree",
         "Done: pinned entity bookmarks",
+        "Done: persisted recent files",
         "Done: entity inspector",
         "Done: basic entity editing/export",
         "Next: web-ifc WASM geometry bridge",
@@ -39,6 +40,7 @@ public partial class MainWindow : Window
     private IfcDocument? pendingDocument;
     private IfcEntity? selectedEntity;
     private CancellationTokenSource? openCancellation;
+    private readonly RecentFileStore recentFileStore = new();
     private readonly HashSet<int> bookmarkedEntityIds = [];
     private bool updatingUi;
 
@@ -46,6 +48,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         CapabilityList.ItemsSource = capabilities;
+        RefreshRecentFiles();
         LoadDocument(IfcStepParser.CreateSample());
     }
 
@@ -62,6 +65,11 @@ public partial class MainWindow : Window
             return;
         }
 
+        await OpenIfcFileAsync(dialog.FileName);
+    }
+
+    private async Task OpenIfcFileAsync(string path)
+    {
         openCancellation?.Cancel();
         openCancellation = new CancellationTokenSource();
         SetOpenInProgress(true);
@@ -69,10 +77,12 @@ public partial class MainWindow : Window
         try
         {
             var progress = new Progress<string>(message => StatusText.Text = message);
-            var text = await IfcFileLoader.ReadTextAsync(dialog.FileName, progress, openCancellation.Token);
-            StatusText.Text = $"Parsing {Path.GetFileName(dialog.FileName)}…";
-            var parsed = await Task.Run(() => IfcStepParser.Parse(text, Path.GetFileName(dialog.FileName)), openCancellation.Token);
+            var text = await IfcFileLoader.ReadTextAsync(path, progress, openCancellation.Token);
+            StatusText.Text = $"Parsing {Path.GetFileName(path)}…";
+            var parsed = await Task.Run(() => IfcStepParser.Parse(text, Path.GetFileName(path)), openCancellation.Token);
             LoadDocument(parsed);
+            recentFileStore.Add(path);
+            RefreshRecentFiles();
         }
         catch (OperationCanceledException)
         {
@@ -247,6 +257,29 @@ public partial class MainWindow : Window
         SelectEntity(node.Entity);
     }
 
+    private async void RecentFileList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (updatingUi || RecentFileList.SelectedItem is not RecentIfcFile recentFile)
+        {
+            return;
+        }
+
+        if (!File.Exists(recentFile.Path))
+        {
+            RefreshRecentFiles(recentFileStore.RemoveMissing());
+            StatusText.Text = $"Recent file no longer exists: {recentFile.FileName}";
+            return;
+        }
+
+        await OpenIfcFileAsync(recentFile.Path);
+    }
+
+    private void ClearMissingRecent_Click(object sender, RoutedEventArgs e)
+    {
+        RefreshRecentFiles(recentFileStore.RemoveMissing());
+        StatusText.Text = "Removed missing recent files.";
+    }
+
     private void ToggleBookmark_Click(object sender, RoutedEventArgs e)
     {
         if (selectedEntity is null)
@@ -363,6 +396,14 @@ public partial class MainWindow : Window
             .OrderBy(id => id)
             .Select(id => new IfcTreeNode(document.EntityById[id], "pinned"))
             .ToList();
+    }
+
+    private void RefreshRecentFiles(IReadOnlyList<RecentIfcFile>? recentFiles = null)
+    {
+        updatingUi = true;
+        RecentFileList.ItemsSource = recentFiles ?? recentFileStore.Load();
+        RecentFileList.SelectedItem = null;
+        updatingUi = false;
     }
 
     private void RefreshDraftUi()
@@ -541,4 +582,3 @@ public partial class MainWindow : Window
         UnitList.ItemsSource = Array.Empty<string>();
     }
 }
-
