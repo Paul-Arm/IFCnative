@@ -152,7 +152,7 @@ Status legend: `[x] current`, `[~] partial`, `[ ] planned/native rewrite target`
 1. [x] Clone/fetch repo and create rewrite branch.
 2. [x] Create this inventory/tracking document.
 3. [~] Make native WPF project structurally complete and buildable by adding missing XAML and project defaults. XAML is present; Windows/dotnet build verification still pending.
-4. [ ] Split native shell into UI + services + view models so large lists can be virtualized and tested.
+4. [~] Split native shell into UI + services + view models so large lists can be virtualized and tested. First selection/inspector projection has moved out of `MainWindow` into service/view-model classes; broader navigation and command wiring still pending.
 5. [~] Port TypeScript native document capabilities to C# services: first-pass relationship model/indexing, property/resource/type/unit/placement/representation read indexes, and numeric placement edit helper done; broader edit helpers and body helpers remain.
 6. [~] Implement draft transaction model and native diff summary. Entity and placement edits now stage drafts with apply/discard; broader edit operations still need integration.
 7. [~] Add large-file parser/index strategy with progress and cancellation. Async sequential file loading with cancel/progress is done; parser/index streaming still pending.
@@ -176,3 +176,4 @@ Status legend: `[x] current`, `[~] partial`, `[ ] planned/native rewrite target`
 - 2026-05-24 13:48 Europe/Berlin: added native spatial path indexing, full path display in the entity inspector, and path-aware entity search. Existing web tests/build still pass on macOS.
 - 2026-05-24 13:58 Europe/Berlin: added native pinned entity bookmarks with a Pinned navigation tab and inspector pin/unpin action. Existing web tests/build still pass on macOS.
 - 2026-05-24 14:08 Europe/Berlin: added persisted native recent-file storage with a Recent navigation tab, one-click reopen, and missing-file cleanup. Existing web tests/build still pass on macOS; native dotnet build remains blocked because `dotnet` is not installed on this host.
+- 2026-05-24 14:22 Europe/Berlin: began native shell split by moving selected-entity inspector projection into `IfcSelectionProjector` and `IfcSelectionDetails`, trimming repeated list-building logic from `MainWindow`. Existing web tests/build still pass on macOS; native dotnet build remains blocked because `dotnet` is not installed on this host.

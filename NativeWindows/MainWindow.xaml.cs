@@ -419,12 +419,18 @@ public partial class MainWindow : Window
 
     private void SelectEntity(IfcEntity entity)
     {
+        if (document is null)
+        {
+            return;
+        }
+
+        var details = IfcSelectionProjector.Project(document, entity);
         selectedEntity = entity;
         InspectorTitle.Text = entity.DisplayName;
         EntityIdText.Text = $"#{entity.Id}";
         EntityTypeText.Text = entity.Type;
         EntityGlobalIdText.Text = string.IsNullOrWhiteSpace(entity.GlobalId) ? "-" : entity.GlobalId;
-        EntityPathText.Text = document?.SpatialPathByEntity.TryGetValue(entity.Id, out var path) == true ? path : "-";
+        EntityPathText.Text = details.SpatialPath;
         EntityNameBox.Text = entity.Name;
         EntityDescriptionBox.Text = entity.Description;
         RawArgsBox.Text = string.Join(",", entity.Arguments);
@@ -432,14 +438,14 @@ public partial class MainWindow : Window
         ViewportInfo.Text = $"Selected #{entity.Id}. Native graph selection is active.";
         ToggleBookmarkButton.Content = bookmarkedEntityIds.Contains(entity.Id) ? "Unpin selection" : "Pin selection";
 
-        IncomingList.ItemsSource = GetIncomingReferences(entity).ToList();
-        RelationshipList.ItemsSource = GetRelationships(entity).ToList();
+        IncomingList.ItemsSource = details.IncomingReferences;
+        RelationshipList.ItemsSource = details.Relationships;
         SetPlacementEditor(entity);
-        RepresentationList.ItemsSource = GetRepresentation(entity).ToList();
-        PropertyList.ItemsSource = GetPropertySets(entity).ToList();
-        TypeAssignmentList.ItemsSource = GetTypeAssignments(entity).ToList();
-        ResourceList.ItemsSource = GetResources(entity).ToList();
-        UnitList.ItemsSource = document?.Units.Count > 0 ? document.Units : ["No IFCUNITASSIGNMENT units indexed."];
+        RepresentationList.ItemsSource = details.Representations;
+        PropertyList.ItemsSource = details.PropertySets;
+        TypeAssignmentList.ItemsSource = details.TypeAssignments;
+        ResourceList.ItemsSource = details.Resources;
+        UnitList.ItemsSource = details.Units;
     }
 
     private void SetPlacementEditor(IfcEntity entity)
@@ -459,102 +465,6 @@ public partial class MainWindow : Window
         PlacementYBox.Text = placement.Y.ToString("0.########", CultureInfo.InvariantCulture);
         PlacementZBox.Text = placement.Z.ToString("0.########", CultureInfo.InvariantCulture);
         SavePlacementButton.IsEnabled = true;
-    }
-
-    private IEnumerable<string> GetPlacement(IfcEntity entity)
-    {
-        if (document is null || !document.PlacementsByEntity.TryGetValue(entity.Id, out var placement))
-        {
-            yield return "No IFCLOCALPLACEMENT indexed for this entity.";
-            yield break;
-        }
-
-        yield return placement.Label;
-    }
-
-    private IEnumerable<string> GetRepresentation(IfcEntity entity)
-    {
-        if (document is null || !document.RepresentationsByEntity.TryGetValue(entity.Id, out var representation))
-        {
-            yield return "No IFCPRODUCTDEFINITIONSHAPE indexed for this entity.";
-            yield break;
-        }
-
-        yield return representation.Label;
-    }
-
-    private IEnumerable<string> GetPropertySets(IfcEntity entity)
-    {
-        if (document is null || !document.PropertySetsByEntity.TryGetValue(entity.Id, out var propertySets))
-        {
-            yield return "No property or quantity sets indexed for this entity.";
-            yield break;
-        }
-
-        foreach (var propertySet in propertySets.OrderBy(set => set.Kind).ThenBy(set => set.Name).ThenBy(set => set.Id))
-        {
-            yield return propertySet.Label;
-            foreach (var value in propertySet.Values)
-            {
-                yield return $"  • {value.Label}";
-            }
-        }
-    }
-
-    private IEnumerable<string> GetTypeAssignments(IfcEntity entity)
-    {
-        if (document is null || !document.TypeAssignmentsByEntity.TryGetValue(entity.Id, out var assignments))
-        {
-            yield return "No IFC type assignments indexed for this entity.";
-            yield break;
-        }
-
-        foreach (var assignment in assignments.OrderBy(assignment => assignment.TypeClass).ThenBy(assignment => assignment.TypeName).ThenBy(assignment => assignment.RelationshipId))
-        {
-            yield return assignment.Label;
-        }
-    }
-
-    private IEnumerable<string> GetResources(IfcEntity entity)
-    {
-        if (document is null || !document.ResourcesByEntity.TryGetValue(entity.Id, out var resources))
-        {
-            yield return "No material/classification/document/library resources indexed for this entity.";
-            yield break;
-        }
-
-        foreach (var resource in resources.OrderBy(resource => resource, StringComparer.OrdinalIgnoreCase))
-        {
-            yield return resource;
-        }
-    }
-
-    private IEnumerable<string> GetRelationships(IfcEntity entity)
-    {
-        if (document is null || !document.RelationshipsByEntity.TryGetValue(entity.Id, out var relationships))
-        {
-            yield return "No indexed IFC relationships for this entity.";
-            yield break;
-        }
-
-        foreach (var relationship in relationships.OrderBy(relationship => relationship.Type).ThenBy(relationship => relationship.Id))
-        {
-            yield return relationship.Label;
-        }
-    }
-
-    private IEnumerable<string> GetIncomingReferences(IfcEntity entity)
-    {
-        if (document is null || !document.IncomingReferences.TryGetValue(entity.Id, out var incoming))
-        {
-            yield return "No incoming references indexed.";
-            yield break;
-        }
-
-        foreach (var reference in incoming.OrderBy(reference => reference.Type).ThenBy(reference => reference.Id))
-        {
-            yield return $"#{reference.Id} {reference.Type}: {StepArgumentReader.CompactPreview(string.Join(",", reference.Arguments))}";
-        }
     }
 
     private void ClearInspector()
