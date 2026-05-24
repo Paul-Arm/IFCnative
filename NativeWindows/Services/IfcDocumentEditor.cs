@@ -216,6 +216,55 @@ public static class IfcDocumentEditor
         return changed ? IfcStepParser.Parse(draft.ToStepText(), draft.FileName) : document;
     }
 
+    public static IfcDocument RemoveMissingRelationshipReferences(IfcDocument document, string diagnosticMessage)
+    {
+        var ids = ReadIds(diagnosticMessage).ToList();
+        if (ids.Count < 2)
+        {
+            return document;
+        }
+
+        var relationshipId = ids[0];
+        var missingIds = ids
+            .Skip(1)
+            .Where(id => !document.EntityById.ContainsKey(id))
+            .Distinct()
+            .ToHashSet();
+        if (missingIds.Count == 0
+            || !document.RelationshipById.TryGetValue(relationshipId, out var relationship)
+            || GetRelationshipEndpointMap(relationship.Type) is not { } map)
+        {
+            return document;
+        }
+
+        var sourceIds = relationship.SourceIds.Where(id => !missingIds.Contains(id)).Distinct().ToList();
+        var targetIds = relationship.TargetIds.Where(id => !missingIds.Contains(id)).Distinct().ToList();
+        if (sourceIds.Count == relationship.SourceIds.Distinct().Count()
+            && targetIds.Count == relationship.TargetIds.Distinct().Count())
+        {
+            return document;
+        }
+
+        var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
+        if (!draft.EntityById.TryGetValue(relationshipId, out var draftRelationship))
+        {
+            return document;
+        }
+
+        if (sourceIds.Count == 0 || targetIds.Count == 0)
+        {
+            draft.Entities.RemoveAll(entity => entity.Id == relationshipId);
+            draft.EntityById.Remove(relationshipId);
+        }
+        else
+        {
+            SetArgument(draftRelationship, map.SourceArgumentIndex, FormatReferenceArgument(sourceIds, map.SourceIsList));
+            SetArgument(draftRelationship, map.TargetArgumentIndex, FormatReferenceArgument(targetIds, map.TargetIsList));
+        }
+
+        return IfcStepParser.Parse(draft.ToStepText(), draft.FileName);
+    }
+
     private static IfcDocument AddSimpleResourceAssignment(
         IfcDocument document,
         int productId,

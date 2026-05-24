@@ -30,6 +30,7 @@ internal sealed class NativeTestRunner
         Run("body assignment creates swept solid representation", BodyAssignmentCreatesSweptSolidRepresentation);
         Run("body assignment can be staged as draft", BodyAssignmentCanBeStagedAsDraft);
         Run("export validation reparses document before save", ExportValidationReparsesDocumentBeforeSave);
+        Run("missing relationship reference diagnostics can be repaired", MissingRelationshipReferenceDiagnosticsCanBeRepaired);
         Run("duplicate GlobalId diagnostics can be repaired", DuplicateGlobalIdDiagnosticsCanBeRepaired);
         Run("spatial containment diagnostics can be repaired", SpatialContainmentDiagnosticsCanBeRepaired);
         Run("diagnostics projector supports text and severity filters", DiagnosticsProjectorSupportsFilters);
@@ -428,6 +429,22 @@ internal sealed class NativeTestRunner
         True(IfcDiffService.Summarize(document, repaired).Any(line => line.Contains("#41") && line.Contains("arg 1")), "repair diff should show the regenerated GlobalId argument");
     }
 
+    private static void MissingRelationshipReferenceDiagnosticsCanBeRepaired()
+    {
+        var document = IfcStepParser.Parse(MissingRelationshipReferenceFixture, "missing-relationship-reference.ifc");
+        var missingDiagnostic = IfcDiagnosticsProjector.Project(document.Diagnostics.Messages, "references missing entity").Single();
+
+        True(missingDiagnostic.CanRepair, "missing reference diagnostic should expose a repair action");
+        True(missingDiagnostic.CanRepairMissingReference, "missing reference diagnostic should expose missing-reference repair kind");
+        Equal(53, missingDiagnostic.EntityId, "missing reference diagnostic should navigate to relationship");
+
+        var repaired = IfcDocumentEditor.RemoveMissingRelationshipReferences(document, missingDiagnostic.Message);
+
+        Equal("(#40)", repaired.EntityById[53].Arguments[4], "repair should remove dangling related object from relationship list");
+        True(!repaired.Diagnostics.Messages.Any(message => message.Contains("references missing entity", StringComparison.OrdinalIgnoreCase)), "missing reference warning should clear after repair");
+        True(IfcDiffService.Summarize(document, repaired).Any(line => line.Contains("#53") && line.Contains("arg 5")), "repair diff should show edited relationship endpoint list");
+    }
+
     private static void SpatialContainmentDiagnosticsCanBeRepaired()
     {
         var document = IfcStepParser.Parse(MultipleContainmentFixture, "multiple-containment.ifc");
@@ -682,6 +699,22 @@ DATA;
 #52= IFCRELAGGREGATES('1AggLevel00000000000000',$,'Building aggregates storeys',$,#20,(#30,#31));
 #53= IFCRELCONTAINEDINSPATIALSTRUCTURE('1ContLevelProxy0000000',$,'Storey A Contains Proxy',$,(#40),#30);
 #54= IFCRELCONTAINEDINSPATIALSTRUCTURE('1ContLevelProxy0000001',$,'Storey B Also Contains Proxy',$,(#40),#31);
+ENDSEC;
+END-ISO-10303-21;
+""";
+
+    private const string MissingRelationshipReferenceFixture = """
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');
+FILE_NAME('missing-relationship-reference.ifc','2026-05-24T00:00:00',('IFCnative'),('IFCnative'),'IFCnative Native Windows','IFCnative','');
+FILE_SCHEMA(('IFC4X3_ADD2'));
+ENDSEC;
+DATA;
+#1= IFCPROJECT('2XQ2f8a9b2ff4l$IFCnative',$,'IFCnative Native Sample',$,$,$,$,$,$);
+#30= IFCBUILDINGSTOREY('0Level8a9b2ff4l$IFCnative',$,'Level 0',$,$,$,$,$,$);
+#40= IFCBUILDINGELEMENTPROXY('0Proxy8a9b2ff4l$IFCnative',$,'Referenced Proxy',$,$,$,$,$,$);
+#53= IFCRELCONTAINEDINSPATIALSTRUCTURE('1ContLevelProxy0000000',$,'Level Contains Proxy',$,(#40,#999),#30);
 ENDSEC;
 END-ISO-10303-21;
 """;

@@ -981,7 +981,9 @@ public partial class MainWindow : Window
         var selectedId = diagnostic.EntityId ?? selectedEntity?.Id ?? document.Entities.FirstOrDefault()?.Id ?? 0;
         var draft = diagnostic.CanRepairSpatialContainment
             ? IfcDocumentEditor.KeepFirstPrimarySpatialContainment(document, diagnostic.Message)
-            : IfcDocumentEditor.RegenerateDuplicateGlobalIds(document, diagnostic.Message);
+            : diagnostic.CanRepairMissingReference
+                ? IfcDocumentEditor.RemoveMissingRelationshipReferences(document, diagnostic.Message)
+                : IfcDocumentEditor.RegenerateDuplicateGlobalIds(document, diagnostic.Message);
         if (draft.ToStepText() == document.ToStepText())
         {
             StatusText.Text = "No diagnostic repair was staged for this diagnostic.";
@@ -990,7 +992,9 @@ public partial class MainWindow : Window
 
         StageDraft(draft, selectedId, diagnostic.CanRepairSpatialContainment
             ? "Staged spatial containment repair from diagnostic."
-            : "Staged duplicate GlobalId repair from diagnostic.");
+            : diagnostic.CanRepairMissingReference
+                ? "Staged missing reference repair from diagnostic."
+                : "Staged duplicate GlobalId repair from diagnostic.");
     }
 
     private void FitViewport_Click(object sender, RoutedEventArgs e)
