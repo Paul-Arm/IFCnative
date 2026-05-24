@@ -46,6 +46,7 @@ Important constraint from Paul: the native app is a separate/additional folder/p
   - Entity parser and typed entity index.
   - Incoming reference index.
   - Relationship index for common IFC relationship classes.
+  - Property/quantity, resource, and unit indexes.
   - Spatial containment tree.
   - Entity search.
   - Entity inspector for id/type/GlobalId/name/description/raw arguments.
@@ -112,8 +113,8 @@ Status legend: `[x] current`, `[~] partial`, `[ ] planned/native rewrite target`
 
 - [~] TypeScript indexes psets, quantities, materials, classifications, documents, types.
 - [~] TypeScript mutation helpers can add/update these resources.
-- [ ] Native property/quantity editor.
-- [ ] Native material/type/classification/document managers.
+- [~] Native property/quantity index and inspector view.
+- [~] Native material/classification/document/library resource index and inspector view.
 - [ ] Templates/presets for common psets and quantities.
 
 ### Geometry/viewport
@@ -151,7 +152,7 @@ Status legend: `[x] current`, `[~] partial`, `[ ] planned/native rewrite target`
 2. [x] Create this inventory/tracking document.
 3. [~] Make native WPF project structurally complete and buildable by adding missing XAML and project defaults. XAML is present; Windows/dotnet build verification still pending.
 4. [ ] Split native shell into UI + services + view models so large lists can be virtualized and tested.
-5. [~] Port TypeScript native document capabilities to C# services: first-pass relationship model/indexing done; psets/qto/resources/types/units, placement/body helpers remain.
+5. [~] Port TypeScript native document capabilities to C# services: first-pass relationship model/indexing and property/resource/unit read indexes done; edit helpers, type assignment index, placement/body helpers remain.
 6. [ ] Implement draft transaction model and native diff summary.
 7. [ ] Add large-file parser/index strategy with progress and cancellation.
 8. [ ] Implement native relationship/spatial/property editor panels.
@@ -164,3 +165,4 @@ Status legend: `[x] current`, `[~] partial`, `[ ] planned/native rewrite target`
 - 2026-05-24 12:18 Europe/Berlin: repo fetched, branch created.
 - 2026-05-24 12:20 Europe/Berlin: native build attempted on current host; blocked because `dotnet` command is not installed on this macOS host.
 - 2026-05-24 12:28 Europe/Berlin: added native relationship model/index, relationship inspector tab, duplicate GlobalId diagnostics, missing relationship reference diagnostics, and multiple primary spatial containment diagnostics. Existing web tests/build still pass on macOS.
+- 2026-05-24 12:38 Europe/Berlin: added native property/quantity set index, resource index, unit index, and inspector tabs for Psets/Qto, resources, and units. Existing web tests/build still pass on macOS.

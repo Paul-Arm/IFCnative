@@ -17,6 +17,7 @@ public partial class MainWindow : Window
         "Done: header/schema extraction",
         "Done: typed entity index",
         "Done: relationship index",
+        "Done: property/resource/unit indexes",
         "Done: duplicate GlobalId and containment diagnostics",
         "Done: spatial containment tree",
         "Done: entity inspector",
@@ -222,6 +223,41 @@ public partial class MainWindow : Window
 
         IncomingList.ItemsSource = GetIncomingReferences(entity).ToList();
         RelationshipList.ItemsSource = GetRelationships(entity).ToList();
+        PropertyList.ItemsSource = GetPropertySets(entity).ToList();
+        ResourceList.ItemsSource = GetResources(entity).ToList();
+        UnitList.ItemsSource = document?.Units.Count > 0 ? document.Units : ["No IFCUNITASSIGNMENT units indexed."];
+    }
+
+    private IEnumerable<string> GetPropertySets(IfcEntity entity)
+    {
+        if (document is null || !document.PropertySetsByEntity.TryGetValue(entity.Id, out var propertySets))
+        {
+            yield return "No property or quantity sets indexed for this entity.";
+            yield break;
+        }
+
+        foreach (var propertySet in propertySets.OrderBy(set => set.Kind).ThenBy(set => set.Name).ThenBy(set => set.Id))
+        {
+            yield return propertySet.Label;
+            foreach (var value in propertySet.Values)
+            {
+                yield return $"  • {value.Label}";
+            }
+        }
+    }
+
+    private IEnumerable<string> GetResources(IfcEntity entity)
+    {
+        if (document is null || !document.ResourcesByEntity.TryGetValue(entity.Id, out var resources))
+        {
+            yield return "No material/classification/document/library resources indexed for this entity.";
+            yield break;
+        }
+
+        foreach (var resource in resources.OrderBy(resource => resource, StringComparer.OrdinalIgnoreCase))
+        {
+            yield return resource;
+        }
     }
 
     private IEnumerable<string> GetRelationships(IfcEntity entity)
@@ -263,6 +299,9 @@ public partial class MainWindow : Window
         RawArgsBox.Text = string.Empty;
         IncomingList.ItemsSource = Array.Empty<string>();
         RelationshipList.ItemsSource = Array.Empty<string>();
+        PropertyList.ItemsSource = Array.Empty<string>();
+        ResourceList.ItemsSource = Array.Empty<string>();
+        UnitList.ItemsSource = Array.Empty<string>();
     }
 }
 

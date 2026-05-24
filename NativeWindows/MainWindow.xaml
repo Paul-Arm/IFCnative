@@ -178,6 +178,15 @@
                                 </StackPanel>
                             </ScrollViewer>
                         </TabItem>
+                        <TabItem Header="Psets/Qto">
+                            <ListBox x:Name="PropertyList" />
+                        </TabItem>
+                        <TabItem Header="Resources">
+                            <ListBox x:Name="ResourceList" />
+                        </TabItem>
+                        <TabItem Header="Units">
+                            <ListBox x:Name="UnitList" />
+                        </TabItem>
                         <TabItem Header="Relationships">
                             <ListBox x:Name="RelationshipList" />
                         </TabItem>

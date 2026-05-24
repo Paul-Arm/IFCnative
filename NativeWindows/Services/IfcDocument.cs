@@ -23,6 +23,14 @@ public sealed class IfcDocument
 
     public Dictionary<int, List<IfcRelationship>> RelationshipsByEntity { get; } = [];
 
+    public Dictionary<int, IfcPropertySet> PropertySetById { get; } = [];
+
+    public Dictionary<int, List<IfcPropertySet>> PropertySetsByEntity { get; } = [];
+
+    public Dictionary<int, List<string>> ResourcesByEntity { get; } = [];
+
+    public List<string> Units { get; } = [];
+
     public List<IfcTreeNode> SpatialRoots { get; } = [];
 
     public IfcDiagnostics Diagnostics { get; } = new();

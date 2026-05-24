@@ -53,10 +53,12 @@ public static partial class IfcStepParser
         }
 
         BuildRelationshipIndex(document);
+        BuildPropertyAndResourceIndexes(document);
         BuildSpatialTree(document);
         ValidateDocument(document);
         document.Diagnostics.Info($"Loaded {document.Entities.Count:N0} STEP entities.");
         document.Diagnostics.Info($"Indexed {document.RelationshipById.Count:N0} IFC relationships.");
+        document.Diagnostics.Info($"Indexed {document.PropertySetById.Count:N0} property/quantity sets.");
         document.Diagnostics.Info($"Detected schema: {document.Schema}.");
 
         return document;
@@ -318,6 +320,128 @@ public static partial class IfcStepParser
     private static void AddRefs(List<int> target, IfcEntity entity, int argumentIndex)
     {
         target.AddRange(StepArgumentReader.ReadReferences(entity.Arguments.ElementAtOrDefault(argumentIndex) ?? string.Empty));
+    }
+
+    private static void BuildPropertyAndResourceIndexes(IfcDocument document)
+    {
+        foreach (var propertySetEntity in document.Entities.Where(entity => entity.Type is "IFCPROPERTYSET" or "IFCELEMENTQUANTITY"))
+        {
+            var propertySet = CreatePropertySet(document, propertySetEntity);
+            document.PropertySetById[propertySet.Id] = propertySet;
+        }
+
+        foreach (var relationship in document.RelationshipById.Values)
+        {
+            switch (relationship.Type)
+            {
+                case "IFCRELDEFINESBYPROPERTIES":
+                    foreach (var setId in relationship.SourceIds)
+                    {
+                        if (!document.PropertySetById.TryGetValue(setId, out var propertySet))
+                        {
+                            continue;
+                        }
+
+                        foreach (var objectId in relationship.TargetIds)
+                        {
+                            AddToIndex(document.PropertySetsByEntity, objectId, propertySet);
+                        }
+                    }
+                    break;
+                case "IFCRELASSOCIATESMATERIAL":
+                case "IFCRELASSOCIATESCLASSIFICATION":
+                case "IFCRELASSOCIATESDOCUMENT":
+                case "IFCRELASSOCIATESLIBRARY":
+                    foreach (var resourceId in relationship.SourceIds)
+                    {
+                        if (!document.EntityById.TryGetValue(resourceId, out var resource))
+                        {
+                            continue;
+                        }
+
+                        var label = $"#{resource.Id} {resource.TypeName()} {ReadEntityLabel(resource)}".Trim();
+                        foreach (var objectId in relationship.TargetIds)
+                        {
+                            AddToIndex(document.ResourcesByEntity, objectId, label);
+                        }
+                    }
+                    break;
+            }
+        }
+
+        foreach (var unitAssignment in document.Entities.Where(entity => entity.Type == "IFCUNITASSIGNMENT"))
+        {
+            foreach (var unitId in StepArgumentReader.ReadReferences(unitAssignment.Arguments.FirstOrDefault() ?? string.Empty))
+            {
+                if (document.EntityById.TryGetValue(unitId, out var unit))
+                {
+                    document.Units.Add($"#{unit.Id} {unit.Type}: {StepArgumentReader.CompactPreview(string.Join(",", unit.Arguments))}");
+                }
+            }
+        }
+    }
+
+    private static IfcPropertySet CreatePropertySet(IfcDocument document, IfcEntity propertySetEntity)
+    {
+        var propertySet = new IfcPropertySet
+        {
+            Id = propertySetEntity.Id,
+            Kind = propertySetEntity.Type == "IFCELEMENTQUANTITY" ? "Qto" : "Pset",
+            Name = ReadEntityLabel(propertySetEntity),
+        };
+
+        foreach (var valueId in StepArgumentReader.ReadReferences(propertySetEntity.Arguments.ElementAtOrDefault(4) ?? string.Empty))
+        {
+            if (!document.EntityById.TryGetValue(valueId, out var valueEntity))
+            {
+                continue;
+            }
+
+            propertySet.Values.Add(new IfcPropertyValue
+            {
+                Id = valueEntity.Id,
+                Type = valueEntity.Type,
+                Name = ReadEntityLabel(valueEntity),
+                Value = ReadPropertyDisplayValue(valueEntity),
+            });
+        }
+
+        return propertySet;
+    }
+
+    private static string ReadEntityLabel(IfcEntity entity)
+    {
+        var nameArgumentIndex = entity.Type switch
+        {
+            "IFCPROPERTYSET" or "IFCELEMENTQUANTITY" => 2,
+            "IFCPROPERTYSINGLEVALUE" => 0,
+            "IFCQUANTITYLENGTH" or "IFCQUANTITYAREA" or "IFCQUANTITYVOLUME" or "IFCQUANTITYCOUNT" or "IFCQUANTITYWEIGHT" or "IFCQUANTITYTIME" => 0,
+            "IFCMATERIAL" or "IFCCLASSIFICATIONREFERENCE" or "IFCDOCUMENTREFERENCE" or "IFCLIBRARYREFERENCE" => 0,
+            _ => 2,
+        };
+
+        return StepArgumentReader.Unquote(entity.Arguments.ElementAtOrDefault(nameArgumentIndex)) ?? entity.Name;
+    }
+
+    private static string ReadPropertyDisplayValue(IfcEntity valueEntity)
+    {
+        return valueEntity.Type switch
+        {
+            "IFCPROPERTYSINGLEVALUE" => StepArgumentReader.CompactPreview(valueEntity.Arguments.ElementAtOrDefault(2) ?? string.Empty),
+            "IFCQUANTITYLENGTH" or "IFCQUANTITYAREA" or "IFCQUANTITYVOLUME" or "IFCQUANTITYCOUNT" or "IFCQUANTITYWEIGHT" or "IFCQUANTITYTIME" => StepArgumentReader.CompactPreview(valueEntity.Arguments.ElementAtOrDefault(3) ?? string.Empty),
+            _ => StepArgumentReader.CompactPreview(string.Join(",", valueEntity.Arguments)),
+        };
+    }
+
+    private static void AddToIndex<T>(Dictionary<int, List<T>> index, int entityId, T value)
+    {
+        if (!index.TryGetValue(entityId, out var bucket))
+        {
+            bucket = [];
+            index[entityId] = bucket;
+        }
+
+        bucket.Add(value);
     }
 
     private static void ValidateDocument(IfcDocument document)
