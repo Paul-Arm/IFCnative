@@ -181,6 +181,9 @@
                         <TabItem Header="Psets/Qto">
                             <ListBox x:Name="PropertyList" />
                         </TabItem>
+                        <TabItem Header="Types">
+                            <ListBox x:Name="TypeAssignmentList" />
+                        </TabItem>
                         <TabItem Header="Resources">
                             <ListBox x:Name="ResourceList" />
                         </TabItem>

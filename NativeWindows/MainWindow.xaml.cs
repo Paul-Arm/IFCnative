@@ -17,7 +17,7 @@ public partial class MainWindow : Window
         "Done: header/schema extraction",
         "Done: typed entity index",
         "Done: relationship index",
-        "Done: property/resource/unit indexes",
+        "Done: property/resource/type/unit indexes",
         "Done: duplicate GlobalId and containment diagnostics",
         "Done: spatial containment tree",
         "Done: entity inspector",
@@ -224,6 +224,7 @@ public partial class MainWindow : Window
         IncomingList.ItemsSource = GetIncomingReferences(entity).ToList();
         RelationshipList.ItemsSource = GetRelationships(entity).ToList();
         PropertyList.ItemsSource = GetPropertySets(entity).ToList();
+        TypeAssignmentList.ItemsSource = GetTypeAssignments(entity).ToList();
         ResourceList.ItemsSource = GetResources(entity).ToList();
         UnitList.ItemsSource = document?.Units.Count > 0 ? document.Units : ["No IFCUNITASSIGNMENT units indexed."];
     }
@@ -243,6 +244,20 @@ public partial class MainWindow : Window
             {
                 yield return $"  • {value.Label}";
             }
+        }
+    }
+
+    private IEnumerable<string> GetTypeAssignments(IfcEntity entity)
+    {
+        if (document is null || !document.TypeAssignmentsByEntity.TryGetValue(entity.Id, out var assignments))
+        {
+            yield return "No IFC type assignments indexed for this entity.";
+            yield break;
+        }
+
+        foreach (var assignment in assignments.OrderBy(assignment => assignment.TypeClass).ThenBy(assignment => assignment.TypeName).ThenBy(assignment => assignment.RelationshipId))
+        {
+            yield return assignment.Label;
         }
     }
 
@@ -300,6 +315,7 @@ public partial class MainWindow : Window
         IncomingList.ItemsSource = Array.Empty<string>();
         RelationshipList.ItemsSource = Array.Empty<string>();
         PropertyList.ItemsSource = Array.Empty<string>();
+        TypeAssignmentList.ItemsSource = Array.Empty<string>();
         ResourceList.ItemsSource = Array.Empty<string>();
         UnitList.ItemsSource = Array.Empty<string>();
     }

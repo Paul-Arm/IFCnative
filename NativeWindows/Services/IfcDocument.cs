@@ -29,6 +29,8 @@ public sealed class IfcDocument
 
     public Dictionary<int, List<string>> ResourcesByEntity { get; } = [];
 
+    public Dictionary<int, List<IfcTypeAssignment>> TypeAssignmentsByEntity { get; } = [];
+
     public List<string> Units { get; } = [];
 
     public List<IfcTreeNode> SpatialRoots { get; } = [];

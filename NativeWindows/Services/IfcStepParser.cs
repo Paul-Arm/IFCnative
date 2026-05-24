@@ -348,6 +348,29 @@ public static partial class IfcStepParser
                         }
                     }
                     break;
+                case "IFCRELDEFINESBYTYPE":
+                    foreach (var typeId in relationship.SourceIds)
+                    {
+                        if (!document.EntityById.TryGetValue(typeId, out var typeEntity))
+                        {
+                            continue;
+                        }
+
+                        var assignment = new IfcTypeAssignment
+                        {
+                            RelationshipId = relationship.Id,
+                            TypeId = typeEntity.Id,
+                            TypeClass = typeEntity.Type,
+                            TypeName = ReadEntityLabel(typeEntity),
+                        };
+                        assignment.ObjectIds.AddRange(relationship.TargetIds);
+
+                        foreach (var objectId in relationship.TargetIds)
+                        {
+                            AddToIndex(document.TypeAssignmentsByEntity, objectId, assignment);
+                        }
+                    }
+                    break;
                 case "IFCRELASSOCIATESMATERIAL":
                 case "IFCRELASSOCIATESCLASSIFICATION":
                 case "IFCRELASSOCIATESDOCUMENT":
