@@ -5,6 +5,7 @@ export type InspectorMode =
   | "edit"
   | "placement"
   | "psets"
+  | "object-info"
   | "relations"
   | "resources"
   | "refs"
@@ -17,6 +18,7 @@ export type MosaicViewId =
   | "builder"
   | "catalog"
   | "catalog-review"
+  | "object-info"
   | "console"
   | "diagnostics";
 

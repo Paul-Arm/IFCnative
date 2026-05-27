@@ -40,6 +40,7 @@ import {
   findCatalogObject,
   getNativePlacement,
   getNextNativeEntityId,
+  buildObjectInfoIndex,
   parseNativeIfcFileInWorker,
   removeNativeEntity,
   removeNativePropertyFromSet,
@@ -55,6 +56,7 @@ import {
   updateNativePropertyValue,
   updateNativeRelationship,
   validateEntityAgainstCatalogObject,
+  validateObjectInfoIndex,
   viewerWorldDeltaToIfcPlacementDelta,
   type CatalogValidationFinding,
   type IfcObjectCatalog,
@@ -74,6 +76,7 @@ import {
 } from "./ifc-workspace/constants";
 import { GraphPanel } from "./ifc-workspace/GraphPanel";
 import { InspectorPanel } from "./ifc-workspace/InspectorPanel";
+import { ObjectInfoPanel } from "./ifc-workspace/ObjectInfoPanel";
 import { ConsolePanel, DiagnosticsPanel } from "./ifc-workspace/ReviewPanels";
 import { StructurePanel } from "./ifc-workspace/StructurePanel";
 import { styles } from "./ifc-workspace/styles";
@@ -346,6 +349,14 @@ export default function IfcWorkspace() {
           )
         : [],
     [activeCatalogObject, selectedId, viewerDocument],
+  );
+  const objectInfoIndex = useMemo(
+    () => buildObjectInfoIndex(viewerDocument),
+    [viewerDocument],
+  );
+  const objectInfoFindings = useMemo(
+    () => validateObjectInfoIndex(objectInfoIndex),
+    [objectInfoIndex],
   );
   const viewerModels = useMemo(
     () =>
@@ -1474,6 +1485,7 @@ export default function IfcWorkspace() {
           "edit",
           "placement",
           "psets",
+          "object-info",
           "relations",
           "resources",
           "refs",
@@ -1488,6 +1500,8 @@ export default function IfcWorkspace() {
         catalogFindings={catalogFindings}
         document={viewerDocument}
         mode={inspectorMode}
+        objectInfoFindings={objectInfoFindings}
+        objectInfoIndex={objectInfoIndex}
         selectedId={selectedId}
         onAddClassification={addClassification}
         onAddDocumentReference={addDocumentReference}
@@ -1506,6 +1520,7 @@ export default function IfcWorkspace() {
         onSaveEdit={saveSelectedEdit}
         onMovePlacement={moveSelectedPlacement}
         onRenamePropertySet={renamePset}
+        onSelectEntity={selectEntity}
         onUpdateProperty={updatePsetProperty}
         onUpdateRelationship={editRelationship}
       />
@@ -1581,6 +1596,18 @@ export default function IfcWorkspace() {
               findings={catalogFindings}
               selectedCatalogObjectId={activeCatalogObjectId}
               onApplyFinding={applyCatalogFinding}
+            />
+          </View>
+        );
+      case "object-info":
+        return (
+          <View style={styles.tileContent}>
+            <ObjectInfoPanel
+              document={viewerDocument}
+              findings={objectInfoFindings}
+              index={objectInfoIndex}
+              selectedId={selectedId}
+              onSelectEntity={selectEntity}
             />
           </View>
         );

@@ -11,6 +11,7 @@ export const MOSAIC_VIEW_IDS: MosaicViewId[] = [
   "builder",
   "catalog",
   "catalog-review",
+  "object-info",
   "console",
   "diagnostics",
 ];
@@ -49,6 +50,7 @@ export const MOSAIC_TITLES: Record<MosaicViewId, string> = {
   console: "JS Console",
   diagnostics: "Diagnostics",
   inspector: "Inspector",
+  "object-info": "Objektinfo: IDs",
   structure: "Structure",
   viewer: "3D Viewer",
 };

@@ -5,42 +5,47 @@ import * as WebIFC from "web-ifc";
 
 import { createMinimalIfcProject } from "../src/ifc/builder";
 import {
-    viewerWorldDeltaToIfcPlacementDelta,
-    viewerWorldPointToIfcPlacementPoint,
+  viewerWorldDeltaToIfcPlacementDelta,
+  viewerWorldPointToIfcPlacementPoint,
 } from "../src/ifc/coordinateMapping";
 import {
-    buildNativeDocumentFromFragments,
-    type FragmentDocumentModel,
+  buildNativeDocumentFromFragments,
+  type FragmentDocumentModel,
 } from "../src/ifc/fragmentDocument";
 import { buildGraphIndex, summarizeLine } from "../src/ifc/graphIndex";
 import {
-    addNativeBodyElement,
-    addNativeClassification,
-    addNativeDocumentReference,
-    addNativeElement,
-    addNativeMaterial,
-    addNativePropertySet,
-    addNativeQuantitySet,
-    addNativeRelationship,
-    addNativeSiUnit,
-    addNativeTypeAssignment,
-    assignNativeBodyRepresentation,
-    createNativeSampleDocument,
-    duplicateNativePropertySet,
-    getNativePlacement,
-    parseNativeIfcText,
-    removeNativeEntity,
-    removeNativePropertyFromSet,
-    removeNativePropertySet,
-    removeNativeRelationship,
-    resolveNativeMovableProductId,
-    serializeNativeIfcDocument,
-    updateNativePlacement,
-    updateNativePropertySetName,
-    updateNativePropertyValue,
-    updateNativeRelationship,
+  addNativeBodyElement,
+  addNativeClassification,
+  addNativeDocumentReference,
+  addNativeElement,
+  addNativeMaterial,
+  addNativePropertySet,
+  addNativePropertySetValues,
+  addNativeQuantitySet,
+  addNativeRelationship,
+  addNativeSiUnit,
+  addNativeTypeAssignment,
+  assignNativeBodyRepresentation,
+  createNativeSampleDocument,
+  duplicateNativePropertySet,
+  getNativePlacement,
+  parseNativeIfcText,
+  removeNativeEntity,
+  removeNativePropertyFromSet,
+  removeNativePropertySet,
+  removeNativeRelationship,
+  resolveNativeMovableProductId,
+  serializeNativeIfcDocument,
+  updateNativePlacement,
+  updateNativePropertySetName,
+  updateNativePropertyValue,
+  updateNativeRelationship,
 } from "../src/ifc/nativeDocument";
 import { buildNativeGraphNeighborhood } from "../src/ifc/nativeGraph";
+import {
+  buildObjectInfoIndex,
+  validateObjectInfoReferences,
+} from "../src/ifc/objectInfoValidation";
 import { preflightIfcText } from "../src/ifc/preflight";
 import { buildPropertyIndex } from "../src/ifc/propertyIndex";
 import type { IfcEntitySummary } from "../src/ifc/types";
@@ -685,6 +690,172 @@ test("native document removes pset rows and selected pset relationships", () => 
   assert.equal(withoutPset.entityById.has(propertyId), false);
   assert.equal(withoutPset.entityById.has(pset.id), false);
   assert.equal(withoutPset.entityById.has(relationship.id), false);
+});
+
+test("object info validation indexes definitions and ID references", () => {
+  const sample = createNativeSampleDocument();
+  const storey = sample.entities.find(
+    (entity) => entity.type === "IFCBUILDINGSTOREY",
+  );
+  assert.ok(storey);
+
+  const withTarget = addNativeElement(
+    sample,
+    storey.id,
+    "IFCWALL",
+    "ObjectInfo Target",
+  );
+  const target = withTarget.entities.find(
+    (entity) =>
+      entity.type === "IFCWALL" && entity.name === "ObjectInfo Target",
+  );
+  assert.ok(target);
+  const targetWithInfo = addNativePropertySetValues(
+    withTarget,
+    target.id,
+    "ePset_Objektinformationen",
+    [{ name: "_ID", value: "OBJ-TARGET" }],
+  );
+
+  const withSource = addNativeElement(
+    targetWithInfo,
+    storey.id,
+    "IFCWALL",
+    "ObjectInfo Source",
+  );
+  const source = withSource.entities.find(
+    (entity) =>
+      entity.type === "IFCWALL" && entity.name === "ObjectInfo Source",
+  );
+  assert.ok(source);
+  const sourceWithInfo = addNativePropertySetValues(
+    withSource,
+    source.id,
+    "ePset_Objektinformationen",
+    [
+      { name: "_ID", value: "OBJ-SOURCE" },
+      { name: "_TargetID", value: "OBJ-TARGET" },
+      { name: "_ExternalID", value: "EXT-1" },
+      { name: "_MissingID", value: "DOES-NOT-EXIST" },
+    ],
+  );
+  const document = addNativePropertySetValues(
+    sourceWithInfo,
+    storey.id,
+    "ePset_ExternalFamily",
+    [{ name: "_ID", value: "EXT-1" }],
+  );
+
+  const index = buildObjectInfoIndex(document);
+  assert.equal(
+    index.definitionsByValue.get("OBJ-TARGET")?.[0].entityId,
+    target.id,
+  );
+  const targetReference = index.references.find(
+    (reference) => reference.propertyName === "_TargetID",
+  );
+  assert.equal(targetReference?.targetDefinitions[0]?.entityId, target.id);
+
+  const findings = validateObjectInfoReferences(document);
+  assert.ok(
+    findings.some(
+      (finding) =>
+        finding.kind === "external-id-reference" && finding.value === "EXT-1",
+    ),
+  );
+  assert.ok(
+    findings.some(
+      (finding) =>
+        finding.kind === "missing-object-info-reference" &&
+        finding.value === "DOES-NOT-EXIST",
+    ),
+  );
+  assert.equal(
+    findings.some(
+      (finding) =>
+        finding.kind === "missing-object-info-reference" &&
+        finding.value === "OBJ-TARGET",
+    ),
+    false,
+  );
+});
+
+test("object info validation reports duplicate and empty object info IDs", () => {
+  const sample = createNativeSampleDocument();
+  const storey = sample.entities.find(
+    (entity) => entity.type === "IFCBUILDINGSTOREY",
+  );
+  assert.ok(storey);
+
+  const withFirst = addNativeElement(
+    sample,
+    storey.id,
+    "IFCWALL",
+    "Duplicate ObjectInfo A",
+  );
+  const first = withFirst.entities.find(
+    (entity) =>
+      entity.type === "IFCWALL" && entity.name === "Duplicate ObjectInfo A",
+  );
+  assert.ok(first);
+  const firstWithInfo = addNativePropertySetValues(
+    withFirst,
+    first.id,
+    "ePset_Objektinformationen",
+    [{ name: "_ID", value: "DUPLICATE-ID" }],
+  );
+
+  const withSecond = addNativeElement(
+    firstWithInfo,
+    storey.id,
+    "IFCWALL",
+    "Duplicate ObjectInfo B",
+  );
+  const second = withSecond.entities.find(
+    (entity) =>
+      entity.type === "IFCWALL" && entity.name === "Duplicate ObjectInfo B",
+  );
+  assert.ok(second);
+  const secondWithInfo = addNativePropertySetValues(
+    withSecond,
+    second.id,
+    "ePset_Objektinformationen",
+    [{ name: "_ID", value: "DUPLICATE-ID" }],
+  );
+
+  const withEmpty = addNativeElement(
+    secondWithInfo,
+    storey.id,
+    "IFCWALL",
+    "Empty ObjectInfo",
+  );
+  const empty = withEmpty.entities.find(
+    (entity) => entity.type === "IFCWALL" && entity.name === "Empty ObjectInfo",
+  );
+  assert.ok(empty);
+  const document = addNativePropertySetValues(
+    withEmpty,
+    empty.id,
+    "ePset_Objektinformationen",
+    [{ name: "_ID", value: "-" }],
+  );
+
+  const findings = validateObjectInfoReferences(document);
+  assert.ok(
+    findings.some(
+      (finding) =>
+        finding.kind === "duplicate-object-info-id" &&
+        finding.value === "DUPLICATE-ID" &&
+        finding.severity === "error",
+    ),
+  );
+  assert.ok(
+    findings.some(
+      (finding) =>
+        finding.kind === "empty-object-info-id" &&
+        finding.entityId === empty.id,
+    ),
+  );
 });
 
 test("native document renames and duplicates property sets", () => {

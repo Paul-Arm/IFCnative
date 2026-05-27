@@ -1,46 +1,48 @@
 import {
-    useEffect,
-    useMemo,
-    useState,
-    type ComponentProps,
-    type ComponentType,
+  useEffect,
+  useMemo,
+  useState,
+  type ComponentProps,
+  type ComponentType,
 } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 
 import {
-    catalogObjectLabel,
-    getNativePlacement,
-    type CatalogObjectType,
-    type CatalogPropertyRule,
-    type CatalogValidationFinding,
-    type IfcObjectCatalog,
-    type NativeIfcDocument,
-    type NativeIfcEntity,
-    type NativeIfcPropertySet,
-    type NativeIfcRelationship,
+  catalogObjectLabel,
+  getNativePlacement,
+  type CatalogObjectType,
+  type CatalogPropertyRule,
+  type CatalogValidationFinding,
+  type IfcObjectCatalog,
+  type NativeIfcDocument,
+  type NativeIfcEntity,
+  type NativeIfcPropertySet,
+  type NativeIfcRelationship,
+  type ObjectInfoIndex,
+  type ObjectInfoValidationFinding,
 } from "@/ifc";
 
 import {
-    ENTITY_TYPES,
-    PROPERTY_VALUE_TYPES,
-    QUANTITY_TYPES,
-    RELATION_TYPES,
-    TYPE_CLASSES,
-    UNIT_NAMES,
-    UNIT_TYPES,
+  ENTITY_TYPES,
+  PROPERTY_VALUE_TYPES,
+  QUANTITY_TYPES,
+  RELATION_TYPES,
+  TYPE_CLASSES,
+  UNIT_NAMES,
+  UNIT_TYPES,
 } from "./constants";
 import { findTreePath } from "./StructurePanel";
 import { styles } from "./styles";
 import type { EntityEditDraft, InspectorMode } from "./types";
 import {
-    Button,
-    CollapsibleSection,
-    DropdownField,
-    EntityDropdown,
-    InfoRow,
-    InfoSection,
-    LabeledInput,
-    SegmentedControl,
+  Button,
+  CollapsibleSection,
+  DropdownField,
+  EntityDropdown,
+  InfoRow,
+  InfoSection,
+  LabeledInput,
+  SegmentedControl,
 } from "./ui";
 
 type NativeContextMenuEvent = {
@@ -59,6 +61,8 @@ export function InspectorPanel({
   catalogFindings,
   document,
   mode,
+  objectInfoFindings,
+  objectInfoIndex,
   selectedId,
   onAddClassification,
   onAddDocumentReference,
@@ -77,6 +81,7 @@ export function InspectorPanel({
   onRemovePropertySet,
   onRenamePropertySet,
   onSaveEdit,
+  onSelectEntity,
   onUpdateProperty,
   onUpdateRelationship,
 }: {
@@ -85,6 +90,8 @@ export function InspectorPanel({
   catalogFindings: CatalogValidationFinding[];
   document: NativeIfcDocument;
   mode: InspectorMode;
+  objectInfoFindings: ObjectInfoValidationFinding[];
+  objectInfoIndex: ObjectInfoIndex;
   selectedId: number;
   onAddClassification(
     identification: string,
@@ -121,6 +128,7 @@ export function InspectorPanel({
   onRemovePropertySet(setId: number): void;
   onRenamePropertySet(setId: number, name: string): void;
   onSaveEdit(draft: EntityEditDraft): void;
+  onSelectEntity(entityId: number): void;
   onUpdateProperty(
     propertyId: number,
     propertyName: string,
@@ -159,6 +167,17 @@ export function InspectorPanel({
         onRemovePropertySet={onRemovePropertySet}
         onRenamePropertySet={onRenamePropertySet}
         onUpdateProperty={onUpdateProperty}
+      />
+    );
+  }
+  if (mode === "object-info") {
+    return (
+      <ObjectInfoInspectorPanel
+        document={document}
+        findings={objectInfoFindings}
+        index={objectInfoIndex}
+        selectedId={selectedId}
+        onSelectEntity={onSelectEntity}
       />
     );
   }
@@ -291,6 +310,154 @@ function InfoPanel({
       </InfoSection>
     </ScrollView>
   );
+}
+
+function ObjectInfoInspectorPanel({
+  document,
+  findings,
+  index,
+  selectedId,
+  onSelectEntity,
+}: {
+  document: NativeIfcDocument;
+  findings: ObjectInfoValidationFinding[];
+  index: ObjectInfoIndex;
+  selectedId: number;
+  onSelectEntity(entityId: number): void;
+}) {
+  const definitions = index.definitionsByEntity.get(selectedId) ?? [];
+  const outgoing = index.referencesByEntity.get(selectedId) ?? [];
+  const incoming = index.references.filter(
+    (reference) =>
+      reference.targetDefinitions.some(
+        (definition) => definition.entityId === selectedId,
+      ) ||
+      reference.externalDefinitions.some(
+        (definition) => definition.entityId === selectedId,
+      ),
+  );
+  const localFindings = findings.filter((finding) =>
+    objectInfoFindingTouchesEntity(finding, selectedId),
+  );
+
+  return (
+    <ScrollView style={styles.panelScroll}>
+      <InfoSection title="Objektinfo-ID">
+        {definitions.length ? (
+          definitions.map((definition) => (
+            <View key={definition.propertyId} style={styles.catalogFinding}>
+              <Text style={styles.diffSummaryTitle}>
+                {definition.value || "-"}
+              </Text>
+              <Text style={styles.diffSummaryText}>
+                #{definition.psetId} {definition.psetName} / #
+                {definition.propertyId} {definition.propertyName}
+              </Text>
+            </View>
+          ))
+        ) : (
+          <Text style={styles.empty}>
+            Kein ePset_Objektinformationen._ID am ausgewaehlten Objekt.
+          </Text>
+        )}
+      </InfoSection>
+
+      <InfoSection title="Ausgehende ID-Referenzen">
+        {outgoing.length ? (
+          outgoing.map((reference) => {
+            const target =
+              reference.targetDefinitions[0]?.entityId ??
+              reference.externalDefinitions[0]?.entityId;
+            return (
+              <View key={reference.propertyId} style={styles.catalogFinding}>
+                <Text style={styles.diffSummaryTitle}>
+                  {reference.psetName}.{reference.propertyName}
+                </Text>
+                <Text style={styles.diffSummaryText}>
+                  {reference.value || "-"}
+                </Text>
+                <Text style={styles.treeMeta} numberOfLines={1}>
+                  {target
+                    ? objectInfoEntityLabel(document, target)
+                    : "Kein Ziel gefunden"}
+                </Text>
+                {target ? (
+                  <Button
+                    label="Ziel oeffnen"
+                    onPress={() => onSelectEntity(target)}
+                  />
+                ) : null}
+              </View>
+            );
+          })
+        ) : (
+          <Text style={styles.empty}>Keine ausgehenden ID-Referenzen.</Text>
+        )}
+      </InfoSection>
+
+      <InfoSection title="Eingehende ID-Referenzen">
+        {incoming.length ? (
+          incoming.map((reference) => (
+            <View key={reference.propertyId} style={styles.catalogFinding}>
+              <Text style={styles.diffSummaryTitle}>
+                {reference.value || "-"}
+              </Text>
+              <Text style={styles.diffSummaryText}>
+                {reference.psetName}.{reference.propertyName}
+              </Text>
+              <Text style={styles.treeMeta} numberOfLines={1}>
+                {objectInfoEntityLabel(document, reference.entityId)}
+              </Text>
+              <Button
+                label="Quelle oeffnen"
+                onPress={() => onSelectEntity(reference.entityId)}
+              />
+            </View>
+          ))
+        ) : (
+          <Text style={styles.empty}>Keine eingehenden ID-Referenzen.</Text>
+        )}
+      </InfoSection>
+
+      <InfoSection title="Lokale Findings">
+        {localFindings.length ? (
+          localFindings.map((finding) => (
+            <View key={finding.id} style={styles.catalogFinding}>
+              <Text style={styles.diffSummaryTitle}>
+                {finding.severity.toUpperCase()} / {finding.kind}
+              </Text>
+              <Text style={styles.diffSummaryText}>{finding.message}</Text>
+            </View>
+          ))
+        ) : (
+          <Text style={styles.empty}>Keine lokalen Objektinfo-Findings.</Text>
+        )}
+      </InfoSection>
+    </ScrollView>
+  );
+}
+
+function objectInfoFindingTouchesEntity(
+  finding: ObjectInfoValidationFinding,
+  entityId: number,
+) {
+  return (
+    finding.entityId === entityId ||
+    finding.definitions?.some(
+      (definition) => definition.entityId === entityId,
+    ) ||
+    finding.externalDefinitions?.some(
+      (definition) => definition.entityId === entityId,
+    ) ||
+    finding.references?.some((reference) => reference.entityId === entityId)
+  );
+}
+
+function objectInfoEntityLabel(document: NativeIfcDocument, entityId: number) {
+  const entity = document.entityById.get(entityId);
+  return entity
+    ? `#${entityId} ${entity.type} ${entity.name || ""}`
+    : `#${entityId}`;
 }
 
 function EditPanel({
