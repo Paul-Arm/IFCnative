@@ -1,4 +1,13 @@
 import { createMinimalIfcProject } from "./builder";
+import {
+  decodeStepString,
+  decodeStepValue,
+  encodeStepString,
+  quoteStepString,
+  unquoteStepString,
+} from "./stepEncoding";
+
+export { decodeStepString, decodeStepValue, encodeStepString };
 
 export interface NativeIfcEntity {
   id: number;
@@ -2333,15 +2342,11 @@ function parseCoordinateTuple(value = ""): [number, number, number] {
 }
 
 export function unquote(value = "") {
-  const trimmed = value.trim();
-  if (!trimmed.startsWith("'") || !trimmed.endsWith("'")) {
-    return undefined;
-  }
-  return trimmed.slice(1, -1).replace(/''/g, "'");
+  return unquoteStepString(value);
 }
 
 export function quote(value: string) {
-  return `'${value.replace(/'/g, "''")}'`;
+  return quoteStepString(value);
 }
 
 function quoteOrDollar(value: string) {
@@ -2859,5 +2864,5 @@ function isRepresentationAssignableProduct(entity: NativeIfcEntity) {
 }
 
 function compactValue(value: string) {
-  return value.replace(/\s+/g, " ").slice(0, 160) || "-";
+  return decodeStepValue(value).replace(/\s+/g, " ").slice(0, 160) || "-";
 }

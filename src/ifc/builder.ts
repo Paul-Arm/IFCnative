@@ -1,3 +1,5 @@
+import { escapeStepStringContent } from "./stepEncoding";
+
 export interface MinimalProjectOptions {
   name?: string;
   author?: string;
@@ -29,29 +31,37 @@ export interface BuilderProductOptions {
 }
 
 const SAMPLE_GUIDS = [
-  '0IFCnative000000000001',
-  '0IFCnative000000000002',
-  '0IFCnative000000000003',
-  '0IFCnative000000000004',
-  '0IFCnative000000000005',
-  '0IFCnative000000000006',
-  '0IFCnative000000000007',
-  '0IFCnative000000000008',
-  '0IFCnative000000000009',
-  '0IFCnative000000000010',
+  "0IFCnative000000000001",
+  "0IFCnative000000000002",
+  "0IFCnative000000000003",
+  "0IFCnative000000000004",
+  "0IFCnative000000000005",
+  "0IFCnative000000000006",
+  "0IFCnative000000000007",
+  "0IFCnative000000000008",
+  "0IFCnative000000000009",
+  "0IFCnative000000000010",
 ];
 
 export function createMinimalIfcProject(options: MinimalProjectOptions = {}) {
-  const projectName = escapeStepString(options.name ?? 'IFCnative Builder Sample');
-  const author = escapeStepString(options.author ?? 'IFCnative');
-  const organization = escapeStepString(options.organization ?? 'IFCnative');
-  const siteName = escapeStepString(options.siteName ?? 'Sample Site');
-  const buildingName = escapeStepString(options.buildingName ?? 'Sample Building');
-  const storeyName = escapeStepString(options.storeyName ?? 'Level 0');
+  const projectName = escapeStepString(
+    options.name ?? "IFCnative Builder Sample",
+  );
+  const author = escapeStepString(options.author ?? "IFCnative");
+  const organization = escapeStepString(options.organization ?? "IFCnative");
+  const siteName = escapeStepString(options.siteName ?? "Sample Site");
+  const buildingName = escapeStepString(
+    options.buildingName ?? "Sample Building",
+  );
+  const storeyName = escapeStepString(options.storeyName ?? "Level 0");
   const timestamp = new Date().toISOString().slice(0, 19);
   const products = normalizeProducts(options.products);
-  const productIDs = products.map((_product, index) => getBuilderProductExpressID(index));
-  const productStep = products.map((product, index) => productToStep(product, index)).join('');
+  const productIDs = products.map((_product, index) =>
+    getBuilderProductExpressID(index),
+  );
+  const productStep = products
+    .map((product, index) => productToStep(product, index))
+    .join("");
 
   return `ISO-10303-21;
 HEADER;
@@ -76,7 +86,7 @@ DATA;
 #50=IFCRELAGGREGATES('${SAMPLE_GUIDS[4]}',$,$,$,#1,(#40));
 #51=IFCRELAGGREGATES('${SAMPLE_GUIDS[5]}',$,$,$,#40,(#41));
 #52=IFCRELAGGREGATES('${SAMPLE_GUIDS[6]}',$,$,$,#41,(#42));
-${productStep}#81=IFCRELCONTAINEDINSPATIALSTRUCTURE('${SAMPLE_GUIDS[8]}',$,$,$,(${productIDs.map((id) => `#${id}`).join(',')}),#42);
+${productStep}#81=IFCRELCONTAINEDINSPATIALSTRUCTURE('${SAMPLE_GUIDS[8]}',$,$,$,(${productIDs.map((id) => `#${id}`).join(",")}),#42);
 ENDSEC;
 END-ISO-10303-21;
 `;
@@ -87,11 +97,14 @@ export function createMinimalIfcProjectBytes(options?: MinimalProjectOptions) {
 }
 
 function escapeStepString(value: string) {
-  return value.replace(/'/g, "''").replace(/[^\w .-]/g, '').slice(0, 80) || 'IFCnative';
+  const trimmed = value.trim().slice(0, 80) || "IFCnative";
+  return escapeStepStringContent(trimmed);
 }
 
 function escapeStepUri(value: string) {
-  return value.replace(/'/g, "''").replace(/\s/g, '').slice(0, 180) || 'https://ifcnative.local';
+  const trimmed =
+    value.trim().replace(/\s/g, "").slice(0, 180) || "https://ifcnative.local";
+  return escapeStepStringContent(trimmed);
 }
 
 export function getBuilderProductExpressID(index: number) {
@@ -103,12 +116,12 @@ function normalizeProducts(products?: BuilderProductOptions[]) {
     {
       depth: 2,
       height: 1.5,
-      name: 'Sample Inspection Block',
+      name: "Sample Inspection Block",
       properties: {
-        MonitoringRole: 'Inspection target',
-        Reference: 'Generated IFCnative block',
+        MonitoringRole: "Inspection target",
+        Reference: "Generated IFCnative block",
       },
-      tag: 'IFCNATIVE-BLOCK-001',
+      tag: "IFCNATIVE-BLOCK-001",
       width: 4,
       x: 0,
       y: 0,
@@ -118,17 +131,25 @@ function normalizeProducts(products?: BuilderProductOptions[]) {
   return (products?.length ? products : fallback).map((product, index) => ({
     depth: safePositive(product.depth, 2),
     height: safePositive(product.height, 1.5),
-    materialCategory: product.materialCategory || 'Concrete',
-    materialName: product.materialName || 'Inspection Concrete',
-    classificationCode: product.classificationCode || `IFCNATIVE-${String(index + 1).padStart(3, '0')}`,
-    classificationName: product.classificationName || 'Inspection Target',
-    classificationUri: product.classificationUri || 'https://ifcnative.local/classification/inspection-target',
-    documentIdentification: product.documentIdentification || `DOC-${String(index + 1).padStart(3, '0')}`,
-    documentName: product.documentName || 'Inspection Report Placeholder',
-    documentUri: product.documentUri || 'https://ifcnative.local/documents/inspection-report',
+    materialCategory: product.materialCategory || "Concrete",
+    materialName: product.materialName || "Inspection Concrete",
+    classificationCode:
+      product.classificationCode ||
+      `IFCNATIVE-${String(index + 1).padStart(3, "0")}`,
+    classificationName: product.classificationName || "Inspection Target",
+    classificationUri:
+      product.classificationUri ||
+      "https://ifcnative.local/classification/inspection-target",
+    documentIdentification:
+      product.documentIdentification ||
+      `DOC-${String(index + 1).padStart(3, "0")}`,
+    documentName: product.documentName || "Inspection Report Placeholder",
+    documentUri:
+      product.documentUri ||
+      "https://ifcnative.local/documents/inspection-report",
     name: product.name || `Builder Block ${index + 1}`,
     properties: product.properties ?? {},
-    tag: product.tag || `IFCNATIVE-BLOCK-${String(index + 1).padStart(3, '0')}`,
+    tag: product.tag || `IFCNATIVE-BLOCK-${String(index + 1).padStart(3, "0")}`,
     width: safePositive(product.width, 4),
     x: safeNumber(product.x, index * 5),
     y: safeNumber(product.y, 0),
@@ -136,7 +157,10 @@ function normalizeProducts(products?: BuilderProductOptions[]) {
   }));
 }
 
-function productToStep(product: Required<BuilderProductOptions>, index: number) {
+function productToStep(
+  product: Required<BuilderProductOptions>,
+  index: number,
+) {
   const base = productBase(index);
   const propertyBaseID = propertyBase(index);
   const quantityBaseID = productExtraBase(index);
@@ -155,11 +179,13 @@ function productToStep(product: Required<BuilderProductOptions>, index: number) 
   const footprintArea = product.width * product.depth;
   const netVolume = footprintArea * product.height;
   const propertyEntries = Object.entries({
-    Reference: 'Generated IFCnative block',
-    MonitoringRole: 'Inspection target',
+    Reference: "Generated IFCnative block",
+    MonitoringRole: "Inspection target",
     ...product.properties,
   }).slice(0, 6);
-  const propertyIDs = propertyEntries.map((_entry, propertyIndex) => propertyBaseID + propertyIndex + 1);
+  const propertyIDs = propertyEntries.map(
+    (_entry, propertyIndex) => propertyBaseID + propertyIndex + 1,
+  );
   const propertyStep = propertyEntries
     .map(
       ([name, value], propertyIndex) =>
@@ -167,7 +193,7 @@ function productToStep(product: Required<BuilderProductOptions>, index: number) 
           name,
         )}',$,IFCLABEL('${escapeStepString(value)}'),$);\n`,
     )
-    .join('');
+    .join("");
 
   return `#${base}=IFCLOCALPLACEMENT(#30,#${base + 1});
 #${base + 1}=IFCAXIS2PLACEMENT3D(#${base + 2},$,$);
@@ -193,7 +219,7 @@ function productToStep(product: Required<BuilderProductOptions>, index: number) 
   )}');
 #${propertyBaseID}=IFCPROPERTYSET('${psetGuid}',$,'IFCnative_Diagnostics',$,(${propertyIDs
     .map((id) => `#${id}`)
-    .join(',')}));
+    .join(",")}));
 ${propertyStep}#${propertyBaseID + 9}=IFCRELDEFINESBYPROPERTIES('${relGuid}',$,$,$,(#${productID}),#${propertyBaseID});
 #${quantityBaseID}=IFCELEMENTQUANTITY('${quantityGuid}',$,'IFCnative_BaseQuantities',$,'BaseQuantities',(#${quantityBaseID + 1},#${quantityBaseID + 2},#${quantityBaseID + 3}));
 #${quantityBaseID + 1}=IFCQUANTITYLENGTH('Height',$,$,${formatStepNumber(product.height)},$);
@@ -222,7 +248,7 @@ function productExtraBase(index: number) {
 }
 
 function sampleGuid(index: number) {
-  return `0IFCnative${String(index).padStart(12, '0')}`;
+  return `0IFCnative${String(index).padStart(12, "0")}`;
 }
 
 function safePositive(value: number | undefined, fallback: number) {
@@ -234,6 +260,9 @@ function safeNumber(value: number | undefined, fallback: number) {
 }
 
 function formatStepNumber(value: number) {
-  const fixed = Number(value).toFixed(4).replace(/0+$/g, '').replace(/\.$/g, '');
-  return fixed.includes('.') ? fixed : `${fixed}.`;
+  const fixed = Number(value)
+    .toFixed(4)
+    .replace(/0+$/g, "")
+    .replace(/\.$/g, "");
+  return fixed.includes(".") ? fixed : `${fixed}.`;
 }

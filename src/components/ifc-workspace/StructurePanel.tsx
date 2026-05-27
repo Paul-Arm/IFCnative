@@ -1,12 +1,15 @@
+import { useRef } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 
 import type {
-    NativeIfcDocument,
-    NativeIfcEntity,
-    NativeIfcTreeNode,
+  NativeIfcDocument,
+  NativeIfcEntity,
+  NativeIfcTreeNode,
 } from "@/ifc";
 
 import { styles } from "./styles";
+
+const TREE_DOUBLE_CLICK_MS = 320;
 
 export function StructurePanel({
   document,
@@ -84,6 +87,16 @@ function TreeNode({
   }
   const childCount = node.children.length;
   const isExpanded = expanded.has(node.id);
+  const lastPressAt = useRef(0);
+  const handlePress = () => {
+    const now = Date.now();
+    const doubleClick = now - lastPressAt.current <= TREE_DOUBLE_CLICK_MS;
+    lastPressAt.current = doubleClick ? 0 : now;
+    onSelect(entity.id, "tree");
+    if (doubleClick && childCount > 0) {
+      onToggle(entity.id);
+    }
+  };
   return (
     <View>
       <View
@@ -94,15 +107,7 @@ function TreeNode({
         ]}
       >
         <View style={styles.treeActionRow}>
-          <Pressable
-            onPress={() => {
-              onSelect(entity.id, "tree");
-              if (childCount > 0) {
-                onToggle(entity.id);
-              }
-            }}
-            style={styles.treePrimaryAction}
-          >
+          <Pressable onPress={handlePress} style={styles.treePrimaryAction}>
             <View style={styles.treeTitleRow}>
               {childCount > 0 ? (
                 <Text style={styles.treeToggle}>{isExpanded ? "-" : "+"}</Text>

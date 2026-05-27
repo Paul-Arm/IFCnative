@@ -1,4 +1,4 @@
-import type { NativeIfcDocument } from "./nativeDocument";
+import { unquote, type NativeIfcDocument } from "./nativeDocument";
 
 export const OBJECT_INFO_PSET_NAME = "ePset_Objektinformationen";
 export const OBJECT_INFO_ID_PROPERTY_NAME = "_ID";
@@ -402,7 +402,7 @@ export function normalizeObjectInfoIdValue(value = "") {
   }
   const typedValue = unwrapTypedIfcValue(trimmed);
   const scalar = typedValue ?? trimmed;
-  return (unquoteStepString(scalar) ?? scalar).trim();
+  return (unquote(scalar) ?? scalar).trim();
 }
 
 function isBlankObjectInfoValue(value = "") {
@@ -413,14 +413,6 @@ function isBlankObjectInfoValue(value = "") {
 function unwrapTypedIfcValue(value: string) {
   const match = /^IFC[A-Z0-9_]*\((.*)\)$/i.exec(value);
   return match?.[1]?.trim();
-}
-
-function unquoteStepString(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed.startsWith("'") || !trimmed.endsWith("'")) {
-    return undefined;
-  }
-  return trimmed.slice(1, -1).replace(/''/g, "'");
 }
 
 function normalizeObjectInfoName(value = "") {

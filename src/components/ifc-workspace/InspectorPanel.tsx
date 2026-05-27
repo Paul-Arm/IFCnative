@@ -1,6 +1,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ComponentProps,
   type ComponentType,
@@ -10,6 +11,7 @@ import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import {
   catalogObjectLabel,
   getNativePlacement,
+  unquote,
   type CatalogObjectType,
   type CatalogPropertyRule,
   type CatalogValidationFinding,
@@ -661,6 +663,13 @@ function PsetPanel({
   const [quantityName, setQuantityName] = useState("ErfassteLaenge");
   const [quantityValue, setQuantityValue] = useState("1");
   const [quantityType, setQuantityType] = useState("IFCQUANTITYLENGTH");
+  const [psetSearch, setPsetSearch] = useState("");
+  const psetSearchInputRef = useRef<TextInput | null>(null);
+  const normalizedPsetSearch = psetSearch.trim().toLowerCase();
+  const visibleSets = useMemo(
+    () => filterPropertySets(sets, document, normalizedPsetSearch),
+    [document, normalizedPsetSearch, sets],
+  );
   const catalogRuleCount = catalogPsets.reduce(
     (total, set) => total + set.rules.length,
     0,
@@ -668,6 +677,27 @@ function PsetPanel({
   const catalogQuickFixes = catalogFindings.filter(
     (finding) => finding.quickFix,
   );
+
+  useEffect(() => {
+    const browserWindow = globalThis.window;
+    if (!browserWindow) {
+      return undefined;
+    }
+    const handleFindShortcut = (event: KeyboardEvent) => {
+      if (
+        !(event.ctrlKey || event.metaKey) ||
+        event.key.toLowerCase() !== "f"
+      ) {
+        return;
+      }
+      event.preventDefault();
+      psetSearchInputRef.current?.focus();
+    };
+    browserWindow.addEventListener("keydown", handleFindShortcut);
+    return () => {
+      browserWindow.removeEventListener("keydown", handleFindShortcut);
+    };
+  }, []);
 
   const addSelectedPset = () => {
     if (psetSource === "catalog") {
@@ -682,10 +712,23 @@ function PsetPanel({
         <View style={styles.psetToolbarSummary}>
           <Text style={styles.infoTitle}>Psets</Text>
           <Text style={styles.psetHeaderMeta}>
-            {sets.length.toLocaleString()} Sets fuer #{selectedId}
+            {normalizedPsetSearch
+              ? `${visibleSets.length.toLocaleString()}/${sets.length.toLocaleString()} Sets fuer #${selectedId}`
+              : `${sets.length.toLocaleString()} Sets fuer #${selectedId}`}
           </Text>
         </View>
         <View style={styles.psetToolbarControls}>
+          <View style={styles.psetSearchField}>
+            <TextInput
+              ref={psetSearchInputRef}
+              placeholder="Psets, Eigenschaften, Werte suchen"
+              placeholderTextColor="#71717a"
+              selectTextOnFocus
+              style={[styles.input, styles.psetToolbarInput]}
+              value={psetSearch}
+              onChangeText={setPsetSearch}
+            />
+          </View>
           <View style={styles.psetSourceField}>
             <SegmentedControl
               options={["empty", "catalog"]}
@@ -707,19 +750,20 @@ function PsetPanel({
               </Text>
             </View>
           ) : (
-            <View style={styles.psetNameField}>
-              <TextInput
-                placeholder="Pset-Name"
-                placeholderTextColor="#71717a"
-                style={[styles.input, styles.psetToolbarInput]}
-                value={emptyPsetName}
-                onChangeText={setEmptyPsetName}
-              />
+            <View style={styles.psetCreateGroup}>
+              <View style={styles.psetNameField}>
+                <TextInput
+                  placeholder="Pset-Name"
+                  placeholderTextColor="#71717a"
+                  style={[styles.input, styles.psetToolbarInput]}
+                  value={emptyPsetName}
+                  onChangeText={setEmptyPsetName}
+                />
+              </View>
+              <PsetPrimaryButton label="+ Pset" onPress={addSelectedPset} />
             </View>
           )}
-          {psetSource === "empty" ? (
-            <PsetPrimaryButton label="+ Pset" onPress={addSelectedPset} />
-          ) : (
+          {psetSource === "empty" ? null : (
             <PsetPrimaryButton
               disabled={!catalogQuickFixes.length}
               label={
@@ -731,12 +775,14 @@ function PsetPanel({
         </View>
       </View>
 
-      {sets.map((set, index) => (
+      {visibleSets.map(({ set, values }, index) => (
         <PsetTableSection
           document={document}
           key={set.id}
           set={set}
-          stackIndex={sets.length - index}
+          stackIndex={visibleSets.length - index}
+          visibleValues={values}
+          searchActive={!!normalizedPsetSearch}
           onAddPropertyToSet={onAddPropertyToSet}
           onDuplicatePropertySet={onDuplicatePropertySet}
           onRemovePropertyFromSet={onRemovePropertyFromSet}
@@ -745,6 +791,15 @@ function PsetPanel({
           onUpdateProperty={onUpdateProperty}
         />
       ))}
+      {sets.length > 0 && !visibleSets.length ? (
+        <View style={styles.diffEmpty}>
+          <Text style={styles.infoTitle}>Keine Treffer</Text>
+          <Text style={styles.empty}>
+            Der aktuelle Pset-Filter findet keine Sets, Eigenschaften oder
+            Werte.
+          </Text>
+        </View>
+      ) : null}
       {!sets.length ? (
         <View style={styles.diffEmpty}>
           <Text style={styles.infoTitle}>Keine Psets</Text>
@@ -804,6 +859,8 @@ function PsetPanel({
 function PsetTableSection({
   document,
   set,
+  visibleValues,
+  searchActive,
   stackIndex,
   onAddPropertyToSet,
   onDuplicatePropertySet,
@@ -814,6 +871,8 @@ function PsetTableSection({
 }: {
   document: NativeIfcDocument;
   set: NativeIfcPropertySet;
+  visibleValues: NativeIfcPropertySet["values"];
+  searchActive: boolean;
   stackIndex: number;
   onAddPropertyToSet(
     setId: number,
@@ -864,7 +923,11 @@ function PsetTableSection({
             style={styles.psetHeaderInput}
           />
           <Text style={styles.psetHeaderMeta}>
-            {set.kind} #{set.id} / {set.values.length.toLocaleString()} Werte
+            {set.kind} #{set.id} /{" "}
+            {searchActive
+              ? `${visibleValues.length.toLocaleString()}/${set.values.length.toLocaleString()}`
+              : set.values.length.toLocaleString()}{" "}
+            Werte
           </Text>
         </View>
         <MiniButton
@@ -891,7 +954,7 @@ function PsetTableSection({
           <Text style={[styles.psetHeadCell, styles.psetValueCell]}>Wert</Text>
           <Text style={[styles.psetHeadCell, styles.psetActionCell]} />
         </View>
-        {set.values.map((value) => (
+        {visibleValues.map((value) => (
           <EditablePropertyTableRow
             key={value.id}
             property={value}
@@ -905,9 +968,11 @@ function PsetTableSection({
             onUpdate={onUpdateProperty}
           />
         ))}
-        {!set.values.length ? (
+        {!visibleValues.length ? (
           <View style={styles.psetTableEmptyRow}>
-            <Text style={styles.empty}>Noch keine Werte.</Text>
+            <Text style={styles.empty}>
+              {searchActive ? "Keine passenden Werte." : "Noch keine Werte."}
+            </Text>
           </View>
         ) : null}
         <View style={[styles.psetTableRow, styles.psetAddRow]}>
@@ -1562,9 +1627,69 @@ function parseTypedPropertyValue(rawValue: string) {
   }
   const unquoted = inner.match(/^'([\s\S]*)'$/)?.[1];
   if (unquoted != null) {
-    return { value: unquoted.replace(/''/g, "'"), valueType };
+    return { value: unquote(inner) ?? unquoted.replace(/''/g, "'"), valueType };
   }
   return { value: inner.replace(/^\./, "").replace(/\.$/, ""), valueType };
+}
+
+function filterPropertySets(
+  sets: NativeIfcPropertySet[],
+  document: NativeIfcDocument,
+  query: string,
+) {
+  if (!query) {
+    return sets.map((set) => ({ set, values: set.values }));
+  }
+
+  return sets.flatMap((set) => {
+    if (matchesPsetQuery(set, query)) {
+      return [{ set, values: set.values }];
+    }
+    const values = set.values.filter((value) =>
+      matchesPropertyValueQuery(
+        value,
+        editableSetValue(document.entityById.get(value.id), value.value),
+        query,
+      ),
+    );
+    return values.length ? [{ set, values }] : [];
+  });
+}
+
+function matchesPsetQuery(set: NativeIfcPropertySet, query: string) {
+  return matchesQuery([set.id, `#${set.id}`, set.kind, set.name], query);
+}
+
+function matchesPropertyValueQuery(
+  value: NativeIfcPropertySet["values"][number],
+  rawValue: string,
+  query: string,
+) {
+  const parsed = parseTypedPropertyValue(rawValue);
+  return matchesQuery(
+    [
+      value.id,
+      `#${value.id}`,
+      value.name,
+      value.type,
+      value.value,
+      rawValue,
+      parsed.value,
+      parsed.valueType,
+    ],
+    query,
+  );
+}
+
+function matchesQuery(
+  values: Array<string | number | null | undefined>,
+  query: string,
+) {
+  return values.some((value) =>
+    String(value ?? "")
+      .toLowerCase()
+      .includes(query),
+  );
 }
 
 function normalizePropertyValueType(type: string) {

@@ -1,17 +1,18 @@
 import type {
-    ItemData,
-    ItemsDataConfig,
-    SpatialTreeItem,
+  ItemData,
+  ItemsDataConfig,
+  SpatialTreeItem,
 } from "@thatopen/fragments";
 
 import type {
-    NativeIfcDocument,
-    NativeIfcEntity,
-    NativeIfcPropertySet,
-    NativeIfcRelationship,
-    NativeIfcTreeNode,
-    NativeIfcTypeAssignment,
+  NativeIfcDocument,
+  NativeIfcEntity,
+  NativeIfcPropertySet,
+  NativeIfcRelationship,
+  NativeIfcTreeNode,
+  NativeIfcTypeAssignment,
 } from "./nativeDocument";
+import { decodeStepString } from "./stepEncoding";
 
 export interface FragmentDocumentModel {
   getAttributeNames?(): Promise<string[]>;
@@ -519,7 +520,7 @@ function readStringAttribute(data: unknown, keys: string[]) {
     return "";
   }
   if (typeof value === "string") {
-    return value;
+    return decodeStepString(value);
   }
   if (typeof value === "number" || typeof value === "boolean") {
     return String(value);

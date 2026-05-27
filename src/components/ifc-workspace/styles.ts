@@ -415,9 +415,21 @@ export const styles = StyleSheet.create({
     flex: 1.25,
     minWidth: 0,
   },
+  psetCreateGroup: {
+    alignItems: "center",
+    flexBasis: 330,
+    flexDirection: "row",
+    flexShrink: 0,
+    gap: 6,
+    minWidth: 300,
+  },
   psetNameField: {
     flex: 1,
     minWidth: 180,
+  },
+  psetSearchField: {
+    flex: 1.2,
+    minWidth: 220,
   },
   psetSection: {
     backgroundColor: "#ffffff",
@@ -557,11 +569,9 @@ export const styles = StyleSheet.create({
     borderColor: "#d4d4d8",
     borderRadius: 6,
     borderWidth: 1,
-    left: 4,
+    marginHorizontal: 4,
+    marginTop: 4,
     overflow: "hidden",
-    position: "absolute",
-    right: 4,
-    top: 30,
     zIndex: 90,
   },
   psetTypeMenuOption: {

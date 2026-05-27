@@ -30,6 +30,7 @@ import {
   duplicateNativePropertySet,
   getNativePlacement,
   parseNativeIfcText,
+  quote,
   removeNativeEntity,
   removeNativePropertyFromSet,
   removeNativePropertySet,
@@ -40,6 +41,7 @@ import {
   updateNativePropertySetName,
   updateNativePropertyValue,
   updateNativeRelationship,
+  unquote,
 } from "../src/ifc/nativeDocument";
 import { buildNativeGraphNeighborhood } from "../src/ifc/nativeGraph";
 import {
@@ -86,6 +88,86 @@ test("preflight reports missing STEP markers", () => {
   );
 });
 
+test("native STEP strings decode and encode IFC umlaut escapes", () => {
+  assert.equal(unquote("'Ma\\X\\DFnahme'"), "Maßnahme");
+  assert.equal(unquote("'Br\\X2\\00FC00E400DF20AC\\X0\\cke'"), "Brüäß€cke");
+  assert.equal(
+    quote("Größe Prüfling €"),
+    "'Gr\\X\\F6\\X\\DFe Pr\\X\\FCfling \\X2\\20AC\\X0\\'",
+  );
+
+  const document = parseNativeIfcText(
+    [
+      "ISO-10303-21;",
+      "HEADER;",
+      "FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');",
+      "FILE_SCHEMA(('IFC4X3_ADD2'));",
+      "ENDSEC;",
+      "DATA;",
+      "#1= IFCPROJECT('0IFCnative000000000001',$,'Br\\X\\FCcke \\X\\DF',$,$,$,$,$,$);",
+      "#2= IFCPROPERTYSINGLEVALUE('_Ma\\X\\DFnahme',$,IFCTEXT('Gr\\X\\F6\\X\\DFe und \\X2\\20AC\\X0\\'),$);",
+      "#3= IFCPROPERTYSET('0IFCnative000000000003',$,'Pset_\\X\\C4nderung',$,(#2));",
+      "#4= IFCRELDEFINESBYPROPERTIES('0IFCnative000000000004',$,$,$,(#1),#3);",
+      "ENDSEC;",
+      "END-ISO-10303-21;",
+    ].join("\n"),
+    "umlaut.ifc",
+  );
+
+  assert.equal(document.entityById.get(1)?.name, "Brücke ß");
+  assert.equal(document.propertySetsByEntity.get(1)?.[0].name, "Pset_Änderung");
+  assert.deepEqual(document.propertySetsByEntity.get(1)?.[0].values[0], {
+    id: 2,
+    name: "_Maßnahme",
+    type: "IFCPROPERTYSINGLEVALUE",
+    value: "IFCTEXT('Größe und €')",
+  });
+
+  const updated = updateNativePropertyValue(document, 2, {
+    name: "_Prüfung",
+    value: "Änderung Größe €",
+    valueType: "IFCTEXT",
+  });
+  const serialized = serializeNativeIfcDocument(updated);
+  assert.ok(serialized.includes("'_Pr\\X\\FCfung'"));
+  assert.ok(
+    serialized.includes(
+      "IFCTEXT('\\X\\C4nderung Gr\\X\\F6\\X\\DFe \\X2\\20AC\\X0\\')",
+    ),
+  );
+  assert.equal(
+    parseNativeIfcText(serialized, "roundtrip.ifc").propertySetsByEntity.get(
+      1,
+    )?.[0].values[0].value,
+    "IFCTEXT('Änderung Größe €')",
+  );
+
+  const builderText = createMinimalIfcProject({
+    name: "Brücke",
+    products: [
+      {
+        name: "Prüfblock",
+        properties: { Maßnahme: "Größe" },
+      },
+    ],
+  });
+  assert.ok(builderText.includes("Br\\X\\FCcke"));
+  assert.ok(builderText.includes("Pr\\X\\FCfblock"));
+  assert.ok(builderText.includes("Ma\\X\\DFnahme"));
+  const builderDocument = parseNativeIfcText(builderText, "builder.ifc");
+  assert.equal(builderDocument.entityById.get(80)?.name, "Prüfblock");
+  assert.ok(
+    builderDocument.propertySetsByEntity
+      .get(80)
+      ?.some((set) =>
+        set.values.some(
+          (value) =>
+            value.name === "Maßnahme" && value.value === "IFCLABEL('Größe')",
+        ),
+      ),
+  );
+});
+
 test("fragments adapter projects model data into the native document contract", async () => {
   const items = new Map<number, FragmentStubItem>();
   const project = fragmentItem(1, "Demo Project");
@@ -98,10 +180,10 @@ test("fragments adapter projects model data into the native document contract", 
       }),
     ],
   });
-  const pset = fragmentItem(10, "Pset_WallCommon", {
+  const pset = fragmentItem(10, "Pset_\\X\\C4nderung", {
     HasProperties: [
-      fragmentItem(11, "Reference", {
-        NominalValue: { value: "A-01" },
+      fragmentItem(11, "Ma\\X\\DFnahme", {
+        NominalValue: { value: "Gr\\X\\F6\\X\\DFe" },
         valueType: { value: "IFCLABEL" },
       }),
     ],
@@ -180,13 +262,13 @@ test("fragments adapter projects model data into the native document contract", 
   assert.deepEqual(document.propertySetsByEntity.get(3)?.[0], {
     id: 10,
     kind: "IFCPROPERTYSET",
-    name: "Pset_WallCommon",
+    name: "Pset_Änderung",
     values: [
       {
         id: 11,
-        name: "Reference",
+        name: "Maßnahme",
         type: "IFCLABEL",
-        value: "A-01",
+        value: "Größe",
       },
     ],
   });
