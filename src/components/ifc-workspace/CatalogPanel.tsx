@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
 
 import {
     catalogObjectLabel,
@@ -8,9 +7,16 @@ import {
     type IfcObjectCatalog,
     type NativeIfcDocument,
 } from "@/ifc";
+import { cn } from "@/lib/utils";
 
-import { styles } from "./styles";
-import { Button, CollapsibleSection, LabeledInput } from "./ui";
+import {
+    Badge,
+    Button,
+    CollapsibleSection,
+    LabeledInput,
+    PanelHeader,
+    PanelShell,
+} from "./ui";
 
 export function CatalogPanel({
   catalog,
@@ -52,26 +58,27 @@ export function CatalogPanel({
   }, [catalog?.objectTypes, query]);
 
   return (
-    <View style={styles.console}>
-      <View style={styles.diffHeader}>
-        <View style={styles.diffHeaderText}>
-          <Text style={styles.infoTitle}>Objektkatalog</Text>
-          <Text style={styles.empty}>
-            {catalog
-              ? `${catalog.objectTypes.length.toLocaleString()} Klassen / ${countProperties(catalog).toLocaleString()} Property-Regeln`
-              : "Kein Katalog geladen."}
-          </Text>
-        </View>
-        <Button
-          disabled={importing}
-          label={importing ? "Import..." : "Import Catalog"}
-          primary={!catalog}
-          onPress={() => void onImportCatalog()}
-        />
-      </View>
+    <PanelShell>
+      <PanelHeader
+        title="Objektkatalog"
+        description={
+          catalog
+            ? `${catalog.objectTypes.length.toLocaleString()} Klassen / ${countProperties(catalog).toLocaleString()} Property-Regeln`
+            : "Kein Katalog geladen."
+        }
+        meta={catalog ? <Badge tone="success">geladen</Badge> : null}
+        actions={
+          <Button
+            disabled={importing}
+            label={importing ? "Import..." : "Import Catalog"}
+            primary={!catalog}
+            onPress={() => void onImportCatalog()}
+          />
+        }
+      />
 
       {catalog ? (
-        <ScrollView style={styles.panelScroll}>
+        <PanelShell scroll>
           <CollapsibleSection
             defaultOpen
             title="Auswahl"
@@ -84,49 +91,54 @@ export function CatalogPanel({
               value={query}
               onChangeText={setQuery}
             />
-            <ScrollView nestedScrollEnabled style={styles.catalogList}>
+            <div className="grid max-h-72 gap-2 overflow-auto pr-1">
               {visibleObjects.map((objectType) => {
                 const selected = objectType.id === selectedCatalogObjectId;
                 return (
-                  <Pressable
+                  <button
+                    type="button"
                     key={objectType.id}
-                    onPress={() => onSelectCatalogObject(objectType.id)}
-                    style={({ pressed }) => [
-                      styles.catalogItem,
-                      selected && styles.treeItemSelected,
-                      pressed && styles.segmentPressed,
-                    ]}
+                    onClick={() => onSelectCatalogObject(objectType.id)}
+                    className={cn(
+                      "grid gap-1 rounded-lg border bg-card px-3 py-2 text-left text-sm hover:bg-muted/50",
+                      selected && "border-primary/40 bg-primary/5",
+                    )}
                   >
-                    <Text style={styles.treeTitle} numberOfLines={1}>
+                    <span className="truncate font-medium text-foreground">
                       {catalogObjectLabel(objectType)}
-                    </Text>
-                    <Text style={styles.treeMeta} numberOfLines={1}>
+                    </span>
+                    <span className="truncate text-xs text-muted-foreground">
                       {objectType.ifcClass} /{" "}
                       {objectType.propertyRules.length.toLocaleString()} Regeln
-                    </Text>
-                  </Pressable>
+                    </span>
+                  </button>
                 );
               })}
-            </ScrollView>
+            </div>
           </CollapsibleSection>
 
           <CollapsibleSection title="Importdiagnose" meta={catalog.fileName}>
             {catalog.diagnostics.map((diagnostic) => (
-              <Text key={diagnostic} style={styles.monoLine}>
+              <code
+                key={diagnostic}
+                className="block rounded-lg bg-muted px-3 py-2 font-mono text-xs text-foreground"
+              >
                 {diagnostic}
-              </Text>
+              </code>
             ))}
           </CollapsibleSection>
-        </ScrollView>
+        </PanelShell>
       ) : (
-        <View style={styles.diffEmpty}>
-          <Text style={styles.infoTitle}>Kein Katalog geladen</Text>
-          <Text style={styles.empty}>
+        <div className="grid place-items-center gap-2 rounded-xl border border-dashed bg-muted/20 p-6 text-center">
+          <h3 className="text-sm font-medium text-foreground">
+            Kein Katalog geladen
+          </h3>
+          <p className="text-sm text-muted-foreground">
             Excel-Datei importieren, danach erscheint die Katalogpruefung.
-          </Text>
-        </View>
+          </p>
+        </div>
       )}
-    </View>
+    </PanelShell>
   );
 }
 
@@ -147,78 +159,90 @@ export function CatalogReviewPanel({
   const quickFixCount = findings.filter((finding) => finding.quickFix).length;
 
   return (
-    <View style={styles.console}>
-      <View style={styles.diffHeader}>
-        <View style={styles.diffHeaderText}>
-          <Text style={styles.infoTitle}>Objektkatalog: Pruefung</Text>
-          <Text style={styles.empty}>
-            {selectedObject
-              ? `${catalogObjectLabel(selectedObject)} / ${findings.length.toLocaleString()} Findings`
-              : catalog
-                ? "Keine Katalogklasse gewaehlt."
-                : "Kein Katalog geladen."}
-          </Text>
-        </View>
-      </View>
+    <PanelShell>
+      <PanelHeader
+        title="Objektkatalog: Pruefung"
+        description={
+          selectedObject
+            ? `${catalogObjectLabel(selectedObject)} / ${findings.length.toLocaleString()} Findings`
+            : catalog
+              ? "Keine Katalogklasse gewaehlt."
+              : "Kein Katalog geladen."
+        }
+        meta={
+          quickFixCount ? (
+            <Badge tone="warning">{quickFixCount} Fixes</Badge>
+          ) : null
+        }
+      />
 
       {catalog ? (
-        <ScrollView style={styles.panelScroll}>
+        <PanelShell scroll>
           {selectedObject ? (
-            <View style={styles.editBlock}>
-              <Text style={styles.infoTitle}>
+            <div className="grid gap-1 rounded-xl border bg-card/80 p-3">
+              <h3 className="text-sm font-medium text-foreground">
                 {catalogObjectLabel(selectedObject)}
-              </Text>
-              <Text style={styles.treeMeta}>
+              </h3>
+              <p className="text-xs text-muted-foreground">
                 Sheet {selectedObject.sheetName}, {selectedObject.ifcClass},
                 Version {selectedObject.version || "-"}
-              </Text>
-              <Text style={styles.treeMeta}>
+              </p>
+              <p className="text-xs text-muted-foreground">
                 {selectedObject.propertyRules
                   .filter((rule) => rule.requirement === "required")
                   .length.toLocaleString()}{" "}
                 erforderliche /{" "}
                 {selectedObject.propertyRules.length.toLocaleString()} gesamte
                 Properties
-              </Text>
-            </View>
+              </p>
+            </div>
           ) : null}
 
           {findings.length ? (
-            <View style={styles.catalogFindingStack}>
-              <Text style={styles.empty}>
+            <div className="grid gap-2">
+              <p className="text-sm text-muted-foreground">
                 {findings.length.toLocaleString()} Warnungen,{" "}
                 {quickFixCount.toLocaleString()} Quick-Fixes
-              </Text>
+              </p>
               {findings.map((finding) => (
-                <View key={finding.id} style={styles.catalogFinding}>
-                  <Text style={styles.diffSummaryTitle}>{finding.kind}</Text>
-                  <Text style={styles.diffSummaryText}>{finding.message}</Text>
+                <div
+                  key={finding.id}
+                  className="grid gap-2 rounded-xl border bg-card/80 p-3"
+                >
+                  <div className="text-sm font-medium text-foreground">
+                    {finding.kind}
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    {finding.message}
+                  </p>
                   {finding.quickFix ? (
                     <Button
                       label={finding.quickFix.label}
                       onPress={() => onApplyFinding(finding)}
                     />
                   ) : null}
-                </View>
+                </div>
               ))}
-            </View>
+            </div>
           ) : (
-            <Text style={styles.empty}>
+            <p className="text-sm text-muted-foreground">
               {selectedObject
                 ? "Keine Katalogwarnungen fuer die aktuelle Kombination."
                 : "Katalogklasse im Objektkatalog-Fenster waehlen."}
-            </Text>
+            </p>
           )}
-        </ScrollView>
+        </PanelShell>
       ) : (
-        <View style={styles.diffEmpty}>
-          <Text style={styles.infoTitle}>Kein Katalog geladen</Text>
-          <Text style={styles.empty}>
+        <div className="grid place-items-center gap-2 rounded-xl border border-dashed bg-muted/20 p-6 text-center">
+          <h3 className="text-sm font-medium text-foreground">
+            Kein Katalog geladen
+          </h3>
+          <p className="text-sm text-muted-foreground">
             Excel-Datei im Objektkatalog-Fenster importieren.
-          </Text>
-        </View>
+          </p>
+        </div>
       )}
-    </View>
+    </PanelShell>
   );
 }
 

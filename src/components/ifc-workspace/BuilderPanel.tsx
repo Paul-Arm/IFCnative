@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { ScrollView, Text, View } from "react-native";
 
 import {
     viewerWorldPointToIfcPlacementPoint,
@@ -16,14 +15,16 @@ import {
     UNIT_NAMES,
     UNIT_TYPES,
 } from "./constants";
-import { styles } from "./styles";
 import type { BodyElementDraft, CoordinateClipboard } from "./types";
 import {
+    Badge,
     Button,
     CollapsibleSection,
     DropdownField,
     EntityDropdown,
     LabeledInput,
+    PanelHeader,
+    PanelShell,
 } from "./ui";
 
 export function BuilderPanel({
@@ -170,7 +171,15 @@ export function BuilderPanel({
   };
 
   return (
-    <ScrollView style={styles.panelScroll}>
+    <PanelShell scroll>
+      <PanelHeader
+        eyebrow={`Auswahl #${selectedId}`}
+        title="Builder"
+        description="Elemente, Koerper, Psets, Ressourcen und Relationen anlegen"
+        meta={
+          <Badge tone={canAssignBody ? "success" : "neutral"}>IFC Edit</Badge>
+        }
+      />
       <CollapsibleSection
         defaultOpen
         title="Element"
@@ -195,16 +204,16 @@ export function BuilderPanel({
         title="3D-Körper"
         meta={`${bodyProfile === "cylinder" ? "Zylinder" : "Rechteck"} ${bodyWidth} x ${bodyDepth} x ${bodyHeight}`}
       >
-        <View style={styles.row}>
-          <View style={styles.flexField}>
+        <FormRow>
+          <FormField>
             <DropdownField
               label="Körperklasse"
               options={ENTITY_TYPES}
               value={bodyType}
               onChange={setBodyType}
             />
-          </View>
-          <View style={styles.flexField}>
+          </FormField>
+          <FormField>
             <DropdownField
               label="Profil"
               options={[
@@ -216,74 +225,74 @@ export function BuilderPanel({
                 setBodyProfile(value as "rectangle" | "cylinder")
               }
             />
-          </View>
-        </View>
+          </FormField>
+        </FormRow>
         <LabeledInput
           label="Körpername"
           value={bodyName}
           onChangeText={setBodyName}
         />
-        <View style={styles.row}>
-          <View style={styles.flexField}>
+        <FormRow>
+          <FormField>
             <LabeledInput
               label={bodyProfile === "cylinder" ? "Durchmesser X" : "Breite X"}
               keyboardType="numeric"
               value={bodyWidth}
               onChangeText={setBodyWidth}
             />
-          </View>
-          <View style={styles.flexField}>
+          </FormField>
+          <FormField>
             <LabeledInput
               label={bodyProfile === "cylinder" ? "Durchmesser Y" : "Tiefe Y"}
               keyboardType="numeric"
               value={bodyDepth}
               onChangeText={setBodyDepth}
             />
-          </View>
-          <View style={styles.flexField}>
+          </FormField>
+          <FormField>
             <LabeledInput
               label="Höhe Z"
               keyboardType="numeric"
               value={bodyHeight}
               onChangeText={setBodyHeight}
             />
-          </View>
-        </View>
-        <View style={styles.row}>
-          <View style={styles.flexField}>
+          </FormField>
+        </FormRow>
+        <FormRow>
+          <FormField>
             <LabeledInput
               label="X"
               keyboardType="numeric"
               value={bodyX}
               onChangeText={setBodyX}
             />
-          </View>
-          <View style={styles.flexField}>
+          </FormField>
+          <FormField>
             <LabeledInput
               label="Y"
               keyboardType="numeric"
               value={bodyY}
               onChangeText={setBodyY}
             />
-          </View>
-          <View style={styles.flexField}>
+          </FormField>
+          <FormField>
             <LabeledInput
               label="Z"
               keyboardType="numeric"
               value={bodyZ}
               onChangeText={setBodyZ}
             />
-          </View>
-        </View>
-        <View style={styles.row}>
-          <View style={styles.flexField}>
+          </FormField>
+        </FormRow>
+        <FormRow>
+          <FormField>
             <LabeledInput
               label="Kennzeichen"
               value={bodyTag}
               onChangeText={setBodyTag}
             />
-          </View>
-          <View style={styles.flexField}>
+          </FormField>
+          <FormField>
             <DropdownField
               label="Spawn-Bezug"
               options={[
@@ -303,15 +312,17 @@ export function BuilderPanel({
                 setBodyPlacementMode(value as "parent" | "world")
               }
             />
-          </View>
-        </View>
-        <View style={styles.editBlock}>
-          <Text style={styles.infoTitle}>Koordinaten-Zwischenablage</Text>
-          <Text style={styles.empty}>
+          </FormField>
+        </FormRow>
+        <div className="grid gap-2 rounded-xl border bg-card/80 p-3">
+          <h3 className="text-sm font-medium text-foreground">
+            Koordinaten-Zwischenablage
+          </h3>
+          <p className="text-sm text-muted-foreground">
             {coordinateClipboard
               ? describeCoordinateClipboard(coordinateClipboard)
               : "Noch keine Koordinaten aus dem 3D-Viewer übernommen."}
-          </Text>
+          </p>
           <Button
             label={
               coordinateClipboard
@@ -320,9 +331,9 @@ export function BuilderPanel({
             }
             onPress={() => void loadCoordinateClipboard()}
           />
-        </View>
-        <View style={styles.row}>
-          <View style={styles.flexField}>
+        </div>
+        <FormRow>
+          <FormField>
             <Button
               label={
                 bodyProfile === "cylinder"
@@ -334,15 +345,15 @@ export function BuilderPanel({
                 onAddBodyElement({ ...bodyDraft, parentId: selectedId })
               }
             />
-          </View>
-          <View style={styles.flexField}>
+          </FormField>
+          <FormField>
             <Button
               disabled={!canAssignBody}
               label="Der Auswahl zuweisen"
               onPress={() => onAssignBodyToSelected(bodyDraft)}
             />
-          </View>
-        </View>
+          </FormField>
+        </FormRow>
       </CollapsibleSection>
 
       <CollapsibleSection title="Beziehung" meta={shortIfc(relType)}>
@@ -352,24 +363,24 @@ export function BuilderPanel({
           value={relType}
           onChange={setRelType}
         />
-        <View style={styles.row}>
-          <View style={styles.flexField}>
+        <FormRow>
+          <FormField>
             <EntityDropdown
               label="Quellobjekt"
               document={document}
               value={sourceId}
               onChange={setSourceId}
             />
-          </View>
-          <View style={styles.flexField}>
+          </FormField>
+          <FormField>
             <EntityDropdown
               label="Zielobjekt"
               document={document}
               value={targetId}
               onChange={setTargetId}
             />
-          </View>
-        </View>
+          </FormField>
+        </FormRow>
         <Button
           disabled={!validSource || !validTarget}
           label="+ Beziehung anlegen"
@@ -383,80 +394,80 @@ export function BuilderPanel({
         title="Pset und Menge"
         meta={`${propertyName}, ${quantityName}`}
       >
-        <View style={styles.row}>
-          <View style={styles.flexField}>
+        <FormRow>
+          <FormField>
             <LabeledInput
               label="Pset"
               value={psetName}
               onChangeText={setPsetName}
             />
-          </View>
-          <View style={styles.flexField}>
+          </FormField>
+          <FormField>
             <LabeledInput
               label="Eigenschaft"
               value={propertyName}
               onChangeText={setPropertyName}
             />
-          </View>
-        </View>
-        <View style={styles.row}>
-          <View style={styles.flexField}>
+          </FormField>
+        </FormRow>
+        <FormRow>
+          <FormField>
             <DropdownField
               label="Werttyp"
               options={PROPERTY_VALUE_TYPES}
               value={propertyValueType}
               onChange={setPropertyValueType}
             />
-          </View>
-          <View style={styles.flexField}>
+          </FormField>
+          <FormField>
             <LabeledInput
               label="Wert"
               value={propertyValue}
               onChangeText={setPropertyValue}
             />
-          </View>
-        </View>
+          </FormField>
+        </FormRow>
         <Button
           label="+ Pset zur Auswahl hinzufügen"
           onPress={() =>
             onAddPset(psetName, propertyName, propertyValue, propertyValueType)
           }
         />
-        <View style={styles.separator} />
-        <View style={styles.row}>
-          <View style={styles.flexField}>
+        <Separator />
+        <FormRow>
+          <FormField>
             <LabeledInput
               label="QTO"
               value={qtoName}
               onChangeText={setQtoName}
             />
-          </View>
-          <View style={styles.flexField}>
+          </FormField>
+          <FormField>
             <LabeledInput
               label="Menge"
               value={quantityName}
               onChangeText={setQuantityName}
             />
-          </View>
-        </View>
-        <View style={styles.row}>
-          <View style={styles.flexField}>
+          </FormField>
+        </FormRow>
+        <FormRow>
+          <FormField>
             <DropdownField
               label="Mengentyp"
               options={QUANTITY_TYPES}
               value={quantityType}
               onChange={setQuantityType}
             />
-          </View>
-          <View style={styles.flexField}>
+          </FormField>
+          <FormField>
             <LabeledInput
               label="Mengenwert"
               keyboardType="numeric"
               value={quantityValue}
               onChangeText={setQuantityValue}
             />
-          </View>
-        </View>
+          </FormField>
+        </FormRow>
         <Button
           label="+ Menge zur Auswahl hinzufügen"
           onPress={() =>
@@ -469,49 +480,49 @@ export function BuilderPanel({
         title="Ressourcen"
         meta={`${materialName}, ${typeName}`}
       >
-        <View style={styles.row}>
-          <View style={styles.flexField}>
+        <FormRow>
+          <FormField>
             <LabeledInput
               label="Material"
               value={materialName}
               onChangeText={setMaterialName}
             />
-          </View>
-          <View style={styles.flexField}>
+          </FormField>
+          <FormField>
             <LabeledInput
               label="Materialkategorie"
               value={materialCategory}
               onChangeText={setMaterialCategory}
             />
-          </View>
-        </View>
+          </FormField>
+        </FormRow>
         <Button
           label="+ Material zur Auswahl hinzufügen"
           onPress={() => onAddMaterial(materialName, materialCategory)}
         />
-        <View style={styles.separator} />
+        <Separator />
         <DropdownField
           label="Typklasse"
           options={TYPE_CLASSES}
           value={typeClass}
           onChange={setTypeClass}
         />
-        <View style={styles.row}>
-          <View style={styles.flexField}>
+        <FormRow>
+          <FormField>
             <LabeledInput
               label="Typname"
               value={typeName}
               onChangeText={setTypeName}
             />
-          </View>
-          <View style={styles.flexField}>
+          </FormField>
+          <FormField>
             <LabeledInput
               label="Typ-Tag"
               value={typeTag}
               onChangeText={setTypeTag}
             />
-          </View>
-        </View>
+          </FormField>
+        </FormRow>
         <Button
           label="+ Typ der Auswahl zuweisen"
           onPress={() => onAssignType(typeName, typeClass, typeTag)}
@@ -522,22 +533,22 @@ export function BuilderPanel({
         title="Referenzen"
         meta={`${classificationId}, ${documentId}`}
       >
-        <View style={styles.row}>
-          <View style={styles.flexField}>
+        <FormRow>
+          <FormField>
             <LabeledInput
               label="Klassifikations-ID"
               value={classificationId}
               onChangeText={setClassificationId}
             />
-          </View>
-          <View style={styles.flexField}>
+          </FormField>
+          <FormField>
             <LabeledInput
               label="Klassifikationsname"
               value={classificationName}
               onChangeText={setClassificationName}
             />
-          </View>
-        </View>
+          </FormField>
+        </FormRow>
         <LabeledInput
           label="Klassifikations-URI"
           value={classificationUri}
@@ -553,23 +564,23 @@ export function BuilderPanel({
             )
           }
         />
-        <View style={styles.separator} />
-        <View style={styles.row}>
-          <View style={styles.flexField}>
+        <Separator />
+        <FormRow>
+          <FormField>
             <LabeledInput
               label="Dokument-ID"
               value={documentId}
               onChangeText={setDocumentId}
             />
-          </View>
-          <View style={styles.flexField}>
+          </FormField>
+          <FormField>
             <LabeledInput
               label="Dokumentname"
               value={documentName}
               onChangeText={setDocumentName}
             />
-          </View>
-        </View>
+          </FormField>
+        </FormRow>
         <LabeledInput
           label="Dokument-URI"
           value={documentUri}
@@ -584,35 +595,35 @@ export function BuilderPanel({
       </CollapsibleSection>
 
       <CollapsibleSection title="Einheiten" meta={`${unitType}: ${unitName}`}>
-        <View style={styles.row}>
-          <View style={styles.flexField}>
+        <FormRow>
+          <FormField>
             <DropdownField
               label="Einheitentyp"
               options={UNIT_TYPES}
               value={unitType}
               onChange={setUnitType}
             />
-          </View>
-          <View style={styles.flexField}>
+          </FormField>
+          <FormField>
             <DropdownField
               label="Einheitenname"
               options={UNIT_NAMES}
               value={unitName}
               onChange={setUnitName}
             />
-          </View>
-        </View>
+          </FormField>
+        </FormRow>
         <Button
           label="+ Einheit hinzufügen"
           onPress={() => onAddUnit(unitType, unitName)}
         />
       </CollapsibleSection>
 
-      <Text style={styles.empty}>
+      <p className="text-sm text-muted-foreground">
         Aktuelle Auswahl: #{selectedId}{" "}
         {document.entityById.get(selectedId)?.type}
-      </Text>
-    </ScrollView>
+      </p>
+    </PanelShell>
   );
 }
 
@@ -631,6 +642,20 @@ function isBodyAssignableEntity(entity?: NativeIfcEntity) {
     ].includes(entity?.type ?? "") &&
     (entity?.args.length ?? 0) >= 7
   );
+}
+
+function FormRow({ children }: { children: ReactNode }) {
+  return (
+    <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">{children}</div>
+  );
+}
+
+function FormField({ children }: { children: ReactNode }) {
+  return <div className="min-w-0">{children}</div>;
+}
+
+function Separator() {
+  return <div className="h-px bg-border" />;
 }
 
 function describeCoordinateClipboard(clipboard: CoordinateClipboard) {

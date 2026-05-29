@@ -1,17 +1,23 @@
 import { useMemo, useState } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
 
 import {
-  OBJECT_INFO_PSET_NAME,
-  type NativeIfcDocument,
-  type ObjectInfoIdDefinition,
-  type ObjectInfoIdReference,
-  type ObjectInfoIndex,
-  type ObjectInfoValidationFinding,
+    OBJECT_INFO_PSET_NAME,
+    type NativeIfcDocument,
+    type ObjectInfoIdDefinition,
+    type ObjectInfoIdReference,
+    type ObjectInfoIndex,
+    type ObjectInfoValidationFinding,
 } from "@/ifc";
+import { cn } from "@/lib/utils";
 
-import { styles } from "./styles";
-import { Button, CollapsibleSection, LabeledInput } from "./ui";
+import {
+    Badge,
+    Button,
+    CollapsibleSection,
+    LabeledInput,
+    PanelHeader,
+    PanelShell,
+} from "./ui";
 
 export function ObjectInfoPanel({
   document,
@@ -60,28 +66,27 @@ export function ObjectInfoPanel({
   ).length;
 
   return (
-    <View style={styles.console}>
-      <View style={styles.diffHeader}>
-        <View style={styles.diffHeaderText}>
-          <Text style={styles.infoTitle}>Objektinfo: IDs</Text>
-          <Text style={styles.empty}>
-            {index.definitions.length.toLocaleString()} Objektinfo-IDs /{" "}
-            {index.references.length.toLocaleString()} ID-Referenzen /{" "}
-            {findings.length.toLocaleString()} Findings
-          </Text>
-        </View>
-      </View>
+    <PanelShell>
+      <PanelHeader
+        title="Objektinfo: IDs"
+        description={`${index.definitions.length.toLocaleString()} Objektinfo-IDs / ${index.references.length.toLocaleString()} ID-Referenzen / ${findings.length.toLocaleString()} Findings`}
+        meta={
+          <Badge tone={errorCount ? "danger" : "success"}>
+            {errorCount} Fehler
+          </Badge>
+        }
+      />
 
-      <ScrollView style={styles.panelScroll}>
-        <View style={styles.editBlock}>
-          <Text style={styles.treeMeta}>
+      <PanelShell scroll>
+        <div className="grid gap-3 rounded-xl border bg-card/80 p-3">
+          <p className="text-sm text-muted-foreground">
             Registry: {OBJECT_INFO_PSET_NAME}._ID. Referenzen: Properties mit
             Suffix ID, ohne _ID.
-          </Text>
+          </p>
           <LabeledInput label="Filter" value={query} onChangeText={setQuery} />
-        </View>
+        </div>
 
-        <View style={styles.diffSummaryGrid}>
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
           <SummaryCard label="Fehler" value={errorCount} />
           <SummaryCard label="Warnungen" value={warningCount} />
           <SummaryCard label="Info" value={infoCount} />
@@ -89,7 +94,7 @@ export function ObjectInfoPanel({
             label="Externe _ID"
             value={index.externalDefinitions.length}
           />
-        </View>
+        </div>
 
         <CollapsibleSection
           defaultOpen
@@ -97,7 +102,7 @@ export function ObjectInfoPanel({
           meta={`${visibleFindings.length.toLocaleString()} sichtbar`}
         >
           {visibleFindings.length ? (
-            <View style={styles.catalogFindingStack}>
+            <div className="grid gap-2">
               {visibleFindings.map((finding) => (
                 <FindingRow
                   document={document}
@@ -107,9 +112,11 @@ export function ObjectInfoPanel({
                   onSelectEntity={onSelectEntity}
                 />
               ))}
-            </View>
+            </div>
           ) : (
-            <Text style={styles.empty}>Keine Findings fuer diesen Filter.</Text>
+            <p className="text-sm text-muted-foreground">
+              Keine Findings fuer diesen Filter.
+            </p>
           )}
         </CollapsibleSection>
 
@@ -119,7 +126,7 @@ export function ObjectInfoPanel({
           meta={`${visibleDefinitions.length.toLocaleString()} sichtbar`}
         >
           {visibleDefinitions.length ? (
-            <View style={styles.catalogFindingStack}>
+            <div className="grid gap-2">
               {visibleDefinitions.map((definition) => (
                 <DefinitionRow
                   definition={definition}
@@ -128,9 +135,11 @@ export function ObjectInfoPanel({
                   onSelectEntity={onSelectEntity}
                 />
               ))}
-            </View>
+            </div>
           ) : (
-            <Text style={styles.empty}>Keine Objektinfo-IDs gefunden.</Text>
+            <p className="text-sm text-muted-foreground">
+              Keine Objektinfo-IDs gefunden.
+            </p>
           )}
         </CollapsibleSection>
 
@@ -139,7 +148,7 @@ export function ObjectInfoPanel({
           meta={`${visibleReferences.length.toLocaleString()} sichtbar`}
         >
           {visibleReferences.length ? (
-            <View style={styles.catalogFindingStack}>
+            <div className="grid gap-2">
               {visibleReferences.map((reference) => (
                 <ReferenceRow
                   key={`${reference.entityId}:${reference.propertyId}`}
@@ -148,22 +157,26 @@ export function ObjectInfoPanel({
                   onSelectEntity={onSelectEntity}
                 />
               ))}
-            </View>
+            </div>
           ) : (
-            <Text style={styles.empty}>Keine ID-Referenzen gefunden.</Text>
+            <p className="text-sm text-muted-foreground">
+              Keine ID-Referenzen gefunden.
+            </p>
           )}
         </CollapsibleSection>
-      </ScrollView>
-    </View>
+      </PanelShell>
+    </PanelShell>
   );
 }
 
 function SummaryCard({ label, value }: { label: string; value: number }) {
   return (
-    <View style={styles.diffSummaryCard}>
-      <Text style={styles.diffSummaryTitle}>{label}</Text>
-      <Text style={styles.diffSummaryText}>{value.toLocaleString()}</Text>
-    </View>
+    <div className="rounded-xl border bg-card/80 p-3">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="mt-1 text-lg font-semibold text-foreground">
+        {value.toLocaleString()}
+      </div>
+    </div>
   );
 }
 
@@ -183,18 +196,23 @@ function FindingRow({
     finding.externalDefinitions?.[0]?.entityId;
   const selected = finding.entityId === selectedId;
   return (
-    <View style={[styles.catalogFinding, selected && styles.treeItemSelected]}>
-      <Text style={styles.diffSummaryTitle}>
+    <div
+      className={cn(
+        "grid gap-2 rounded-xl border bg-card/80 p-3",
+        selected && "border-primary/40 bg-primary/5",
+      )}
+    >
+      <div className="text-sm font-medium text-foreground">
         {finding.severity.toUpperCase()} / {finding.kind}
-      </Text>
-      <Text style={styles.diffSummaryText}>{finding.message}</Text>
-      <Text style={styles.treeMeta} numberOfLines={1}>
+      </div>
+      <p className="text-sm text-muted-foreground">{finding.message}</p>
+      <div className="truncate text-xs text-muted-foreground">
         {finding.value ? `${finding.value} / ` : ""}
         {finding.entityId
           ? entityLabel(document, finding.entityId)
           : "Dokument"}
-      </Text>
-      <View style={styles.actions}>
+      </div>
+      <div className="flex flex-wrap gap-2">
         {finding.entityId ? (
           <Button
             label="Objekt oeffnen"
@@ -207,8 +225,8 @@ function FindingRow({
             onPress={() => onSelectEntity(targetEntityId)}
           />
         ) : null}
-      </View>
-    </View>
+      </div>
+    </div>
   );
 }
 
@@ -222,24 +240,26 @@ function DefinitionRow({
   onSelectEntity(id: number): void;
 }) {
   return (
-    <Pressable
-      onPress={() => onSelectEntity(definition.entityId)}
-      style={({ pressed }) => [
-        styles.catalogFinding,
-        selected && styles.treeItemSelected,
-        pressed && styles.segmentPressed,
-      ]}
+    <button
+      type="button"
+      onClick={() => onSelectEntity(definition.entityId)}
+      className={cn(
+        "grid gap-1 rounded-xl border bg-card/80 p-3 text-left hover:bg-muted/50",
+        selected && "border-primary/40 bg-primary/5",
+      )}
     >
-      <Text style={styles.diffSummaryTitle}>{definition.value || "-"}</Text>
-      <Text style={styles.treeMeta} numberOfLines={1}>
+      <div className="text-sm font-medium text-foreground">
+        {definition.value || "-"}
+      </div>
+      <div className="truncate text-xs text-muted-foreground">
         #{definition.entityId} {definition.entityType}{" "}
         {definition.entityName || ""}
-      </Text>
-      <Text style={styles.diffSummaryText}>
+      </div>
+      <div className="text-sm text-muted-foreground">
         #{definition.psetId} {definition.psetName} / #{definition.propertyId}{" "}
         {definition.propertyName}
-      </Text>
-    </Pressable>
+      </div>
+    </button>
   );
 }
 
@@ -255,23 +275,30 @@ function ReferenceRow({
   const resolved = reference.targetDefinitions[0]?.entityId;
   const external = reference.externalDefinitions[0]?.entityId;
   return (
-    <View style={[styles.catalogFinding, selected && styles.treeItemSelected]}>
-      <Text style={styles.diffSummaryTitle}>{reference.value || "-"}</Text>
-      <Text style={styles.treeMeta} numberOfLines={1}>
+    <div
+      className={cn(
+        "grid gap-2 rounded-xl border bg-card/80 p-3",
+        selected && "border-primary/40 bg-primary/5",
+      )}
+    >
+      <div className="text-sm font-medium text-foreground">
+        {reference.value || "-"}
+      </div>
+      <div className="truncate text-xs text-muted-foreground">
         #{reference.entityId} {reference.entityType}{" "}
         {reference.entityName || ""}
-      </Text>
-      <Text style={styles.diffSummaryText}>
+      </div>
+      <div className="text-sm text-muted-foreground">
         {reference.psetName}.{reference.propertyName}
-      </Text>
-      <Text style={styles.treeMeta} numberOfLines={1}>
+      </div>
+      <div className="truncate text-xs text-muted-foreground">
         {resolved
           ? `Objektinfo-Ziel #${resolved}`
           : external
             ? `Externe _ID-Familie #${external}`
             : "Kein Ziel gefunden"}
-      </Text>
-      <View style={styles.actions}>
+      </div>
+      <div className="flex flex-wrap gap-2">
         <Button
           label="Objekt oeffnen"
           onPress={() => onSelectEntity(reference.entityId)}
@@ -287,8 +314,8 @@ function ReferenceRow({
             onPress={() => onSelectEntity(external)}
           />
         ) : null}
-      </View>
-    </View>
+      </div>
+    </div>
   );
 }
 

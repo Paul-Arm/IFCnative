@@ -1,6 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
@@ -9,7 +10,7 @@ const fromRoot = (...parts: string[]) => path.resolve(projectRoot, ...parts);
 
 export default defineConfig({
   base: "./",
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   resolve: {
     alias: [
       { find: "@", replacement: fromRoot("src") },
@@ -31,7 +32,6 @@ export default defineConfig({
         find: /^react-dom\/server$/,
         replacement: fromRoot("node_modules/react-dom/server.browser.js"),
       },
-      { find: /^react-native$/, replacement: "react-native-web" },
     ],
     dedupe: ["react", "react-dom"],
     extensions: [".web.tsx", ".web.ts", ".tsx", ".ts", ".jsx", ".js", ".json"],

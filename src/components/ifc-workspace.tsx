@@ -1,101 +1,94 @@
+import { Input } from "@/components/ui/input";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  startTransition,
-  useEffect,
-  useMemo,
-  useState,
-  type SetStateAction,
+    startTransition,
+    useEffect,
+    useMemo,
+    useState,
+    type SetStateAction,
 } from "react";
 import {
-  Mosaic,
-  MosaicWindow,
-  type MosaicNode,
-  type MosaicPath,
+    Mosaic,
+    MosaicWindow,
+    type MosaicNode,
+    type MosaicPath,
 } from "react-mosaic-component";
-import {
-  Pressable,
-  SafeAreaView,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
 
 import {
-  addNativeBodyElement,
-  addNativeClassification,
-  addNativeDocumentReference,
-  addNativeElement,
-  addNativeEmptyPropertySet,
-  addNativeMaterial,
-  addNativePropertySet,
-  addNativePropertyToSet,
-  addNativeQuantitySet,
-  addNativeRelationship,
-  addNativeSiUnit,
-  addNativeTypeAssignment,
-  applyCatalogQuickFix,
-  assignNativeBodyRepresentation,
-  createNativeSampleDocument,
-  duplicateNativePropertySet,
-  findCatalogObject,
-  getNativePlacement,
-  getNextNativeEntityId,
-  buildObjectInfoIndex,
-  parseNativeIfcFileInWorker,
-  removeNativeEntity,
-  removeNativePropertyFromSet,
-  removeNativePropertySet,
-  removeNativeRelationship,
-  resolveNativeMovableProductId,
-  serializeNativeIfcDocument,
-  splitTopLevel,
-  suggestCatalogObjectForEntity,
-  updateNativeEntity,
-  updateNativePlacement,
-  updateNativePropertySetName,
-  updateNativePropertyValue,
-  updateNativeRelationship,
-  validateEntityAgainstCatalogObject,
-  validateObjectInfoIndex,
-  viewerWorldDeltaToIfcPlacementDelta,
-  type CatalogValidationFinding,
-  type IfcObjectCatalog,
-  type NativeIfcDocument,
-  type NativeIfcEntity,
+    addNativeBodyElement,
+    addNativeClassification,
+    addNativeDocumentReference,
+    addNativeElement,
+    addNativeEmptyPropertySet,
+    addNativeMaterial,
+    addNativePropertySet,
+    addNativePropertyToSet,
+    addNativeQuantitySet,
+    addNativeRelationship,
+    addNativeSiUnit,
+    addNativeTypeAssignment,
+    applyCatalogQuickFix,
+    assignNativeBodyRepresentation,
+    buildObjectInfoIndex,
+    createNativeSampleDocument,
+    duplicateNativePropertySet,
+    findCatalogObject,
+    getNativePlacement,
+    getNextNativeEntityId,
+    parseNativeIfcFileInWorker,
+    removeNativeEntity,
+    removeNativePropertyFromSet,
+    removeNativePropertySet,
+    removeNativeRelationship,
+    resolveNativeMovableProductId,
+    serializeNativeIfcDocument,
+    splitTopLevel,
+    suggestCatalogObjectForEntity,
+    updateNativeEntity,
+    updateNativePlacement,
+    updateNativePropertySetName,
+    updateNativePropertyValue,
+    updateNativeRelationship,
+    validateEntityAgainstCatalogObject,
+    validateObjectInfoIndex,
+    viewerWorldDeltaToIfcPlacementDelta,
+    type CatalogValidationFinding,
+    type IfcObjectCatalog,
+    type NativeIfcDocument,
+    type NativeIfcEntity,
 } from "@/ifc";
 import { type NativeGraphPreset } from "@/ifc/nativeGraph";
 
+import {
+    Button,
+    MosaicWindowMenu,
+    SegmentedControl,
+    typeOption,
+} from "@/components/ifc-workspace/ui";
 import { BuilderPanel } from "./ifc-workspace/BuilderPanel";
 import { CatalogPanel, CatalogReviewPanel } from "./ifc-workspace/CatalogPanel";
 import {
-  DEFAULT_MOSAIC_LAYOUT,
-  ENTITY_TYPES,
-  MOSAIC_TITLES,
-  MOSAIC_VIEW_IDS,
-  RELATION_TYPES,
+    DEFAULT_MOSAIC_LAYOUT,
+    ENTITY_TYPES,
+    MOSAIC_TITLES,
+    MOSAIC_VIEW_IDS,
+    RELATION_TYPES,
 } from "./ifc-workspace/constants";
 import { GraphPanel } from "./ifc-workspace/GraphPanel";
 import { InspectorPanel } from "./ifc-workspace/InspectorPanel";
 import { ObjectInfoPanel } from "./ifc-workspace/ObjectInfoPanel";
 import { ConsolePanel, DiagnosticsPanel } from "./ifc-workspace/ReviewPanels";
 import { StructurePanel } from "./ifc-workspace/StructurePanel";
-import { styles } from "./ifc-workspace/styles";
 import type {
-  BodyElementDraft,
-  CoordinateClipboard,
-  EntityEditDraft,
-  InspectorMode,
-  MosaicViewId,
-  ParsedCoordinates,
-  Point,
-  StructureMode,
+    BodyElementDraft,
+    CoordinateClipboard,
+    EntityEditDraft,
+    InspectorMode,
+    MosaicViewId,
+    ParsedCoordinates,
+    Point,
+    StructureMode,
 } from "./ifc-workspace/types";
-import {
-  Button,
-  MosaicWindowMenu,
-  SegmentedControl,
-  typeOption,
-} from "./ifc-workspace/ui";
 import type { RelationshipFlowClipboardNode } from "./relationship-flow.types";
 import type { ViewerCoordinatePick } from "./that-open-viewer";
 import ThatOpenViewer from "./that-open-viewer";
@@ -1386,18 +1379,17 @@ export default function IfcWorkspace() {
   };
 
   const renderStructure = () => (
-    <View style={styles.tileContent}>
+    <TileContent>
       <SegmentedControl
         options={["tree", "graph"]}
         value={structureMode}
         onChange={(value) => setStructureMode(value as StructureMode)}
       />
-      <TextInput
+      <Input
         value={search}
-        onChangeText={setSearch}
+        onChange={(event) => setSearch(event.currentTarget.value)}
         placeholder="Search ID, class, name, GlobalId"
-        placeholderTextColor="#71717a"
-        style={styles.input}
+        className="h-8 shrink-0"
       />
       {structureMode === "tree" ? (
         <StructurePanel
@@ -1474,11 +1466,11 @@ export default function IfcWorkspace() {
           }}
         />
       )}
-    </View>
+    </TileContent>
   );
 
   const renderInspector = () => (
-    <View style={styles.tileContent}>
+    <TileContent>
       <SegmentedControl
         options={[
           "info",
@@ -1524,7 +1516,7 @@ export default function IfcWorkspace() {
         onUpdateProperty={updatePsetProperty}
         onUpdateRelationship={editRelationship}
       />
-    </View>
+    </TileContent>
   );
 
   const renderTileContent = (id: MosaicViewId) => {
@@ -1533,7 +1525,7 @@ export default function IfcWorkspace() {
         return renderStructure();
       case "viewer":
         return (
-          <View style={styles.tileContent}>
+          <TileContent>
             <ThatOpenViewer
               activeDocumentId={activeSession.id}
               activeModelDeferredReason={
@@ -1548,13 +1540,13 @@ export default function IfcWorkspace() {
               onPickCoordinates={storePickedCoordinates}
               onSelect={selectEntity}
             />
-          </View>
+          </TileContent>
         );
       case "inspector":
         return renderInspector();
       case "builder":
         return (
-          <View style={styles.tileContent}>
+          <TileContent>
             <BuilderPanel
               coordinateClipboard={coordinateClipboard}
               document={document}
@@ -1572,11 +1564,11 @@ export default function IfcWorkspace() {
               onAddUnit={addUnit}
               onLoadSystemCoordinates={loadSystemCoordinateClipboard}
             />
-          </View>
+          </TileContent>
         );
       case "catalog":
         return (
-          <View style={styles.tileContent}>
+          <TileContent>
             <CatalogPanel
               catalog={catalog}
               document={viewerDocument}
@@ -1586,22 +1578,22 @@ export default function IfcWorkspace() {
               onImportCatalog={importCatalog}
               onSelectCatalogObject={setSelectedCatalogObjectId}
             />
-          </View>
+          </TileContent>
         );
       case "catalog-review":
         return (
-          <View style={styles.tileContent}>
+          <TileContent>
             <CatalogReviewPanel
               catalog={catalog}
               findings={catalogFindings}
               selectedCatalogObjectId={activeCatalogObjectId}
               onApplyFinding={applyCatalogFinding}
             />
-          </View>
+          </TileContent>
         );
       case "object-info":
         return (
-          <View style={styles.tileContent}>
+          <TileContent>
             <ObjectInfoPanel
               document={viewerDocument}
               findings={objectInfoFindings}
@@ -1609,22 +1601,22 @@ export default function IfcWorkspace() {
               selectedId={selectedId}
               onSelectEntity={selectEntity}
             />
-          </View>
+          </TileContent>
         );
       case "console":
         return (
-          <View style={styles.tileContent}>
+          <TileContent>
             <ConsolePanel
               lines={consoleLines}
               onClear={() => setConsoleLines([])}
             />
-          </View>
+          </TileContent>
         );
       case "diagnostics":
         return (
-          <View style={styles.tileContent}>
+          <TileContent>
             <DiagnosticsPanel document={document} />
-          </View>
+          </TileContent>
         );
     }
   };
@@ -1645,118 +1637,136 @@ export default function IfcWorkspace() {
   );
 
   const renderDocumentTabs = () => (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      style={styles.documentTabs}
-      contentContainerStyle={styles.documentTabsContent}
+    <Tabs
+      value={activeSession.id}
+      onValueChange={(nextValue) => {
+        if (nextValue) {
+          setActiveDocumentId(nextValue);
+        }
+      }}
+      className="min-w-0"
     >
-      {documentSessions.map((session) => {
-        const active = session.id === activeSession.id;
-        return (
-          <Pressable
-            accessibilityRole="tab"
-            accessibilityState={{ selected: active }}
-            key={session.id}
-            onPress={() => setActiveDocumentId(session.id)}
-            style={({ pressed }) => [
-              styles.documentTab,
-              active && styles.documentTabActive,
-              pressed && styles.documentTabPressed,
-            ]}
-          >
-            <Text
-              numberOfLines={1}
-              style={[
-                styles.documentTabTitle,
-                active && styles.documentTabTitleActive,
-              ]}
+      <div className="-mx-1 overflow-x-auto px-1">
+        <TabsList
+          variant="line"
+          className="h-auto min-w-max justify-start gap-1 bg-transparent p-0"
+        >
+          {documentSessions.map((session) => (
+            <TabsTrigger
+              key={session.id}
+              value={session.id}
+              className="group relative h-auto min-w-40 max-w-60 flex-col items-start gap-0.5 rounded-t-md border-x border-t border-transparent bg-transparent px-3 py-1.5 text-left transition-colors hover:bg-muted/40 data-active:border-border data-active:bg-card data-active:shadow-[0_1px_0_0_var(--color-card)]"
             >
-              {session.document.fileName}
-            </Text>
-            <Text
-              numberOfLines={1}
-              style={[
-                styles.documentTabMeta,
-                active && styles.documentTabMetaActive,
-              ]}
-            >
-              {session.document.schema} ·{" "}
-              {session.document.entities.length.toLocaleString()} entities
-              {session.documentTextDirty ? " · unsaved" : ""}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </ScrollView>
+              <span className="flex w-full items-center gap-1.5">
+                <span className="size-1.5 shrink-0 rounded-full bg-muted-foreground/40 group-data-active:bg-primary" />
+                <span className="min-w-0 flex-1 truncate text-xs font-medium">
+                  {session.document.fileName}
+                </span>
+                {session.documentTextDirty ? (
+                  <span
+                    aria-label="unsaved"
+                    className="size-1.5 shrink-0 rounded-full bg-amber-500"
+                  />
+                ) : null}
+              </span>
+              <span className="w-full truncate pl-3 text-[0.65rem] font-normal text-muted-foreground">
+                {session.document.schema} ·{" "}
+                {session.document.entities.length.toLocaleString()} entities
+              </span>
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </div>
+    </Tabs>
   );
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={styles.topbar}>
-        <View style={styles.toolbarMain}>
-          <View style={styles.toolbarBrand}>
-            <Text style={styles.appTitle}>IFCnative</Text>
-            <Text style={styles.appMeta}>
-              {documentSessions.length.toLocaleString()} IFC
-            </Text>
-          </View>
-          <View style={styles.activeDocumentControl}>
-            <Text style={styles.fieldLabel}>Aktive IFC</Text>
-            {renderDocumentTabs()}
-          </View>
-        </View>
-        <View style={styles.actions}>
-          <Button
-            disabled={Boolean(loadingIfcName)}
-            label={loadingIfcName ? "Loading IFC..." : "Open IFC"}
-            primary
-            onPress={() => void openIfc()}
-          />
-          <Button
-            disabled={Boolean(loadingIfcName)}
-            label="Add IFC"
-            onPress={() => void addIfcFiles()}
-          />
-          <Button label="Sample" onPress={loadSample} />
-          <Button
-            disabled={catalogImporting}
-            label={catalog ? "Reload Catalog" : "Import Catalog"}
-            onPress={() => void importCatalog()}
-          />
-          <Button
-            disabled={Boolean(loadingIfcName)}
-            label="Export IFC"
-            onPress={() => void exportIfc()}
-          />
-          <Button label="Reset Layout" onPress={resetMosaicLayout} />
-          <MosaicWindowMenu
-            closedIds={closedMosaicIds}
-            onRestore={restoreMosaicView}
-          />
-        </View>
-      </View>
+    <div className="flex min-h-screen flex-col bg-background text-foreground">
+      <header className="relative z-20 flex shrink-0 flex-col gap-2 border-b border-border/70 bg-card/95 px-4 pt-2 pb-0 shadow-sm backdrop-blur lg:flex-row lg:items-center lg:gap-4">
+        <div className="flex shrink-0 items-center gap-2.5">
+          <span
+            aria-hidden
+            className="flex size-7 items-center justify-center rounded-md bg-gradient-to-br from-teal-500 to-emerald-600 text-[10px] font-bold text-white shadow-sm"
+          >
+            IFC
+          </span>
+          <div className="flex flex-col leading-tight">
+            <span className="text-sm font-semibold tracking-tight">
+              IFCnative
+            </span>
+            <span className="text-[0.65rem] text-muted-foreground">
+              {documentSessions.length.toLocaleString()}{" "}
+              {documentSessions.length === 1 ? "Datei" : "Dateien"}
+            </span>
+          </div>
+          <div className="mx-2 hidden h-6 w-px bg-border/70 lg:block" />
+        </div>
+        <div className="min-w-0 flex-1">{renderDocumentTabs()}</div>
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5 pb-2 lg:pb-0">
+          <div className="flex items-center gap-1 rounded-md">
+            <Button
+              disabled={Boolean(loadingIfcName)}
+              label={loadingIfcName ? "Lädt…" : "IFC öffnen"}
+              primary
+              onPress={() => void openIfc()}
+            />
+            <Button
+              disabled={Boolean(loadingIfcName)}
+              label="Hinzufügen"
+              onPress={() => void addIfcFiles()}
+            />
+            <Button label="Beispiel" onPress={loadSample} />
+          </div>
+          <div className="mx-1 h-5 w-px bg-border/70" />
+          <div className="flex items-center gap-1">
+            <Button
+              disabled={catalogImporting}
+              label={catalog ? "Katalog neu laden" : "Katalog importieren"}
+              onPress={() => void importCatalog()}
+            />
+            <Button
+              disabled={Boolean(loadingIfcName)}
+              label="IFC exportieren"
+              onPress={() => void exportIfc()}
+            />
+          </div>
+          <div className="mx-1 h-5 w-px bg-border/70" />
+          <div className="flex items-center gap-1">
+            <Button label="Layout zurücksetzen" onPress={resetMosaicLayout} />
+            <MosaicWindowMenu
+              closedIds={closedMosaicIds}
+              onRestore={restoreMosaicView}
+            />
+          </div>
+        </div>
+      </header>
 
-      <View style={styles.mosaicShell}>
-        <Mosaic<MosaicViewId>
-          className="ifcnative-mosaic"
-          renderTile={renderMosaicTile}
-          resize={{ minimumPaneSizePercentage: 12 }}
-          value={mosaicValue}
-          zeroStateView={
-            <View style={styles.zeroState}>
-              <Button
-                label="Restore Layout"
-                primary
-                onPress={resetMosaicLayout}
-              />
-            </View>
-          }
-          onChange={setMosaicValue}
-        />
-      </View>
-    </SafeAreaView>
+      <main className="min-h-0 flex-1 p-1.5">
+        <div className="h-full min-h-[640px] overflow-hidden rounded-lg border border-border/60 bg-muted/30">
+          <Mosaic<MosaicViewId>
+            className="ifcnative-mosaic"
+            renderTile={renderMosaicTile}
+            resize={{ minimumPaneSizePercentage: 12 }}
+            value={mosaicValue}
+            zeroStateView={
+              <div className="flex h-full items-center justify-center">
+                <Button
+                  label="Layout wiederherstellen"
+                  primary
+                  onPress={resetMosaicLayout}
+                />
+              </div>
+            }
+            onChange={setMosaicValue}
+          />
+        </div>
+      </main>
+    </div>
   );
+}
+
+function TileContent({ children }: { children: React.ReactNode }) {
+  return <div className="flex h-full min-h-0 flex-col gap-3">{children}</div>;
 }
 
 function pickIfcFile() {

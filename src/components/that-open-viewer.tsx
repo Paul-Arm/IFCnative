@@ -1,5 +1,3 @@
-import { StyleSheet, Text, View } from "react-native";
-
 export interface ViewerCoordinatePick {
   documentId?: string;
   entityId?: number;
@@ -59,45 +57,28 @@ export default function ThatOpenViewer({
   const activeModel =
     models.find((model) => model.documentId === activeDocumentId) ?? models[0];
   return (
-    <View style={styles.fallback}>
-      <Text style={styles.title}>ThatOpen Viewer</Text>
-      <Text style={styles.text}>
-        {activeModel?.fileName ?? activeModelFileName ?? "No IFC loaded"}
-      </Text>
-      {!activeModelLoaded && activeModelDeferredReason ? (
-        <Text style={styles.text}>{activeModelDeferredReason}</Text>
-      ) : null}
-      {!activeModelLoaded && onLoadActiveModel ? (
-        <Text style={styles.text}>
-          3D loading is available in the web build.
-        </Text>
-      ) : null}
-      <Text style={styles.text}>
-        The ThatOpen WebGL viewer is available in the web build.
-      </Text>
-    </View>
+    <div className="grid min-h-[440px] place-items-center rounded-xl border bg-muted/30 p-6 text-center">
+      <div className="grid max-w-lg gap-2">
+        <h2 className="text-base font-semibold text-foreground">
+          ThatOpen Viewer
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          {activeModel?.fileName ?? activeModelFileName ?? "No IFC loaded"}
+        </p>
+        {!activeModelLoaded && activeModelDeferredReason ? (
+          <p className="text-sm text-muted-foreground">
+            {activeModelDeferredReason}
+          </p>
+        ) : null}
+        {!activeModelLoaded && onLoadActiveModel ? (
+          <p className="text-sm text-muted-foreground">
+            3D loading is available in the web build.
+          </p>
+        ) : null}
+        <p className="text-sm text-muted-foreground">
+          The ThatOpen WebGL viewer is available in the web build.
+        </p>
+      </div>
+    </div>
   );
 }
-
-const styles = StyleSheet.create({
-  fallback: {
-    alignItems: "center",
-    backgroundColor: "#f8fafc",
-    borderColor: "#d4d4d8",
-    borderRadius: 8,
-    borderWidth: 1,
-    justifyContent: "center",
-    minHeight: 440,
-    padding: 24,
-  },
-  text: {
-    color: "#52525b",
-    fontSize: 12,
-    marginTop: 6,
-    textAlign: "center",
-  },
-  title: {
-    color: "#18181b",
-    fontSize: 16,
-  },
-});

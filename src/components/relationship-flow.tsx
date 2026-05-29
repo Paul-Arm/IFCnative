@@ -1,4 +1,4 @@
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { cn } from "@/lib/utils";
 
 import type { RelationshipFlowProps } from "./relationship-flow.types";
 
@@ -23,64 +23,54 @@ export default function RelationshipFlow({
   onTogglePin,
 }: RelationshipFlowProps) {
   return (
-    <View style={styles.root}>
-      <View style={styles.toolbar}>
-        <Text style={styles.summary}>
+    <div className="min-h-[430px] overflow-hidden rounded-xl border bg-card">
+      <div className="flex flex-wrap items-center gap-2 border-b p-2">
+        <div className="min-w-40 flex-1 text-sm text-muted-foreground">
           {nodes.length} nodes - {relationshipCount} rels{" "}
           {capped ? "- capped" : ""}
-        </Text>
-        <View style={styles.depthRow}>
+        </div>
+        <div className="flex flex-wrap gap-1">
           {DEPTH_VALUES.map((value) => (
-            <Pressable
+            <button
+              type="button"
               key={value}
-              onPress={() => onDepth(value)}
-              style={[
-                styles.depthButton,
-                depth === value && styles.depthButtonActive,
-              ]}
+              onClick={() => onDepth(value)}
+              className={cn(
+                "min-w-8 rounded-md border px-2 py-1 text-xs text-foreground hover:bg-muted",
+                depth === value &&
+                  "border-primary bg-primary text-primary-foreground",
+              )}
             >
-              <Text
-                style={[
-                  styles.depthText,
-                  depth === value && styles.depthTextActive,
-                ]}
-              >
-                {value}
-              </Text>
-            </Pressable>
+              {value}
+            </button>
           ))}
-          <Pressable onPress={onClearPositions} style={styles.depthButton}>
-            <Text style={styles.depthText}>Auto</Text>
-          </Pressable>
-        </View>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.filterScroll}
-        >
-          <Pressable
-            onPress={() => onRelationshipTypeFilters([])}
-            style={[
-              styles.filterChip,
-              relationshipTypeFilters.length === 0 && styles.filterChipActive,
-            ]}
+          <button
+            type="button"
+            onClick={onClearPositions}
+            className="rounded-md border px-2 py-1 text-xs text-foreground hover:bg-muted"
           >
-            <Text
-              style={[
-                styles.filterChipText,
-                relationshipTypeFilters.length === 0 &&
-                  styles.filterChipTextActive,
-              ]}
-            >
-              All rels
-            </Text>
-          </Pressable>
+            Auto
+          </button>
+        </div>
+        <div className="flex max-w-full gap-1 overflow-x-auto pb-1">
+          <button
+            type="button"
+            onClick={() => onRelationshipTypeFilters([])}
+            className={cn(
+              "rounded-full border px-2 py-1 text-xs text-foreground hover:bg-muted",
+              relationshipTypeFilters.length === 0 &&
+                "border-primary bg-primary text-primary-foreground",
+            )}
+          >
+            All rels
+          </button>
           {relationshipOptions.map((option) => {
             const active = relationshipTypeFilters.includes(option.value);
             return (
-              <Pressable
+              <button
+                type="button"
                 key={option.value}
-                onPress={() => {
+                onClick={() => {
                   const next = active
                     ? relationshipTypeFilters.filter(
                         (value) => value !== option.value,
@@ -88,85 +78,74 @@ export default function RelationshipFlow({
                     : [...relationshipTypeFilters, option.value];
                   onRelationshipTypeFilters(next);
                 }}
-                style={[styles.filterChip, active && styles.filterChipActive]}
+                className={cn(
+                  "rounded-full border px-2 py-1 text-xs text-foreground hover:bg-muted",
+                  active && "border-primary bg-primary text-primary-foreground",
+                )}
               >
-                <Text
-                  style={[
-                    styles.filterChipText,
-                    active && styles.filterChipTextActive,
-                  ]}
-                  numberOfLines={1}
-                >
-                  {shortRelationship(option.label)}
-                </Text>
-              </Pressable>
+                {shortRelationship(option.label)}
+              </button>
             );
           })}
-        </ScrollView>
-      </View>
-      <ScrollView style={styles.list}>
+        </div>
+      </div>
+      <div className="grid max-h-[560px] gap-2 overflow-auto p-2">
         {nodes.map((node) => (
-          <Pressable
+          <div
             key={node.id}
-            onPress={() => onSelect(node.id)}
-            style={[
-              styles.node,
-              node.selected && styles.nodeSelected,
-              node.pinned && styles.nodePinned,
-            ]}
+            className={cn(
+              "grid gap-1 rounded-xl border-2 border-primary/60 bg-cyan-50 p-2",
+              node.selected &&
+                "border-foreground bg-primary text-primary-foreground",
+              node.pinned && !node.selected && "bg-emerald-100",
+            )}
           >
-            <View style={styles.nodeHeader}>
-              <Text
-                style={[
-                  styles.nodeTitle,
-                  node.selected && styles.nodeTitleSelected,
-                ]}
-                numberOfLines={1}
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => onSelect(node.id)}
+                className="min-w-0 flex-1 truncate text-left text-xs font-medium"
               >
                 #{node.id} {shortType(node.entity.type)}
-              </Text>
+              </button>
               {node.childCount > 0 ? (
-                <Pressable
-                  onPress={() => onToggleChildren(node.id, node.childrenLoaded)}
-                  style={styles.nodeButton}
+                <button
+                  type="button"
+                  onClick={() => onToggleChildren(node.id, node.childrenLoaded)}
+                  className="min-w-7 rounded border bg-background px-1 py-0.5 text-xs text-primary"
                 >
-                  <Text style={styles.nodeButtonText}>
-                    {node.childrenLoaded
-                      ? "-"
-                      : `+${Math.min(node.childCount, 99)}`}
-                  </Text>
-                </Pressable>
+                  {node.childrenLoaded
+                    ? "-"
+                    : `+${Math.min(node.childCount, 99)}`}
+                </button>
               ) : null}
-              <Pressable
-                onPress={() => onTogglePin(node.id)}
-                style={styles.nodeButton}
+              <button
+                type="button"
+                onClick={() => onTogglePin(node.id)}
+                className="min-w-7 rounded border bg-background px-1 py-0.5 text-xs text-primary"
               >
-                <Text style={styles.nodeButtonText}>
-                  {node.pinned ? "PIN" : "+"}
-                </Text>
-              </Pressable>
-            </View>
-            <Text
-              style={[
-                styles.nodeName,
-                node.selected && styles.nodeTitleSelected,
-              ]}
-              numberOfLines={1}
+                {node.pinned ? "PIN" : "+"}
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => onSelect(node.id)}
+              className="truncate text-left text-xs opacity-90"
             >
               {node.entity.name || node.entity.globalId || node.entity.type}
-            </Text>
-          </Pressable>
+            </button>
+          </div>
         ))}
         {!nodes.length ? (
-          <Text style={styles.empty}>No graph nodes.</Text>
+          <p className="py-2 text-sm text-muted-foreground">No graph nodes.</p>
         ) : null}
         {edges.length ? (
-          <Text style={styles.empty}>
+          <p className="py-2 text-sm text-muted-foreground">
             {edges.length} relationships indexed.
-          </Text>
+          </p>
         ) : null}
-      </ScrollView>
-    </View>
+      </div>
+    </div>
   );
 }
 
@@ -177,129 +156,3 @@ function shortType(type: string) {
 function shortRelationship(type: string) {
   return type.replace(/^IFCREL/i, "").replace(/^IFC/i, "");
 }
-
-const styles = StyleSheet.create({
-  depthButton: {
-    borderColor: "#d4d4d8",
-    borderRadius: 6,
-    borderWidth: 1,
-    minWidth: 30,
-    paddingHorizontal: 7,
-    paddingVertical: 6,
-  },
-  depthButtonActive: {
-    backgroundColor: "#0f766e",
-    borderColor: "#0f766e",
-  },
-  depthRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 4,
-  },
-  depthText: {
-    color: "#18181b",
-    fontSize: 10,
-    textAlign: "center",
-  },
-  depthTextActive: {
-    color: "#ffffff",
-  },
-  empty: {
-    color: "#71717a",
-    fontSize: 12,
-    paddingVertical: 8,
-  },
-  filterChip: {
-    borderColor: "#d4d4d8",
-    borderRadius: 999,
-    borderWidth: 1,
-    marginRight: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-  },
-  filterChipActive: {
-    backgroundColor: "#0f766e",
-    borderColor: "#0f766e",
-  },
-  filterChipText: {
-    color: "#18181b",
-    fontSize: 10,
-  },
-  filterChipTextActive: {
-    color: "#ffffff",
-  },
-  filterScroll: {
-    maxWidth: "100%",
-  },
-  list: {
-    padding: 8,
-  },
-  node: {
-    backgroundColor: "#cffafe",
-    borderColor: "#0f766e",
-    borderRadius: 8,
-    borderWidth: 2,
-    marginBottom: 8,
-    padding: 8,
-  },
-  nodeButton: {
-    backgroundColor: "#ffffff",
-    borderColor: "#0f766e",
-    borderRadius: 4,
-    borderWidth: 1,
-    minWidth: 26,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-  },
-  nodeButtonText: {
-    color: "#0f766e",
-    fontSize: 10,
-    textAlign: "center",
-  },
-  nodeHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 4,
-  },
-  nodeName: {
-    color: "#18181b",
-    fontSize: 11,
-    marginTop: 4,
-  },
-  nodePinned: {
-    backgroundColor: "#bbf7d0",
-  },
-  nodeSelected: {
-    backgroundColor: "#0f766e",
-    borderColor: "#18181b",
-  },
-  nodeTitle: {
-    color: "#18181b",
-    flex: 1,
-    fontSize: 11,
-  },
-  nodeTitleSelected: {
-    color: "#ffffff",
-  },
-  root: {
-    borderColor: "#e4e4e7",
-    borderRadius: 8,
-    borderWidth: 1,
-    minHeight: 430,
-    overflow: "hidden",
-  },
-  summary: {
-    color: "#52525b",
-    flex: 1,
-    fontSize: 12,
-  },
-  toolbar: {
-    alignItems: "center",
-    borderBottomColor: "#e4e4e7",
-    borderBottomWidth: 1,
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    padding: 8,
-  },
-});
