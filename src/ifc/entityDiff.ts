@@ -20,6 +20,16 @@ export interface IfcRelationshipDiffSummary {
   type: string;
   before?: string;
   after?: string;
+  beforeSources?: IfcRelationshipEndpointSummary[];
+  beforeTargets?: IfcRelationshipEndpointSummary[];
+  afterSources?: IfcRelationshipEndpointSummary[];
+  afterTargets?: IfcRelationshipEndpointSummary[];
+}
+
+export interface IfcRelationshipEndpointSummary {
+  id: number;
+  type: string;
+  name?: string;
 }
 
 export interface IfcPlacementDiffSummary {
@@ -85,9 +95,12 @@ export function summarizeEntityAwareDiff(beforeText: string, afterText: string):
     if (!beforeEntity && afterEntity) {
       addedEntities += 1;
       if (isRelationshipEntity(afterEntity)) {
+        const afterRelationship = summarizeRelationship(afterEntity, after);
         relationshipChanges.push({
           action: 'added',
-          after: describeRelationship(afterEntity),
+          after: afterRelationship.text,
+          afterSources: afterRelationship.sources,
+          afterTargets: afterRelationship.targets,
           id,
           type: afterEntity.type,
         });
@@ -95,7 +108,7 @@ export function summarizeEntityAwareDiff(beforeText: string, afterText: string):
       if (isGeometryEntity(afterEntity)) {
         geometryChanges.push({
           action: 'added',
-          after: describeGeometry(afterEntity),
+          after: describeGeometry(afterEntity, after),
           affectedProducts: traceProductsForGeometry(after, id),
           id,
           type: afterEntity.type,
@@ -106,9 +119,12 @@ export function summarizeEntityAwareDiff(beforeText: string, afterText: string):
     if (beforeEntity && !afterEntity) {
       removedEntities += 1;
       if (isRelationshipEntity(beforeEntity)) {
+        const beforeRelationship = summarizeRelationship(beforeEntity, before);
         relationshipChanges.push({
           action: 'removed',
-          before: describeRelationship(beforeEntity),
+          before: beforeRelationship.text,
+          beforeSources: beforeRelationship.sources,
+          beforeTargets: beforeRelationship.targets,
           id,
           type: beforeEntity.type,
         });
@@ -117,7 +133,7 @@ export function summarizeEntityAwareDiff(beforeText: string, afterText: string):
         geometryChanges.push({
           action: 'removed',
           affectedProducts: traceProductsForGeometry(before, id),
-          before: describeGeometry(beforeEntity),
+          before: describeGeometry(beforeEntity, before),
           id,
           type: beforeEntity.type,
         });
@@ -130,10 +146,16 @@ export function summarizeEntityAwareDiff(beforeText: string, afterText: string):
 
     changedEntities += 1;
     if (isRelationshipEntity(beforeEntity) || isRelationshipEntity(afterEntity)) {
+      const beforeRelationship = summarizeRelationship(beforeEntity, before);
+      const afterRelationship = summarizeRelationship(afterEntity, after);
       relationshipChanges.push({
         action: 'changed',
-        after: describeRelationship(afterEntity),
-        before: describeRelationship(beforeEntity),
+        after: afterRelationship.text,
+        afterSources: afterRelationship.sources,
+        afterTargets: afterRelationship.targets,
+        before: beforeRelationship.text,
+        beforeSources: beforeRelationship.sources,
+        beforeTargets: beforeRelationship.targets,
         id,
         type: afterEntity.type,
       });
@@ -142,9 +164,9 @@ export function summarizeEntityAwareDiff(beforeText: string, afterText: string):
     if (isGeometryEntity(beforeEntity) || isGeometryEntity(afterEntity)) {
       geometryChanges.push({
         action: 'changed',
-        after: describeGeometry(afterEntity),
+        after: describeGeometry(afterEntity, after),
         affectedProducts: traceProductsForGeometry(after, id),
-        before: describeGeometry(beforeEntity),
+        before: describeGeometry(beforeEntity, before),
         id,
         type: afterEntity.type,
       });
@@ -317,30 +339,115 @@ const GEOMETRY_ENTITY_TYPES = new Set([
   'IFCBOUNDINGBOX',
 ]);
 
-function describeRelationship(entity: StepEntityLine) {
+function summarizeRelationship(entity: StepEntityLine, step: ParsedStepText) {
+  const { sources, targets } = relationshipEndpoints(entity, step);
+  if (!sources.length && !targets.length) {
+    return { sources, targets, text: describeRelationshipFallback(entity) };
+  }
+  const sourceText = sources.length ? sources.map(formatEndpoint).join(', ') : '∅';
+  const targetText = targets.length ? targets.map(formatEndpoint).join(', ') : '∅';
+  return {
+    sources,
+    targets,
+    text: `${entity.type} ${sourceText} → ${targetText}`,
+  };
+}
+
+function relationshipEndpoints(entity: StepEntityLine, step: ParsedStepText) {
+  const direct = (index: number) => endpointSummaries(step, readReferences(entity.args[index] ?? ''));
+  switch (entity.type) {
+    case 'IFCRELAGGREGATES':
+    case 'IFCRELNESTS':
+      return { sources: direct(4), targets: direct(5) };
+    case 'IFCRELCONTAINEDINSPATIALSTRUCTURE':
+    case 'IFCRELREFERENCEDINSPATIALSTRUCTURE':
+      return { sources: direct(5), targets: direct(4) };
+    case 'IFCRELDEFINESBYPROPERTIES':
+    case 'IFCRELDEFINESBYTYPE':
+      return { sources: direct(5), targets: direct(4) };
+    case 'IFCRELASSIGNSTOGROUP':
+    case 'IFCRELASSIGNSTOPROCESS':
+    case 'IFCRELASSIGNSTOCONTROL':
+    case 'IFCRELASSIGNSTOPRODUCT':
+    case 'IFCRELASSOCIATESMATERIAL':
+    case 'IFCRELASSOCIATESCLASSIFICATION':
+    case 'IFCRELASSOCIATESDOCUMENT':
+    case 'IFCRELASSOCIATESLIBRARY':
+      return { sources: direct(5), targets: direct(4) };
+    case 'IFCRELCONNECTSELEMENTS':
+    case 'IFCRELCONNECTSPORTS':
+    case 'IFCRELCONNECTSPORTTOELEMENT':
+    case 'IFCRELVOIDSELEMENT':
+    case 'IFCRELFILLSELEMENT':
+    case 'IFCRELSEQUENCE':
+      return { sources: direct(4), targets: direct(5) };
+    default: {
+      const refs = endpointSummaries(step, readReferences(entity.text));
+      return { sources: refs.slice(0, 1), targets: refs.slice(1) };
+    }
+  }
+}
+
+function endpointSummaries(step: ParsedStepText, ids: number[]): IfcRelationshipEndpointSummary[] {
+  return uniqueNumbers(ids)
+    .map((id) => {
+      const entity = step.entities.get(id);
+      return {
+        id,
+        name: entity?.name,
+        type: entity?.type ?? 'UNKNOWN',
+      };
+    });
+}
+
+function formatEndpoint(endpoint: IfcRelationshipEndpointSummary) {
+  return `#${endpoint.id} ${endpoint.type}${endpoint.name ? ` '${endpoint.name}'` : ''}`;
+}
+
+function describeRelationshipFallback(entity: StepEntityLine) {
   const refs = entity.text.match(/#\d+/g) ?? [];
   const uniqueRefs = [...new Set(refs)].slice(0, 8).join(' → ');
   const suffix = refs.length > 8 ? ' …' : '';
   return uniqueRefs ? `${entity.type} ${uniqueRefs}${suffix}` : entity.type;
 }
 
-function describeGeometry(entity: StepEntityLine) {
-  if (entity.type === 'IFCRECTANGLEPROFILEDEF') {
-    return `${entity.type} ${entity.args[2] ?? '?'} × ${entity.args[3] ?? '?'}`;
-  }
-  if (entity.type === 'IFCCIRCLEPROFILEDEF') {
-    return `${entity.type} radius ${entity.args[3] ?? '?'}`;
+function describeGeometry(entity: StepEntityLine, step?: ParsedStepText) {
+  const profileDescription = describeProfileGeometry(entity);
+  if (profileDescription) {
+    return `${entity.type} ${profileDescription}`;
   }
   if (entity.type === 'IFCEXTRUDEDAREASOLID') {
-    return `${entity.type} profile ${entity.args[0] ?? '?'} depth ${entity.args[3] ?? '?'}`;
+    const profileId = readReferences(entity.args[0] ?? '')[0];
+    const profile = profileId ? step?.entities.get(profileId) : undefined;
+    const profileText = profile ? `${describeGeometry(profile, step)} (#${profile.id})` : `profile ${entity.args[0] ?? '?'}`;
+    return `${entity.type} ${profileText} depth ${entity.args[3] ?? '?'}`;
   }
   if (entity.type === 'IFCSHAPEREPRESENTATION') {
-    return `${entity.type} ${entity.args[2] ?? ''} ${entity.args[3] ?? ''}`.trim();
+    const items = readReferences(entity.args[3] ?? '')
+      .map((id) => step?.entities.get(id))
+      .filter((item): item is StepEntityLine => Boolean(item))
+      .map((item) => `#${item.id} ${describeGeometry(item, step)}`)
+      .slice(0, 3);
+    const itemText = items.length ? ` items ${items.join(', ')}` : ` ${entity.args[3] ?? ''}`;
+    return `${entity.type} ${entity.args[2] ?? ''}${itemText}`.trim();
   }
   const refs = entity.text.match(/#\d+/g) ?? [];
   const uniqueRefs = [...new Set(refs)].slice(0, 6).join(' → ');
   const suffix = refs.length > 6 ? ' …' : '';
   return uniqueRefs ? `${entity.type} ${uniqueRefs}${suffix}` : entity.type;
+}
+
+function describeProfileGeometry(entity: StepEntityLine) {
+  if (entity.type === 'IFCRECTANGLEPROFILEDEF') {
+    return `rectangle ${entity.args[3] ?? '?'} × ${entity.args[4] ?? '?'}`;
+  }
+  if (entity.type === 'IFCCIRCLEPROFILEDEF') {
+    return `circle radius ${entity.args[3] ?? '?'}`;
+  }
+  if (entity.type === 'IFCBOUNDINGBOX') {
+    return `box ${entity.args[3] ?? '?'} × ${entity.args[4] ?? '?'} × ${entity.args[5] ?? '?'}`;
+  }
+  return undefined;
 }
 
 function traceProductsForGeometry(step: ParsedStepText, geometryId: number): IfcGeometryProductSummary[] {

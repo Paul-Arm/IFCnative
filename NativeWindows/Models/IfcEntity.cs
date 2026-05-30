@@ -10,6 +10,10 @@ public sealed class IfcEntity
 
     public List<string> Arguments { get; } = [];
 
+    public string? OriginalStepLine { get; init; }
+
+    public List<string> OriginalArguments { get; } = [];
+
     public string GlobalId => StepArgumentReader.Unquote(Arguments.ElementAtOrDefault(0)) ?? string.Empty;
 
     public string Name
@@ -51,6 +55,6 @@ public sealed class IfcEntity
 
     public string ToStepLine()
     {
-        return $"#{Id}= {Type}({string.Join(",", Arguments)});";
+        return IFCnative.NativeWindows.Services.IfcStepWriter.SerializeEntity(this);
     }
 }

@@ -170,7 +170,12 @@ test('native type assignments are indexed, diffed, and endpoint-validated', () =
   assert.ok(typed.diagnostics.some((line) => line.includes('Validation: no relationship or reference warnings')));
 
   const diffSummary = summarizeEntityAwareDiff(serializeNativeIfcDocument(sample), serializeNativeIfcDocument(typed));
-  assert.ok(diffSummary.relationshipChanges.some((change) => change.type === 'IFCRELDEFINESBYTYPE'));
+  const typeChange = diffSummary.relationshipChanges.find((change) => change.type === 'IFCRELDEFINESBYTYPE');
+  assert.ok(typeChange);
+  assert.ok(typeChange.afterSources?.some((endpoint) => endpoint.id === assignment.typeId && endpoint.type === 'IFCTYPEOBJECT'));
+  assert.ok(typeChange.afterTargets?.some((endpoint) => endpoint.id === block.id && endpoint.type === block.type));
+  assert.ok(typeChange.after?.includes(`#${assignment.typeId} IFCTYPEOBJECT`));
+  assert.ok(typeChange.after?.includes(`#${block.id} IFCBUILTELEMENT`));
 
   const badRelationship = updateNativeRelationship(
     typed,
@@ -180,6 +185,34 @@ test('native type assignments are indexed, diffed, and endpoint-validated', () =
   assert.ok(
     badRelationship.diagnostics.some((line) =>
       line.includes('IFCRELDEFINESBYTYPE expects type object definitions'),
+    ),
+  );
+});
+
+test('native document diagnostics flag unit/schema and physical product shape issues', () => {
+  const sample = createNativeSampleDocument();
+  const project = sample.entities.find((entity) => entity.type === 'IFCPROJECT');
+  const block = sample.entities.find((entity) => entity.type === 'IFCBUILTELEMENT');
+  assert.ok(project);
+  assert.ok(block);
+
+  const broken = parseNativeIfcText(
+    serializeNativeIfcDocument(sample)
+      .replace("FILE_SCHEMA(('IFC4X3_ADD2'));", '')
+      .replace(`,${project.args[8]});`, ',$);')
+      .replace(`,${block.args[5]},${block.args[6]},`, ',$,$,'),
+    'diagnostics.ifc',
+  );
+
+  assert.ok(broken.diagnostics.some((line) => line.includes('FILE_SCHEMA is missing')));
+  assert.ok(broken.diagnostics.some((line) => line.includes('IFCPROJECT does not reference an IFCUNITASSIGNMENT')));
+  assert.ok(broken.diagnostics.some((line) => line.includes(`#${block.id} IFCBUILTELEMENT has no ObjectPlacement`)));
+  assert.ok(broken.diagnostics.some((line) => line.includes(`#${block.id} IFCBUILTELEMENT has no Representation`)));
+
+  const duplicateUnits = addNativeSiUnit(sample, 'LENGTHUNIT', '$', 'METRE');
+  assert.ok(
+    duplicateUnits.diagnostics.some((line) =>
+      line.includes('IFCUNITASSIGNMENT has duplicate .LENGTHUNIT. units'),
     ),
   );
 });
@@ -245,7 +278,10 @@ test('native document stages relationship deletion without removing endpoints', 
     serializeNativeIfcDocument(withoutRelationship),
   );
   assert.equal(summary.removedEntities, 1);
-  assert.ok(summary.relationshipChanges.some((change) => change.action === 'removed' && change.id === relationship.id));
+  const removed = summary.relationshipChanges.find((change) => change.action === 'removed' && change.id === relationship.id);
+  assert.ok(removed);
+  assert.ok(removed.beforeSources?.some((endpoint) => endpoint.id === storey.id && endpoint.type === storey.type));
+  assert.ok(removed.beforeTargets?.some((endpoint) => endpoint.id === wall.id && endpoint.name === 'Delete Relation Wall'));
 });
 
 test('native graph presets filter relationship neighborhoods', () => {
@@ -285,6 +321,53 @@ test('native graph presets filter relationship neighborhoods', () => {
   assert.ok(explicit.edges.every((edge) => edge.type === 'IFCRELDEFINESBYPROPERTIES'));
 });
 
+test('native graph geometry preset expands placement and representation references', () => {
+  const sample = createNativeSampleDocument();
+  const block = sample.entities.find((entity) => entity.type === 'IFCBUILTELEMENT');
+  assert.ok(block);
+
+  const placement = getNativePlacement(sample, block.id);
+  assert.ok(placement);
+
+  const graph = buildNativeGraphNeighborhood(sample, {
+    depth: 4,
+    preset: 'geometry',
+    selectedId: block.id,
+  });
+
+  assert.ok(graph.nodeIds.includes(placement.placementId));
+  assert.ok(graph.nodeIds.includes(placement.axisPlacementId));
+  assert.ok(graph.nodeIds.includes(placement.pointId));
+  assert.ok(graph.nodeIds.includes(Number(block.args[6].slice(1))));
+  assert.ok(graph.edges.some((edge) => edge.type === 'IFCREFGEOMETRY' && edge.label === 'ObjectPlacement'));
+  assert.ok(graph.edges.some((edge) => edge.type === 'IFCREFGEOMETRY' && edge.label === 'Representation'));
+  assert.ok(graph.relationshipTypes.includes('IFCLOCALPLACEMENT'));
+});
+
+test('native graph surfaces visible relationship validation warnings', () => {
+  const sample = createNativeSampleDocument();
+  const block = sample.entities.find((entity) => entity.type === 'IFCBUILTELEMENT');
+  assert.ok(block);
+
+  const typed = addNativeTypeAssignment(sample, block.id, 'Graph Warning Type', 'IFCTYPEOBJECT', 'WARN-TYPE');
+  const assignment = typed.typeAssignmentsByEntity.get(block.id)?.[0];
+  assert.ok(assignment);
+
+  const broken = updateNativeRelationship(typed, assignment.relationshipId, {
+    sourceId: block.id,
+    targetId: block.id,
+    type: 'IFCRELDEFINESBYTYPE',
+  });
+  const graph = buildNativeGraphNeighborhood(broken, {
+    depth: 1,
+    preset: 'all',
+    selectedId: block.id,
+  });
+
+  assert.ok(graph.warnings.some((warning) => warning.relationshipId === assignment.relationshipId));
+  assert.ok(graph.warnings.some((warning) => warning.message.includes('IFCRELDEFINESBYTYPE expects type object definitions')));
+});
+
 test('entity-aware diff groups STEP changes by entity id', () => {
   const sample = createNativeSampleDocument();
   const storey = sample.entities.find((entity) => entity.type === 'IFCBUILDINGSTOREY');
@@ -313,14 +396,15 @@ test('entity-aware diff groups STEP changes by entity id', () => {
       (change) => change.action === 'added' && change.type === 'IFCRELCONTAINEDINSPATIALSTRUCTURE',
     ),
   );
-  assert.ok(
-    summary.geometryChanges.some(
-      (change) =>
-        change.action === 'added' &&
-        change.type === 'IFCEXTRUDEDAREASOLID' &&
-        change.affectedProducts.some((product) => product.name === 'Diff Block'),
-    ),
+  const solidChange = summary.geometryChanges.find(
+    (change) =>
+      change.action === 'added' &&
+      change.type === 'IFCEXTRUDEDAREASOLID' &&
+      change.affectedProducts.some((product) => product.name === 'Diff Block'),
   );
+  assert.ok(solidChange);
+  assert.ok(solidChange.after?.includes('rectangle 1. × 1.'));
+  assert.ok(solidChange.after?.includes('depth 1.'));
 });
 
 test('native body preset creates contained swept solid geometry', async () => {
@@ -430,6 +514,15 @@ test('native body assignment replaces selected product representation with revie
         change.action === 'added' &&
         change.type === 'IFCPRODUCTDEFINITIONSHAPE' &&
         change.affectedProducts.some((product) => product.id === block.id),
+    ),
+  );
+  assert.ok(
+    diffSummary.geometryChanges.some(
+      (change) =>
+        change.action === 'added' &&
+        change.type === 'IFCEXTRUDEDAREASOLID' &&
+        change.after?.includes('rectangle 3. × 1.5') &&
+        change.after.includes('depth 2.'),
     ),
   );
 

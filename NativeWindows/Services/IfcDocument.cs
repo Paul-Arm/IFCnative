@@ -1,4 +1,3 @@
-using System.Text;
 using IFCnative.NativeWindows.Models;
 
 namespace IFCnative.NativeWindows.Services;
@@ -19,26 +18,33 @@ public sealed class IfcDocument
 
     public Dictionary<int, List<IfcEntity>> IncomingReferences { get; } = [];
 
+    public Dictionary<int, IfcRelationship> RelationshipById { get; } = [];
+
+    public Dictionary<int, List<IfcRelationship>> RelationshipsByEntity { get; } = [];
+
+    public Dictionary<int, IfcPropertySet> PropertySetById { get; } = [];
+
+    public Dictionary<int, List<IfcPropertySet>> PropertySetsByEntity { get; } = [];
+
+    public Dictionary<int, List<string>> ResourcesByEntity { get; } = [];
+
+    public Dictionary<int, List<IfcTypeAssignment>> TypeAssignmentsByEntity { get; } = [];
+
+    public Dictionary<int, IfcPlacementSummary> PlacementsByEntity { get; } = [];
+
+    public Dictionary<int, IfcRepresentationSummary> RepresentationsByEntity { get; } = [];
+
+    public List<string> Units { get; } = [];
+
     public List<IfcTreeNode> SpatialRoots { get; } = [];
+
+    public Dictionary<int, string> SpatialPathByEntity { get; } = [];
 
     public IfcDiagnostics Diagnostics { get; } = new();
 
     public string ToStepText()
     {
-        var builder = new StringBuilder();
-        builder.AppendLine("ISO-10303-21;");
-        builder.Append(HeaderText.TrimEnd());
-        builder.AppendLine();
-        builder.AppendLine("DATA;");
-
-        foreach (var entity in Entities.OrderBy(entity => entity.Id))
-        {
-            builder.AppendLine(entity.ToStepLine());
-        }
-
-        builder.AppendLine("ENDSEC;");
-        builder.AppendLine("END-ISO-10303-21;");
-        return builder.ToString();
+        return IfcStepWriter.Serialize(this);
     }
 }
 

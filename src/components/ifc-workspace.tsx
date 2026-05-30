@@ -1487,6 +1487,7 @@ function GraphPanel({
       relationshipCount={graph.edges.length}
       relationshipTypeFilters={[...relationshipTypeFilters]}
       relationshipTypes={graph.relationshipTypes}
+      relationshipWarnings={graph.warnings.map((warning) => warning.message)}
       onClearPositions={() => {
         onPositions(new Map());
         onLog("graph.autoLayout();");
@@ -2971,8 +2972,7 @@ function DiffPanel({
                   key={`${change.action}-${change.id}`}
                   style={styles.diffSummaryText}
                 >
-                  #{change.id} {change.type} {change.action}:{" "}
-                  {change.after ?? change.before}
+                  {formatRelationshipChange(change)}
                 </Text>
               ))}
             </View>
@@ -3062,6 +3062,49 @@ function formatGeometryProducts(
     )
     .join(", ");
   return ` (${labels}${change.affectedProducts.length > 3 ? " …" : ""})`;
+}
+
+function formatRelationshipChange(
+  change: ReturnType<typeof summarizeEntityAwareDiff>["relationshipChanges"][number],
+) {
+  const after =
+    formatRelationshipEndpoints(change.afterSources, change.afterTargets) ||
+    change.after;
+  const before =
+    formatRelationshipEndpoints(change.beforeSources, change.beforeTargets) ||
+    change.before;
+  if (change.action === "changed" && before && after && before !== after) {
+    return `#${change.id} ${change.type} changed: ${before} → ${after}`;
+  }
+  return `#${change.id} ${change.type} ${change.action}: ${
+    after ?? before ?? change.type
+  }`;
+}
+
+function formatRelationshipEndpoints(
+  sources?: ReturnType<
+    typeof summarizeEntityAwareDiff
+  >["relationshipChanges"][number]["afterSources"],
+  targets?: ReturnType<
+    typeof summarizeEntityAwareDiff
+  >["relationshipChanges"][number]["afterTargets"],
+) {
+  if (!sources?.length && !targets?.length) {
+    return "";
+  }
+  const format = (items: NonNullable<typeof sources>) =>
+    items
+      .slice(0, 3)
+      .map(
+        (item) =>
+          `#${item.id} ${item.type}${item.name ? ` '${item.name}'` : ""}`,
+      )
+      .join(", ");
+  const sourceText = sources?.length ? format(sources) : "∅";
+  const targetText = targets?.length ? format(targets) : "∅";
+  const sourceMore = sources && sources.length > 3 ? " …" : "";
+  const targetMore = targets && targets.length > 3 ? " …" : "";
+  return `${sourceText}${sourceMore} → ${targetText}${targetMore}`;
 }
 
 function ConsolePanel({

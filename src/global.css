@@ -370,6 +370,30 @@ textarea {
   color: #ffffff;
 }
 
+.ifc-graph-warning-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  border-bottom: 1px solid #fde68a;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 11px;
+  padding: 6px 8px;
+}
+
+.ifc-graph-warning-bar strong {
+  flex: 0 0 auto;
+  font-weight: 900;
+}
+
+.ifc-graph-warning-bar span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ifc-reactflow-shell {
   width: 100%;
   height: 100%;
