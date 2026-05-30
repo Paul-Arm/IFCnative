@@ -19,6 +19,8 @@ export type MosaicViewId =
   | "builder"
   | "catalog"
   | "catalog-review"
+  | "resource-references"
+  | "resource-controls"
   | "object-info"
   | "console"
   | "diagnostics"

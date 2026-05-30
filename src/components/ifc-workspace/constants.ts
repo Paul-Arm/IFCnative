@@ -11,6 +11,8 @@ export const MOSAIC_VIEW_IDS: MosaicViewId[] = [
   "builder",
   "catalog",
   "catalog-review",
+  "resource-references",
+  "resource-controls",
   "object-info",
   "console",
   "diagnostics",
@@ -65,6 +67,28 @@ export const REVIEW_MOSAIC_LAYOUT: MosaicNode<MosaicViewId> = {
     splitPercentage: 58,
   },
   splitPercentage: 68,
+};
+
+export const INSPECTION_MOSAIC_LAYOUT: MosaicNode<MosaicViewId> = {
+  direction: "row",
+  first: {
+    direction: "column",
+    first: "viewer",
+    second: "structure",
+    splitPercentage: 72,
+  },
+  second: {
+    direction: "column",
+    first: "inspector",
+    second: {
+      direction: "row",
+      first: "resource-references",
+      second: "resource-controls",
+      splitPercentage: 50,
+    },
+    splitPercentage: 42,
+  },
+  splitPercentage: 54,
 };
 
 export const BUILD_MOSAIC_LAYOUT: MosaicNode<MosaicViewId> = {
@@ -139,6 +163,13 @@ export const BUILT_IN_WORKSPACES: WorkspaceDefinition[] = [
   },
   {
     builtIn: true,
+    description: "Pruefung mit Inspector, Ressourcen und Kontrollfreigaben.",
+    id: "builtin:inspection",
+    layout: INSPECTION_MOSAIC_LAYOUT,
+    name: "Pruefung",
+  },
+  {
+    builtIn: true,
     description: "Bauen, Strukturieren und zuletzt genutzte IFCs.",
     id: "builtin:build",
     layout: BUILD_MOSAIC_LAYOUT,
@@ -163,6 +194,8 @@ export const MOSAIC_TITLES: Record<MosaicViewId, string> = {
   notes: "Notizen",
   "object-info": "Objektinfo: IDs",
   recent: "Kuerzlich verwendet",
+  "resource-references": "Klassifikation & Dokumente",
+  "resource-controls": "Freigaben & Constraints",
   structure: "Structure",
   viewer: "3D Viewer",
 };

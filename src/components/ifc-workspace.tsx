@@ -105,7 +105,11 @@ import {
     RELATION_TYPES,
 } from "./ifc-workspace/constants";
 import { GraphPanel } from "./ifc-workspace/GraphPanel";
-import { InspectorPanel } from "./ifc-workspace/InspectorPanel";
+import {
+    InspectorPanel,
+    ResourceControlsPanel,
+    ResourceReferencesPanel,
+} from "./ifc-workspace/InspectorPanel";
 import { ObjectInfoPanel } from "./ifc-workspace/ObjectInfoPanel";
 import { ConsolePanel, DiagnosticsPanel } from "./ifc-workspace/ReviewPanels";
 import { StructurePanel } from "./ifc-workspace/StructurePanel";
@@ -1778,6 +1782,37 @@ export default function IfcWorkspace() {
     );
   };
 
+  const updateResourceEntityArgs = (
+    updates: Array<{ entityId: number; args: string[] }>,
+    label: string,
+  ) => {
+    if (updates.length === 0) {
+      return;
+    }
+    const next = updates.reduce(
+      (current, update) =>
+        updateNativeEntity(current, update.entityId, { args: update.args }),
+      document,
+    );
+    commitDocument(
+      next,
+      selectedId,
+      label,
+      `updateResourceEntities({ ids: [${updates.map((update) => update.entityId).join(", ")}] });`,
+    );
+  };
+
+  const removeResourceAssociation = (relationshipId: number) => {
+    const relationship = document.entityById.get(relationshipId);
+    const next = removeNativeRelationship(document, relationshipId);
+    commitDocument(
+      next,
+      selectedId,
+      `Remove ${relationship?.type ?? "resource association"} #${relationshipId}`,
+      `removeResourceAssociation({ id: ${relationshipId} });`,
+    );
+  };
+
   const assignType = (typeName: string, typeClass: string, tag: string) => {
     const next = addNativeTypeAssignment(
       document,
@@ -2205,12 +2240,7 @@ export default function IfcWorkspace() {
         objectInfoFindings={objectInfoFindings}
         objectInfoIndex={objectInfoIndex}
         selectedId={selectedId}
-        onAddApproval={addApproval}
-        onAddClassification={addClassification}
-        onAddConstraint={addConstraint}
-        onAddDocumentReference={addDocumentReference}
         onAddGroupAssignment={addGroupAssignment}
-        onAddLibraryReference={addLibraryReference}
         onAddMaterial={addMaterial}
         onAddMaterialConstituentSet={addMaterialConstituentSet}
         onAddMaterialLayerSet={addMaterialLayerSet}
@@ -2237,6 +2267,33 @@ export default function IfcWorkspace() {
         onSelectEntity={selectEntity}
         onUpdateProperty={updatePsetProperty}
         onUpdateRelationship={editRelationship}
+      />
+    </TileContent>
+  );
+
+  const renderResourceReferences = () => (
+    <TileContent>
+      <ResourceReferencesPanel
+        document={viewerDocument}
+        selectedId={selectedId}
+        onAddClassification={addClassification}
+        onAddDocumentReference={addDocumentReference}
+        onAddLibraryReference={addLibraryReference}
+        onRemoveAssociation={removeResourceAssociation}
+        onUpdateEntityArgs={updateResourceEntityArgs}
+      />
+    </TileContent>
+  );
+
+  const renderResourceControls = () => (
+    <TileContent>
+      <ResourceControlsPanel
+        document={viewerDocument}
+        selectedId={selectedId}
+        onAddApproval={addApproval}
+        onAddConstraint={addConstraint}
+        onRemoveAssociation={removeResourceAssociation}
+        onUpdateEntityArgs={updateResourceEntityArgs}
       />
     </TileContent>
   );
@@ -2324,6 +2381,10 @@ export default function IfcWorkspace() {
         );
       case "inspector":
         return renderInspector();
+      case "resource-references":
+        return renderResourceReferences();
+      case "resource-controls":
+        return renderResourceControls();
       case "builder":
         return (
           <TileContent>

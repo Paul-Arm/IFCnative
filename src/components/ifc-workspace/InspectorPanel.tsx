@@ -7,7 +7,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import { Copy, Plus, Trash2 } from "lucide-react";
+import { Copy, Plus, Save, Trash2 } from "lucide-react";
 import {
     useEffect,
     useMemo,
@@ -22,6 +22,7 @@ import {
     getNativeBodyRepresentation,
     getNativePlacement,
     relationshipTypesForEntities,
+    quote,
     splitTopLevel,
     unquote,
     type CatalogObjectType,
@@ -79,12 +80,7 @@ export function InspectorPanel({
   objectInfoFindings,
   objectInfoIndex,
   selectedId,
-  onAddApproval,
-  onAddClassification,
-  onAddConstraint,
-  onAddDocumentReference,
   onAddGroupAssignment,
-  onAddLibraryReference,
   onAddMaterial,
   onAddMaterialConstituentSet,
   onAddMaterialLayerSet,
@@ -120,34 +116,11 @@ export function InspectorPanel({
   objectInfoFindings: ObjectInfoValidationFinding[];
   objectInfoIndex: ObjectInfoIndex;
   selectedId: number;
-  onAddApproval(identifier: string, name: string, status: string): void;
-  onAddClassification(
-    identification: string,
-    name: string,
-    location: string,
-  ): void;
-  onAddConstraint(
-    name: string,
-    grade: string,
-    source: string,
-    qualifier: string,
-    intent: string,
-  ): void;
-  onAddDocumentReference(
-    identification: string,
-    name: string,
-    location: string,
-  ): void;
   onAddGroupAssignment(
     groupType: string,
     groupName: string,
     objectType: string,
     longName: string,
-  ): void;
-  onAddLibraryReference(
-    identification: string,
-    name: string,
-    location: string,
   ): void;
   onAddMaterial(materialName: string, materialCategory: string): void;
   onAddMaterialWithProperties(
@@ -307,12 +280,7 @@ export function InspectorPanel({
       <ResourcesPanel
         document={document}
         selectedId={selectedId}
-        onAddApproval={onAddApproval}
-        onAddClassification={onAddClassification}
-        onAddConstraint={onAddConstraint}
-        onAddDocumentReference={onAddDocumentReference}
         onAddGroupAssignment={onAddGroupAssignment}
-        onAddLibraryReference={onAddLibraryReference}
         onAddMaterial={onAddMaterial}
         onAddMaterialConstituentSet={onAddMaterialConstituentSet}
         onAddMaterialLayerSet={onAddMaterialLayerSet}
@@ -1848,15 +1816,10 @@ function EditableRelationship({
   );
 }
 
-function ResourcesPanel({
+export function ResourcesPanel({
   document,
   selectedId,
-  onAddApproval,
-  onAddClassification,
-  onAddConstraint,
-  onAddDocumentReference,
   onAddGroupAssignment,
-  onAddLibraryReference,
   onAddMaterial,
   onAddMaterialConstituentSet,
   onAddMaterialLayerSet,
@@ -1869,34 +1832,11 @@ function ResourcesPanel({
 }: {
   document: NativeIfcDocument;
   selectedId: number;
-  onAddApproval(identifier: string, name: string, status: string): void;
-  onAddClassification(
-    identification: string,
-    name: string,
-    location: string,
-  ): void;
-  onAddConstraint(
-    name: string,
-    grade: string,
-    source: string,
-    qualifier: string,
-    intent: string,
-  ): void;
-  onAddDocumentReference(
-    identification: string,
-    name: string,
-    location: string,
-  ): void;
   onAddGroupAssignment(
     groupType: string,
     groupName: string,
     objectType: string,
     longName: string,
-  ): void;
-  onAddLibraryReference(
-    identification: string,
-    name: string,
-    location: string,
   ): void;
   onAddMaterial(materialName: string, materialCategory: string): void;
   onAddMaterialWithProperties(
@@ -1989,37 +1929,6 @@ function ResourcesPanel({
   const [typeClass, setTypeClass] = useState("IFCTYPEOBJECT");
   const [typeName, setTypeName] = useState("Inspektionselement-Typ");
   const [typeTag, setTypeTag] = useState("TYPE-INSPECTION");
-  const [classificationId, setClassificationId] = useState(
-    "IFCNATIVE-INSPECTION",
-  );
-  const [classificationName, setClassificationName] =
-    useState("Inspektionsziel");
-  const [classificationUri, setClassificationUri] = useState(
-    "https://ifcnative.local/classification/inspection-target",
-  );
-  const [documentId, setDocumentId] = useState("DOC-INSPECTION");
-  const [documentName, setDocumentName] = useState("Inspektionsbericht");
-  const [documentUri, setDocumentUri] = useState(
-    "https://ifcnative.local/documents/inspection-report",
-  );
-  const [libraryId, setLibraryId] = useState("LIB-INSPECTION");
-  const [libraryName, setLibraryName] = useState("Inspektionsbibliothek");
-  const [libraryUri, setLibraryUri] = useState(
-    "https://ifcnative.local/library/inspection",
-  );
-  const [approvalId, setApprovalId] = useState("APP-INSPECTION");
-  const [approvalName, setApprovalName] = useState("Pruefung freigegeben");
-  const [approvalStatus, setApprovalStatus] = useState("Approved");
-  const [constraintName, setConstraintName] = useState(
-    "Objektanforderung erfuellen",
-  );
-  const [constraintGrade, setConstraintGrade] = useState("HARD");
-  const [constraintSource, setConstraintSource] = useState("IFCnative");
-  const [constraintQualifier, setConstraintQualifier] =
-    useState("REQUIREMENT");
-  const [constraintIntent, setConstraintIntent] = useState(
-    "EXPECTED PERFORMANCE",
-  );
 
   return (
     <PanelShell scroll>
@@ -2405,25 +2314,509 @@ function ResourcesPanel({
           </ResponsiveField>
         </ResponsiveRow>
       </EditBlock>
-      <EditBlock title="Add Classification">
-        <LabeledInput
+    </PanelShell>
+  );
+}
+
+type ResourceAssociation = {
+  relationship: NativeIfcRelationship;
+  relationshipEntity: NativeIfcEntity;
+  resource: NativeIfcEntity;
+};
+
+type ResourceEditCallbacks = {
+  onRemoveAssociation(relationshipId: number): void;
+  onUpdateEntityArgs(
+    updates: Array<{ entityId: number; args: string[] }>,
+    label: string,
+  ): void;
+};
+
+function getResourceAssociations(
+  document: NativeIfcDocument,
+  selectedId: number,
+  relationshipTypes: string[],
+): ResourceAssociation[] {
+  const allowedTypes = new Set(relationshipTypes);
+  return (document.relationshipsByEntity.get(selectedId) ?? []).flatMap(
+    (relationship) => {
+      if (
+        !allowedTypes.has(relationship.type) ||
+        !relationship.sourceIds.includes(selectedId)
+      ) {
+        return [];
+      }
+      const relationshipEntity = document.entityById.get(relationship.id);
+      if (!relationshipEntity) {
+        return [];
+      }
+      return relationship.targetIds.flatMap((resourceId) => {
+        const resource = document.entityById.get(resourceId);
+        return resource
+          ? [{ relationship, relationshipEntity, resource }]
+          : [];
+      });
+    },
+  );
+}
+
+function EditableReferenceResource({
+  association,
+  onRemoveAssociation,
+  onUpdateEntityArgs,
+}: {
+  association: ResourceAssociation;
+} & ResourceEditCallbacks) {
+  const { relationship, resource } = association;
+  const [location, setLocation] = useState(readOptionalStepString(resource.args[0]));
+  const [identification, setIdentification] = useState(
+    readOptionalStepString(resource.args[1]),
+  );
+  const [name, setName] = useState(readOptionalStepString(resource.args[2]));
+
+  useEffect(() => {
+    setLocation(readOptionalStepString(resource.args[0]));
+    setIdentification(readOptionalStepString(resource.args[1]));
+    setName(readOptionalStepString(resource.args[2]));
+  }, [resource.args, resource.id]);
+
+  const label =
+    resource.type === "IFCCLASSIFICATIONREFERENCE"
+      ? "Classification"
+      : resource.type === "IFCDOCUMENTREFERENCE"
+        ? "Document"
+        : "Library";
+
+  return (
+    <CompactResourceCard
+      title={`${label} #${resource.id}`}
+      relation={`#${relationship.id} ${relationship.type}`}
+      onRemove={() => onRemoveAssociation(relationship.id)}
+      onSave={() =>
+        onUpdateEntityArgs(
+          [
+            {
+              args: setStepArgs(resource.args, {
+                0: writeOptionalStepString(location),
+                1: writeOptionalStepString(identification),
+                2: writeOptionalStepString(name),
+              }),
+              entityId: resource.id,
+            },
+          ],
+          `Update ${label.toLowerCase()} #${resource.id}`,
+        )
+      }
+    >
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(8.5rem,1fr))] gap-2">
+        <CompactTextInput
+          label="Identification"
+          value={identification}
+          onChangeText={setIdentification}
+        />
+        <CompactTextInput label="Name" value={name} onChangeText={setName} />
+        <CompactTextInput
+          label="Location / URI"
+          value={location}
+          onChangeText={setLocation}
+        />
+      </div>
+    </CompactResourceCard>
+  );
+}
+
+function CompactResourceCard({
+  children,
+  relation,
+  title,
+  onRemove,
+  onSave,
+}: {
+  children: ReactNode;
+  relation: string;
+  title: string;
+  onRemove(): void;
+  onSave(): void;
+}) {
+  return (
+    <section className="grid gap-2 rounded-md border border-border/60 bg-card px-2.5 py-2 shadow-sm">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <h3 className="truncate text-xs font-semibold uppercase tracking-wide text-foreground">
+            {title}
+          </h3>
+          <span className="truncate text-[0.65rem] text-muted-foreground">
+            {relation}
+          </span>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <ShadcnButton
+            aria-label={`${title} speichern`}
+            className="h-7 gap-1 px-2 text-xs"
+            size="sm"
+            type="button"
+            onClick={onSave}
+          >
+            <Save aria-hidden className="size-3" />
+            <span>Speichern</span>
+          </ShadcnButton>
+          <ShadcnButton
+            aria-label={`${title} Zuordnung entfernen`}
+            className="h-7 gap-1 px-2 text-xs"
+            size="sm"
+            type="button"
+            variant="outline"
+            onClick={onRemove}
+          >
+            <Trash2 aria-hidden className="size-3" />
+            <span>Entfernen</span>
+          </ShadcnButton>
+        </div>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function CompactTextInput({
+  label,
+  value,
+  onChangeText,
+}: {
+  label: string;
+  value: string;
+  onChangeText(value: string): void;
+}) {
+  return (
+    <label className="grid min-w-0 gap-1 text-[0.65rem] font-medium uppercase tracking-wide text-muted-foreground">
+      <span className="truncate">{label}</span>
+      <Input
+        className="h-8 min-w-0 rounded-md px-2 text-xs text-foreground"
+        title={value}
+        value={value}
+        onChange={(event) => onChangeText(event.currentTarget.value)}
+      />
+    </label>
+  );
+}
+
+function CompactSelectInput({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: string[];
+  value: string;
+  onChange(value: string): void;
+}) {
+  return (
+    <label className="grid min-w-0 gap-1 text-[0.65rem] font-medium uppercase tracking-wide text-muted-foreground">
+      <span className="truncate">{label}</span>
+      <Select value={value} onValueChange={onChange}>
+        <SelectTrigger className="h-8 min-w-0 rounded-md px-2 text-xs text-foreground">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((option) => (
+            <SelectItem key={option} value={option}>
+              {option}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </label>
+  );
+}
+
+function CompactAddSection({
+  children,
+  title,
+}: {
+  children: ReactNode;
+  title: string;
+}) {
+  return (
+    <details className="group rounded-md border border-border/60 bg-muted/20">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-2.5 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:bg-muted/45">
+        <span>{title}</span>
+        <Plus
+          aria-hidden
+          className="size-3.5 transition-transform group-open:rotate-45"
+        />
+      </summary>
+      <div className="grid gap-2 border-t border-border/60 bg-card p-2.5">
+        {children}
+      </div>
+    </details>
+  );
+}
+
+function CompactCreateButton({
+  label,
+  onClick,
+}: {
+  label: string;
+  onClick(): void;
+}) {
+  return (
+    <ShadcnButton
+      className="h-8 w-full gap-1.5 text-xs"
+      size="sm"
+      type="button"
+      variant="outline"
+      onClick={onClick}
+    >
+      <Plus aria-hidden className="size-3.5" />
+      <span>{label}</span>
+    </ShadcnButton>
+  );
+}
+
+function EditableApprovalResource({
+  association,
+  onRemoveAssociation,
+  onUpdateEntityArgs,
+}: {
+  association: ResourceAssociation;
+} & ResourceEditCallbacks) {
+  const { relationship, resource } = association;
+  const [identifier, setIdentifier] = useState(
+    readOptionalStepString(resource.args[0]),
+  );
+  const [name, setName] = useState(readOptionalStepString(resource.args[1]));
+  const [status, setStatus] = useState(readOptionalStepString(resource.args[4]));
+
+  useEffect(() => {
+    setIdentifier(readOptionalStepString(resource.args[0]));
+    setName(readOptionalStepString(resource.args[1]));
+    setStatus(readOptionalStepString(resource.args[4]));
+  }, [resource.args, resource.id]);
+
+  return (
+    <CompactResourceCard
+      title={`Approval #${resource.id}`}
+      relation={`#${relationship.id} ${relationship.type}`}
+      onRemove={() => onRemoveAssociation(relationship.id)}
+      onSave={() =>
+        onUpdateEntityArgs(
+          [
+            {
+              args: setStepArgs(resource.args, {
+                0: writeOptionalStepString(identifier),
+                1: writeOptionalStepString(name),
+                4: writeOptionalStepString(status),
+              }),
+              entityId: resource.id,
+            },
+          ],
+          `Update approval #${resource.id}`,
+        )
+      }
+    >
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(8.5rem,1fr))] gap-2">
+        <CompactTextInput
+          label="Identifier"
+          value={identifier}
+          onChangeText={setIdentifier}
+        />
+        <CompactTextInput label="Name" value={name} onChangeText={setName} />
+        <CompactTextInput
+          label="Status"
+          value={status}
+          onChangeText={setStatus}
+        />
+      </div>
+    </CompactResourceCard>
+  );
+}
+
+function EditableConstraintResource({
+  association,
+  onRemoveAssociation,
+  onUpdateEntityArgs,
+}: {
+  association: ResourceAssociation;
+} & ResourceEditCallbacks) {
+  const { relationship, relationshipEntity, resource } = association;
+  const [name, setName] = useState(readOptionalStepString(resource.args[0]));
+  const [grade, setGrade] = useState(readStepEnum(resource.args[2]));
+  const [source, setSource] = useState(readOptionalStepString(resource.args[3]));
+  const [qualifier, setQualifier] = useState(readStepEnum(resource.args[9]));
+  const [intent, setIntent] = useState(
+    readOptionalStepString(relationshipEntity.args[5]),
+  );
+
+  useEffect(() => {
+    setName(readOptionalStepString(resource.args[0]));
+    setGrade(readStepEnum(resource.args[2]));
+    setSource(readOptionalStepString(resource.args[3]));
+    setQualifier(readStepEnum(resource.args[9]));
+    setIntent(readOptionalStepString(relationshipEntity.args[5]));
+  }, [relationshipEntity.args, relationshipEntity.id, resource.args, resource.id]);
+
+  return (
+    <CompactResourceCard
+      title={`Constraint #${resource.id}`}
+      relation={`#${relationship.id} ${relationship.type}`}
+      onRemove={() => onRemoveAssociation(relationship.id)}
+      onSave={() => {
+        const cleanGrade = grade || "NOTDEFINED";
+        onUpdateEntityArgs(
+          [
+            {
+              args: setStepArgs(resource.args, {
+                0: writeOptionalStepString(name),
+                2: writeStepEnum(cleanGrade),
+                3: writeOptionalStepString(source),
+                6:
+                  cleanGrade.toUpperCase() === "USERDEFINED"
+                    ? writeOptionalStepString("User defined")
+                    : "$",
+                9: writeStepEnum(qualifier || "REQUIREMENT"),
+              }),
+              entityId: resource.id,
+            },
+            {
+              args: setStepArgs(relationshipEntity.args, {
+                5: writeOptionalStepString(intent),
+              }),
+              entityId: relationship.id,
+            },
+          ],
+          `Update constraint #${resource.id}`,
+        );
+      }}
+    >
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(8.5rem,1fr))] gap-2">
+        <CompactTextInput label="Name" value={name} onChangeText={setName} />
+        <CompactSelectInput
+          label="Grade"
+          options={CONSTRAINT_GRADES}
+          value={grade || "NOTDEFINED"}
+          onChange={setGrade}
+        />
+        <CompactSelectInput
+          label="Qualifier"
+          options={OBJECTIVE_QUALIFIERS}
+          value={qualifier || "REQUIREMENT"}
+          onChange={setQualifier}
+        />
+        <CompactTextInput
+          label="Source"
+          value={source}
+          onChangeText={setSource}
+        />
+        <CompactTextInput
+          label="Intent"
+          value={intent}
+          onChangeText={setIntent}
+        />
+      </div>
+    </CompactResourceCard>
+  );
+}
+
+export function ResourceReferencesPanel({
+  document,
+  selectedId,
+  onAddClassification,
+  onAddDocumentReference,
+  onAddLibraryReference,
+  onRemoveAssociation,
+  onUpdateEntityArgs,
+}: {
+  document: NativeIfcDocument;
+  selectedId: number;
+  onAddClassification(
+    identification: string,
+    name: string,
+    location: string,
+  ): void;
+  onAddDocumentReference(
+    identification: string,
+    name: string,
+    location: string,
+  ): void;
+  onAddLibraryReference(
+    identification: string,
+    name: string,
+    location: string,
+  ): void;
+  onRemoveAssociation(relationshipId: number): void;
+  onUpdateEntityArgs(
+    updates: Array<{ entityId: number; args: string[] }>,
+    label: string,
+  ): void;
+}) {
+  const referenceAssociations = getResourceAssociations(document, selectedId, [
+    "IFCRELASSOCIATESCLASSIFICATION",
+    "IFCRELASSOCIATESDOCUMENT",
+    "IFCRELASSOCIATESLIBRARY",
+  ]);
+  const [classificationId, setClassificationId] = useState(
+    "IFCNATIVE-INSPECTION",
+  );
+  const [classificationName, setClassificationName] =
+    useState("Inspektionsziel");
+  const [classificationUri, setClassificationUri] = useState(
+    "https://ifcnative.local/classification/inspection-target",
+  );
+  const [documentId, setDocumentId] = useState("DOC-INSPECTION");
+  const [documentName, setDocumentName] = useState("Inspektionsbericht");
+  const [documentUri, setDocumentUri] = useState(
+    "https://ifcnative.local/documents/inspection-report",
+  );
+  const [libraryId, setLibraryId] = useState("LIB-INSPECTION");
+  const [libraryName, setLibraryName] = useState("Inspektionsbibliothek");
+  const [libraryUri, setLibraryUri] = useState(
+    "https://ifcnative.local/library/inspection",
+  );
+
+  return (
+    <PanelShell scroll>
+      <PanelHeader
+        eyebrow={`Auswahl #${selectedId}`}
+        title="Klassifikation & Dokumente"
+        description={`${referenceAssociations.length.toLocaleString()} verknuepfte Referenzen`}
+        meta={<Badge tone="neutral">IFC</Badge>}
+      />
+      <div className="grid gap-2">
+        {referenceAssociations.length ? (
+          referenceAssociations.map((association) => (
+            <EditableReferenceResource
+              key={`${association.relationship.id}-${association.resource.id}`}
+              association={association}
+              onRemoveAssociation={onRemoveAssociation}
+              onUpdateEntityArgs={onUpdateEntityArgs}
+            />
+          ))
+        ) : (
+          <EmptyBlock>Keine Klassifikation, kein Dokument und keine Library zugewiesen.</EmptyBlock>
+        )}
+      </div>
+      <CompactAddSection title="Add Classification">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(8.5rem,1fr))] gap-2">
+        <CompactTextInput
           label="Identification"
           value={classificationId}
           onChangeText={setClassificationId}
         />
-        <LabeledInput
+        <CompactTextInput
           label="Name"
           value={classificationName}
           onChangeText={setClassificationName}
         />
-        <LabeledInput
+        <CompactTextInput
           label="Location / URI"
           value={classificationUri}
           onChangeText={setClassificationUri}
         />
-        <Button
-          label="+ Add Classification"
-          onPress={() =>
+        </div>
+        <CompactCreateButton
+          label="Add Classification"
+          onClick={() =>
             onAddClassification(
               classificationId,
               classificationName,
@@ -2431,111 +2824,190 @@ function ResourcesPanel({
             )
           }
         />
-      </EditBlock>
-      <EditBlock title="Add Document">
-        <LabeledInput
+      </CompactAddSection>
+      <CompactAddSection title="Add Document">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(8.5rem,1fr))] gap-2">
+        <CompactTextInput
           label="Identification"
           value={documentId}
           onChangeText={setDocumentId}
         />
-        <LabeledInput
+        <CompactTextInput
           label="Name"
           value={documentName}
           onChangeText={setDocumentName}
         />
-        <LabeledInput
+        <CompactTextInput
           label="Location / URI"
           value={documentUri}
           onChangeText={setDocumentUri}
         />
-        <Button
-          label="+ Add Document"
-          onPress={() =>
+        </div>
+        <CompactCreateButton
+          label="Add Document"
+          onClick={() =>
             onAddDocumentReference(documentId, documentName, documentUri)
           }
         />
-      </EditBlock>
-      <EditBlock title="Add Library">
-        <LabeledInput
+      </CompactAddSection>
+      <CompactAddSection title="Add Library">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(8.5rem,1fr))] gap-2">
+        <CompactTextInput
           label="Identification"
           value={libraryId}
           onChangeText={setLibraryId}
         />
-        <LabeledInput
+        <CompactTextInput
           label="Name"
           value={libraryName}
           onChangeText={setLibraryName}
         />
-        <LabeledInput
+        <CompactTextInput
           label="Location / URI"
           value={libraryUri}
           onChangeText={setLibraryUri}
         />
-        <Button
-          label="+ Add Library"
-          onPress={() =>
+        </div>
+        <CompactCreateButton
+          label="Add Library"
+          onClick={() =>
             onAddLibraryReference(libraryId, libraryName, libraryUri)
           }
         />
-      </EditBlock>
-      <EditBlock title="Add Approval">
-        <LabeledInput
+      </CompactAddSection>
+    </PanelShell>
+  );
+}
+
+export function ResourceControlsPanel({
+  document,
+  selectedId,
+  onAddApproval,
+  onAddConstraint,
+  onRemoveAssociation,
+  onUpdateEntityArgs,
+}: {
+  document: NativeIfcDocument;
+  selectedId: number;
+  onAddApproval(identifier: string, name: string, status: string): void;
+  onAddConstraint(
+    name: string,
+    grade: string,
+    source: string,
+    qualifier: string,
+    intent: string,
+  ): void;
+  onRemoveAssociation(relationshipId: number): void;
+  onUpdateEntityArgs(
+    updates: Array<{ entityId: number; args: string[] }>,
+    label: string,
+  ): void;
+}) {
+  const controlAssociations = getResourceAssociations(document, selectedId, [
+    "IFCRELASSOCIATESAPPROVAL",
+    "IFCRELASSOCIATESCONSTRAINT",
+  ]);
+  const [approvalId, setApprovalId] = useState("APP-INSPECTION");
+  const [approvalName, setApprovalName] = useState("Pruefung freigegeben");
+  const [approvalStatus, setApprovalStatus] = useState("Approved");
+  const [constraintName, setConstraintName] = useState(
+    "Objektanforderung erfuellen",
+  );
+  const [constraintGrade, setConstraintGrade] = useState("HARD");
+  const [constraintSource, setConstraintSource] = useState("IFCnative");
+  const [constraintQualifier, setConstraintQualifier] =
+    useState("REQUIREMENT");
+  const [constraintIntent, setConstraintIntent] = useState(
+    "EXPECTED PERFORMANCE",
+  );
+
+  return (
+    <PanelShell scroll>
+      <PanelHeader
+        eyebrow={`Auswahl #${selectedId}`}
+        title="Freigaben & Constraints"
+        description={`${controlAssociations.length.toLocaleString()} verknuepfte Kontrollressourcen`}
+        meta={<Badge tone="neutral">IFC</Badge>}
+      />
+      <div className="grid gap-2">
+        {controlAssociations.length ? (
+          controlAssociations.map((association) =>
+            association.resource.type === "IFCAPPROVAL" ? (
+              <EditableApprovalResource
+                key={`${association.relationship.id}-${association.resource.id}`}
+                association={association}
+                onRemoveAssociation={onRemoveAssociation}
+                onUpdateEntityArgs={onUpdateEntityArgs}
+              />
+            ) : (
+              <EditableConstraintResource
+                key={`${association.relationship.id}-${association.resource.id}`}
+                association={association}
+                onRemoveAssociation={onRemoveAssociation}
+                onUpdateEntityArgs={onUpdateEntityArgs}
+              />
+            ),
+          )
+        ) : (
+          <EmptyBlock>Keine Freigabe und kein Constraint zugewiesen.</EmptyBlock>
+        )}
+      </div>
+      <CompactAddSection title="Add Approval">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(8.5rem,1fr))] gap-2">
+        <CompactTextInput
           label="Identifier"
           value={approvalId}
           onChangeText={setApprovalId}
         />
-        <LabeledInput
+        <CompactTextInput
           label="Name"
           value={approvalName}
           onChangeText={setApprovalName}
         />
-        <LabeledInput
+        <CompactTextInput
           label="Status"
           value={approvalStatus}
           onChangeText={setApprovalStatus}
         />
-        <Button
-          label="+ Add Approval"
-          onPress={() => onAddApproval(approvalId, approvalName, approvalStatus)}
+        </div>
+        <CompactCreateButton
+          label="Add Approval"
+          onClick={() => onAddApproval(approvalId, approvalName, approvalStatus)}
         />
-      </EditBlock>
-      <EditBlock title="Add Constraint">
-        <LabeledInput
+      </CompactAddSection>
+      <CompactAddSection title="Add Constraint">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(8.5rem,1fr))] gap-2">
+        <CompactTextInput
           label="Name"
           value={constraintName}
           onChangeText={setConstraintName}
         />
-        <ResponsiveRow>
-          <ResponsiveField>
-            <DropdownField
-              label="Grade"
-              options={CONSTRAINT_GRADES}
-              value={constraintGrade}
-              onChange={setConstraintGrade}
-            />
-          </ResponsiveField>
-          <ResponsiveField>
-            <DropdownField
-              label="Qualifier"
-              options={OBJECTIVE_QUALIFIERS}
-              value={constraintQualifier}
-              onChange={setConstraintQualifier}
-            />
-          </ResponsiveField>
-        </ResponsiveRow>
-        <LabeledInput
+        <CompactSelectInput
+          label="Grade"
+          options={CONSTRAINT_GRADES}
+          value={constraintGrade}
+          onChange={setConstraintGrade}
+        />
+        <CompactSelectInput
+          label="Qualifier"
+          options={OBJECTIVE_QUALIFIERS}
+          value={constraintQualifier}
+          onChange={setConstraintQualifier}
+        />
+        <CompactTextInput
           label="Source"
           value={constraintSource}
           onChangeText={setConstraintSource}
         />
-        <LabeledInput
+        <CompactTextInput
           label="Intent"
           value={constraintIntent}
           onChangeText={setConstraintIntent}
         />
-        <Button
-          label="+ Add Constraint"
-          onPress={() =>
+        </div>
+        <CompactCreateButton
+          label="Add Constraint"
+          onClick={() =>
             onAddConstraint(
               constraintName,
               constraintGrade,
@@ -2545,7 +3017,7 @@ function ResourcesPanel({
             )
           }
         />
-      </EditBlock>
+      </CompactAddSection>
     </PanelShell>
   );
 }
@@ -2733,6 +3205,36 @@ function parseStepValueList(rawValue = "") {
 
 function parseOptionalIfcValue(rawValue = "") {
   return rawValue && rawValue !== "$" ? parseIfcValue(rawValue).value : "";
+}
+
+function readOptionalStepString(rawValue = "") {
+  const trimmed = rawValue.trim();
+  if (!trimmed || trimmed === "$" || trimmed === "*") {
+    return "";
+  }
+  return unquote(trimmed) ?? readStepEnum(trimmed);
+}
+
+function writeOptionalStepString(value: string) {
+  const trimmed = value.trim();
+  return trimmed ? quote(trimmed) : "$";
+}
+
+function readStepEnum(rawValue = "") {
+  return rawValue.trim().replace(/^\./, "").replace(/\.$/, "");
+}
+
+function writeStepEnum(value: string) {
+  const normalized = value.trim().replace(/^\./, "").replace(/\.$/, "");
+  return normalized ? `.${normalized.toUpperCase()}.` : "$";
+}
+
+function setStepArgs(args: string[], updates: Record<number, string>) {
+  const next = [...args];
+  for (const [index, value] of Object.entries(updates)) {
+    next[Number(index)] = value;
+  }
+  return next;
 }
 
 function parseIfcValue(rawValue = "") {
