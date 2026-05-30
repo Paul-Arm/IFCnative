@@ -11,7 +11,7 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { CopyPlus, PanelTopOpen, Save, Trash2 } from "lucide-react";
+import { PanelTopOpen, Plus, Save, Trash2 } from "lucide-react";
 import {
     startTransition,
     cloneElement,
@@ -652,7 +652,6 @@ export default function IfcWorkspace() {
 
   const saveActiveWorkspace = () => {
     if (activeWorkspace?.builtIn) {
-      saveWorkspaceCopy();
       return;
     }
     setCustomWorkspaces((current) =>
@@ -669,17 +668,13 @@ export default function IfcWorkspace() {
     logAction(`ui.workspace.save({ id: '${activeWorkspaceId}' });`);
   };
 
-  const saveWorkspaceCopy = () => {
-    const fallbackName = activeWorkspace?.builtIn
-      ? `${activeWorkspace.name} Kopie`
-      : activeWorkspace?.name || "Eigener Workspace";
-    const name = globalThis.prompt?.("Workspace speichern als", fallbackName);
-    if (!name?.trim()) {
-      return;
-    }
+  const createWorkspaceFromCurrentLayout = () => {
+    const nextIndex = customWorkspaces.length + 1;
+    const name = `Eigener Workspace ${nextIndex}`;
     const workspace = createCustomWorkspace(name, mosaicValue);
     setCustomWorkspaces((current) => [...current, workspace]);
     setActiveWorkspaceId(workspace.id);
+    setMosaicValue(cloneMosaicNode(workspace.layout) ?? DEFAULT_MOSAIC_LAYOUT);
     logAction(`ui.workspace.create({ id: '${workspace.id}' });`);
   };
 
@@ -2567,22 +2562,27 @@ export default function IfcWorkspace() {
         </SelectContent>
       </Select>
       <IconButton
-        aria-label="Workspace speichern"
+        aria-label="Neuen Workspace hinzufuegen"
         size="icon-sm"
-        title="Workspace speichern"
+        title="Neuen Workspace hinzufuegen"
+        variant="outline"
+        onClick={createWorkspaceFromCurrentLayout}
+      >
+        <Plus aria-hidden className="size-3.5" />
+      </IconButton>
+      <IconButton
+        aria-label="Workspace speichern"
+        disabled={Boolean(activeWorkspace?.builtIn)}
+        size="icon-sm"
+        title={
+          activeWorkspace?.builtIn
+            ? "Standard-Workspaces sind fix"
+            : "Workspace speichern"
+        }
         variant="outline"
         onClick={saveActiveWorkspace}
       >
         <Save aria-hidden className="size-3.5" />
-      </IconButton>
-      <IconButton
-        aria-label="Workspace-Kopie speichern"
-        size="icon-sm"
-        title="Workspace-Kopie speichern"
-        variant="outline"
-        onClick={saveWorkspaceCopy}
-      >
-        <CopyPlus aria-hidden className="size-3.5" />
       </IconButton>
       {!activeWorkspace?.builtIn ? (
         <IconButton
@@ -2606,12 +2606,12 @@ export default function IfcWorkspace() {
           setActiveDocumentId(nextValue);
         }
       }}
-      className="min-w-0"
+      className="min-w-0 overflow-hidden"
     >
-      <div className="-mx-1 overflow-x-auto px-1">
+      <div className="-mx-1 overflow-x-auto overflow-y-hidden px-1">
         <TabsList
           variant="line"
-          className="h-auto min-w-max justify-start gap-1 bg-transparent p-0"
+          className="h-auto min-w-max justify-start gap-1 bg-transparent p-0 pb-px"
         >
           {documentSessions.map((session) => (
             <TabsTrigger
@@ -2728,7 +2728,6 @@ export default function IfcWorkspace() {
           </div>
           <div className="mx-1 h-5 w-px bg-border/70" />
           <div className="flex items-center gap-1">
-            <Button label="Layout zurücksetzen" onPress={resetMosaicLayout} />
             <MosaicWindowMenu
               closedIds={closedMosaicIds}
               onRestore={restoreMosaicView}
