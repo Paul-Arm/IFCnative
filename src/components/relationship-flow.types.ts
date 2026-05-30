@@ -3,6 +3,21 @@ export interface FlowPoint {
   y: number;
 }
 
+export type RelationshipFlowLayoutMode = "columns" | "tension";
+
+export interface RelationshipFlowMove {
+  id: number;
+  point: FlowPoint;
+}
+
+export interface RelationshipFlowClipboardNode {
+  id: number;
+  name: string;
+  type: string;
+  x: number;
+  y: number;
+}
+
 export interface RelationshipFlowNode {
   childCount: number;
   childrenLoaded: boolean;
@@ -15,6 +30,7 @@ export interface RelationshipFlowNode {
   };
   id: number;
   pinned: boolean;
+  searchMatch: boolean;
   selected: boolean;
   x: number;
   y: number;
@@ -24,6 +40,7 @@ export interface RelationshipFlowEdge {
   id: string;
   label: string;
   rel: number;
+  relationshipType: string;
   source: number;
   target: number;
 }
@@ -39,6 +56,7 @@ export interface RelationshipFlowProps {
   classOptions: RelationshipFlowOption[];
   depth: number;
   edges: RelationshipFlowEdge[];
+  layoutMode: RelationshipFlowLayoutMode;
   nodes: RelationshipFlowNode[];
   preset: string;
   presetOptions: RelationshipFlowOption[];
@@ -47,8 +65,16 @@ export interface RelationshipFlowProps {
   relationshipTypeFilters: string[];
   relationshipTypes: string[];
   relationshipWarnings: string[];
+  search: string;
+  searchActiveId: number | null;
+  searchActiveIndex: number;
+  searchMatchCount: number;
   onClearPositions(): void;
-  onConnectNodes(sourceId: number, targetId: number, relationshipType: string): void;
+  onConnectNodes(
+    sourceId: number,
+    targetId: number,
+    relationshipType: string,
+  ): void;
   onCreateNodeFromConnection(
     sourceId: number,
     type: string,
@@ -57,12 +83,24 @@ export interface RelationshipFlowProps {
     position: FlowPoint,
   ): void;
   onDepth(depth: number): void;
+  onLayoutMode(mode: RelationshipFlowLayoutMode): void;
   onLog(code: string): void;
+  onRemoveNode(id: number): void;
+  onRemoveRelationship(relationshipId: number): void;
   onRelationshipTypeFilters(filters: string[]): void;
   onMoveEnd(id: number, point: FlowPoint): void;
   onMoveNode(id: number, point: FlowPoint): void;
+  onMoveNodes?(moves: RelationshipFlowMove[]): void;
+  onMoveNodesEnd?(moves: RelationshipFlowMove[]): void;
+  onPasteNodes(
+    sourceId: number,
+    relationshipType: string,
+    nodes: RelationshipFlowClipboardNode[],
+    connect: boolean,
+  ): void;
   onPreset(preset: string): void;
+  onSearchNavigate(direction: "previous" | "next"): void;
   onSelect(id: number): void;
   onToggleChildren(id: number, loaded: boolean): void;
-  onTogglePin(id: number): void;
+  onTogglePin(id: number, point?: FlowPoint): void;
 }

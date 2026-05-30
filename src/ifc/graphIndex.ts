@@ -1,39 +1,39 @@
-import type * as WebIFC from 'web-ifc';
+import type * as WebIFC from "web-ifc";
 
 import type {
-  IfcDiagnostic,
-  IfcEntitySummary,
-  IfcGraphIndex,
-  IfcRelationshipLink,
-  IfcTreeNode,
-} from './types';
-import { asExpressID, asExpressIDs, labelForLine } from './utils';
+    IfcDiagnostic,
+    IfcEntitySummary,
+    IfcGraphIndex,
+    IfcRelationshipLink,
+    IfcTreeNode,
+} from "./types";
+import { asExpressID, asExpressIDs, labelForLine } from "./utils";
 
 const RELATIONSHIP_TYPES = [
-  'IFCRELAGGREGATES',
-  'IFCRELNESTS',
-  'IFCRELCONTAINEDINSPATIALSTRUCTURE',
-  'IFCRELREFERENCEDINSPATIALSTRUCTURE',
-  'IFCRELDEFINESBYTYPE',
-  'IFCRELDEFINESBYPROPERTIES',
-  'IFCRELASSIGNSTOGROUP',
-  'IFCRELASSIGNSTOPROCESS',
-  'IFCRELASSIGNSTOCONTROL',
-  'IFCRELASSIGNSTOPRODUCT',
-  'IFCRELASSOCIATESMATERIAL',
-  'IFCRELASSOCIATESCLASSIFICATION',
-  'IFCRELASSOCIATESDOCUMENT',
-  'IFCRELASSOCIATESLIBRARY',
-  'IFCRELASSOCIATESCONSTRAINT',
-  'IFCRELASSOCIATESAPPROVAL',
-  'IFCRELCONNECTSELEMENTS',
-  'IFCRELCONNECTSPORTS',
-  'IFCRELCONNECTSPORTTOELEMENT',
-  'IFCRELSPACEBOUNDARY',
-  'IFCRELVOIDSELEMENT',
-  'IFCRELFILLSELEMENT',
-  'IFCRELSEQUENCE',
-  'IFCRELSERVICESBUILDINGS',
+  "IFCRELAGGREGATES",
+  "IFCRELNESTS",
+  "IFCRELCONTAINEDINSPATIALSTRUCTURE",
+  "IFCRELREFERENCEDINSPATIALSTRUCTURE",
+  "IFCRELDEFINESBYTYPE",
+  "IFCRELDEFINESBYPROPERTIES",
+  "IFCRELASSIGNSTOGROUP",
+  "IFCRELASSIGNSTOPROCESS",
+  "IFCRELASSIGNSTOCONTROL",
+  "IFCRELASSIGNSTOPRODUCT",
+  "IFCRELASSOCIATESMATERIAL",
+  "IFCRELASSOCIATESCLASSIFICATION",
+  "IFCRELASSOCIATESDOCUMENT",
+  "IFCRELASSOCIATESLIBRARY",
+  "IFCRELASSOCIATESCONSTRAINT",
+  "IFCRELASSOCIATESAPPROVAL",
+  "IFCRELCONNECTSELEMENTS",
+  "IFCRELCONNECTSPORTS",
+  "IFCRELCONNECTSPORTTOELEMENT",
+  "IFCRELSPACEBOUNDARY",
+  "IFCRELVOIDSELEMENT",
+  "IFCRELFILLSELEMENT",
+  "IFCRELSEQUENCE",
+  "IFCRELSERVICESBUILDINGS",
 ];
 
 export function buildGraphIndex(
@@ -43,7 +43,9 @@ export function buildGraphIndex(
   entityCounts: { typeName: string; typeCode: number; count: number }[],
 ): IfcGraphIndex {
   const diagnostics: IfcDiagnostic[] = [];
-  const byExpressID = new Map(entities.map((entity) => [entity.expressID, entity]));
+  const byExpressID = new Map(
+    entities.map((entity) => [entity.expressID, entity]),
+  );
   const byGlobalId = new Map(
     entities
       .filter((entity) => entity.globalId)
@@ -60,53 +62,91 @@ export function buildGraphIndex(
   const documentByObject = new Map<number, number[]>();
 
   for (const relationshipType of RELATIONSHIP_TYPES) {
-    for (const line of getLinesByTypeName(api, modelID, relationshipType, diagnostics)) {
+    for (const line of getLinesByTypeName(
+      api,
+      modelID,
+      relationshipType,
+      diagnostics,
+    )) {
       const relationshipID = line.expressID as number;
       const link = relationshipLink(relationshipID, relationshipType, line);
       relationships.push(link);
 
-      if (relationshipType === 'IFCRELAGGREGATES' || relationshipType === 'IFCRELNESTS') {
+      if (
+        relationshipType === "IFCRELAGGREGATES" ||
+        relationshipType === "IFCRELNESTS"
+      ) {
         addParentLink(aggregateChildren, link);
-      } else if (relationshipType === 'IFCRELCONTAINEDINSPATIALSTRUCTURE') {
+      } else if (relationshipType === "IFCRELCONTAINEDINSPATIALSTRUCTURE") {
         addParentLink(containedChildren, link);
-      } else if (relationshipType === 'IFCRELDEFINESBYTYPE' && link.relatingID) {
-        typeAssignments.set(link.relatingID, [
-          ...(typeAssignments.get(link.relatingID) ?? []),
-          ...link.relatedIDs,
-        ]);
-        link.relatedIDs.forEach((id) => typeByOccurrence.set(id, link.relatingID as number));
-      } else if (relationshipType === 'IFCRELASSIGNSTOGROUP' && link.relatingID) {
-        groupAssignments.set(link.relatingID, [
-          ...(groupAssignments.get(link.relatingID) ?? []),
-          ...link.relatedIDs,
-        ]);
-      } else if (relationshipType === 'IFCRELASSOCIATESMATERIAL' && link.relatingID) {
+      } else if (
+        relationshipType === "IFCRELDEFINESBYTYPE" &&
+        link.relatingID
+      ) {
+        pushMapValues(typeAssignments, link.relatingID, link.relatedIDs);
+        link.relatedIDs.forEach((id) =>
+          typeByOccurrence.set(id, link.relatingID as number),
+        );
+      } else if (
+        relationshipType === "IFCRELASSIGNSTOGROUP" &&
+        link.relatingID
+      ) {
+        pushMapValues(groupAssignments, link.relatingID, link.relatedIDs);
+      } else if (
+        relationshipType === "IFCRELASSOCIATESMATERIAL" &&
+        link.relatingID
+      ) {
         addAssociation(materialByObject, link);
-      } else if (relationshipType === 'IFCRELASSOCIATESCLASSIFICATION' && link.relatingID) {
+      } else if (
+        relationshipType === "IFCRELASSOCIATESCLASSIFICATION" &&
+        link.relatingID
+      ) {
         addAssociation(classificationByObject, link);
-      } else if (relationshipType === 'IFCRELASSOCIATESDOCUMENT' && link.relatingID) {
+      } else if (
+        relationshipType === "IFCRELASSOCIATESDOCUMENT" &&
+        link.relatingID
+      ) {
         addAssociation(documentByObject, link);
       }
     }
   }
 
-  const projectRoots = entities.filter((entity) => entity.typeName.toUpperCase() === 'IFCPROJECT');
-  const spatialFallbackRoots = entities.filter((entity) =>
-    ['IFCSITE', 'IFCBUILDING', 'IFCBUILDINGSTOREY', 'IFCSPACE', 'IFCFACILITY'].includes(
-      entity.typeName.toUpperCase(),
-    ),
+  const projectRoots = entities.filter(
+    (entity) => entity.typeName.toUpperCase() === "IFCPROJECT",
   );
-  const roots = projectRoots.length > 0 ? projectRoots : spatialFallbackRoots.slice(0, 1);
+  const spatialFallbackRoots = entities.filter((entity) =>
+    [
+      "IFCSITE",
+      "IFCBUILDING",
+      "IFCBUILDINGSTOREY",
+      "IFCSPACE",
+      "IFCFACILITY",
+    ].includes(entity.typeName.toUpperCase()),
+  );
+  const roots =
+    projectRoots.length > 0 ? projectRoots : spatialFallbackRoots.slice(0, 1);
 
   return {
     byExpressID,
     byGlobalId,
     entityCounts,
     spatialTree: roots.map((root) =>
-      buildTreeNode(root.expressID, byExpressID, aggregateChildren, containedChildren, 'aggregate'),
+      buildTreeNode(
+        root.expressID,
+        byExpressID,
+        aggregateChildren,
+        containedChildren,
+        "aggregate",
+      ),
     ),
     containmentTree: roots.map((root) =>
-      buildTreeNode(root.expressID, byExpressID, containedChildren, undefined, 'contains'),
+      buildTreeNode(
+        root.expressID,
+        byExpressID,
+        containedChildren,
+        undefined,
+        "contains",
+      ),
     ),
     typeAssignments,
     typeByOccurrence,
@@ -185,25 +225,52 @@ function getLinesByTypeName(
     return lines;
   } catch (error) {
     diagnostics.push({
-      code: 'RELATIONSHIP_READ_FAILED',
-      severity: 'warning',
+      code: "RELATIONSHIP_READ_FAILED",
+      severity: "warning",
       message: `Could not read ${typeName}: ${String(error)}`,
     });
     return [];
   }
 }
 
-function addParentLink(target: Map<number, IfcRelationshipLink[]>, link: IfcRelationshipLink) {
+function addParentLink(
+  target: Map<number, IfcRelationshipLink[]>,
+  link: IfcRelationshipLink,
+) {
   if (!link.relatingID) {
     return;
   }
-  target.set(link.relatingID, [...(target.get(link.relatingID) ?? []), link]);
+  pushMapValue(target, link.relatingID, link);
 }
 
-function addAssociation(target: Map<number, number[]>, link: IfcRelationshipLink) {
+function addAssociation(
+  target: Map<number, number[]>,
+  link: IfcRelationshipLink,
+) {
   link.relatedIDs.forEach((objectID) => {
-    target.set(objectID, [...(target.get(objectID) ?? []), link.relatingID as number]);
+    pushMapValue(target, objectID, link.relatingID as number);
   });
+}
+
+function pushMapValue<K, V>(map: Map<K, V[]>, key: K, value: V) {
+  const values = map.get(key);
+  if (values) {
+    values.push(value);
+  } else {
+    map.set(key, [value]);
+  }
+}
+
+function pushMapValues<K, V>(map: Map<K, V[]>, key: K, values: V[]) {
+  if (!values.length) {
+    return;
+  }
+  const current = map.get(key);
+  if (current) {
+    current.push(...values);
+  } else {
+    map.set(key, [...values]);
+  }
 }
 
 function buildTreeNode(
@@ -211,37 +278,53 @@ function buildTreeNode(
   byExpressID: Map<number, IfcEntitySummary>,
   primaryChildren: Map<number, IfcRelationshipLink[]>,
   secondaryChildren?: Map<number, IfcRelationshipLink[]>,
-  relationship = 'child',
-  visited = new Set<number>(),
+  relationship = "child",
 ): IfcTreeNode {
   const entity = byExpressID.get(expressID);
-  const localVisited = new Set(visited);
-  localVisited.add(expressID);
-  const links = [
-    ...(primaryChildren.get(expressID) ?? []),
-    ...(secondaryChildren?.get(expressID) ?? []),
-  ];
-
-  return {
+  const root: IfcTreeNode = {
     expressID,
     label: entity?.name ?? `#${expressID}`,
-    typeName: entity?.typeName ?? 'UNKNOWN',
+    typeName: entity?.typeName ?? "UNKNOWN",
     relationship,
-    children: links.flatMap((link) =>
-      link.relatedIDs
-        .filter((childID) => !localVisited.has(childID))
-        .map((childID) =>
-          buildTreeNode(
-            childID,
-            byExpressID,
-            primaryChildren,
-            secondaryChildren,
-            link.relationshipType,
-            localVisited,
-          ),
-        ),
-    ),
+    children: [],
   };
+  const stack: Array<{ node: IfcTreeNode; path: Set<number> }> = [
+    { node: root, path: new Set([expressID]) },
+  ];
+
+  while (stack.length) {
+    const current = stack.pop();
+    if (!current) {
+      continue;
+    }
+    const visitLink = (link: IfcRelationshipLink) => {
+      for (const childID of link.relatedIDs) {
+        if (current.path.has(childID)) {
+          continue;
+        }
+        const childEntity = byExpressID.get(childID);
+        const childNode: IfcTreeNode = {
+          expressID: childID,
+          label: childEntity?.name ?? `#${childID}`,
+          typeName: childEntity?.typeName ?? "UNKNOWN",
+          relationship: link.relationshipType,
+          children: [],
+        };
+        current.node.children.push(childNode);
+        const childPath = new Set(current.path);
+        childPath.add(childID);
+        stack.push({ node: childNode, path: childPath });
+      }
+    };
+    for (const link of primaryChildren.get(current.node.expressID) ?? []) {
+      visitLink(link);
+    }
+    for (const link of secondaryChildren?.get(current.node.expressID) ?? []) {
+      visitLink(link);
+    }
+  }
+
+  return root;
 }
 
 export function summarizeLine(
@@ -258,8 +341,9 @@ export function summarizeLine(
     expressID,
     typeCode,
     typeName,
-    globalId: labelForLine({ Name: line.GlobalId }, '').trim() || undefined,
-    name: labelForLine(line, '').trim() || undefined,
-    description: labelForLine({ Name: line.Description }, '').trim() || undefined,
+    globalId: labelForLine({ Name: line.GlobalId }, "").trim() || undefined,
+    name: labelForLine(line, "").trim() || undefined,
+    description:
+      labelForLine({ Name: line.Description }, "").trim() || undefined,
   };
 }

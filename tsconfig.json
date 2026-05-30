@@ -1,7 +1,6 @@
 {
   "compilerOptions": {
     "allowSyntheticDefaultImports": true,
-    "baseUrl": ".",
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "isolatedModules": true,
@@ -19,16 +18,5 @@
     "target": "ES2022",
     "types": ["vite/client"]
   },
-  "include": [
-    "src/main.tsx",
-    "src/components/ifc-workspace.tsx",
-    "src/components/relationship-flow.tsx",
-    "src/components/relationship-flow.web.tsx",
-    "src/components/relationship-flow.types.ts",
-    "src/components/that-open-viewer.tsx",
-    "src/components/that-open-viewer.web.tsx",
-    "src/ifc/**/*.ts",
-    "tests/**/*.ts",
-    "vite.config.mts"
-  ]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts", "vite.config.mts"]
 }

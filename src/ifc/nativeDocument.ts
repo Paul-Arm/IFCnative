@@ -1,4 +1,13 @@
 import { createMinimalIfcProject } from "./builder";
+import {
+  decodeStepString,
+  decodeStepValue,
+  encodeStepString,
+  quoteStepString,
+  unquoteStepString,
+} from "./stepEncoding";
+
+export { decodeStepString, decodeStepValue, encodeStepString };
 
 export interface NativeIfcEntity {
   id: number;
@@ -44,6 +53,7 @@ export interface NativeBodyElementOptions {
   type: string;
   name: string;
   parentId?: number;
+  placementMode?: "parent" | "world";
   width: number | string;
   depth: number | string;
   height: number | string;
@@ -96,6 +106,12 @@ const RELATIONSHIP_FAMILIES: Record<string, string> = {
   IFCRELASSOCIATESDOCUMENT: "document",
   IFCRELASSIGNSTOGROUP: "group",
 };
+
+const HIERARCHY_RELATIONSHIP_TYPES = new Set([
+  "IFCRELAGGREGATES",
+  "IFCRELNESTS",
+  "IFCRELCONTAINEDINSPATIALSTRUCTURE",
+]);
 
 const QUANTITY_TYPES = new Set([
   "IFCQUANTITYLENGTH",
@@ -212,6 +228,10 @@ export function serializeNativeIfcDocument(document: NativeIfcDocument) {
   ].join("\n");
 }
 
+export function getNextNativeEntityId(document: NativeIfcDocument) {
+  return nextEntityId(document.entities);
+}
+
 export function updateNativeEntity(
   document: NativeIfcDocument,
   entityId: number,
@@ -285,6 +305,42 @@ export function getNativePlacement(
     y,
     z,
   };
+}
+
+export function resolveNativeMovableProductId(
+  document: NativeIfcDocument,
+  entityId: number,
+  globalId?: string,
+) {
+  const globalEntity = globalId
+    ? document.entities.find((entity) => entity.globalId === globalId)
+    : undefined;
+  if (globalEntity && getNativePlacement(document, globalEntity.id)) {
+    return globalEntity.id;
+  }
+  if (getNativePlacement(document, entityId)) {
+    return entityId;
+  }
+
+  const queue = [{ depth: 0, id: entityId }];
+  const visited = new Set<number>([entityId]);
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current || current.depth >= 6) {
+      continue;
+    }
+    for (const incoming of document.incomingRefs.get(current.id) ?? []) {
+      if (visited.has(incoming.id)) {
+        continue;
+      }
+      if (getNativePlacement(document, incoming.id)) {
+        return incoming.id;
+      }
+      visited.add(incoming.id);
+      queue.push({ depth: current.depth + 1, id: incoming.id });
+    }
+  }
+  return undefined;
 }
 
 export function updateNativePlacement(
@@ -391,9 +447,12 @@ export function addNativeBodyElement(
   const parent = options.parentId
     ? document.entityById.get(options.parentId)
     : undefined;
-  const parentPlacementRef = parent?.args[5]?.startsWith("#")
-    ? parent.args[5]
-    : "$";
+  const parentPlacementRef =
+    options.placementMode === "world"
+      ? "$"
+      : parent?.args[5]?.startsWith("#")
+        ? parent.args[5]
+        : "$";
   const contextRef = `#${document.entities.find((entity) => entity.type === "IFCGEOMETRICREPRESENTATIONCONTEXT")?.id ?? 10}`;
   const width = positiveStepNumber(options.width, 1);
   const depth = positiveStepNumber(options.depth, 1);
@@ -898,9 +957,11 @@ export function addNativePropertySet(
   propertyValue: string,
   propertyValueType = "IFCLABEL",
 ) {
-  const next = cloneDocumentEntities(document);
-  const propertyId = nextEntityId(next);
-  next.push({
+  if (!document.entityById.has(entityId)) {
+    return document;
+  }
+  const propertyId = getNextNativeEntityId(document);
+  const property: NativeIfcEntity = {
     args: [
       quote(propertyName),
       "$",
@@ -912,9 +973,9 @@ export function addNativePropertySet(
     id: propertyId,
     name: propertyName,
     type: "IFCPROPERTYSINGLEVALUE",
-  });
-  const psetId = nextEntityId(next);
-  next.push({
+  };
+  const psetId = propertyId + 1;
+  const pset: NativeIfcEntity = {
     args: [
       quote(createIfcGuid(psetId)),
       "$",
@@ -927,8 +988,71 @@ export function addNativePropertySet(
     id: psetId,
     name: psetName,
     type: "IFCPROPERTYSET",
+  };
+  const relId = psetId + 1;
+  const relationship: NativeIfcEntity = {
+    args: [
+      quote(createIfcGuid(relId)),
+      "$",
+      "$",
+      "$",
+      `(#${entityId})`,
+      `#${psetId}`,
+    ],
+    description: "",
+    globalId: createIfcGuid(relId),
+    id: relId,
+    name: "",
+    type: "IFCRELDEFINESBYPROPERTIES",
+  };
+  return appendNativeEntities(document, [property, pset, relationship]);
+}
+
+export function addNativePropertySetValues(
+  document: NativeIfcDocument,
+  entityId: number,
+  psetName: string,
+  properties: Array<{ name: string; value: string; valueType?: string }>,
+) {
+  if (!document.entityById.has(entityId) || properties.length === 0) {
+    return document;
+  }
+  const next: NativeIfcEntity[] = [];
+  const propertyIds: number[] = [];
+  let nextId = getNextNativeEntityId(document);
+  for (const property of properties) {
+    const propertyId = nextId++;
+    propertyIds.push(propertyId);
+    next.push({
+      args: [
+        quote(property.name),
+        "$",
+        formatPropertyValue(property.valueType ?? "IFCLABEL", property.value),
+        "$",
+      ],
+      description: "",
+      globalId: "",
+      id: propertyId,
+      name: property.name,
+      type: "IFCPROPERTYSINGLEVALUE",
+    });
+  }
+  const psetId = nextId++;
+  next.push({
+    args: [
+      quote(createIfcGuid(psetId)),
+      "$",
+      quote(psetName),
+      "$",
+      `(${propertyIds.map((id) => `#${id}`).join(",")})`,
+    ],
+    description: "",
+    globalId: createIfcGuid(psetId),
+    id: psetId,
+    name: psetName,
+    type: "IFCPROPERTYSET",
   });
-  const relId = nextEntityId(next);
+  const relId = nextId++;
   next.push({
     args: [
       quote(createIfcGuid(relId)),
@@ -944,8 +1068,306 @@ export function addNativePropertySet(
     name: "",
     type: "IFCRELDEFINESBYPROPERTIES",
   });
+  return appendNativeEntities(document, next);
+}
+
+export function addNativeEmptyPropertySet(
+  document: NativeIfcDocument,
+  entityId: number,
+  psetName: string,
+) {
+  if (!document.entityById.has(entityId)) {
+    return document;
+  }
+  const psetId = getNextNativeEntityId(document);
+  const pset: NativeIfcEntity = {
+    args: [quote(createIfcGuid(psetId)), "$", quote(psetName), "$", "()"],
+    description: "",
+    globalId: createIfcGuid(psetId),
+    id: psetId,
+    name: psetName,
+    type: "IFCPROPERTYSET",
+  };
+  const relId = psetId + 1;
+  const relationship: NativeIfcEntity = {
+    args: [
+      quote(createIfcGuid(relId)),
+      "$",
+      "$",
+      "$",
+      `(#${entityId})`,
+      `#${psetId}`,
+    ],
+    description: "",
+    globalId: createIfcGuid(relId),
+    id: relId,
+    name: "",
+    type: "IFCRELDEFINESBYPROPERTIES",
+  };
+  return appendNativeEntities(document, [pset, relationship]);
+}
+
+export function addNativePropertyToSet(
+  document: NativeIfcDocument,
+  setId: number,
+  propertyName: string,
+  propertyValue: string,
+  propertyValueType = "IFCLABEL",
+) {
+  const set = document.entityById.get(setId);
+  if (
+    !set ||
+    (set.type !== "IFCPROPERTYSET" && set.type !== "IFCELEMENTQUANTITY")
+  ) {
+    return document;
+  }
+  const propertyId = getNextNativeEntityId(document);
+  const updatedSet: NativeIfcEntity = { ...set, args: [...set.args] };
+  let property: NativeIfcEntity;
+  if (set.type === "IFCELEMENTQUANTITY") {
+    const quantityType = normalizeQuantityType(propertyValueType);
+    property = {
+      args: [
+        quote(propertyName),
+        "$",
+        "$",
+        formatStepNumber(propertyValue),
+        "$",
+      ],
+      description: "",
+      globalId: "",
+      id: propertyId,
+      name: propertyName,
+      type: quantityType,
+    };
+    appendReference(updatedSet.args, 5, propertyId);
+  } else {
+    property = {
+      args: [
+        quote(propertyName),
+        "$",
+        formatPropertyValue(propertyValueType, propertyValue),
+        "$",
+      ],
+      description: "",
+      globalId: "",
+      id: propertyId,
+      name: propertyName,
+      type: "IFCPROPERTYSINGLEVALUE",
+    };
+    appendReference(updatedSet.args, 4, propertyId);
+  }
+  return updatePropertySetSummaries(
+    appendNativeEntities(replaceNativeEntities(document, [updatedSet]), [
+      property,
+    ]),
+    setId,
+  );
+}
+
+export function removeNativePropertyFromSet(
+  document: NativeIfcDocument,
+  setId: number,
+  propertyId: number,
+) {
+  const set = document.entityById.get(setId);
+  if (
+    !set ||
+    (set.type !== "IFCPROPERTYSET" && set.type !== "IFCELEMENTQUANTITY")
+  ) {
+    return document;
+  }
+
+  const refIndex = set.type === "IFCELEMENTQUANTITY" ? 5 : 4;
+  const currentRefs = readReferences(set.args[refIndex]);
+  if (!currentRefs.includes(propertyId)) {
+    return document;
+  }
+
+  const next = cloneDocumentEntities(document);
+  const updatedSet = next.find((entity) => entity.id === setId);
+  if (!updatedSet) {
+    return document;
+  }
+
+  setArg(
+    updatedSet.args,
+    refIndex,
+    formatReferenceList(currentRefs.filter((id) => id !== propertyId)),
+  );
+
+  const removeProperty = !hasIncomingReferenceExcept(
+    document,
+    propertyId,
+    setId,
+  );
+  const nextEntities = removeProperty
+    ? next.filter((entity) => entity.id !== propertyId)
+    : next;
+
   return parseNativeIfcText(
-    serializeEntities(document, next),
+    serializeEntities(document, nextEntities),
+    document.fileName,
+  );
+}
+
+export function updateNativePropertySetName(
+  document: NativeIfcDocument,
+  setId: number,
+  name: string,
+) {
+  const set = document.entityById.get(setId);
+  if (
+    !set ||
+    (set.type !== "IFCPROPERTYSET" && set.type !== "IFCELEMENTQUANTITY")
+  ) {
+    return document;
+  }
+
+  const updatedSet: NativeIfcEntity = { ...set, args: [...set.args] };
+  updatedSet.name = name.trim();
+  setArg(updatedSet.args, 2, quoteOrDollar(name));
+
+  return updatePropertySetSummaries(
+    replaceNativeEntities(document, [updatedSet]),
+    setId,
+  );
+}
+
+export function duplicateNativePropertySet(
+  document: NativeIfcDocument,
+  entityId: number,
+  setId: number,
+  name?: string,
+) {
+  const set = document.entityById.get(setId);
+  if (
+    !document.entityById.has(entityId) ||
+    !set ||
+    (set.type !== "IFCPROPERTYSET" && set.type !== "IFCELEMENTQUANTITY")
+  ) {
+    return document;
+  }
+
+  const refIndex = set.type === "IFCELEMENTQUANTITY" ? 5 : 4;
+  let nextId = getNextNativeEntityId(document);
+  const copiedValueIds: number[] = [];
+  const copiedEntities: NativeIfcEntity[] = [];
+  for (const valueId of readReferences(set.args[refIndex])) {
+    const value = document.entityById.get(valueId);
+    if (!value) {
+      continue;
+    }
+    const copiedId = nextId++;
+    copiedValueIds.push(copiedId);
+    copiedEntities.push({
+      ...value,
+      args: [...value.args],
+      globalId: "",
+      id: copiedId,
+    });
+  }
+
+  const copiedSetId = nextId++;
+  const copiedName = name?.trim() || `${set.name || `#${set.id}`} Copy`;
+  const copiedSet: NativeIfcEntity = {
+    ...set,
+    args: [...set.args],
+    globalId: createIfcGuid(copiedSetId),
+    id: copiedSetId,
+    name: copiedName,
+  };
+  setArg(copiedSet.args, 0, quote(createIfcGuid(copiedSetId)));
+  setArg(copiedSet.args, 2, quoteOrDollar(copiedName));
+  setArg(copiedSet.args, refIndex, formatReferenceList(copiedValueIds));
+
+  const relationshipId = nextId++;
+  const relationship: NativeIfcEntity = {
+    args: [
+      quote(createIfcGuid(relationshipId)),
+      "$",
+      "$",
+      "$",
+      `(#${entityId})`,
+      `#${copiedSetId}`,
+    ],
+    description: "",
+    globalId: createIfcGuid(relationshipId),
+    id: relationshipId,
+    name: "",
+    type: "IFCRELDEFINESBYPROPERTIES",
+  };
+
+  return appendNativeEntities(document, [
+    ...copiedEntities,
+    copiedSet,
+    relationship,
+  ]);
+}
+
+export function removeNativePropertySet(
+  document: NativeIfcDocument,
+  entityId: number,
+  setId: number,
+) {
+  const set = document.entityById.get(setId);
+  if (
+    !document.entityById.has(entityId) ||
+    !set ||
+    (set.type !== "IFCPROPERTYSET" && set.type !== "IFCELEMENTQUANTITY")
+  ) {
+    return document;
+  }
+
+  const next = cloneDocumentEntities(document);
+  const removedIds = new Set<number>();
+  let changed = false;
+
+  for (const relationship of next) {
+    if (relationship.type !== "IFCRELDEFINESBYPROPERTIES") {
+      continue;
+    }
+    if (!readReferences(relationship.args[5]).includes(setId)) {
+      continue;
+    }
+    const objectIds = readReferences(relationship.args[4]);
+    if (!objectIds.includes(entityId)) {
+      continue;
+    }
+    const remainingObjectIds = objectIds.filter((id) => id !== entityId);
+    if (remainingObjectIds.length > 0) {
+      setArg(relationship.args, 4, formatReferenceList(remainingObjectIds));
+    } else {
+      removedIds.add(relationship.id);
+    }
+    changed = true;
+  }
+
+  if (!changed) {
+    return document;
+  }
+
+  const setStillReferenced = next.some(
+    (entity) =>
+      !removedIds.has(entity.id) &&
+      entity.type === "IFCRELDEFINESBYPROPERTIES" &&
+      readReferences(entity.args[5]).includes(setId),
+  );
+  if (!setStillReferenced) {
+    removedIds.add(setId);
+    const refIndex = set.type === "IFCELEMENTQUANTITY" ? 5 : 4;
+    for (const propertyId of readReferences(set.args[refIndex])) {
+      if (!hasIncomingReferenceExcept(document, propertyId, setId)) {
+        removedIds.add(propertyId);
+      }
+    }
+  }
+
+  return parseNativeIfcText(
+    serializeEntities(
+      document,
+      next.filter((entity) => !removedIds.has(entity.id)),
+    ),
     document.fileName,
   );
 }
@@ -958,19 +1380,21 @@ export function addNativeQuantitySet(
   quantityValue: string,
   quantityType = "IFCQUANTITYLENGTH",
 ) {
-  const next = cloneDocumentEntities(document);
+  if (!document.entityById.has(entityId)) {
+    return document;
+  }
   const normalizedQuantityType = normalizeQuantityType(quantityType);
-  const quantityId = nextEntityId(next);
-  next.push({
+  const quantityId = getNextNativeEntityId(document);
+  const quantity: NativeIfcEntity = {
     args: [quote(quantityName), "$", "$", formatStepNumber(quantityValue), "$"],
     description: "",
     globalId: "",
     id: quantityId,
     name: quantityName,
     type: normalizedQuantityType,
-  });
-  const qtoId = nextEntityId(next);
-  next.push({
+  };
+  const qtoId = quantityId + 1;
+  const quantitySet: NativeIfcEntity = {
     args: [
       quote(createIfcGuid(qtoId)),
       "$",
@@ -984,9 +1408,9 @@ export function addNativeQuantitySet(
     id: qtoId,
     name: qtoName,
     type: "IFCELEMENTQUANTITY",
-  });
-  const relId = nextEntityId(next);
-  next.push({
+  };
+  const relId = qtoId + 1;
+  const relationship: NativeIfcEntity = {
     args: [
       quote(createIfcGuid(relId)),
       "$",
@@ -1000,11 +1424,8 @@ export function addNativeQuantitySet(
     id: relId,
     name: "",
     type: "IFCRELDEFINESBYPROPERTIES",
-  });
-  return parseNativeIfcText(
-    serializeEntities(document, next),
-    document.fileName,
-  );
+  };
+  return appendNativeEntities(document, [quantity, quantitySet, relationship]);
 }
 
 export function updateNativePropertyValue(
@@ -1012,8 +1433,7 @@ export function updateNativePropertyValue(
   propertyId: number,
   updates: { name?: string; value?: string; valueType?: string },
 ) {
-  const next = cloneDocumentEntities(document);
-  const property = next.find((entity) => entity.id === propertyId);
+  const property = document.entityById.get(propertyId);
   if (
     !property ||
     (property.type !== "IFCPROPERTYSINGLEVALUE" &&
@@ -1022,28 +1442,36 @@ export function updateNativePropertyValue(
     return document;
   }
 
+  const updatedProperty: NativeIfcEntity = {
+    ...property,
+    args: [...property.args],
+  };
+
   if (updates.name != null) {
-    setArg(property.args, 0, quoteOrDollar(updates.name));
+    setArg(updatedProperty.args, 0, quoteOrDollar(updates.name));
+    updatedProperty.name = updates.name;
   }
   if (updates.value != null) {
-    if (isQuantityType(property.type)) {
-      property.type = normalizeQuantityType(updates.valueType ?? property.type);
-      setArg(property.args, 3, formatStepNumber(updates.value));
+    if (isQuantityType(updatedProperty.type)) {
+      updatedProperty.type = normalizeQuantityType(
+        updates.valueType ?? updatedProperty.type,
+      );
+      setArg(updatedProperty.args, 3, formatStepNumber(updates.value));
     } else {
       setArg(
-        property.args,
+        updatedProperty.args,
         2,
         formatPropertyValue(
-          updates.valueType ?? readPropertyValueType(property.args[2]),
+          updates.valueType ?? readPropertyValueType(updatedProperty.args[2]),
           updates.value,
         ),
       );
     }
   }
 
-  return parseNativeIfcText(
-    serializeEntities(document, next),
-    document.fileName,
+  return updatePropertySetSummariesContainingValue(
+    replaceNativeEntities(document, [updatedProperty]),
+    propertyId,
   );
 }
 
@@ -1205,6 +1633,29 @@ export function removeNativeRelationship(
 
   const next = cloneDocumentEntities(document).filter(
     (entity) => entity.id !== relationshipId,
+  );
+  return parseNativeIfcText(
+    serializeEntities(document, next),
+    document.fileName,
+  );
+}
+
+export function removeNativeEntity(
+  document: NativeIfcDocument,
+  entityId: number,
+) {
+  const entity = document.entityById.get(entityId);
+  if (!entity || entity.type === "IFCPROJECT") {
+    return document;
+  }
+
+  const removedIds = collectCascadeRemovalIds(document, entityId);
+  if (removedIds.size === 0 || removedIds.size >= document.entities.length) {
+    return document;
+  }
+
+  const next = cloneDocumentEntities(document).filter(
+    (current) => !removedIds.has(current.id),
   );
   return parseNativeIfcText(
     serializeEntities(document, next),
@@ -1405,6 +1856,46 @@ function relationshipEnds(entity: NativeIfcEntity): [number[], number[]] {
   }
   const refs = readUniqueReferencesFromArgs(entity.args);
   return refs.length <= 1 ? [refs, []] : [[refs[0]], refs.slice(1)];
+}
+
+function collectCascadeRemovalIds(document: NativeIfcDocument, rootId: number) {
+  const removedIds = new Set<number>();
+  const queue = [rootId];
+
+  while (queue.length > 0) {
+    const currentId = queue.shift();
+    if (
+      !currentId ||
+      removedIds.has(currentId) ||
+      !document.entityById.has(currentId)
+    ) {
+      continue;
+    }
+
+    removedIds.add(currentId);
+
+    for (const relationship of document.relationshipsByEntity.get(currentId) ??
+      []) {
+      if (
+        HIERARCHY_RELATIONSHIP_TYPES.has(relationship.type) &&
+        relationship.sourceIds.includes(currentId)
+      ) {
+        for (const childId of relationship.targetIds) {
+          if (!removedIds.has(childId)) {
+            queue.push(childId);
+          }
+        }
+      }
+    }
+
+    for (const incoming of document.incomingRefs.get(currentId) ?? []) {
+      if (!removedIds.has(incoming.id)) {
+        queue.push(incoming.id);
+      }
+    }
+  }
+
+  return removedIds;
 }
 
 function readPropertySets(
@@ -1812,29 +2303,34 @@ function buildTreeNode(
   entityById: Map<number, NativeIfcEntity>,
   childrenByParent: Map<number, { id: number; relation: string }[]>,
   relation: string,
-  visited = new Set<number>(),
 ): NativeIfcTreeNode {
-  visited.add(id);
-  const children: NativeIfcTreeNode[] = [];
-  for (const child of childrenByParent.get(id) ?? []) {
-    if (entityById.has(child.id) && !visited.has(child.id)) {
-      children.push(
-        buildTreeNode(
-          child.id,
-          entityById,
-          childrenByParent,
-          child.relation,
-          visited,
-        ),
-      );
+  const root: NativeIfcTreeNode = { children: [], id, relation };
+  const stack: Array<{ node: NativeIfcTreeNode; path: Set<number> }> = [
+    { node: root, path: new Set([id]) },
+  ];
+
+  while (stack.length) {
+    const current = stack.pop();
+    if (!current) {
+      continue;
+    }
+    for (const child of childrenByParent.get(current.node.id) ?? []) {
+      if (!entityById.has(child.id) || current.path.has(child.id)) {
+        continue;
+      }
+      const childNode: NativeIfcTreeNode = {
+        children: [],
+        id: child.id,
+        relation: child.relation,
+      };
+      current.node.children.push(childNode);
+      const childPath = new Set(current.path);
+      childPath.add(child.id);
+      stack.push({ node: childNode, path: childPath });
     }
   }
-  visited.delete(id);
-  return {
-    children,
-    id,
-    relation,
-  };
+
+  return root;
 }
 
 export function splitTopLevel(value: string) {
@@ -1931,15 +2427,11 @@ function parseCoordinateTuple(value = ""): [number, number, number] {
 }
 
 export function unquote(value = "") {
-  const trimmed = value.trim();
-  if (!trimmed.startsWith("'") || !trimmed.endsWith("'")) {
-    return undefined;
-  }
-  return trimmed.slice(1, -1).replace(/''/g, "'");
+  return unquoteStepString(value);
 }
 
 export function quote(value: string) {
-  return `'${value.replace(/'/g, "''")}'`;
+  return quoteStepString(value);
 }
 
 function quoteOrDollar(value: string) {
@@ -1951,6 +2443,283 @@ function setArg(args: string[], index: number, value: string) {
     args.push("$");
   }
   args[index] = value;
+}
+
+function appendReference(args: string[], index: number, id: number) {
+  const refs = readReferences(args[index]);
+  setArg(args, index, formatReferenceList([...refs, id]));
+}
+
+function formatReferenceList(refs: number[]) {
+  return `(${refs.map((ref) => `#${ref}`).join(",")})`;
+}
+
+function hasIncomingReferenceExcept(
+  document: NativeIfcDocument,
+  entityId: number,
+  sourceId: number,
+) {
+  return (document.incomingRefs.get(entityId) ?? []).some(
+    (incoming) => incoming.id !== sourceId,
+  );
+}
+
+function appendNativeEntities(
+  document: NativeIfcDocument,
+  addedEntities: NativeIfcEntity[],
+): NativeIfcDocument {
+  if (addedEntities.length === 0) {
+    return document;
+  }
+
+  const entities = [...document.entities, ...addedEntities];
+  const entityById = new Map(document.entityById);
+  const entitiesByType = new Map(document.entitiesByType);
+  const outgoingRefs = new Map(document.outgoingRefs);
+  const incomingRefs = new Map(document.incomingRefs);
+  let relationships = document.relationships;
+  let relationshipsByEntity = document.relationshipsByEntity;
+  let propertySetsByEntity = document.propertySetsByEntity;
+
+  for (const entity of addedEntities) {
+    entityById.set(entity.id, entity);
+    addMapValueCopy(entitiesByType, entity.type, entity);
+
+    const refs = readUniqueReferencesFromArgs(entity.args);
+    outgoingRefs.set(entity.id, refs);
+    for (const ref of refs) {
+      addMapValueCopy(incomingRefs, ref, entity);
+    }
+
+    if (!entity.type.startsWith("IFCREL")) {
+      continue;
+    }
+
+    const [sourceIds, targetIds] = relationshipEnds(entity);
+    const relationship: NativeIfcRelationship = {
+      family: RELATIONSHIP_FAMILIES[entity.type] ?? "relationship",
+      id: entity.id,
+      sourceIds,
+      targetIds,
+      type: entity.type,
+    };
+    relationships = [...relationships, relationship];
+    relationshipsByEntity = new Map(relationshipsByEntity);
+    for (const id of new Set([...sourceIds, ...targetIds])) {
+      addMapValueCopy(relationshipsByEntity, id, relationship);
+    }
+
+    if (entity.type !== "IFCRELDEFINESBYPROPERTIES") {
+      continue;
+    }
+    const definitionId = targetIds[0];
+    const definition = entityById.get(definitionId);
+    const propertySet = definition
+      ? buildPropertySet(definition, entityById)
+      : undefined;
+    if (!propertySet) {
+      continue;
+    }
+    propertySetsByEntity = new Map(propertySetsByEntity);
+    for (const objectId of sourceIds) {
+      addMapValueCopy(propertySetsByEntity, objectId, propertySet);
+    }
+  }
+
+  return {
+    ...document,
+    entities,
+    entityById,
+    entitiesByType,
+    incomingRefs,
+    outgoingRefs,
+    propertySetsByEntity,
+    relationships,
+    relationshipsByEntity,
+  };
+}
+
+function replaceNativeEntities(
+  document: NativeIfcDocument,
+  updatedEntities: NativeIfcEntity[],
+): NativeIfcDocument {
+  if (updatedEntities.length === 0) {
+    return document;
+  }
+
+  const updates = new Map(updatedEntities.map((entity) => [entity.id, entity]));
+  let entityById = document.entityById;
+  let entitiesByType = document.entitiesByType;
+  let outgoingRefs = document.outgoingRefs;
+  let incomingRefs = document.incomingRefs;
+
+  const entities = document.entities.map(
+    (entity) => updates.get(entity.id) ?? entity,
+  );
+
+  for (const updatedEntity of updatedEntities) {
+    const previousEntity = document.entityById.get(updatedEntity.id);
+    if (!previousEntity) {
+      continue;
+    }
+
+    if (entityById === document.entityById) {
+      entityById = new Map(document.entityById);
+    }
+    entityById.set(updatedEntity.id, updatedEntity);
+
+    if (entitiesByType === document.entitiesByType) {
+      entitiesByType = new Map(document.entitiesByType);
+    }
+    replaceEntityByType(entitiesByType, previousEntity, updatedEntity);
+
+    const previousRefs = document.outgoingRefs.get(updatedEntity.id) ?? [];
+    const nextRefs = readUniqueReferencesFromArgs(updatedEntity.args);
+    if (!sameNumberSet(previousRefs, nextRefs)) {
+      if (outgoingRefs === document.outgoingRefs) {
+        outgoingRefs = new Map(document.outgoingRefs);
+      }
+      if (incomingRefs === document.incomingRefs) {
+        incomingRefs = new Map(document.incomingRefs);
+      }
+      outgoingRefs.set(updatedEntity.id, nextRefs);
+      for (const ref of previousRefs) {
+        removeIncomingEntity(incomingRefs, ref, updatedEntity.id);
+      }
+      for (const ref of nextRefs) {
+        addMapValueCopy(incomingRefs, ref, updatedEntity);
+      }
+    }
+  }
+
+  return {
+    ...document,
+    entities,
+    entityById,
+    entitiesByType,
+    incomingRefs,
+    outgoingRefs,
+  };
+}
+
+function updatePropertySetSummaries(
+  document: NativeIfcDocument,
+  setId: number,
+): NativeIfcDocument {
+  const setEntity = document.entityById.get(setId);
+  const propertySet = setEntity
+    ? buildPropertySet(setEntity, document.entityById)
+    : undefined;
+  if (!propertySet) {
+    return document;
+  }
+
+  let changed = false;
+  const propertySetsByEntity = new Map(document.propertySetsByEntity);
+  for (const [entityId, sets] of document.propertySetsByEntity) {
+    if (!sets.some((set) => set.id === setId)) {
+      continue;
+    }
+    changed = true;
+    propertySetsByEntity.set(
+      entityId,
+      sets.map((set) => (set.id === setId ? propertySet : set)),
+    );
+  }
+
+  return changed ? { ...document, propertySetsByEntity } : document;
+}
+
+function updatePropertySetSummariesContainingValue(
+  document: NativeIfcDocument,
+  propertyId: number,
+): NativeIfcDocument {
+  const rebuiltSets = new Map<number, NativeIfcPropertySet>();
+  let changed = false;
+  const propertySetsByEntity = new Map(document.propertySetsByEntity);
+
+  for (const [entityId, sets] of document.propertySetsByEntity) {
+    let entryChanged = false;
+    const nextSets = sets.map((set) => {
+      if (!set.values.some((value) => value.id === propertyId)) {
+        return set;
+      }
+      let rebuilt = rebuiltSets.get(set.id);
+      if (!rebuilt) {
+        const setEntity = document.entityById.get(set.id);
+        rebuilt = setEntity
+          ? buildPropertySet(setEntity, document.entityById)
+          : undefined;
+        if (rebuilt) {
+          rebuiltSets.set(set.id, rebuilt);
+        }
+      }
+      if (!rebuilt) {
+        return set;
+      }
+      entryChanged = true;
+      return rebuilt;
+    });
+    if (entryChanged) {
+      changed = true;
+      propertySetsByEntity.set(entityId, nextSets);
+    }
+  }
+
+  return changed ? { ...document, propertySetsByEntity } : document;
+}
+
+function addMapValueCopy<K, V>(map: Map<K, V[]>, key: K, value: V) {
+  const current = map.get(key);
+  map.set(key, current ? [...current, value] : [value]);
+}
+
+function replaceEntityByType(
+  entitiesByType: Map<string, NativeIfcEntity[]>,
+  previousEntity: NativeIfcEntity,
+  updatedEntity: NativeIfcEntity,
+) {
+  const previousGroup = entitiesByType.get(previousEntity.type) ?? [];
+  if (previousEntity.type === updatedEntity.type) {
+    entitiesByType.set(
+      updatedEntity.type,
+      previousGroup.map((entity) =>
+        entity.id === updatedEntity.id ? updatedEntity : entity,
+      ),
+    );
+    return;
+  }
+
+  entitiesByType.set(
+    previousEntity.type,
+    previousGroup.filter((entity) => entity.id !== updatedEntity.id),
+  );
+  addMapValueCopy(entitiesByType, updatedEntity.type, updatedEntity);
+}
+
+function removeIncomingEntity(
+  incomingRefs: Map<number, NativeIfcEntity[]>,
+  ref: number,
+  entityId: number,
+) {
+  const current = incomingRefs.get(ref);
+  if (!current) {
+    return;
+  }
+  const next = current.filter((entity) => entity.id !== entityId);
+  if (next.length > 0) {
+    incomingRefs.set(ref, next);
+  } else {
+    incomingRefs.delete(ref);
+  }
+}
+
+function sameNumberSet(left: number[], right: number[]) {
+  if (left.length !== right.length) {
+    return false;
+  }
+  const values = new Set(left);
+  return right.every((value) => values.has(value));
 }
 
 function cloneDocumentEntities(document: NativeIfcDocument) {
@@ -2024,7 +2793,13 @@ function serializeEntities(
 }
 
 function nextEntityId(entities: NativeIfcEntity[]) {
-  return Math.max(0, ...entities.map((entity) => entity.id)) + 1;
+  let maxId = 0;
+  for (const entity of entities) {
+    if (entity.id > maxId) {
+      maxId = entity.id;
+    }
+  }
+  return maxId + 1;
 }
 
 function normalizeType(type: string) {
@@ -2204,5 +2979,5 @@ function isRepresentationAssignableProduct(entity: NativeIfcEntity) {
 }
 
 function compactValue(value: string) {
-  return value.replace(/\s+/g, " ").slice(0, 160) || "-";
+  return decodeStepValue(value).replace(/\s+/g, " ").slice(0, 160) || "-";
 }

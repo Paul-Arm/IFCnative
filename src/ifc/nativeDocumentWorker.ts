@@ -13,7 +13,7 @@ export type ParseNativeIfcWorkerResponse =
       document: NativeIfcDocument;
       bytes: ArrayBuffer;
       elapsedMs: number;
-      text: string;
+      text?: string;
     }
   | {
       requestId: number;
@@ -25,7 +25,7 @@ export interface ParseNativeIfcFileResult {
   document: NativeIfcDocument;
   bytes: ArrayBuffer;
   elapsedMs: number;
-  text: string;
+  text?: string;
 }
 
 let nextRequestId = 0;
