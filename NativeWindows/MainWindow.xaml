@@ -252,7 +252,11 @@
                                 <RowDefinition Height="*" />
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
-                            <Viewport3D x:Name="NativeViewport3D" Margin="8" ClipToBounds="True" />
+                            <Viewport3D x:Name="NativeViewport3D"
+                                        Margin="8"
+                                        ClipToBounds="True"
+                                        MouseLeftButtonUp="NativeViewport3D_MouseLeftButtonUp"
+                                        MouseWheel="NativeViewport3D_MouseWheel" />
                             <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="16" Background="#99020617" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="10" MaxWidth="420">
                                 <StackPanel>
                                     <TextBlock Text="Native 3D preview" Foreground="#cbd5e1" FontSize="18" FontWeight="SemiBold" />
@@ -479,6 +483,15 @@
                                     <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
                                         <Button Content="Fit graph" Click="FitGraph_Click" Background="#334155" BorderBrush="#475569" />
                                         <Button Content="Reset zoom" Click="ResetGraph_Click" Background="#334155" BorderBrush="#475569" />
+                                        <Button Content="Auto LR" Click="AutoGraphLeftRight_Click" Margin="8,0,0,0" Background="#334155" BorderBrush="#475569" />
+                                        <Button Content="Auto TB" Click="AutoGraphTopBottom_Click" Margin="8,0,0,0" Background="#334155" BorderBrush="#475569" />
+                                        <ComboBox x:Name="GraphNodeStyleBox" Width="128" Margin="8,0,0,0" SelectionChanged="GraphNodeStyle_SelectionChanged" SelectedIndex="0">
+                                            <ComboBoxItem Content="Detailed" Tag="Detailed" />
+                                            <ComboBoxItem Content="Compact" Tag="Compact" />
+                                            <ComboBoxItem Content="Type color" Tag="TypeColor" />
+                                        </ComboBox>
+                                        <Button x:Name="CopyGraphButton" Content="Copy node" Click="CopyGraphSelection_Click" Margin="8,0,0,0" Background="#334155" BorderBrush="#475569" />
+                                        <Button x:Name="PasteGraphButton" Content="Paste link draft" Click="PasteGraphSelection_Click" Margin="8,0,0,0" IsEnabled="False" Background="#334155" BorderBrush="#475569" />
                                     </StackPanel>
                                 </StackPanel>
                                 <Border Background="#020617" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6" ClipToBounds="True">
@@ -507,6 +520,12 @@
                                             Click="RepairDiagnostic_Click"
                                             Margin="0,8,0,0"
                                             IsEnabled="False"
+                                            Background="#334155"
+                                            BorderBrush="#475569" />
+                                    <Button x:Name="ValidateIdsButton"
+                                            Content="Validate IDS..."
+                                            Click="ValidateIds_Click"
+                                            Margin="0,8,0,0"
                                             Background="#334155"
                                             BorderBrush="#475569" />
                                 </StackPanel>

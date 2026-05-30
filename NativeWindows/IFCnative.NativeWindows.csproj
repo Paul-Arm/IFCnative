@@ -8,4 +8,13 @@
     <UseWPF>true</UseWPF>
   </PropertyGroup>
 
+  <ItemGroup>
+    <PackageReference Include="HelixToolkit.Wpf.SharpDX" Version="3.1.2" />
+    <PackageReference Include="Msagl.WpfGraphControl" Version="1.2.1" />
+    <PackageReference Include="Xbim.Essentials" Version="6.0.587" />
+    <PackageReference Include="Xbim.Geometry" Version="6.3.873-netcore" />
+    <PackageReference Include="Xbim.IDS.Validator.Core" Version="1.0.187" />
+    <PackageReference Include="Xceed.Products.Wpf.Toolkit.AvalonDock" Version="5.1.26166.7861" />
+  </ItemGroup>
+
 </Project>

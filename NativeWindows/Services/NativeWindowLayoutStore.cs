@@ -1,3 +1,4 @@
+using System.IO;
 using System.Text.Json;
 using IFCnative.NativeWindows.Models;
 
@@ -58,6 +59,7 @@ public sealed class NativeWindowLayoutStore
             WindowWidth = Clamp(layout.WindowWidth, 1100, 3840, 1440),
             WindowHeight = Clamp(layout.WindowHeight, 700, 2160, 900),
             LastOpenedIfcPath = NormalizePath(layout.LastOpenedIfcPath),
+            AvalonDockLayoutXml = NormalizeAvalonDockLayout(layout.AvalonDockLayoutXml),
         };
     }
 
@@ -86,5 +88,18 @@ public sealed class NativeWindowLayoutStore
         {
             return null;
         }
+    }
+
+    private static string? NormalizeAvalonDockLayout(string? xml)
+    {
+        if (string.IsNullOrWhiteSpace(xml))
+        {
+            return null;
+        }
+
+        var trimmed = xml.Trim();
+        return trimmed.StartsWith('<') && trimmed.EndsWith('>')
+            ? trimmed
+            : null;
     }
 }

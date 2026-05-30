@@ -19,7 +19,9 @@ Important constraints:
   - `npm run test:ifc`
   - `npm run lint`
   - `npm run build`
-- Native `.NET/WPF` build/test execution is still not verified on the Mac host because `dotnet` is not installed there.
+- Native `.NET/WPF` build/test execution is now verified on Windows/.NET 9:
+  - `dotnet run --project NativeWindows.Tests\IFCnative.NativeWindows.Tests.csproj`
+  - `dotnet build NativeWindows\IFCnative.NativeWindows.csproj`
 
 ## Functions that currently exist in the native app
 
@@ -27,17 +29,21 @@ Important constraints:
 
 - Open IFC/STEP files.
 - Open `.ifczip` / `.zip` archives and extract the first IFC/STEP entry.
+- Open IFCnative `.ifcxml` exports through a safe `stepText` payload.
 - Export IFC text.
 - Export validated IFC text into `.ifczip` archives.
+- Export validated IFC text into IFCnative `.ifcxml` `stepText` payloads.
 - Recent IFC paths.
 - Reopen/clean missing recent entries.
 - Persist window/pane layout state.
 - Restore pane visibility, pane widths, and window size.
 - Auto-reopen last available IFC workspace on startup.
+- Runtime package bridge status for xBIM Essentials, xBIM Geometry, xBIM IDS Validator, HelixToolkit WPF SharpDX, and Xceed AvalonDock.
 
 ### Inspection/navigation
 
 - Entity search by STEP id, IFC type, name, GlobalId, and spatial path.
+- Advanced search service for text, type, relationship kind, diagnostic severity, property presence, and resource presence filters.
 - Entity inspector.
 - Incoming references panel.
 - Relationship panel.
@@ -47,6 +53,7 @@ Important constraints:
 - Diagnostics tab with severity-ranked rows.
 - Diagnostics filtering by severity/message/repair-suggestion text.
 - Diagnostic rows with STEP ids navigate to the referenced entity.
+- Diagnostics-tab IDS file picker plus basic entity-requirement validation with diagnostics append support.
 
 ### Draft/review/edit safety
 
@@ -71,7 +78,7 @@ Important constraints:
 - Relationship endpoint selection/staging from the inspector.
 - Element connect/disconnect workflow.
 - Opening fill workflow via `IFCRELFILLSELEMENT`.
-- Relationship neighborhood graph preview with filtering, depth controls, relationship hub nodes, edge labels, and graph-to-editor selection.
+- Relationship neighborhood graph preview with filtering, depth controls, MSAGL auto-layout, relationship hub nodes, edge labels, graph-to-editor selection, and draft-safe graph copy/paste link creation.
 
 ### Properties/resources
 
@@ -93,9 +100,11 @@ Important constraints:
 - Numeric placement editor.
 - Product representation index for `IFCPRODUCTDEFINITIONSHAPE` / `IFCSHAPEREPRESENTATION` references.
 - Geometry backend abstraction (`IIfcGeometryBackend`).
-- STEP-reference viewport preview backend.
-- First generated WPF `Viewport3D` preview for sample geometry.
+- STEP-reference viewport preview backend with shape/dimension projection for simple swept solids and bounding boxes.
+- WPF `Viewport3D` preview renders STEP-derived rectangle/cylinder bodies at indexed placements with fit/zoom.
+- Preview body picking selects the corresponding IFC product in the inspector.
 - Sample IFC expanded with visible placement/body representation geometry.
+- HelixToolkit WPF SharpDX and xBIM Geometry packages are pinned for the next full mesh backend slice.
 
 ### Validation/repair
 
@@ -111,24 +120,25 @@ Important constraints:
 - Missing/invalid placement/representation repair helpers.
 - Missing relationship reference repair.
 - Spatial containment repair.
+- Safe IDS entity-requirement pass/fail diagnostics.
 
 ## What is still not good enough / missing
 
 These are the important gaps Paul is reacting to:
 
 1. **3D viewer is not a real IFC mesh viewer yet**
-   - Current viewport is only a first native/generated/STEP-reference preview.
-   - Need real mesh extraction/tessellation and interactive rendering.
+   - Current viewport can render simple STEP-derived body previews, but it is not full IFC tessellation.
+   - Need real mesh extraction/tessellation and richer interactive rendering.
    - Prefer native renderer/backend over WASM.
 
 2. **Graph is still not a mature visual graph editor**
-   - Current graph is improving but remains a preview, not a polished graph editor.
-   - Relationship hubs, edge labels, and click-to-edit relationship selection now exist.
-   - Still needs a real layout algorithm, edge routing, expansion UX, maybe minimap/zoom controls.
+   - Native WPF graph now uses MSAGL for automatic layout and keeps WPF-rendered nodes for IFC-aware styling/interactions.
+   - Relationship hubs, edge labels, click-to-edit relationship selection, and copy/paste-to-draft now exist.
+   - Still needs richer node templates, minimap-style overview, persisted manual pins, and more graph-native relationship editing.
 
 3. **Window management/docking is still incomplete**
    - Menu and pane toggles exist, but this is not full docking/window management.
-   - Need a mature docking library if possible.
+   - Xceed AvalonDock is now pinned and layout XML persistence is prepared, but the visible shell has not been migrated to dockable panes yet.
 
 4. **Editor panels are still too raw**
    - Property editor still has raw-ish value editing.
@@ -141,8 +151,9 @@ These are the important gaps Paul is reacting to:
    - Some parser recovery exists.
    - But true streaming parser/lazy indexes/mesh chunking/cancellation across indexing and tessellation are still pending.
 
-6. **Native build verification is pending**
-   - Need Windows/dotnet environment to restore packages and run native tests/build.
+6. **Native package-backed verification is now available**
+   - `dotnet run --project NativeWindows.Tests\IFCnative.NativeWindows.Tests.csproj` passes with 45 tests on Windows/.NET 9.
+   - `dotnet build NativeWindows\IFCnative.NativeWindows.csproj` passes on Windows/.NET 9.
 
 ## New priority order
 
@@ -185,6 +196,12 @@ Deliverables:
 - Reset layout.
 - Avoid unreadable theme states in dock chrome.
 
+Current status:
+
+- Xceed AvalonDock is referenced and runtime-probed.
+- `NativeWindowLayoutStore` can persist/sanitize AvalonDock layout XML.
+- Visible dock chrome migration remains the next UI slice.
+
 ### Priority 3 — Real visual graph editor
 
 Goal: replace graph preview with a usable IFC relationship graph.
@@ -193,6 +210,7 @@ Recommended libraries/options:
 
 - GraphX / GraphShape / QuickGraph-style stack if compatible.
 - Otherwise a stronger WPF Canvas graph with layout, edge routing, pan/zoom, and interaction.
+- Current native implementation uses MSAGL for layout and a WPF Canvas renderer for customizable IFC nodes.
 
 Deliverables:
 

@@ -1,6 +1,7 @@
 using IFCnative.NativeWindows;
 using IFCnative.NativeWindows.Models;
 using IFCnative.NativeWindows.ViewModels;
+using System.Globalization;
 
 namespace IFCnative.NativeWindows.Services;
 
@@ -76,7 +77,7 @@ public sealed class StepReferenceGeometryBackend : IIfcGeometryBackend
         items.AddRange(document.RepresentationsByEntity.Values
             .OrderBy(summary => summary.ProductId)
             .Take(limit)
-            .Select(summary => new IfcViewportItem(summary.ProductId, DescribeProduct(document, summary))));
+            .Select(summary => CreateViewportItem(document, summary)));
 
         if (document.RepresentationsByEntity.Count > limit)
         {
@@ -100,7 +101,7 @@ public sealed class StepReferenceGeometryBackend : IIfcGeometryBackend
 
         if (document.RepresentationsByEntity.TryGetValue(entityId, out var representation))
         {
-            items.Add(new IfcViewportItem(entityId, DescribeProduct(document, representation)));
+            items.Add(CreateViewportItem(document, representation));
             foreach (var geometryItemId in representation.GeometryItemIds.Distinct().Take(limit))
             {
                 items.Add(new IfcViewportItem(geometryItemId, $"  • #{geometryItemId} {DescribeGeometry(document, geometryItemId, 0, [])}"));
@@ -125,12 +126,114 @@ public sealed class StepReferenceGeometryBackend : IIfcGeometryBackend
         if (referencingProducts.Count > 0)
         {
             items.Add(new IfcViewportItem(entityId, $"#{entityId} is referenced by represented products:"));
-            items.AddRange(referencingProducts.Select(summary => new IfcViewportItem(summary.ProductId, DescribeProduct(document, summary))));
+            items.AddRange(referencingProducts.Select(summary => CreateViewportItem(document, summary)));
             return items;
         }
 
         items.Add(new IfcViewportItem(entityId, "No indexed representation references for this selection."));
         return items;
+    }
+
+    private static IfcViewportItem CreateViewportItem(IfcDocument document, IfcRepresentationSummary summary)
+    {
+        var dimensions = ReadPreviewDimensions(document, summary);
+        var placement = document.PlacementsByEntity.TryGetValue(summary.ProductId, out var placementSummary)
+            ? placementSummary
+            : null;
+
+        return new IfcViewportItem(
+            summary.ProductId,
+            DescribeProduct(document, summary),
+            dimensions.Shape,
+            placement?.X ?? 0,
+            placement?.Y ?? 0,
+            (placement?.Z ?? 0) + dimensions.Height / 2,
+            dimensions.Width,
+            dimensions.Depth,
+            dimensions.Height);
+    }
+
+    private static PreviewDimensions ReadPreviewDimensions(IfcDocument document, IfcRepresentationSummary summary)
+    {
+        foreach (var geometryItemId in summary.GeometryItemIds)
+        {
+            var dimensions = ReadPreviewDimensions(document, geometryItemId, []);
+            if (dimensions is not null)
+            {
+                return dimensions;
+            }
+        }
+
+        return new PreviewDimensions("box", 1, 1, 1);
+    }
+
+    private static PreviewDimensions? ReadPreviewDimensions(IfcDocument document, int entityId, HashSet<int> visited)
+    {
+        if (!visited.Add(entityId) || !document.EntityById.TryGetValue(entityId, out var entity))
+        {
+            return null;
+        }
+
+        if (entity.Type == "IFCEXTRUDEDAREASOLID")
+        {
+            var height = ParseMeasure(Argument(entity, 3), 1);
+            var profileId = StepArgumentReader.ReadReferences(Argument(entity, 0)).FirstOrDefault();
+            if (profileId != 0 && document.EntityById.TryGetValue(profileId, out var profile))
+            {
+                if (profile.Type == "IFCRECTANGLEPROFILEDEF")
+                {
+                    return new PreviewDimensions(
+                        "box",
+                        ParseMeasure(Argument(profile, 3), 1),
+                        ParseMeasure(Argument(profile, 4), 1),
+                        height);
+                }
+
+                if (profile.Type == "IFCCIRCLEPROFILEDEF")
+                {
+                    var diameter = ParseMeasure(Argument(profile, 3), 0.5) * 2;
+                    return new PreviewDimensions("cylinder", diameter, diameter, height);
+                }
+            }
+
+            return new PreviewDimensions("box", 1, 1, height);
+        }
+
+        if (entity.Type == "IFCBOUNDINGBOX")
+        {
+            return new PreviewDimensions(
+                "box",
+                ParseMeasure(Argument(entity, 3), 1),
+                ParseMeasure(Argument(entity, 4), 1),
+                ParseMeasure(Argument(entity, 5), 1));
+        }
+
+        if (entity.Type == "IFCSHAPEREPRESENTATION")
+        {
+            foreach (var itemId in StepArgumentReader.ReadReferences(Argument(entity, 3)))
+            {
+                var dimensions = ReadPreviewDimensions(document, itemId, visited);
+                if (dimensions is not null)
+                {
+                    return dimensions;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static double ParseMeasure(string value, double fallback)
+    {
+        var normalized = value.Trim().Trim('(', ')');
+        if (normalized is "$" or "*" || normalized.Length == 0)
+        {
+            return fallback;
+        }
+
+        return double.TryParse(normalized, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)
+            ? Math.Max(0.001, parsed)
+            : fallback;
     }
 
     private static string DescribeProduct(IfcDocument document, IfcRepresentationSummary summary)
@@ -211,4 +314,6 @@ public sealed class StepReferenceGeometryBackend : IIfcGeometryBackend
                 || type.Contains("FURNISHING", StringComparison.OrdinalIgnoreCase)
                 || type.Contains("PROXY", StringComparison.OrdinalIgnoreCase));
     }
+
+    private sealed record PreviewDimensions(string Shape, double Width, double Depth, double Height);
 }

@@ -16,6 +16,11 @@ public static class IfcFileLoader
         var fileInfo = new FileInfo(path);
         progress?.Report($"Opening {fileInfo.Name} ({FormatBytes(fileInfo.Length)})…");
 
+        if (IfcXmlExchange.IsIfcXml(path))
+        {
+            return await IfcXmlExchange.ReadAsync(path, progress, cancellationToken);
+        }
+
         if (IsIfcZip(path))
         {
             return await ReadZipAsync(path, progress, cancellationToken);
@@ -34,6 +39,12 @@ public static class IfcFileLoader
 
     public static void WriteText(string path, string stepText, string documentFileName)
     {
+        if (IfcXmlExchange.IsIfcXml(path))
+        {
+            IfcXmlExchange.Write(path, stepText, documentFileName);
+            return;
+        }
+
         if (IsIfcZip(path))
         {
             WriteZip(path, stepText, documentFileName);
@@ -98,13 +109,30 @@ public static class IfcFileLoader
 
         if (entry is null)
         {
-            throw new InvalidDataException("ifcZIP archive does not contain an .ifc, .stp, or .step file.");
+            throw new InvalidDataException("ifcZIP archive does not contain an .ifc, .ifcxml, .stp, or .step file.");
         }
 
         progress?.Report($"Extracting {entry.FullName} from {Path.GetFileName(path)} ({FormatBytes(entry.Length)})…");
         await using var entryStream = entry.Open();
         using var reader = new StreamReader(entryStream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: BufferSize, leaveOpen: false);
         var text = await reader.ReadToEndAsync(cancellationToken);
+        if (IfcXmlExchange.IsIfcXml(entry.Name))
+        {
+            var tempPath = Path.Combine(Path.GetTempPath(), $"ifcnative-ifcxml-{Guid.NewGuid():N}.ifcxml");
+            try
+            {
+                await File.WriteAllTextAsync(tempPath, text, Encoding.UTF8, cancellationToken);
+                return await IfcXmlExchange.ReadAsync(tempPath, progress, cancellationToken);
+            }
+            finally
+            {
+                if (File.Exists(tempPath))
+                {
+                    File.Delete(tempPath);
+                }
+            }
+        }
+
         return new LoadedIfcText(text, entry.Name);
     }
 
@@ -141,6 +169,7 @@ public static class IfcFileLoader
     {
         var extension = Path.GetExtension(name);
         return extension.Equals(".ifc", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".ifcxml", StringComparison.OrdinalIgnoreCase)
             || extension.Equals(".stp", StringComparison.OrdinalIgnoreCase)
             || extension.Equals(".step", StringComparison.OrdinalIgnoreCase);
     }

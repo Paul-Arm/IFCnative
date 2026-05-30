@@ -194,13 +194,18 @@ public static partial class IfcStepParser
             }
 
             var originalStepLine = terminator is { HasSemicolon: true, HasUnexpectedTrailingText: false }
-                ? data[entityStart..index].Trim()
+                ? NormalizeLineEndings(data[entityStart..index].Trim())
                 : null;
             var entity = new IfcEntity { Id = id, Type = type, OriginalStepLine = originalStepLine };
             entity.Arguments.AddRange(StepArgumentReader.SplitTopLevel(args));
             entity.OriginalArguments.AddRange(entity.Arguments);
             yield return entity;
         }
+    }
+
+    private static string NormalizeLineEndings(string text)
+    {
+        return text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
     }
 
     private static void SkipWhitespaceAndComments(string text, ref int index)

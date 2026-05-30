@@ -231,3 +231,11 @@ Important checks:
 5. Type/material/classification/document managers.
 6. Validation panel and repair suggestions.
 7. Undo/redo and change sets.
+
+## Native Windows status, 2026-05-24
+
+- Draft-first editing, apply/discard, export gating, named undo/redo checkpoints, entity-aware STEP diff summaries, relationship graph filters, numeric placement edits, simple rectangle/cylinder body presets, opening/fill workflows, and resource assignment workflows are implemented in `NativeWindows/`.
+- New package-backed native service groundwork is in place for xBIM Essentials/Geometry, xBIM IDS Validator, HelixToolkit WPF SharpDX, and Xceed AvalonDock.
+- IFCnative `.ifcxml` roundtrip load/export, Diagnostics-tab IDS entity-requirement validation, advanced IFC search, and AvalonDock layout XML persistence are covered by `NativeWindows.Tests`.
+- Windows-native graph now uses MSAGL auto-layout, WPF-customizable IFC nodes, and draft-safe graph copy/paste link creation.
+- Still pending for full parity: real xBIM tessellated mesh viewport, visible AvalonDock shell migration, richer typed editors/pickers, full buildingSMART ifcXML mapping, full IDS/MVD result mapping, and true large-model streaming/chunked geometry.

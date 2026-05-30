@@ -600,15 +600,15 @@ public static class IfcDocumentEditor
             return document;
         }
 
-        draftEntity.Name = name.Trim();
-        draftEntity.Description = description.Trim();
-
         var normalizedArguments = rawArguments.Trim();
         if (!string.IsNullOrWhiteSpace(normalizedArguments))
         {
             draftEntity.Arguments.Clear();
             draftEntity.Arguments.AddRange(StepArgumentReader.SplitTopLevel(normalizedArguments));
         }
+
+        draftEntity.Name = name.Trim();
+        draftEntity.Description = description.Trim();
 
         return IfcStepParser.Parse(draft.ToStepText(), draft.FileName);
     }
@@ -998,9 +998,9 @@ public static class IfcDocumentEditor
 
     private static IEnumerable<int> ReadIds(string text)
     {
-        foreach (var match in System.Text.RegularExpressions.Regex.Matches(text, @"#?(\d+)"))
+        foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(text, @"#?(\d+)"))
         {
-            if (int.TryParse(match.ToString().TrimStart('#'), NumberStyles.Integer, CultureInfo.InvariantCulture, out var id))
+            if (int.TryParse(match.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id))
             {
                 yield return id;
             }

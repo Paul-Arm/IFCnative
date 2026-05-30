@@ -14,6 +14,9 @@ internal sealed class NativeTestRunner
         Run("sample parser builds core indexes", SampleParserBuildsCoreIndexes);
         Run("IFC file loader reads ifcZIP archives", IfcFileLoaderReadsIfcZipArchives);
         Run("IFC file loader writes ifcZIP archives", IfcFileLoaderWritesIfcZipArchives);
+        Run("native dependency catalog exposes planned libraries", NativeDependencyCatalogExposesPlannedLibraries);
+        Run("IFC file loader roundtrips ifcXML payloads", IfcFileLoaderRoundtripsIfcXmlPayloads);
+        Run("xBIM document adapter opens ifcXML payloads", XbimDocumentAdapterOpensIfcXmlPayloads);
         Run("STEP export preserves parsed entity order", StepExportPreservesParsedEntityOrder);
         Run("STEP writer exposes canonical entity helpers", StepWriterExposesCanonicalEntityHelpers);
         Run("STEP export preserves untouched entity text", StepExportPreservesUntouchedEntityText);
@@ -37,6 +40,7 @@ internal sealed class NativeTestRunner
         Run("property templates create indexed pset and qto", PropertyTemplatesCreateIndexedPsetAndQto);
         Run("resource assignments create indexed references", ResourceAssignmentsCreateIndexedReferences);
         Run("body assignment creates swept solid representation", BodyAssignmentCreatesSweptSolidRepresentation);
+        Run("geometry backend projects body dimensions", GeometryBackendProjectsBodyDimensions);
         Run("body assignment can be staged as draft", BodyAssignmentCanBeStagedAsDraft);
         Run("export validation reparses document before save", ExportValidationReparsesDocumentBeforeSave);
         Run("missing relationship reference diagnostics can be repaired", MissingRelationshipReferenceDiagnosticsCanBeRepaired);
@@ -45,8 +49,12 @@ internal sealed class NativeTestRunner
         Run("spatial containment diagnostics can be repaired", SpatialContainmentDiagnosticsCanBeRepaired);
         Run("placement and representation diagnostics can be repaired", PlacementAndRepresentationDiagnosticsCanBeRepaired);
         Run("diagnostics projector supports text and severity filters", DiagnosticsProjectorSupportsFilters);
+        Run("IDS validation reports passing and failing entity requirements", IdsValidationReportsEntityRequirements);
+        Run("advanced search filters model indexes", AdvancedSearchFiltersModelIndexes);
         Run("relationship graph supports filter and depth", RelationshipGraphSupportsFilterAndDepth);
+        Run("MSAGL relationship graph layout positions nodes", MsaglRelationshipGraphLayoutPositionsNodes);
         Run("native window layout store persists sanitized layout", NativeWindowLayoutStorePersistsSanitizedLayout);
+        Run("native window layout store persists AvalonDock XML", NativeWindowLayoutStorePersistsAvalonDockXml);
         Run("draft session gates export until apply/discard", DraftSessionGatesExport);
         Run("draft session supports applied undo redo history", DraftSessionSupportsUndoRedoHistory);
     }
@@ -125,6 +133,66 @@ internal sealed class NativeTestRunner
             using var reader = new StreamReader(archive.Entries[0].Open());
             var exported = reader.ReadToEnd();
             True(exported.Contains("IFCPROJECT", StringComparison.Ordinal), "ifcZIP export should contain STEP text");
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+        }
+    }
+
+    private static void NativeDependencyCatalogExposesPlannedLibraries()
+    {
+        var statuses = NativeDependencyCatalog.GetStatuses();
+
+        True(statuses.Any(status => status.Name == "xBIM Essentials" && status.Version == "6.0.587"), "xBIM Essentials dependency status missing");
+        True(statuses.Any(status => status.Name == "xBIM Geometry" && status.Version == "6.3.873-netcore"), "xBIM Geometry dependency status missing");
+        True(statuses.Any(status => status.Name == "HelixToolkit WPF SharpDX" && status.Version == "3.1.2"), "HelixToolkit dependency status missing");
+        True(statuses.Any(status => status.Name == "Xceed AvalonDock" && status.Version == "5.1.26166.7861"), "AvalonDock dependency status missing");
+        True(statuses.Any(status => status.Name == "MSAGL WPF GraphControl" && status.Version == "1.2.1"), "MSAGL dependency status missing");
+        True(statuses.Any(status => status.CanResolve), "at least one planned native dependency should resolve at runtime");
+    }
+
+    private static void IfcFileLoaderRoundtripsIfcXmlPayloads()
+    {
+        var tempPath = Path.Combine(Path.GetTempPath(), $"ifcnative-export-{Guid.NewGuid():N}.ifcxml");
+        try
+        {
+            IfcFileLoader.WriteText(tempPath, UnorderedFixture, "source-model.ifc");
+
+            var xml = File.ReadAllText(tempPath);
+            True(xml.Contains("<stepText>", StringComparison.Ordinal), "ifcXML export should contain a stepText payload");
+            True(xml.Contains("IFCnative-stepText", StringComparison.Ordinal), "ifcXML export should mark the safe roundtrip format");
+
+            var loaded = IfcFileLoader.ReadAsync(tempPath).GetAwaiter().GetResult();
+            True(loaded.Text.Contains("IFCPROJECT", StringComparison.Ordinal), "ifcXML import should recover STEP text");
+
+            var document = IfcStepParser.Parse(loaded.Text, loaded.FileName);
+            Equal("IFC4X3_ADD2", document.Schema, "ifcXML parsed schema");
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+        }
+    }
+
+    private static void XbimDocumentAdapterOpensIfcXmlPayloads()
+    {
+        var tempPath = Path.Combine(Path.GetTempPath(), $"ifcnative-adapter-{Guid.NewGuid():N}.ifcxml");
+        try
+        {
+            IfcFileLoader.WriteText(tempPath, UnorderedFixture, "adapter-source.ifc");
+
+            var result = new XbimDocumentAdapter().LoadAsync(tempPath).GetAwaiter().GetResult();
+
+            True(result.IsIfcXml, "adapter should mark ifcXML inputs");
+            Equal("IFC4X3_ADD2", result.Document.Schema, "adapter parsed schema");
+            True(result.Document.Diagnostics.Messages.Any(message => message.Contains("xBIM adapter bridge", StringComparison.OrdinalIgnoreCase)), "adapter should add xBIM diagnostics");
         }
         finally
         {
@@ -362,7 +430,7 @@ internal sealed class NativeTestRunner
             && relationship.TargetIds.Contains(opening!.Id)), "void relationship not indexed");
         True(edited.PlacementsByEntity.ContainsKey(opening!.Id), "opening placement not indexed");
         True(edited.RepresentationsByEntity.TryGetValue(opening.Id, out var representation), "opening body representation not indexed");
-        var solid = edited.EntityById[representation.GeometryItemIds[0]];
+        var solid = edited.EntityById[representation!.GeometryItemIds[0]];
         Equal("IFCEXTRUDEDAREASOLID", solid.Type, "opening body solid type");
         Equal("2.1", solid.Arguments[3], "opening body height");
         True(IfcDiffService.Summarize(document, edited).Any(line => line.Contains("IFCRELVOIDSELEMENT")), "opening diff should show void relationship");
@@ -383,7 +451,7 @@ internal sealed class NativeTestRunner
             && relationship.TargetIds.Contains(filling!.Id)), "fill relationship not indexed");
         True(edited.PlacementsByEntity.TryGetValue(filling!.Id, out var placement) && placement.RelativeToId == edited.PlacementsByEntity[opening.Id].PlacementId, "filling placement should be relative to opening");
         True(edited.RepresentationsByEntity.TryGetValue(filling.Id, out var representation), "filling body representation not indexed");
-        var solid = edited.EntityById[representation.GeometryItemIds[0]];
+        var solid = edited.EntityById[representation!.GeometryItemIds[0]];
         Equal("IFCEXTRUDEDAREASOLID", solid.Type, "filling body solid type");
         Equal("2.", solid.Arguments[3], "filling body height");
         True(IfcDiffService.Summarize(withOpening, edited).Any(line => line.Contains("IFCRELFILLSELEMENT")), "filling diff should show fill relationship");
@@ -396,7 +464,7 @@ internal sealed class NativeTestRunner
         var assigned = IfcDocumentEditor.AssignBodyRepresentation(document, 40, "5", "2.5", "3", "rectangle");
 
         True(assigned.RepresentationsByEntity.TryGetValue(40, out var representation), "body representation was not indexed for product");
-        True(representation.GeometryItemIds.Count == 1, "body representation should contain one solid item");
+        True(representation!.GeometryItemIds.Count == 1, "body representation should contain one solid item");
         var solid = assigned.EntityById[representation.GeometryItemIds[0]];
         Equal("IFCEXTRUDEDAREASOLID", solid.Type, "assigned body solid type");
         Equal("3.", solid.Arguments[3], "assigned body height");
@@ -412,6 +480,28 @@ internal sealed class NativeTestRunner
         var cylinderProfileId = int.Parse(cylinderSolid.Arguments[0].TrimStart('#'));
         Equal("IFCCIRCLEPROFILEDEF", cylinder.EntityById[cylinderProfileId].Type, "assigned cylinder profile type");
         Equal("1.", cylinder.EntityById[cylinderProfileId].Arguments[3], "assigned cylinder radius");
+    }
+
+    private static void GeometryBackendProjectsBodyDimensions()
+    {
+        var document = IfcStepParser.CreateSample();
+        var assigned = IfcDocumentEditor.AssignBodyRepresentation(document, 40, "5", "2.5", "3", "rectangle");
+        var backend = new StepReferenceGeometryBackend();
+
+        var preview = backend.ProjectDocument(assigned).Single(item => item.EntityId == 40);
+
+        Equal("box", preview.Shape, "rectangle body preview shape");
+        Equal(5d, preview.Width, "rectangle body preview width");
+        Equal(2.5d, preview.Depth, "rectangle body preview depth");
+        Equal(3d, preview.Height, "rectangle body preview height");
+        Equal(1.5d, preview.CenterZ, "rectangle body preview center height");
+
+        var cylinder = IfcDocumentEditor.AssignBodyRepresentation(document, 40, "2", "2", "4", "cylinder");
+        var cylinderPreview = backend.ProjectDocument(cylinder).Single(item => item.EntityId == 40);
+
+        Equal("cylinder", cylinderPreview.Shape, "cylinder body preview shape");
+        Equal(2d, cylinderPreview.Width, "cylinder body preview diameter");
+        Equal(4d, cylinderPreview.Height, "cylinder body preview height");
     }
 
     private static void PropertyTemplatesCreateIndexedPsetAndQto()
@@ -495,7 +585,7 @@ internal sealed class NativeTestRunner
             && relationship.TargetIds.Contains(product.Id)), "new product containment relationship not indexed");
         True(edited.SpatialPathByEntity.TryGetValue(product.Id, out var path) && path.Contains("Level 0") && path.Contains("Native Child"), "new product spatial path not indexed");
 
-        var solid = edited.EntityById[representation.GeometryItemIds[0]];
+        var solid = edited.EntityById[representation!.GeometryItemIds[0]];
         Equal("IFCEXTRUDEDAREASOLID", solid.Type, "new product body solid type");
         Equal("3.", solid.Arguments[3], "new product body height");
     }
@@ -644,6 +734,64 @@ internal sealed class NativeTestRunner
         True(IfcDiffService.Summarize(document, withRepresentation).Any(line => line.Contains("#40") && line.Contains("arg 7")), "representation repair diff should show edited Representation argument");
     }
 
+    private static void IdsValidationReportsEntityRequirements()
+    {
+        var document = IfcStepParser.CreateSample();
+        var passing = """
+<ids>
+  <specifications>
+    <specification>
+      <requirements>
+        <entity>
+          <name><simpleValue>IFCBUILDINGELEMENTPROXY</simpleValue></name>
+        </entity>
+      </requirements>
+    </specification>
+  </specifications>
+</ids>
+""";
+        var failing = passing.Replace("IFCBUILDINGELEMENTPROXY", "IFCWALL", StringComparison.Ordinal);
+
+        var passingResult = IdsValidationService.Validate(document, passing);
+        True(passingResult.IsValid, "matching IDS entity requirement should pass");
+        True(passingResult.Issues.Any(issue => issue.EntityId == 40), "passing IDS result should navigate to a matching entity");
+
+        var failingResult = IdsValidationService.Validate(document, failing);
+        True(!failingResult.IsValid, "missing IDS entity requirement should fail");
+        True(failingResult.Issues.Any(issue => issue.Severity == "Error" && issue.Message.Contains("IFCWALL", StringComparison.Ordinal)), "failing IDS result should name missing entity type");
+
+        IdsValidationService.AppendDiagnostics(document, failingResult);
+        True(document.Diagnostics.Messages.Any(message => message.Contains("IFCWALL", StringComparison.Ordinal)), "IDS diagnostics should append to document diagnostics");
+    }
+
+    private static void AdvancedSearchFiltersModelIndexes()
+    {
+        var document = IfcDocumentEditor.AddSimpleMaterialAssignment(IfcStepParser.CreateSample(), 40, "Native Concrete");
+
+        var propertyMatches = IfcAdvancedSearch.Search(
+            document,
+            new IfcAdvancedSearchQuery(
+                Text: "Inspection",
+                Type: "IFCBUILDINGELEMENTPROXY",
+                RelationshipKind: "IFCRELDEFINESBYPROPERTIES",
+                HasProperties: true));
+
+        True(propertyMatches.Any(entity => entity.Id == 40), "advanced search should find proxy by text/type/relationship/properties");
+
+        var resourceMatches = IfcAdvancedSearch.Search(
+            document,
+            new IfcAdvancedSearchQuery(Text: "Concrete", HasResources: true));
+
+        True(resourceMatches.Any(entity => entity.Id == 40), "advanced search should find resource-backed product");
+
+        var diagnosticDocument = IfcStepParser.Parse(MissingRelationshipReferenceFixture, "missing-reference.ifc");
+        var diagnosticMatches = IfcAdvancedSearch.Search(
+            diagnosticDocument,
+            new IfcAdvancedSearchQuery(DiagnosticSeverity: "Warning"));
+
+        True(diagnosticMatches.Any(entity => entity.Id == 40 || entity.Id == 53), "advanced search should find entities mentioned in warning diagnostics");
+    }
+
     private static void RelationshipGraphSupportsFilterAndDepth()
     {
         var document = IfcStepParser.CreateSample();
@@ -655,6 +803,22 @@ internal sealed class NativeTestRunner
         var filtered = IfcSelectionProjector.ProjectRelationshipGraph(document, proxy, "IFCPROPERTYSET", 2);
         True(filtered.Any(item => item.EntityId == 60), "filtered graph should keep matching property set neighbor");
         True(filtered.All(item => item.EntityId is not 30), "filtered graph should hide non-matching spatial neighbor");
+    }
+
+    private static void MsaglRelationshipGraphLayoutPositionsNodes()
+    {
+        var document = IfcStepParser.CreateSample();
+        var proxy = document.EntityById[40];
+        var graphItems = IfcSelectionProjector.ProjectRelationshipGraph(document, proxy, null, 2);
+
+        var layout = MsaglRelationshipGraphLayout.Project(document, proxy, graphItems, "LR");
+
+        True(layout.Nodes.Any(node => node.IsSelected && node.EntityId == 40), "MSAGL layout should include selected entity node");
+        True(layout.Nodes.Any(node => node.RelationshipId == 53), "MSAGL layout should include relationship hub node");
+        True(layout.Nodes.Any(node => node.EntityId == 30), "MSAGL layout should include neighbor entity node");
+        True(layout.Edges.Count > 0, "MSAGL layout should create edges");
+        True(layout.Width >= 420 && layout.Height >= 260, "MSAGL layout should report usable canvas bounds");
+        True(layout.Nodes.All(node => double.IsFinite(node.X) && double.IsFinite(node.Y)), "MSAGL layout should return finite node positions");
     }
 
     private static void NativeWindowLayoutStorePersistsSanitizedLayout()
@@ -675,6 +839,32 @@ internal sealed class NativeTestRunner
             Equal(1100d, loaded.WindowWidth, "window width should be clamped to minimum");
             Equal(700d, loaded.WindowHeight, "window height should be clamped to minimum");
             Equal(Path.GetFullPath(lastIfcPath), loaded.LastOpenedIfcPath, "last opened IFC path should persist as a full path");
+        }
+        finally
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+    }
+
+    private static void NativeWindowLayoutStorePersistsAvalonDockXml()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"ifcnative-avalondock-layout-{Guid.NewGuid():N}.json");
+        try
+        {
+            var store = new NativeWindowLayoutStore(path);
+            const string xml = "<LayoutRoot><RootPanel Orientation=\"Horizontal\" /></LayoutRoot>";
+
+            store.Save(new(AvalonDockLayoutXml: xml));
+            var loaded = store.Load();
+
+            Equal(xml, loaded.AvalonDockLayoutXml, "AvalonDock XML should persist");
+
+            store.Save(new(AvalonDockLayoutXml: "not xml"));
+            var sanitized = store.Load();
+            Equal<string?>(null, sanitized.AvalonDockLayoutXml, "invalid AvalonDock XML should be ignored");
         }
         finally
         {
@@ -732,8 +922,9 @@ internal sealed class NativeTestRunner
         True(redone is not null && redone.EntityById[40].Name == "First Draft Proxy", "redo should restore applied draft");
         True(session.CanUndo, "redo should restore undo checkpoint");
 
-        var secondDraft = IfcDocumentEditor.UpdateEntity(redone, 40, "Second Draft Proxy", string.Empty, string.Join(",", redone.EntityById[40].Arguments));
-        session.Stage(redone, secondDraft);
+        var redoneDocument = redone!;
+        var secondDraft = IfcDocumentEditor.UpdateEntity(redoneDocument, 40, "Second Draft Proxy", string.Empty, string.Join(",", redoneDocument.EntityById[40].Arguments));
+        session.Stage(redoneDocument, secondDraft);
         session.Apply("Rename proxy again");
         Equal("Rename proxy again", session.NextUndoName, "latest named changeset should be first undo");
         True(!session.CanRedo, "new apply should clear redo history");

@@ -11,4 +11,8 @@
     <ProjectReference Include="..\NativeWindows\IFCnative.NativeWindows.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Msagl.WpfGraphControl" Version="1.2.1" />
+  </ItemGroup>
+
 </Project>

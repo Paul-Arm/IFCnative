@@ -17,12 +17,17 @@ Completed:
 - Builder, inspector, and graph mutations now stage a draft document instead of immediately replacing the active IFC.
 - Export is disabled while a draft is pending; user can Apply or Discard after inspecting the diff.
 - Verified with `npm run test:ifc` and `npm run build`.
+- Native Windows pass now also has package-backed services for xBIM/Helix/AvalonDock status, ifcXML `stepText` load/export, IDS entity-requirement diagnostics, advanced IFC search, and AvalonDock layout XML persistence groundwork.
+- Verified native services with `dotnet run --project NativeWindows.Tests\IFCnative.NativeWindows.Tests.csproj` and `dotnet build NativeWindows\IFCnative.NativeWindows.csproj` on Windows/.NET 9.
+- Native graph pass now uses MSAGL auto-layout in the WPF graph, with copy and paste-as-link-draft through the existing review workflow.
 
 Suggested next iterations:
 
 - Improve 3D viewer editing: transform controls for selected object, with draft move operation instead of immediate write.
+- Replace the STEP-preview viewport with the pinned xBIM Geometry + HelixToolkit mesh backend.
+- Migrate visible panes to AvalonDock using the persisted layout XML support.
 - Add simple body creation presets with dimensions and placement fields, ideally using rectangular swept solids.
-- Make graph expansion/filtering stronger: relationship-type filters, neighborhood search, pinned layouts persisted in document/session.
+- Continue the native WPF graph pass: richer node templates, minimap/overview, persisted pins, and more graph-native relationship edit flows.
 - Improve diff preview from single-hunk prefix/suffix into entity-aware diffs grouped by STEP id.
 - Add tests for staged draft behavior and new builder helpers.
 

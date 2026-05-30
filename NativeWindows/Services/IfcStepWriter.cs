@@ -8,18 +8,19 @@ public static class IfcStepWriter
     public static string Serialize(IfcDocument document)
     {
         var builder = new StringBuilder();
-        builder.AppendLine("ISO-10303-21;");
-        builder.Append(document.HeaderText.TrimEnd());
-        builder.AppendLine();
-        builder.AppendLine("DATA;");
+        builder.Append("ISO-10303-21;\n");
+        builder.Append(NormalizeLineEndings(document.HeaderText.TrimEnd()));
+        builder.Append('\n');
+        builder.Append("DATA;\n");
 
         foreach (var entity in document.Entities)
         {
-            builder.AppendLine(SerializeEntity(entity));
+            builder.Append(SerializeEntity(entity));
+            builder.Append('\n');
         }
 
-        builder.AppendLine("ENDSEC;");
-        builder.AppendLine("END-ISO-10303-21;");
+        builder.Append("ENDSEC;\n");
+        builder.Append("END-ISO-10303-21;\n");
         return builder.ToString();
     }
 
@@ -29,10 +30,15 @@ public static class IfcStepWriter
             && entity.OriginalArguments.SequenceEqual(entity.Arguments, StringComparer.Ordinal)
             && entity.OriginalStepLine.Contains($"#{entity.Id}", StringComparison.Ordinal))
         {
-            return entity.OriginalStepLine.TrimEnd();
+            return NormalizeLineEndings(entity.OriginalStepLine.TrimEnd());
         }
 
         return $"#{entity.Id}= {entity.Type}({string.Join(",", entity.Arguments)});";
+    }
+
+    private static string NormalizeLineEndings(string text)
+    {
+        return text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
     }
 
     public static int NextEntityId(IfcDocument document)

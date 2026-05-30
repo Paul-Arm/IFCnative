@@ -37,3 +37,11 @@ Goal: evolve IFCnative from an IFC viewer/builder into a staged, inspectable ful
 4. Replace text-only diff hunking with entity-aware grouped diffs.
 5. Add deletion and move workflows with reference impact checks.
 
+## Native Windows status, 2026-05-24
+
+- Implemented in `NativeWindows/`: draft-first apply/discard/export gating, named undo/redo checkpoints, entity-aware diff summaries, spatial/relationship/property/resource/placement/body workflows, STEP-derived native viewport preview, diagnostics/repair flows, and graph filters/depth controls.
+- Added this pass: pinned xBIM/HelixToolkit/AvalonDock package bridge, IFCnative `.ifcxml` `stepText` load/export, Diagnostics-tab IDS entity-requirement validation, advanced IFC search filters, and AvalonDock layout XML persistence groundwork.
+- Windows-native graph now uses MSAGL auto-layout, WPF-customizable IFC nodes, and draft-safe graph copy/paste link creation.
+- Verified with `dotnet run --project NativeWindows.Tests\IFCnative.NativeWindows.Tests.csproj` and `dotnet build NativeWindows\IFCnative.NativeWindows.csproj` on Windows/.NET 9.
+- Remaining full-editor gaps: xBIM tessellated mesh viewport, visible AvalonDock docking UI, full IDS/MVD validator mapping, full buildingSMART ifcXML mapping, richer typed editors/pickers, and true large-file streaming/chunked geometry.
+

@@ -22,7 +22,8 @@ Important constraint from Paul: the native app is a separate/additional folder/p
 - Vite React 19 app using TypeScript.
 - IFC loading with `web-ifc` and ThatOpen/Fragments-related dependencies.
 - Mosaic/pane-based IFC workspace.
-- Relationship graph UI using React Flow.
+- Relationship graph UI using React Flow in the Web app.
+- Windows-native relationship graph now uses MSAGL for automatic layout while keeping WPF-customizable nodes, graph pan/zoom, graph selection, and draft-safe copy/paste link creation.
 - Three/ThatOpen viewer components.
 - IFC builder utilities for minimal IFC4X3 projects.
 - STEP preflight checks: ISO marker, header/data sections, schema extraction.
@@ -39,8 +40,9 @@ Important constraint from Paul: the native app is a separate/additional folder/p
 - `NativeWindows/IFCnative.NativeWindows.csproj` targets `net9.0-windows` with WPF enabled.
 - `NativeWindows.Tests/` contains a lightweight native service test runner for parser/index/edit/diff/draft behavior; execution still needs a Windows/dotnet environment.
 - Current C# shell code already includes:
-  - Open IFC/STEP/ifcZIP file dialog.
-  - Export IFC/ifcZIP file dialog.
+  - Open IFC/STEP/ifcZIP/ifcXML file dialog.
+  - Export IFC/ifcZIP/ifcXML file dialog.
+  - xBIM/HelixToolkit/AvalonDock package bridge status through the native capability panel.
   - Sample IFC loader.
   - STEP preflight diagnostics.
   - Header/schema extraction.
@@ -50,10 +52,12 @@ Important constraint from Paul: the native app is a separate/additional folder/p
   - Property/quantity, type assignment, resource, unit, product placement, and product representation indexes.
   - Spatial containment tree.
   - Entity search.
+  - Advanced search service for id/type/name/GlobalId/spatial path plus relationship, diagnostic, property, and resource filters.
   - Entity inspector for id/type/GlobalId/name/description/raw arguments.
   - Basic entity edit/export by reparsing serialized STEP text.
   - Type count list.
-  - Placeholder native viewport status/actions.
+  - STEP-derived native viewport body preview with product picking.
+  - Basic IDS entity-requirement validation service that can append grouped diagnostics.
 - Gap found: `App.xaml` references `MainWindow.xaml`, but `MainWindow.xaml` is missing in the branch, so the native WPF project is incomplete until the XAML view is added.
 
 ## Current function/capability checklist
@@ -69,7 +73,7 @@ Status legend: `[x] current`, `[~] partial`, `[ ] planned/native rewrite target`
 - [x] Preserve original STEP ids and order during export. Native serialization now keeps parsed DATA entity order and appends newly created entities after existing rows.
 - [~] Large-file memory strategy: async sequential file loading with progress/cancellation; streaming parser and lazy indexes still pending.
 - [~] Recent files/session restore. Native shell now persists recent IFC paths, can reopen/clean missing entries, restores window/pane visibility plus pane widths, and automatically reopens the last IFC workspace on startup when the file is still available.
-- [~] ifcZIP/ifcXML support. Native file loader can open `.ifczip`/`.zip` archives and extract the first IFC/STEP entry; export can write validated IFC text into `.ifczip` archives; ifcXML remains pending.
+- [~] ifcZIP/ifcXML support. Native file loader can open `.ifczip`/`.zip` archives and extract the first IFC/STEP/IFCnative-ifcXML entry; export can write validated IFC text into `.ifczip` archives; direct `.ifcxml` load/export is available through a safe `stepText` roundtrip payload while full buildingSMART/xBIM ifcXML mapping remains pending.
 
 ### Parsing/indexing
 
@@ -88,7 +92,7 @@ Status legend: `[x] current`, `[~] partial`, `[ ] planned/native rewrite target`
 - [x] Entity inspector.
 - [x] Incoming references panel.
 - [x] Type counts.
-- [~] Global search by id/type/name/GlobalId/spatial path; advanced filters still pending.
+- [~] Global search by id/type/name/GlobalId/spatial path. Advanced native search service now supports type, relationship kind, diagnostic severity, property presence, and resource presence filters; WPF filter UI for those advanced fields remains pending.
 - [x] Pinned selections/bookmarks for quick navigation.
 - [x] Full spatial path display for selected entity.
 
@@ -96,8 +100,8 @@ Status legend: `[x] current`, `[~] partial`, `[ ] planned/native rewrite target`
 
 - [x] Basic name/description/raw argument editing.
 - [~] TypeScript draft mutation helpers for elements, relationships, properties, quantities, resources, types, units, placement, and body representations.
-- [ ] Native draft transaction model.
-- [ ] Apply/discard review UI.
+- [~] Native draft transaction model. `IfcDraftSession` now stages draft documents, blocks export while pending, applies/discards, and keeps named undo/redo checkpoints; operation metadata/snapshots are still being deepened.
+- [x] Apply/discard review UI.
 - [~] Undo/redo or named changesets. Applied native drafts now create named undo/redo checkpoints in `IfcDraftSession`; the WPF Draft tab can label a changeset, shows next undo/redo names, and lists recent checkpoint summaries.
 - [~] Safe targeted serializer preserving formatting/order where practical. Native STEP export now keeps parsed DATA entity order and preserves untouched entity source text/formatting, edited/new entities serialize canonically, and STEP writer/id allocation helpers are centralized in `IfcStepWriter`.
 
@@ -106,7 +110,7 @@ Status legend: `[x] current`, `[~] partial`, `[ ] planned/native rewrite target`
 - [~] Spatial tree display.
 - [~] TypeScript helpers can add elements and relationships.
 - [~] Native create/edit/move/reparent spatial nodes. First-pass reparent draft editor now updates existing containment/aggregation parents with cycle/spatial-parent guards; spatial parents can now stage new contained product presets with placement/body geometry; first-pass detach/delete spatial-link workflow removes selected entities from containment/aggregation relationships.
-- [~] Native relationship graph/editor with filters/depth/pinning. Relationship endpoints can now be selected and staged from the inspector, and the relationship neighborhood graph now has text/type/id/name filtering, depth-1/depth-2 expansion controls, relationship hub nodes, edge labels, and graph-to-relationship editor selection; richer visual graph layout remains pending.
+- [~] Native relationship graph/editor with filters/depth/pinning. Relationship endpoints can now be selected and staged from the inspector, and the Windows-native relationship neighborhood graph now has text/type/id/name filtering, depth-1/depth-2 expansion controls, MSAGL auto-layout (`LR`/`TB`), relationship hub nodes, edge labels, graph-to-relationship editor selection, and draft-safe graph copy/paste link creation; richer node templates and persisted pin positions remain pending.
 - [~] Relationship create/edit/delete with endpoint validation. Existing common relationship endpoints can now be draft-edited by source/target STEP ids, selected relationships can be staged for deletion, common indexed relationship types can now be created from source/target STEP ids with diff review/export gating, and first-pass product connect/disconnect buttons use `IFCRELCONNECTSELEMENTS`; richer relationship-specific creation forms remain pending.
 - [~] Opening/fill and connect/disconnect workflows. First-pass native opening/void workflow can stage a new `IFCOPENINGELEMENT` with placement/body preset plus `IFCRELVOIDSELEMENT`; selected openings can now stage a filling element with body preset plus `IFCRELFILLSELEMENT`; selected products can now stage first-pass `IFCRELCONNECTSELEMENTS` connect/disconnect drafts with corrected endpoint indexing.
 
@@ -123,10 +127,10 @@ Status legend: `[x] current`, `[~] partial`, `[ ] planned/native rewrite target`
 
 - [x] Web app has `web-ifc` geometry streaming/indexing.
 - [~] TypeScript native document supports simple rectangle/cylinder body generation and placement updates; C# services now cover assigning rectangle/cylinder swept-solid representations to existing products.
-- [~] C# native project has viewport placeholders and product representation indexing.
-- [~] Native 3D viewport implementation. A geometry backend abstraction now feeds a first-pass STEP-reference viewport preview; actual mesh rendering is still pending.
+- [~] C# native project has product representation indexing plus a STEP-derived WPF `Viewport3D` body preview for indexed rectangle/cylinder/bounding-box-style solids.
+- [~] Native 3D viewport implementation. A geometry backend abstraction now feeds STEP-derived native preview geometry with camera fit/zoom and clickable product selection; full IFC mesh tessellation/streaming is still pending.
 - [ ] Efficient large-model mesh streaming/chunking.
-- [~] Selection sync between tree/graph/viewport. Tree/graph selections now update the geometry preview list; rendered mesh picking remains pending.
+- [~] Selection sync between tree/graph/viewport. Tree/graph selections update the geometry preview list, and rendered preview bodies can now be clicked to select their IFC product; full mesh picking remains pending.
 - [~] Product placement index and numeric placement editor; transform controls still pending.
 - [~] Body presets: native service and WPF UI can stage rectangle/cylinder swept-solid body representations for existing selected products, create new contained product presets under spatial parents, and create first-pass opening voids with body geometry under selected host products with draft review/export gating.
 
@@ -146,24 +150,27 @@ Status legend: `[x] current`, `[~] partial`, `[ ] planned/native rewrite target`
 - [~] Native validation panel with grouped severity. Diagnostics are now projected into severity-ranked rows with first-pass repair suggestions, can be filtered by severity/message/suggestion text, and diagnostic rows with STEP ids navigate to the referenced entity; richer issue-specific repair actions still pending.
 - [~] Missing/duplicate GlobalId, missing refs, physical product placement/representation, and multiple primary containment diagnostics.
 - [~] Repair suggestions/actions. First-pass suggestions exist for STEP envelope, missing refs, missing/duplicate GlobalIds, containment, placement, and representation diagnostics; missing GlobalId diagnostics can stage generated ids, duplicate GlobalId diagnostics now expose a staged repair action that regenerates duplicate ids after the first occurrence, multiple-primary-containment diagnostics can stage a repair that keeps the first containment relationship while removing duplicate product links through the diff/export gate, missing relationship reference diagnostics can stage removal of dangling endpoints or delete now-empty relationships, and missing/invalid placement or representation diagnostics can stage default local placement/body repairs.
-- [ ] IDS/MVD validation.
+- [~] IDS/MVD validation. The Diagnostics tab can open `.ids`/XML files, a native IDS XML service evaluates entity requirements, and passing/failing results append navigable diagnostics; full xBIM IDS validator result mapping and MVD rule coverage remain pending.
 
 ## Rewrite work queue
 
 1. [x] Clone/fetch repo and create rewrite branch.
 2. [x] Create this inventory/tracking document.
-3. [~] Make native WPF project structurally complete and buildable by adding missing XAML and project defaults. XAML is present; Windows/dotnet build verification still pending.
+3. [x] Make native WPF project structurally complete and buildable by adding missing XAML and project defaults. XAML is present and `dotnet build NativeWindows\IFCnative.NativeWindows.csproj` passes on Windows/.NET 9.
 4. [~] Split native shell into UI + services + view models so large lists can be virtualized and tested. Selection/inspector projection, navigation/type/search/bookmark projection, placement editor projection, entity-edit draft creation, draft-session state, and persisted native window-layout state have moved out of `MainWindow` into service/view-model classes; command wiring still needs further extraction.
 5. [~] Port TypeScript native document capabilities to C# services: first-pass relationship model/indexing, property/resource/type/unit/placement/representation read indexes, numeric placement edit helper, existing-product body assignment helper, centralized STEP writer/id allocation helpers, and first malformed/duplicate-entity parser recovery done; broader create/delete edit helpers remain.
 6. [~] Implement draft transaction model and native diff summary. Entity/placement and broader editor operations now stage drafts with apply/discard; applied drafts now support named undo/redo checkpoints, while richer persisted changeset metadata remains pending.
 7. [~] Add large-file parser/index strategy with progress and cancellation. Async sequential file loading with cancel/progress is done; parser/index streaming still pending.
 8. [~] Implement native relationship/spatial/property editor panels. Editable Psets/Qto raw values, common Pset/base Qto template creation, simple material/classification/document/library assignment, common relationship endpoint source/target draft edits, common relationship creation, selected relationship deletion, first-pass element connect/disconnect workflows, first-pass spatial reparent draft editing, spatial-parent product creation presets, spatial detach/delete-link workflows, and first-pass opening/void/fill creation are in place; richer typed forms/cascade workflows remain pending.
-9. [~] Implement geometry backend abstraction and first viewport. `IIfcGeometryBackend` plus a STEP-reference preview backend now drives the native viewport panel; the WPF shell now renders a first native `Viewport3D` block preview with generated sample geometry, while a real native mesh/tessellation backend (prefer HelixToolkit/SharpDX/DirectX + IfcOpenShell/native worker over WASM if feasible) remains pending.
-10. [~] Add native test project for parser/index/edit/diff services. A lightweight `NativeWindows.Tests` runner now covers sample parsing/indexes, entity/property/relationship/spatial/placement edits, diff summaries, and draft export gating; Windows/dotnet execution remains pending.
-11. [ ] Run Windows build/tests on a Windows-capable environment; current host is macOS and lacks `dotnet`.
+9. [~] Implement geometry backend abstraction and first viewport. `IIfcGeometryBackend` plus a STEP-reference preview backend now drives the native viewport panel; the WPF shell now renders a first native `Viewport3D` block preview with generated sample geometry, and HelixToolkit/xBIM Geometry packages are pinned as the next mesh backend bridge; full tessellation/streaming remains pending.
+10. [x] Add native test project for parser/index/edit/diff services. `NativeWindows.Tests` now covers sample parsing/indexes, file formats, dependency status, ifcXML roundtrip, IDS entity requirements, advanced search, entity/property/relationship/spatial/placement edits, diff summaries, and draft export gating.
+11. [x] Run Windows build/tests on a Windows-capable environment. `dotnet run --project NativeWindows.Tests\IFCnative.NativeWindows.Tests.csproj` and `dotnet build NativeWindows\IFCnative.NativeWindows.csproj` pass on Windows/.NET 9.
 
 ## Verification log
 
+- 2026-05-24 23:55 Europe/Berlin: corrected the graph work back to Windows-native: added `Msagl.WpfGraphControl 1.2.1`, added `MsaglRelationshipGraphLayout`, switched the WPF graph canvas from hand-positioned circular layout to MSAGL automatic layout with left-to-right/top-to-bottom buttons, and added graph copy plus paste-link-as-draft through the existing review/export gate. `dotnet run --project NativeWindows.Tests\IFCnative.NativeWindows.Tests.csproj --no-restore` now passes 46 tests, and `dotnet build NativeWindows\IFCnative.NativeWindows.csproj --no-restore` passes.
+- 2026-05-24 23:42 Europe/Berlin: pinned native library bridge packages (`Xbim.Essentials 6.0.587`, `Xbim.Geometry 6.3.873-netcore`, `Xbim.IDS.Validator.Core 1.0.187`, `HelixToolkit.Wpf.SharpDX 3.1.2`, `Xceed.Products.Wpf.Toolkit.AvalonDock 5.1.26166.7861`), added runtime dependency status projection, added `XbimDocumentAdapter`, safe IFCnative `.ifcxml` `stepText` load/export, Diagnostics-tab IDS entity-requirement validation, advanced native search service, and AvalonDock layout XML persistence groundwork. Verification passed: `dotnet restore NativeWindows\IFCnative.NativeWindows.csproj`, `dotnet restore NativeWindows.Tests\IFCnative.NativeWindows.Tests.csproj`, `dotnet run --project NativeWindows.Tests\IFCnative.NativeWindows.Tests.csproj --no-restore` (45 tests), `dotnet build NativeWindows\IFCnative.NativeWindows.csproj --no-restore`, `npm run test:ifc`, `npm run lint`, and `npm run build`.
+- 2026-05-24 23:03 Europe/Berlin: read all repo Markdown requirement files and implemented a visible native viewport pass: `StepReferenceGeometryBackend` now projects STEP-derived preview shape metadata for rectangle/cylinder/bounding-box-style bodies, the WPF `Viewport3D` renders those bodies at indexed placements with fit/zoom and click-to-select synchronization, and `NativeWindows.Tests` covers body dimension projection. `dotnet run --project NativeWindows.Tests\IFCnative.NativeWindows.Tests.csproj`, `dotnet build NativeWindows\IFCnative.NativeWindows.csproj`, `npm run test:ifc`, `npm run lint`, and `npm run build` pass on Windows/.NET 9.
 - 2026-05-24 12:18 Europe/Berlin: repo fetched, branch created.
 - 2026-05-24 12:20 Europe/Berlin: native build attempted on current host; blocked because `dotnet` command is not installed on this macOS host.
 - 2026-05-24 12:28 Europe/Berlin: added native relationship model/index, relationship inspector tab, duplicate GlobalId diagnostics, missing relationship reference diagnostics, and multiple primary spatial containment diagnostics. Existing web tests/build still pass on macOS.

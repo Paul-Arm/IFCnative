@@ -8,4 +8,5 @@ public sealed record NativeWindowLayout(
     double InspectorPaneWidth = 380,
     double WindowWidth = 1440,
     double WindowHeight = 900,
-    string? LastOpenedIfcPath = null);
+    string? LastOpenedIfcPath = null,
+    string? AvalonDockLayoutXml = null);
