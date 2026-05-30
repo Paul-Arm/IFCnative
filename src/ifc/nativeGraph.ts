@@ -70,6 +70,8 @@ const PRESET_RELATIONSHIPS: Record<NativeGraphPreset, string[] | undefined> = {
     'IFCRELASSOCIATESCLASSIFICATION',
     'IFCRELASSOCIATESDOCUMENT',
     'IFCRELASSOCIATESLIBRARY',
+    'IFCRELASSOCIATESCONSTRAINT',
+    'IFCRELASSOCIATESAPPROVAL',
   ],
   spatial: [
     'IFCRELAGGREGATES',
@@ -193,7 +195,7 @@ function graphWarnings(
   );
   const warnings: NativeGraphWarning[] = [];
 
-  for (const relationship of document.relationships) {
+  for (const relationship of visibleRelationshipCandidates(document, visible)) {
     const relationshipVisible = relationshipIds.has(relationship.id);
     const endpointVisible = [...relationship.sourceIds, ...relationship.targetIds].some((id) => visible.has(id));
     if (!relationshipVisible && !endpointVisible) {
@@ -219,6 +221,19 @@ function graphWarnings(
   }
 
   return warnings.slice(0, 12);
+}
+
+function visibleRelationshipCandidates(
+  document: NativeIfcDocument,
+  visible: Set<number>,
+) {
+  const candidates = new Map<number, NativeIfcRelationship>();
+  for (const id of visible) {
+    for (const relationship of document.relationshipsByEntity.get(id) ?? []) {
+      candidates.set(relationship.id, relationship);
+    }
+  }
+  return [...candidates.values()];
 }
 
 function diagnosticsForRelationship(diagnostics: string[], relationshipId: number) {
@@ -283,7 +298,7 @@ function effectiveRelationshipTypes(preset: NativeGraphPreset, explicit?: Set<st
 }
 
 function relationshipsForSource(document: NativeIfcDocument, sourceId: number, relationshipTypes: Set<string>) {
-  return document.relationships.filter(
+  return (document.relationshipsByEntity.get(sourceId) ?? []).filter(
     (relationship) =>
       relationshipMatches(relationship, relationshipTypes) &&
       (relationship.sourceIds.includes(sourceId) || relationship.targetIds.includes(sourceId)),
@@ -301,7 +316,7 @@ function directChildCount(
   includeGeometryReferences = false,
 ) {
   return unique(
-    document.relationships.flatMap((relationship) => {
+    (document.relationshipsByEntity.get(id) ?? []).flatMap((relationship) => {
       if (!relationshipMatches(relationship, relationshipTypes)) {
         return [];
       }

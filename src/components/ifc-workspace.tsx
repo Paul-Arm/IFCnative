@@ -32,11 +32,22 @@ import {
 
 import {
     addNativeBodyElement,
+    addNativeApproval,
     addNativeClassification,
+    addNativeConstraintObjective,
     addNativeDocumentReference,
     addNativeElement,
     addNativeEmptyPropertySet,
+    addNativeLibraryReference,
+    addNativeGroupAssignment,
     addNativeMaterial,
+    addNativeMaterialConstituentSet,
+    addNativeMaterialLayerSet,
+    addNativeMaterialLayerSetUsage,
+    addNativeMaterialProfileSet,
+    addNativeMaterialProfileSetUsage,
+    addNativeMaterialStyle,
+    addNativeMaterialWithProperties,
     addNativePropertySet,
     addNativePropertyToSet,
     addNativeQuantitySet,
@@ -311,6 +322,15 @@ export default function IfcWorkspace() {
   const [graphRelationshipTypes, setGraphRelationshipTypes] = useState<
     Set<string>
   >(() => new Set());
+  const [graphFocusRequest, setGraphFocusRequest] = useState<{
+    entityId: number;
+    nonce: number;
+  } | null>(null);
+  const [viewerFocusRequest, setViewerFocusRequest] = useState<{
+    documentId: string;
+    entityId: number;
+    nonce: number;
+  } | null>(null);
   const [loadingIfcName, setLoadingIfcName] = useState("");
   const [catalog, setCatalog] = useState<IfcObjectCatalog | null>(null);
   const [catalogImporting, setCatalogImporting] = useState(false);
@@ -832,12 +852,68 @@ export default function IfcWorkspace() {
     setSelectedId(resolvedId);
     if (source === "graph") {
       setGraphAnchorId(resolvedId);
+      setGraphFocusRequest(null);
     }
     const entity = selectionDocument.entityById.get(resolvedId);
     logAction(
       `${source}.selectEntity({ id: ${resolvedId}, class: '${entity?.type ?? "UNKNOWN"}' });`,
     );
   };
+
+  const revealGraphWarningEntity = (id: number) => {
+    const entity = activeSession.document.entityById.get(id);
+    if (!entity) {
+      return;
+    }
+    setSelectedId(id);
+    setGraphAnchorId(id);
+    setGraphCollapsed((current) => removeFromSet(current, id));
+    setGraphExpanded((current) => addToSet(current, id));
+    setGraphFocusRequest({
+      entityId: id,
+      nonce: Date.now(),
+    });
+    logAction(
+      `graph.warning.reveal({ id: ${id}, class: '${entity.type}' });`,
+    );
+  };
+
+  const centerViewerCamera = (id = selectedId, source = "ui") => {
+    const entity = activeSession.document.entityById.get(id);
+    if (!entity) {
+      return;
+    }
+    setSelectedId(id);
+    if (!activeSession.viewerModelLoadRequested) {
+      requestActiveViewerLoad();
+    }
+    setViewerFocusRequest({
+      documentId: activeSession.id,
+      entityId: id,
+      nonce: Date.now(),
+    });
+    logAction(
+      `${source}.cameraCenter({ id: ${id}, class: '${entity.type}' });`,
+    );
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        (event.key !== "." && event.code !== "Period") ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        isEditableShortcutTarget(event.target)
+      ) {
+        return;
+      }
+      event.preventDefault();
+      centerViewerCamera(selectedId, structureMode === "graph" ? "graph" : "tree");
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [activeSession, selectedId, structureMode]);
 
   const openIfc = async () => {
     try {
@@ -1419,6 +1495,189 @@ export default function IfcWorkspace() {
     );
   };
 
+  const addMaterialWithProperties = (
+    materialName: string,
+    materialCategory: string,
+    propertySetName: string,
+    propertyRows: string,
+  ) => {
+    const next = addNativeMaterialWithProperties(
+      document,
+      selectedId,
+      materialName,
+      materialCategory,
+      propertySetName,
+      propertyRows,
+    );
+    commitDocument(
+      next,
+      selectedId,
+      `Assign material '${materialName}' with properties to #${selectedId}`,
+      `addMaterialWithProperties({ objectId: ${selectedId}, name: ${JSON.stringify(materialName)} });`,
+    );
+  };
+
+  const addMaterialStyle = (
+    materialName: string,
+    materialCategory: string,
+    styleName: string,
+    color: string,
+    transparency: string,
+  ) => {
+    const next = addNativeMaterialStyle(
+      document,
+      selectedId,
+      materialName,
+      materialCategory,
+      styleName,
+      color,
+      transparency,
+    );
+    commitDocument(
+      next,
+      selectedId,
+      `Assign material style '${styleName}' to #${selectedId}`,
+      `addMaterialStyle({ objectId: ${selectedId}, material: ${JSON.stringify(materialName)}, color: ${JSON.stringify(color)} });`,
+    );
+  };
+
+  const addMaterialLayerSet = (setName: string, layerRows: string) => {
+    const next = addNativeMaterialLayerSet(
+      document,
+      selectedId,
+      setName,
+      layerRows,
+    );
+    commitDocument(
+      next,
+      selectedId,
+      `Assign material layer set '${setName}' to #${selectedId}`,
+      `addMaterialLayerSet({ objectId: ${selectedId}, name: ${JSON.stringify(setName)} });`,
+    );
+  };
+
+  const addMaterialLayerSetUsage = (
+    setName: string,
+    layerRows: string,
+    direction: string,
+    directionSense: string,
+    offset: string,
+    referenceExtent: string,
+  ) => {
+    const next = addNativeMaterialLayerSetUsage(
+      document,
+      selectedId,
+      setName,
+      layerRows,
+      direction,
+      directionSense,
+      offset,
+      referenceExtent,
+    );
+    commitDocument(
+      next,
+      selectedId,
+      `Assign material layer set usage '${setName}' to #${selectedId}`,
+      `addMaterialLayerSetUsage({ objectId: ${selectedId}, name: ${JSON.stringify(setName)} });`,
+    );
+  };
+
+  const addMaterialProfileSet = (
+    setName: string,
+    profileName: string,
+    materialName: string,
+    category: string,
+    width: string,
+    depth: string,
+  ) => {
+    const next = addNativeMaterialProfileSet(
+      document,
+      selectedId,
+      setName,
+      profileName,
+      materialName,
+      category,
+      width,
+      depth,
+    );
+    commitDocument(
+      next,
+      selectedId,
+      `Assign material profile set '${setName}' to #${selectedId}`,
+      `addMaterialProfileSet({ objectId: ${selectedId}, name: ${JSON.stringify(setName)} });`,
+    );
+  };
+
+  const addMaterialProfileSetUsage = (
+    setName: string,
+    profileName: string,
+    materialName: string,
+    category: string,
+    width: string,
+    depth: string,
+    cardinalPoint: string,
+    referenceExtent: string,
+  ) => {
+    const next = addNativeMaterialProfileSetUsage(
+      document,
+      selectedId,
+      setName,
+      profileName,
+      materialName,
+      category,
+      width,
+      depth,
+      cardinalPoint,
+      referenceExtent,
+    );
+    commitDocument(
+      next,
+      selectedId,
+      `Assign material profile set usage '${setName}' to #${selectedId}`,
+      `addMaterialProfileSetUsage({ objectId: ${selectedId}, name: ${JSON.stringify(setName)} });`,
+    );
+  };
+
+  const addMaterialConstituentSet = (
+    setName: string,
+    constituentRows: string,
+  ) => {
+    const next = addNativeMaterialConstituentSet(
+      document,
+      selectedId,
+      setName,
+      constituentRows,
+    );
+    commitDocument(
+      next,
+      selectedId,
+      `Assign material constituent set '${setName}' to #${selectedId}`,
+      `addMaterialConstituentSet({ objectId: ${selectedId}, name: ${JSON.stringify(setName)} });`,
+    );
+  };
+
+  const addGroupAssignment = (
+    groupType: string,
+    groupName: string,
+    objectType: string,
+    longName: string,
+  ) => {
+    const next = addNativeGroupAssignment(
+      document,
+      selectedId,
+      groupType,
+      groupName,
+      objectType,
+      longName,
+    );
+    commitDocument(
+      next,
+      selectedId,
+      `Assign ${groupType} '${groupName}' to #${selectedId}`,
+      `addGroupAssignment({ objectId: ${selectedId}, type: ${JSON.stringify(groupType)}, name: ${JSON.stringify(groupName)} });`,
+    );
+  };
+
   const addClassification = (
     identification: string,
     name: string,
@@ -1456,6 +1715,66 @@ export default function IfcWorkspace() {
       selectedId,
       `Assign document '${identification}' to #${selectedId}`,
       `addDocumentReference({ objectId: ${selectedId}, id: '${identification}' });`,
+    );
+  };
+
+  const addLibraryReference = (
+    identification: string,
+    name: string,
+    location: string,
+  ) => {
+    const next = addNativeLibraryReference(
+      document,
+      selectedId,
+      identification,
+      name,
+      location,
+    );
+    commitDocument(
+      next,
+      selectedId,
+      `Assign library '${identification}' to #${selectedId}`,
+      `addLibraryReference({ objectId: ${selectedId}, id: '${identification}' });`,
+    );
+  };
+
+  const addApproval = (identifier: string, name: string, status: string) => {
+    const next = addNativeApproval(
+      document,
+      selectedId,
+      identifier,
+      name,
+      status,
+    );
+    commitDocument(
+      next,
+      selectedId,
+      `Assign approval '${identifier || name}' to #${selectedId}`,
+      `addApproval({ objectId: ${selectedId}, id: '${identifier}' });`,
+    );
+  };
+
+  const addConstraint = (
+    name: string,
+    grade: string,
+    source: string,
+    qualifier: string,
+    intent: string,
+  ) => {
+    const next = addNativeConstraintObjective(
+      document,
+      selectedId,
+      name,
+      grade,
+      source,
+      qualifier,
+      intent,
+    );
+    commitDocument(
+      next,
+      selectedId,
+      `Assign constraint '${name}' to #${selectedId}`,
+      `addConstraint({ objectId: ${selectedId}, name: ${JSON.stringify(name)} });`,
     );
   };
 
@@ -1785,6 +2104,7 @@ export default function IfcWorkspace() {
           filteredEntities={filteredEntities}
           search={search}
           selectedId={selectedId}
+          onCenterCamera={(id) => centerViewerCamera(id, "tree")}
           onRemove={(id) => deleteEntity(id, "tree")}
           onSelect={selectEntity}
           onToggle={(id) => {
@@ -1803,6 +2123,7 @@ export default function IfcWorkspace() {
           depth={graphDepth}
           document={document}
           expanded={graphExpanded}
+          focusRequest={graphFocusRequest}
           pinned={graphPinned}
           positions={graphPositions}
           preset={graphPreset}
@@ -1823,6 +2144,7 @@ export default function IfcWorkspace() {
           onRelationshipTypeFilters={(filters) =>
             setGraphRelationshipTypes(new Set(filters))
           }
+          onRevealWarningEntity={revealGraphWarningEntity}
           onSelect={selectEntity}
           onToggleChildren={(id, loaded) => {
             if (loaded) {
@@ -1863,6 +2185,7 @@ export default function IfcWorkspace() {
           "info",
           "edit",
           "placement",
+          "geometry",
           "psets",
           "object-info",
           "relations",
@@ -1882,10 +2205,22 @@ export default function IfcWorkspace() {
         objectInfoFindings={objectInfoFindings}
         objectInfoIndex={objectInfoIndex}
         selectedId={selectedId}
+        onAddApproval={addApproval}
         onAddClassification={addClassification}
+        onAddConstraint={addConstraint}
         onAddDocumentReference={addDocumentReference}
+        onAddGroupAssignment={addGroupAssignment}
+        onAddLibraryReference={addLibraryReference}
         onAddMaterial={addMaterial}
+        onAddMaterialConstituentSet={addMaterialConstituentSet}
+        onAddMaterialLayerSet={addMaterialLayerSet}
+        onAddMaterialLayerSetUsage={addMaterialLayerSetUsage}
+        onAddMaterialProfileSet={addMaterialProfileSet}
+        onAddMaterialProfileSetUsage={addMaterialProfileSetUsage}
+        onAddMaterialStyle={addMaterialStyle}
+        onAddMaterialWithProperties={addMaterialWithProperties}
         onAssignType={assignType}
+        onAssignBodyToSelected={assignBodyToSelected}
         onAddEmptyPset={addEmptyPset}
         onAddPropertyToSet={addPropertyToSet}
         onAddQuantity={addQuantity}
@@ -1977,6 +2312,7 @@ export default function IfcWorkspace() {
               }
               activeModelFileName={activeSession.document.fileName}
               activeModelLoaded={activeSession.viewerModelLoadRequested}
+              focusRequest={viewerFocusRequest}
               models={viewerModels}
               onLog={logAction}
               onLoadActiveModel={requestActiveViewerLoad}
@@ -1995,13 +2331,24 @@ export default function IfcWorkspace() {
               coordinateClipboard={coordinateClipboard}
               document={document}
               selectedId={selectedId}
+              onAddApproval={addApproval}
               onAddClassification={addClassification}
+              onAddConstraint={addConstraint}
               onAddDocumentReference={addDocumentReference}
+              onAddGroupAssignment={addGroupAssignment}
+              onAddLibraryReference={addLibraryReference}
               onAssignType={assignType}
               onAddElement={addElement}
               onAddBodyElement={addBodyElement}
               onAssignBodyToSelected={assignBodyToSelected}
               onAddMaterial={addMaterial}
+              onAddMaterialConstituentSet={addMaterialConstituentSet}
+              onAddMaterialLayerSet={addMaterialLayerSet}
+              onAddMaterialLayerSetUsage={addMaterialLayerSetUsage}
+              onAddMaterialProfileSet={addMaterialProfileSet}
+              onAddMaterialProfileSetUsage={addMaterialProfileSetUsage}
+              onAddMaterialStyle={addMaterialStyle}
+              onAddMaterialWithProperties={addMaterialWithProperties}
               onAddRelationship={addRelationship}
               onAddPset={addPset}
               onAddQuantity={addQuantity}
@@ -2401,6 +2748,18 @@ function removeFromSet<T>(current: Set<T>, value: T) {
   const next = new Set(current);
   next.delete(value);
   return next;
+}
+
+function isEditableShortcutTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  return (
+    target.isContentEditable ||
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement
+  );
 }
 
 function filterEntitySet(current: Set<number>, document: NativeIfcDocument) {

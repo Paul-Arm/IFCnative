@@ -4,6 +4,7 @@ export type InspectorMode =
   | "info"
   | "edit"
   | "placement"
+  | "geometry"
   | "psets"
   | "object-info"
   | "relations"

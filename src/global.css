@@ -450,9 +450,22 @@ textarea {
   display: none !important;
 }
 
+.ifc-graph-panel {
+  display: grid;
+  grid-template-rows: minmax(240px, 1fr) auto;
+  gap: 8px;
+  width: 100%;
+  min-height: 0;
+  flex: 1;
+}
+
+.ifc-graph-panel-viewer {
+  min-height: 0;
+}
+
 .ifc-relationship-graph {
   display: grid;
-  grid-template-rows: auto auto minmax(220px, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   width: 100%;
   height: 100%;
   min-height: 240px;
@@ -550,34 +563,11 @@ textarea {
   color: #ffffff;
 }
 
-.ifc-graph-warning-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  overflow: hidden;
-  border-bottom: 1px solid #fde68a;
-  background: #fffbeb;
-  color: #92400e;
-  font-size: 11px;
-  padding: 6px 8px;
-}
-
-.ifc-graph-warning-bar strong {
-  flex: 0 0 auto;
-  font-weight: 900;
-}
-
-.ifc-graph-warning-bar span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .ifc-reactflow-shell {
   width: 100%;
   height: 100%;
   min-height: 0;
+  overflow: hidden;
 }
 
 .ifc-reactflow-shell .react-flow {
@@ -743,6 +733,69 @@ textarea {
   stroke: #2563eb;
 }
 
+.ifc-graph-warnings-panel {
+  display: grid;
+  gap: 6px;
+  max-height: 150px;
+  min-height: 42px;
+  overflow: auto;
+  border: 1px solid #fde68a;
+  border-radius: 6px;
+  background: #fffbeb;
+  color: #78350f;
+  padding: 8px;
+}
+
+.ifc-graph-warnings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.ifc-graph-warnings-header strong {
+  font-weight: 900;
+}
+
+.ifc-graph-warnings-list {
+  display: grid;
+  gap: 6px;
+}
+
+.ifc-graph-warning-item {
+  display: grid;
+  gap: 5px;
+  border-top: 1px solid rgb(251 191 36 / 45%);
+  padding-top: 6px;
+}
+
+.ifc-graph-warning-message {
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.ifc-graph-warning-message button {
+  border: 0;
+  border-radius: 4px;
+  background: rgb(15 118 110 / 10%);
+  color: #0f766e;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 800;
+  padding: 1px 4px;
+}
+
+.ifc-graph-warning-message button:hover {
+  background: rgb(15 118 110 / 18%);
+}
+
+.ifc-graph-warnings-panel p {
+  margin: 0;
+  color: #64748b;
+  font-size: 11px;
+}
+
 .ifc-flow-popover {
   position: absolute;
   right: 12px;
@@ -793,6 +846,16 @@ textarea {
   font-size: 10px;
 }
 
+.ifc-flow-popover-note {
+  border: 1px solid #fde68a;
+  border-radius: 6px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 11px;
+  line-height: 1.35;
+  padding: 7px 8px;
+}
+
 .ifc-flow-popover-summary {
   display: grid;
   gap: 4px;
@@ -831,6 +894,11 @@ textarea {
   cursor: pointer;
   font-size: 11px;
   padding: 0 12px;
+}
+
+.ifc-flow-popover-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .ifc-flow-popover-actions button.primary {

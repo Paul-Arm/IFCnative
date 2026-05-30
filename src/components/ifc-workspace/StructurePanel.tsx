@@ -1,5 +1,5 @@
 import { FileTree, useFileTree } from "@pierre/trees/react";
-import { Trash2 } from "lucide-react";
+import { Crosshair, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 
@@ -23,6 +23,7 @@ export function StructurePanel({
   filteredEntities,
   search,
   selectedId,
+  onCenterCamera,
   onRemove,
   onSelect,
 }: {
@@ -31,6 +32,7 @@ export function StructurePanel({
   filteredEntities: NativeIfcEntity[];
   search: string;
   selectedId: number;
+  onCenterCamera(id: number): void;
   onRemove(id: number): void;
   onSelect(id: number, source?: string): void;
   onToggle(id: number): void;
@@ -42,8 +44,10 @@ export function StructurePanel({
 
   const idByPathRef = useRef(treeModel.idByPath);
   const typeByIdRef = useRef(treeModel.typeById);
+  const onCenterCameraRef = useRef(onCenterCamera);
   const onSelectRef = useRef(onSelect);
   const onRemoveRef = useRef(onRemove);
+  onCenterCameraRef.current = onCenterCamera;
   onSelectRef.current = onSelect;
   onRemoveRef.current = onRemove;
 
@@ -220,6 +224,23 @@ export function StructurePanel({
             zIndex: 9999,
           }}
         >
+          <div className="mb-1 min-w-[190px] rounded-md border border-border bg-popover p-1 text-sm shadow-md">
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-foreground hover:bg-muted/70"
+              onClick={() => {
+                context.close({ restoreFocus: false });
+                onSelectRef.current(id, "tree");
+                onCenterCameraRef.current(id);
+              }}
+            >
+              <Crosshair aria-hidden className="size-3.5" />
+              <span className="min-w-0 flex-1">Kamera zentrieren</span>
+              <kbd className="rounded border border-border/70 px-1 text-[10px] leading-4 text-muted-foreground">
+                .
+              </kbd>
+            </button>
+          </div>
           {isProtected ? (
             <div className="rounded-md border border-border bg-popover px-3 py-2 text-xs text-muted-foreground shadow-md">
               IFCPROJECT kann nicht gelöscht werden.
@@ -262,6 +283,7 @@ export function StructurePanel({
             entity={entity}
             key={entity.id}
             selected={entity.id === selectedId}
+            onCenterCamera={onCenterCamera}
             onRemove={onRemove}
             onPress={() => onSelect(entity.id, "tree")}
           />
@@ -284,11 +306,13 @@ export function StructurePanel({
 function FallbackRow({
   entity,
   selected,
+  onCenterCamera,
   onRemove,
   onPress,
 }: {
   entity: NativeIfcEntity;
   selected: boolean;
+  onCenterCamera(id: number): void;
   onRemove(id: number): void;
   onPress(): void;
 }) {
@@ -312,6 +336,14 @@ function FallbackRow({
         <div className="truncate text-[11px] leading-tight text-muted-foreground">
           #{entity.id} · {entity.type}
         </div>
+      </button>
+      <button
+        type="button"
+        aria-label={`Kamera zentrieren ${entity.name || entity.type}`}
+        onClick={() => onCenterCamera(entity.id)}
+        className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-muted/70 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+      >
+        <Crosshair aria-hidden className="size-3.5" />
       </button>
       {entity.type !== "IFCPROJECT" ? (
         <button

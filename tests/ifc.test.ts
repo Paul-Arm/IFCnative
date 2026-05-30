@@ -19,12 +19,25 @@ import {
 import { buildGraphIndex, summarizeLine } from "../src/ifc/graphIndex";
 import {
   addNativeBodyElement,
+  addNativeApproval,
   addNativeClassification,
+  addNativeConstraintObjective,
   addNativeDocumentReference,
   addNativeElement,
+  addNativeEmptyPropertySet,
+  addNativeGroupAssignment,
+  addNativeLibraryReference,
   addNativeMaterial,
+  addNativeMaterialConstituentSet,
+  addNativeMaterialLayerSet,
+  addNativeMaterialLayerSetUsage,
+  addNativeMaterialProfileSet,
+  addNativeMaterialProfileSetUsage,
+  addNativeMaterialStyle,
+  addNativeMaterialWithProperties,
   addNativePropertySet,
   addNativePropertySetValues,
+  addNativePropertyToSet,
   addNativeQuantitySet,
   addNativeRelationship,
   addNativeSiUnit,
@@ -32,6 +45,7 @@ import {
   assignNativeBodyRepresentation,
   createNativeSampleDocument,
   duplicateNativePropertySet,
+  getNativeBodyRepresentation,
   getNativePlacement,
   parseNativeIfcText,
   quote,
@@ -41,6 +55,7 @@ import {
   removeNativeRelationship,
   resolveNativeMovableProductId,
   serializeNativeIfcDocument,
+  updateNativeEntity,
   updateNativePlacement,
   updateNativePropertySetName,
   updateNativePropertyValue,
@@ -54,6 +69,7 @@ import {
 } from "../src/ifc/objectInfoValidation";
 import { preflightIfcText } from "../src/ifc/preflight";
 import { buildPropertyIndex } from "../src/ifc/propertyIndex";
+import { relationshipTypesForEndpointTypes } from "../src/ifc/relationshipRules";
 import type { IfcEntitySummary } from "../src/ifc/types";
 
 type FragmentStubItem = {
@@ -343,7 +359,7 @@ test("web-ifc opens builder scaffold and graph indexes spatial hierarchy", async
   api.CloseModel(modelID);
 });
 
-test("native document edits keep indexes live", () => {
+test("native document edits keep indexes live", async () => {
   const sample = createNativeSampleDocument();
   const storey = sample.entities.find(
     (entity) => entity.type === "IFCBUILDINGSTOREY",
@@ -355,6 +371,13 @@ test("native document edits keep indexes live", () => {
     (entity) => entity.type === "IFCWALL" && entity.name === "RN Wall",
   );
   assert.ok(wall);
+  assert.ok(getNativePlacement(withElement, wall.id));
+  assert.equal(
+    withElement.diagnostics.some((line) =>
+      line.includes(`#${wall.id} IFCWALL has no ObjectPlacement`),
+    ),
+    false,
+  );
   assert.ok(
     withElement.relationshipsByEntity
       .get(wall.id)
@@ -417,8 +440,140 @@ test("native document edits keep indexes live", () => {
       .get(wall.id)
       ?.some((resource) => resource.includes("RN Concrete")),
   );
-  const withClassification = addNativeClassification(
+  const withMaterialProperties = addNativeMaterialWithProperties(
     withMaterial,
+    wall.id,
+    "RN Property Concrete",
+    "Concrete",
+    "RN Material Pset",
+    "MassDensity | 2400 | IFCREAL\nFireRating | REI 90 | IFCLABEL",
+  );
+  assert.ok(
+    withMaterialProperties.resourcesByEntity
+      .get(wall.id)
+      ?.some(
+        (resource) =>
+          resource.includes("RN Property Concrete") &&
+          resource.includes("RN Material Pset"),
+      ),
+  );
+  assert.ok(
+    withMaterialProperties.entities.some(
+      (entity) =>
+        entity.type === "IFCMATERIALPROPERTIES" &&
+        entity.name === "RN Material Pset",
+    ),
+  );
+  const withMaterialStyle = addNativeMaterialStyle(
+    withMaterialProperties,
+    wall.id,
+    "RN Styled Concrete",
+    "Concrete",
+    "RN Blue Style",
+    "#336699",
+    "0.15",
+  );
+  assert.ok(
+    withMaterialStyle.resourcesByEntity
+      .get(wall.id)
+      ?.some(
+        (resource) =>
+          resource.includes("RN Styled Concrete") &&
+          resource.includes("RN Blue Style"),
+      ),
+  );
+  assert.ok(
+    withMaterialStyle.entities.some(
+      (entity) => entity.type === "IFCMATERIALDEFINITIONREPRESENTATION",
+    ),
+  );
+  assert.ok(
+    withMaterialStyle.entities.some(
+      (entity) => entity.type === "IFCSURFACESTYLERENDERING",
+    ),
+  );
+  assert.ok(
+    withMaterialStyle.entities.some((entity) => entity.type === "IFCCOLOURRGB"),
+  );
+  const withLayerSet = addNativeMaterialLayerSet(
+    withMaterialStyle,
+    wall.id,
+    "RN Layer Set",
+    "Core | RN Concrete | 0.2 | LoadBearing\nFinish | RN Plaster | 0.02 | Finish",
+  );
+  assert.ok(
+    withLayerSet.resourcesByEntity
+      .get(wall.id)
+      ?.some((resource) => resource.includes("RN Layer Set")),
+  );
+  const withProfileSet = addNativeMaterialProfileSet(
+    withLayerSet,
+    wall.id,
+    "RN Profile Set",
+    "RN Rectangle",
+    "RN Steel",
+    "LoadBearing",
+    "0.2",
+    "0.3",
+  );
+  assert.ok(
+    withProfileSet.resourcesByEntity
+      .get(wall.id)
+      ?.some((resource) => resource.includes("RN Profile Set")),
+  );
+  const withLayerUsage = addNativeMaterialLayerSetUsage(
+    withProfileSet,
+    wall.id,
+    "RN Layer Usage",
+    "Core | RN Concrete | 0.2 | LoadBearing\nFinish | RN Plaster | 0.02 | Finish",
+    "AXIS2",
+    "POSITIVE",
+    "0",
+    "3",
+  );
+  assert.ok(
+    withLayerUsage.resourcesByEntity
+      .get(wall.id)
+      ?.some(
+        (resource) =>
+          resource.includes("IFCMATERIALLAYERSETUSAGE") &&
+          resource.includes("RN Layer Usage"),
+      ),
+  );
+  const withProfileUsage = addNativeMaterialProfileSetUsage(
+    withLayerUsage,
+    wall.id,
+    "RN Profile Usage",
+    "RN Rectangle Usage",
+    "RN Usage Steel",
+    "LoadBearing",
+    "0.2",
+    "0.3",
+    "5",
+    "4",
+  );
+  assert.ok(
+    withProfileUsage.resourcesByEntity
+      .get(wall.id)
+      ?.some(
+        (resource) =>
+          resource.includes("IFCMATERIALPROFILESETUSAGE") &&
+          resource.includes("RN Profile Usage"),
+      ),
+  );
+  const withConstituentSet = addNativeMaterialConstituentSet(
+    withProfileUsage,
+    wall.id,
+    "RN Constituent Set",
+    "Frame | RN Aluminium | 0.6 | Frame\nGlazing | RN Glass | 0.4 | Glazing",
+  );
+  assert.ok(
+    withConstituentSet.resourcesByEntity
+      .get(wall.id)
+      ?.some((resource) => resource.includes("RN Constituent Set")),
+  );
+  const withClassification = addNativeClassification(
+    withConstituentSet,
     wall.id,
     "RN-001",
     "RN Class",
@@ -441,8 +596,73 @@ test("native document edits keep indexes live", () => {
       .get(wall.id)
       ?.some((resource) => resource.includes("RN Report")),
   );
-  const withType = addNativeTypeAssignment(
+  const withLibrary = addNativeLibraryReference(
     withDocument,
+    wall.id,
+    "RN-LIB",
+    "RN Library",
+    "https://ifcnative.local/lib",
+  );
+  assert.ok(
+    withLibrary.resourcesByEntity
+      .get(wall.id)
+      ?.some((resource) => resource.includes("RN Library")),
+  );
+  const withApproval = addNativeApproval(
+    withLibrary,
+    wall.id,
+    "RN-APP",
+    "RN Approval",
+    "Approved",
+  );
+  assert.ok(
+    withApproval.resourcesByEntity
+      .get(wall.id)
+      ?.some((resource) => resource.includes("RN Approval")),
+  );
+  const withConstraint = addNativeConstraintObjective(
+    withApproval,
+    wall.id,
+    "RN Constraint",
+    "HARD",
+    "RN Spec",
+    "REQUIREMENT",
+    "EXPECTED PERFORMANCE",
+  );
+  assert.ok(
+    withConstraint.resourcesByEntity
+      .get(wall.id)
+      ?.some((resource) => resource.includes("RN Constraint")),
+  );
+  const withGroup = addNativeGroupAssignment(
+    withConstraint,
+    wall.id,
+    "IFCZONE",
+    "RN Fire Zone",
+    "Fire compartment",
+    "RN Fire Compartment Level 1",
+  );
+  assert.ok(
+    withGroup.resourcesByEntity
+      .get(wall.id)
+      ?.some(
+        (resource) =>
+          resource.includes("IFCZONE") &&
+          resource.includes("RN Fire Zone"),
+      ),
+  );
+  assert.ok(
+    withGroup.relationshipsByEntity
+      .get(wall.id)
+      ?.some((relationship) => relationship.type === "IFCRELASSIGNSTOGROUP"),
+  );
+  assert.ok(
+    withGroup.entities.some(
+      (entity) => entity.type === "IFCZONE" && entity.args.length === 6,
+    ),
+  );
+  const withType = addNativeTypeAssignment(
+    withGroup,
     wall.id,
     "RN Wall Type",
     "IFCTYPEOBJECT",
@@ -453,6 +673,27 @@ test("native document edits keep indexes live", () => {
       .get(wall.id)
       ?.some((assignment) => assignment.typeName === "RN Wall Type"),
   );
+  const resourceText = serializeNativeIfcDocument(withType);
+  assert.ok(resourceText.includes("IFCMATERIALPROPERTIES"));
+  assert.ok(resourceText.includes("RN Material Pset"));
+  assert.ok(resourceText.includes("IFCMATERIALDEFINITIONREPRESENTATION"));
+  assert.ok(resourceText.includes("IFCSTYLEDREPRESENTATION"));
+  assert.ok(resourceText.includes("IFCSTYLEDITEM"));
+  assert.ok(resourceText.includes("IFCSURFACESTYLE"));
+  assert.ok(resourceText.includes("IFCSURFACESTYLERENDERING"));
+  assert.ok(resourceText.includes("IFCCOLOURRGB"));
+  assert.ok(resourceText.includes("IFCMATERIALLAYERSET"));
+  assert.ok(resourceText.includes("IFCMATERIALLAYERSETUSAGE"));
+  assert.ok(resourceText.includes("IFCMATERIALPROFILESET"));
+  assert.ok(resourceText.includes("IFCMATERIALPROFILESETUSAGE"));
+  assert.ok(resourceText.includes("IFCMATERIALCONSTITUENTSET"));
+  assert.ok(resourceText.includes("IFCAPPROVAL"));
+  assert.ok(resourceText.includes("IFCOBJECTIVE"));
+  assert.ok(resourceText.includes("IFCZONE"));
+  assert.ok(resourceText.includes("RN Fire Compartment Level 1"));
+  assert.ok(resourceText.includes("IFCRELASSIGNSTOGROUP"));
+  assert.ok(resourceText.includes("IFCRELASSOCIATESAPPROVAL"));
+  assert.ok(resourceText.includes("IFCRELASSOCIATESCONSTRAINT"));
 
   const project = withType.entities.find(
     (entity) => entity.type === "IFCPROJECT",
@@ -471,7 +712,11 @@ test("native document edits keep indexes live", () => {
   );
   const groupRelationship = withRelation.relationshipsByEntity
     .get(wall.id)
-    ?.find((relationship) => relationship.type === "IFCRELASSIGNSTOGROUP");
+    ?.find(
+      (relationship) =>
+        relationship.type === "IFCRELASSIGNSTOGROUP" &&
+        relationship.sourceIds.includes(project.id),
+    );
   assert.ok(groupRelationship);
   const withUpdatedRelationship = updateNativeRelationship(
     withRelation,
@@ -514,13 +759,186 @@ test("native document edits keep indexes live", () => {
   assert.ok(
     reopened.resourcesByEntity
       .get(wall.id)
+      ?.some(
+        (resource) =>
+          resource.includes("RN Property Concrete") &&
+          resource.includes("RN Material Pset"),
+      ),
+  );
+  assert.ok(
+    reopened.resourcesByEntity
+      .get(wall.id)
+      ?.some(
+        (resource) =>
+          resource.includes("RN Styled Concrete") &&
+          resource.includes("RN Blue Style"),
+      ),
+  );
+  assert.ok(
+    reopened.resourcesByEntity
+      .get(wall.id)
+      ?.some((resource) => resource.includes("RN Layer Set")),
+  );
+  assert.ok(
+    reopened.resourcesByEntity
+      .get(wall.id)
+      ?.some(
+        (resource) =>
+          resource.includes("IFCMATERIALLAYERSETUSAGE") &&
+          resource.includes("RN Layer Usage"),
+      ),
+  );
+  assert.ok(
+    reopened.resourcesByEntity
+      .get(wall.id)
+      ?.some((resource) => resource.includes("RN Profile Set")),
+  );
+  assert.ok(
+    reopened.resourcesByEntity
+      .get(wall.id)
+      ?.some(
+        (resource) =>
+          resource.includes("IFCMATERIALPROFILESETUSAGE") &&
+          resource.includes("RN Profile Usage"),
+      ),
+  );
+  assert.ok(
+    reopened.resourcesByEntity
+      .get(wall.id)
+      ?.some((resource) => resource.includes("RN Constituent Set")),
+  );
+  assert.ok(
+    reopened.resourcesByEntity
+      .get(wall.id)
       ?.some((resource) => resource.includes("RN Report")),
+  );
+  assert.ok(
+    reopened.resourcesByEntity
+      .get(wall.id)
+      ?.some((resource) => resource.includes("RN Library")),
+  );
+  assert.ok(
+    reopened.resourcesByEntity
+      .get(wall.id)
+      ?.some((resource) => resource.includes("RN Approval")),
+  );
+  assert.ok(
+    reopened.resourcesByEntity
+      .get(wall.id)
+      ?.some((resource) => resource.includes("RN Constraint")),
+  );
+  assert.ok(
+    reopened.resourcesByEntity
+      .get(wall.id)
+      ?.some(
+        (resource) =>
+          resource.includes("IFCZONE") &&
+          resource.includes("RN Fire Zone"),
+      ),
   );
   assert.ok(
     reopened.typeAssignmentsByEntity
       .get(wall.id)
       ?.some((assignment) => assignment.typeClass === "IFCTYPEOBJECT"),
   );
+
+  const api = new WebIFC.IfcAPI();
+  await api.Init();
+  const modelID = api.OpenModel(new TextEncoder().encode(resourceText));
+  assert.ok(modelID >= 0);
+  api.CloseModel(modelID);
+});
+
+test("native property editor authors extended IFC simple property types", async () => {
+  const sample = createNativeSampleDocument();
+  const block = sample.entities.find(
+    (entity) => entity.type === "IFCBUILTELEMENT",
+  );
+  assert.ok(block);
+
+  const withSet = addNativeEmptyPropertySet(
+    sample,
+    block.id,
+    "Pset_ExtendedValues",
+  );
+  const set = withSet.propertySetsByEntity
+    .get(block.id)
+    ?.find((item) => item.name === "Pset_ExtendedValues");
+  assert.ok(set);
+
+  const withList = addNativePropertyToSet(
+    withSet,
+    set.id,
+    "AllowedStatuses",
+    "Draft; Reviewed; Approved",
+    "IFCPROPERTYLISTVALUE:IFCLABEL",
+  );
+  const withEnum = addNativePropertyToSet(
+    withList,
+    set.id,
+    "SelectedStatus",
+    "Reviewed",
+    "IFCPROPERTYENUMERATEDVALUE:IFCLABEL",
+  );
+  const withBounded = addNativePropertyToSet(
+    withEnum,
+    set.id,
+    "TemperatureRange",
+    "18..24; 21",
+    "IFCPROPERTYBOUNDEDVALUE:IFCREAL",
+  );
+  const withTable = addNativePropertyToSet(
+    withBounded,
+    set.id,
+    "LoadCurve",
+    "0=>0; 1=>10; 2=>30",
+    "IFCPROPERTYTABLEVALUE:IFCREAL:IFCREAL",
+  );
+
+  const values = withTable.propertySetsByEntity.get(block.id)?.find(
+    (item) => item.name === "Pset_ExtendedValues",
+  )?.values;
+  assert.ok(values?.some((value) => value.type === "IFCPROPERTYLISTVALUE"));
+  assert.ok(
+    values?.some((value) => value.type === "IFCPROPERTYENUMERATEDVALUE"),
+  );
+  assert.ok(values?.some((value) => value.type === "IFCPROPERTYBOUNDEDVALUE"));
+  assert.ok(values?.some((value) => value.type === "IFCPROPERTYTABLEVALUE"));
+
+  const listProperty = values?.find(
+    (value) => value.name === "AllowedStatuses",
+  );
+  assert.ok(listProperty);
+  const updated = updateNativePropertyValue(withTable, listProperty.id, {
+    name: "AllowedStatuses",
+    value: "Draft; Approved",
+    valueType: "IFCPROPERTYLISTVALUE:IFCLABEL",
+  });
+  const serialized = serializeNativeIfcDocument(updated);
+  assert.ok(serialized.includes("IFCPROPERTYLISTVALUE"));
+  assert.ok(serialized.includes("IFCPROPERTYENUMERATEDVALUE"));
+  assert.ok(serialized.includes("IFCPROPERTYBOUNDEDVALUE"));
+  assert.ok(serialized.includes("IFCPROPERTYTABLEVALUE"));
+  assert.ok(serialized.includes("IFCREAL(24)"));
+
+  const reopened = parseNativeIfcText(serialized, "extended-values.ifc");
+  const reopenedValues = reopened.propertySetsByEntity
+    .get(block.id)
+    ?.find((item) => item.name === "Pset_ExtendedValues")?.values;
+  assert.ok(
+    reopenedValues?.some(
+      (value) =>
+        value.name === "AllowedStatuses" &&
+        value.type === "IFCPROPERTYLISTVALUE" &&
+        value.value.includes("Approved"),
+    ),
+  );
+
+  const api = new WebIFC.IfcAPI();
+  await api.Init();
+  const modelID = api.OpenModel(new TextEncoder().encode(serialized));
+  assert.ok(modelID >= 0);
+  api.CloseModel(modelID);
 });
 
 test("native type assignments are indexed and endpoint-validated", () => {
@@ -1151,6 +1569,39 @@ test("native graph presets filter relationship neighborhoods", () => {
   assert.ok(explicit.edges.every((edge) => edge.type === 'IFCRELDEFINESBYPROPERTIES'));
 });
 
+test("native graph expands from indexed relationships without scanning the relationship array", () => {
+  const sample = createNativeSampleDocument();
+  const block = sample.entities.find(
+    (entity) => entity.type === "IFCBUILTELEMENT",
+  );
+  assert.ok(block);
+
+  const withResource = addNativeApproval(
+    sample,
+    block.id,
+    "GRAPH-APPROVAL",
+    "Graph Approval",
+    "Approved",
+  );
+  const approval = withResource.entities.find(
+    (entity) => entity.type === "IFCAPPROVAL" && entity.name === "Graph Approval",
+  );
+  assert.ok(approval);
+
+  const indexedOnly = { ...withResource, relationships: [] };
+  const graph = buildNativeGraphNeighborhood(indexedOnly, {
+    depth: 1,
+    preset: "resources",
+    selectedId: block.id,
+  });
+
+  assert.ok(graph.nodeIds.includes(approval.id));
+  assert.ok(
+    graph.edges.some((edge) => edge.type === "IFCRELASSOCIATESAPPROVAL"),
+  );
+  assert.ok(graph.relationshipTypes.includes("IFCRELASSOCIATESAPPROVAL"));
+});
+
 test('native graph geometry preset expands placement and representation references', () => {
   const sample = createNativeSampleDocument();
   const block = sample.entities.find((entity) => entity.type === 'IFCBUILTELEMENT');
@@ -1196,6 +1647,45 @@ test('native graph surfaces visible relationship validation warnings', () => {
 
   assert.ok(graph.warnings.some((warning) => warning.relationshipId === assignment.relationshipId));
   assert.ok(graph.warnings.some((warning) => warning.message.includes('IFCRELDEFINESBYTYPE expects type object definitions')));
+});
+
+test("relationship create menus filter relationship classes by endpoint types", () => {
+  const relationTypes = [
+    "IFCRELASSOCIATESAPPROVAL",
+    "IFCRELASSIGNSTOGROUP",
+    "IFCRELCONTAINEDINSPATIALSTRUCTURE",
+  ];
+
+  assert.deepEqual(
+    relationshipTypesForEndpointTypes(
+      relationTypes,
+      "IFCWALL",
+      "IFCZONE",
+      1,
+      2,
+    ),
+    ["IFCRELASSIGNSTOGROUP"],
+  );
+  assert.deepEqual(
+    relationshipTypesForEndpointTypes(
+      relationTypes,
+      "IFCWALL",
+      "IFCAPPROVAL",
+      1,
+      2,
+    ),
+    ["IFCRELASSOCIATESAPPROVAL"],
+  );
+  assert.deepEqual(
+    relationshipTypesForEndpointTypes(
+      relationTypes,
+      "IFCBUILDINGSTOREY",
+      "IFCWALL",
+      1,
+      2,
+    ),
+    ["IFCRELCONTAINEDINSPATIALSTRUCTURE"],
+  );
 });
 
 test('entity-aware diff groups STEP changes by entity id', () => {
@@ -1472,7 +1962,7 @@ test("native body preset can spawn at world coordinates under a selected parent"
   );
 });
 
-test("native body assignment replaces selected product representation with reviewable quantities", async () => {
+test("native body assignment updates selected product representation with reviewable quantities", async () => {
   const sample = createNativeSampleDocument();
   const block = sample.entities.find(
     (entity) => entity.type === "IFCBUILTELEMENT",
@@ -1490,7 +1980,12 @@ test("native body assignment replaces selected product representation with revie
   const afterBlock = assigned.entityById.get(block.id);
   assert.ok(afterBlock);
   assert.equal(afterBlock.globalId, block.globalId);
-  assert.notEqual(afterBlock.args[6], block.args[6]);
+  assert.equal(afterBlock.args[6], block.args[6]);
+  const body = getNativeBodyRepresentation(assigned, block.id);
+  assert.equal(body.profile, "rectangle");
+  assert.equal(body.width, 3);
+  assert.equal(body.depth, 1.5);
+  assert.equal(body.height, 2);
   assert.equal(
     getNativePlacement(assigned, block.id)?.pointId,
     beforePlacement.pointId,
@@ -1515,16 +2010,8 @@ test("native body assignment replaces selected product representation with revie
     serializeNativeIfcDocument(sample),
     serializeNativeIfcDocument(assigned),
   );
-  assert.equal(diffSummary.changedEntities, 1);
-  assert.ok(diffSummary.addedEntities >= 10);
-  assert.ok(
-    diffSummary.geometryChanges.some(
-      (change) =>
-        change.action === "added" &&
-        change.type === "IFCPRODUCTDEFINITIONSHAPE" &&
-        change.affectedProducts.some((product) => product.id === block.id),
-    ),
-  );
+  assert.ok(diffSummary.changedEntities >= 2);
+  assert.equal(diffSummary.addedEntities, 0);
   assert.ok(
     assigned.entities.some(
       (entity) => entity.type === "IFCPRODUCTDEFINITIONSHAPE",
@@ -1533,7 +2020,7 @@ test("native body assignment replaces selected product representation with revie
   assert.ok(
     diffSummary.geometryChanges.some(
       (change) =>
-        change.action === "added" &&
+        change.action === "changed" &&
         change.type === "IFCEXTRUDEDAREASOLID" &&
         change.after?.includes("rectangle 3.") &&
         change.after.includes("depth 2."),
@@ -1548,6 +2035,89 @@ test("native body assignment replaces selected product representation with revie
   assert.ok(modelID >= 0);
   assert.ok(streamGeometryVertexCount(api, modelID) > 0);
   api.CloseModel(modelID);
+});
+
+test("native body assignment repairs missing product placement", () => {
+  const sample = createNativeSampleDocument();
+  const block = sample.entities.find(
+    (entity) => entity.type === "IFCBUILTELEMENT",
+  );
+  assert.ok(block);
+  const broken = updateNativeEntity(sample, block.id, {
+    args: block.args.map((arg, index) => (index === 5 ? "$" : arg)),
+  });
+  assert.equal(getNativePlacement(broken, block.id), undefined);
+  assert.ok(
+    broken.diagnostics.some((line) =>
+      line.includes(`#${block.id} IFCBUILTELEMENT has no ObjectPlacement`),
+    ),
+  );
+
+  const repaired = assignNativeBodyRepresentation(broken, block.id, {
+    depth: "1",
+    height: "1",
+    profile: "rectangle",
+    width: "1",
+  });
+  const placement = getNativePlacement(repaired, block.id);
+  assert.ok(placement);
+  assert.equal(placement.x, 0);
+  assert.equal(placement.y, 0);
+  assert.equal(placement.z, 0);
+  assert.equal(
+    repaired.diagnostics.some((line) =>
+      line.includes(`#${block.id} IFCBUILTELEMENT has no ObjectPlacement`),
+    ),
+    false,
+  );
+});
+
+test("native body representation summary reads and updates assigned geometry", () => {
+  const sample = createNativeSampleDocument();
+  const block = sample.entities.find(
+    (entity) => entity.type === "IFCBUILTELEMENT",
+  );
+  assert.ok(block);
+
+  const assigned = assignNativeBodyRepresentation(sample, block.id, {
+    depth: "2",
+    height: "3",
+    profile: "rectangle",
+    width: "4",
+  });
+  const initialBody = getNativeBodyRepresentation(assigned, block.id);
+  assert.equal(initialBody.canAssign, true);
+  assert.equal(initialBody.canEdit, true);
+  assert.equal(initialBody.profile, "rectangle");
+  assert.equal(initialBody.width, 4);
+  assert.equal(initialBody.depth, 2);
+  assert.equal(initialBody.height, 3);
+  assert.ok(initialBody.shapeId);
+  assert.ok(initialBody.solidId);
+  assert.ok(initialBody.profileId);
+
+  const updated = assignNativeBodyRepresentation(assigned, block.id, {
+    depth: "1",
+    height: "5",
+    profile: "cylinder",
+    width: "2",
+  });
+  const updatedBody = getNativeBodyRepresentation(updated, block.id);
+  assert.equal(updatedBody.shapeId, initialBody.shapeId);
+  assert.equal(updatedBody.solidId, initialBody.solidId);
+  assert.equal(updatedBody.profileId, initialBody.profileId);
+  assert.equal(updatedBody.profile, "cylinder");
+  assert.equal(updatedBody.radius, 1);
+  assert.equal(updatedBody.width, 2);
+  assert.equal(updatedBody.depth, 2);
+  assert.equal(updatedBody.height, 5);
+  assert.equal(
+    updated.propertySetsByEntity
+      .get(block.id)
+      ?.find((set) => set.name === "IFCnative_BaseQuantities")
+      ?.values.find((value) => value.name === "NetVolume")?.value,
+    "15.708",
+  );
 });
 
 test("native placement editor writes numeric XYZ moves without rewriting product identity", async () => {
