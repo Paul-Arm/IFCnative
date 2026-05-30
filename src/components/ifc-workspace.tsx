@@ -1,15 +1,31 @@
 import { Input } from "@/components/ui/input";
+import { Button as IconButton } from "@/components/ui/button";
+import {
+    Select,
+    SelectContent,
+    SelectGroup,
+    SelectItem,
+    SelectLabel,
+    SelectSeparator,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { CopyPlus, PanelTopOpen, Save, Trash2 } from "lucide-react";
 import {
     startTransition,
+    cloneElement,
+    isValidElement,
     useEffect,
     useMemo,
+    useRef,
     useState,
     type SetStateAction,
 } from "react";
 import {
     Mosaic,
     MosaicWindow,
+    DEFAULT_CONTROLS_WITHOUT_CREATION,
     type MosaicNode,
     type MosaicPath,
 } from "react-mosaic-component";
@@ -35,6 +51,7 @@ import {
     findCatalogObject,
     getNativePlacement,
     getNextNativeEntityId,
+    parseNativeIfcText,
     parseNativeIfcFileInWorker,
     removeNativeEntity,
     removeNativePropertyFromSet,
@@ -68,7 +85,9 @@ import {
 import { BuilderPanel } from "./ifc-workspace/BuilderPanel";
 import { CatalogPanel, CatalogReviewPanel } from "./ifc-workspace/CatalogPanel";
 import {
+    BUILT_IN_WORKSPACES,
     DEFAULT_MOSAIC_LAYOUT,
+    DEFAULT_WORKSPACE_ID,
     ENTITY_TYPES,
     MOSAIC_TITLES,
     MOSAIC_VIEW_IDS,
@@ -79,6 +98,7 @@ import { InspectorPanel } from "./ifc-workspace/InspectorPanel";
 import { ObjectInfoPanel } from "./ifc-workspace/ObjectInfoPanel";
 import { ConsolePanel, DiagnosticsPanel } from "./ifc-workspace/ReviewPanels";
 import { StructurePanel } from "./ifc-workspace/StructurePanel";
+import { NotesPanel, RecentFilesPanel } from "./ifc-workspace/WorkspacePanels";
 import type {
     BodyElementDraft,
     CoordinateClipboard,
@@ -89,6 +109,21 @@ import type {
     Point,
     StructureMode,
 } from "./ifc-workspace/types";
+import {
+    cloneMosaicNode,
+    createCustomWorkspace,
+    loadActiveWorkspaceId,
+    loadCustomWorkspaces,
+    loadNotes,
+    loadRecentIfcFiles,
+    mergeRecentIfcFile,
+    resolveWorkspace,
+    saveActiveWorkspaceId,
+    saveCustomWorkspaces,
+    saveNotes,
+    saveRecentIfcFiles,
+    type RecentIfcFileEntry,
+} from "./ifc-workspace/workspaceStorage";
 import type { RelationshipFlowClipboardNode } from "./relationship-flow.types";
 import type { ViewerCoordinatePick } from "./that-open-viewer";
 import ThatOpenViewer from "./that-open-viewer";
@@ -118,6 +153,37 @@ interface WorkspaceDocumentSession {
 const AUTO_VIEWER_LOAD_LIMIT_BYTES = 80 * 1024 * 1024;
 
 let nextWorkspaceDocumentId = 0;
+
+interface DetachedWorkspaceDescriptor {
+  token?: string;
+  viewId: MosaicViewId;
+}
+
+interface WorkspaceSyncSnapshot {
+  activeDocumentId: string;
+  documentText: string;
+  fileName: string;
+  notes: string;
+  recentIfcFiles: RecentIfcFileEntry[];
+  selectedId: number;
+  ui: WorkspaceUiSyncState;
+  version: number;
+}
+
+interface WorkspaceUiSyncState {
+  graphDepth: number;
+  graphPreset: NativeGraphPreset;
+  graphRelationshipTypes: string[];
+  inspectorMode: InspectorMode;
+  search: string;
+  structureMode: StructureMode;
+}
+
+interface WorkspaceSyncMessage {
+  clientId: string;
+  snapshot: WorkspaceSyncSnapshot;
+  type: "snapshot";
+}
 
 function createWorkspaceDocumentSession(
   document: NativeIfcDocument,
@@ -209,15 +275,36 @@ function applyStateAction<T>(current: T, action: SetStateAction<T>) {
 }
 
 export default function IfcWorkspace() {
+  const detachedDescriptor = readDetachedWorkspaceDescriptor();
+  const syncClientIdRef = useRef(createWorkspaceSyncClientId());
+  const lastWorkspaceSyncSignatureRef = useRef("");
+  const [workspaceBootState] = useState(() => {
+    const customWorkspaces = loadCustomWorkspaces();
+    const workspace = resolveWorkspace(
+      loadActiveWorkspaceId(),
+      customWorkspaces,
+    );
+    return {
+      activeWorkspaceId: workspace.id,
+      customWorkspaces,
+      layout: cloneMosaicNode(workspace.layout) ?? DEFAULT_MOSAIC_LAYOUT,
+    };
+  });
   const [initialDocument] = useState(createInitialWorkspaceDocument);
   const [documentSessions, setDocumentSessions] = useState<
     WorkspaceDocumentSession[]
   >(() => [initialDocument]);
   const [activeDocumentId, setActiveDocumentId] = useState(initialDocument.id);
+  const [customWorkspaces, setCustomWorkspaces] = useState(
+    workspaceBootState.customWorkspaces,
+  );
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState(
+    workspaceBootState.activeWorkspaceId,
+  );
   const [structureMode, setStructureMode] = useState<StructureMode>("tree");
   const [inspectorMode, setInspectorMode] = useState<InspectorMode>("info");
   const [mosaicValue, setMosaicValue] =
-    useState<MosaicNode<MosaicViewId> | null>(DEFAULT_MOSAIC_LAYOUT);
+    useState<MosaicNode<MosaicViewId> | null>(workspaceBootState.layout);
   const [search, setSearch] = useState("");
   const [graphDepth, setGraphDepth] = useState(1);
   const [graphPreset, setGraphPreset] = useState<NativeGraphPreset>("all");
@@ -231,10 +318,24 @@ export default function IfcWorkspace() {
   const [consoleLines, setConsoleLines] = useState<string[]>(() => [
     `${new Date().toLocaleTimeString()}  ui.boot({ shell: 'vite-react' });`,
   ]);
+  const [recentIfcFiles, setRecentIfcFiles] = useState(loadRecentIfcFiles);
+  const [notes, setNotes] = useState(loadNotes);
+  const [detachedLoading, setDetachedLoading] = useState(
+    Boolean(detachedDescriptor?.token),
+  );
   const [coordinateClipboard, setCoordinateClipboard] =
     useState<CoordinateClipboard | null>(null);
   const desktopApi =
     typeof window === "undefined" ? undefined : window.ifcNativeDesktop;
+  const allWorkspaces = useMemo(
+    () => [...BUILT_IN_WORKSPACES, ...customWorkspaces],
+    [customWorkspaces],
+  );
+  const activeWorkspace =
+    allWorkspaces.find((workspace) => workspace.id === activeWorkspaceId) ??
+    allWorkspaces[0];
+  const detachedViewId = detachedDescriptor?.viewId;
+  const detachedToken = detachedDescriptor?.token;
 
   const activeSession =
     documentSessions.find((session) => session.id === activeDocumentId) ??
@@ -249,6 +350,46 @@ export default function IfcWorkspace() {
   const graphPositions = activeSession.graphPositions;
   const documentText = activeSession.documentText;
   const documentTextDirty = activeSession.documentTextDirty;
+  const workspaceSyncDocumentText = useMemo(
+    () =>
+      documentTextDirty || !documentText
+        ? serializeNativeIfcDocument(document)
+        : documentText,
+    [document, documentText, documentTextDirty],
+  );
+  const workspaceSyncSnapshot = useMemo<WorkspaceSyncSnapshot>(
+    () => ({
+      activeDocumentId: activeSession.id,
+      documentText: workspaceSyncDocumentText,
+      fileName: document.fileName,
+      notes,
+      recentIfcFiles,
+      selectedId,
+      ui: {
+        graphDepth,
+        graphPreset,
+        graphRelationshipTypes: [...graphRelationshipTypes].sort(),
+        inspectorMode,
+        search,
+        structureMode,
+      },
+      version: Date.now(),
+    }),
+    [
+      activeSession.id,
+      document.fileName,
+      graphDepth,
+      graphPreset,
+      graphRelationshipTypes,
+      inspectorMode,
+      notes,
+      recentIfcFiles,
+      search,
+      selectedId,
+      structureMode,
+      workspaceSyncDocumentText,
+    ],
+  );
 
   const updateActiveSession = (
     updater: (session: WorkspaceDocumentSession) => WorkspaceDocumentSession,
@@ -403,14 +544,146 @@ export default function IfcWorkspace() {
     ]);
   };
 
+  const applyWorkspaceSyncSnapshot = (
+    snapshot: WorkspaceSyncSnapshot,
+    source = "sync",
+  ) => {
+    if (!snapshot.documentText.trim()) {
+      return;
+    }
+    lastWorkspaceSyncSignatureRef.current =
+      createWorkspaceSyncSignature(snapshot);
+    let parsedDocument: NativeIfcDocument | undefined;
+    const getParsedDocument = () => {
+      parsedDocument ??= parseNativeIfcText(
+        snapshot.documentText,
+        snapshot.fileName || "Detached.ifc",
+      );
+      return parsedDocument;
+    };
+
+    setDocumentSessions((current) => {
+      const existing = current.find(
+        (session) => session.id === snapshot.activeDocumentId,
+      );
+      if (existing && existing.documentText === snapshot.documentText) {
+        const selected = existing.document.entityById.has(snapshot.selectedId)
+          ? snapshot.selectedId
+          : (existing.document.spatialRoots[0]?.id ??
+            existing.document.entities[0]?.id ??
+            existing.selectedId);
+        return current.map((session) =>
+          session.id === snapshot.activeDocumentId
+            ? {
+                ...session,
+                graphAnchorId: selected,
+                selectedId: selected,
+              }
+            : session,
+        );
+      }
+
+      const nextDocument = getParsedDocument();
+      const nextSession = createWorkspaceDocumentSession(nextDocument, {
+        id: snapshot.activeDocumentId,
+        selectedId: snapshot.selectedId,
+        text: snapshot.documentText,
+        viewerModelLoadRequested:
+          existing?.viewerModelLoadRequested ?? shouldAutoLoadViewer(null),
+        viewerModelRevision: (existing?.viewerModelRevision ?? 0) + 1,
+      });
+
+      if (detachedViewId) {
+        return [nextSession];
+      }
+      if (existing) {
+        return current.map((session) =>
+          session.id === snapshot.activeDocumentId ? nextSession : session,
+        );
+      }
+      return [...current, nextSession];
+    });
+    setActiveDocumentId(snapshot.activeDocumentId);
+    setNotes(snapshot.notes);
+    setRecentIfcFiles(snapshot.recentIfcFiles);
+    setStructureMode(snapshot.ui.structureMode);
+    setInspectorMode(snapshot.ui.inspectorMode);
+    setSearch(snapshot.ui.search);
+    setGraphDepth(snapshot.ui.graphDepth);
+    setGraphPreset(snapshot.ui.graphPreset);
+    setGraphRelationshipTypes(new Set(snapshot.ui.graphRelationshipTypes));
+    logAction(
+      `ui.workspaceSync.apply({ source: '${source}', file: '${snapshot.fileName}', id: ${snapshot.selectedId} });`,
+    );
+  };
+
+  const selectWorkspace = (id: string) => {
+    const workspace =
+      allWorkspaces.find((candidate) => candidate.id === id) ??
+      allWorkspaces[0];
+    setActiveWorkspaceId(workspace.id);
+    setMosaicValue(cloneMosaicNode(workspace.layout) ?? DEFAULT_MOSAIC_LAYOUT);
+    logAction(`ui.workspace.select({ id: '${workspace.id}' });`);
+  };
+
+  const saveActiveWorkspace = () => {
+    if (activeWorkspace?.builtIn) {
+      saveWorkspaceCopy();
+      return;
+    }
+    setCustomWorkspaces((current) =>
+      current.map((workspace) =>
+        workspace.id === activeWorkspaceId
+          ? {
+              ...workspace,
+              layout: cloneMosaicNode(mosaicValue),
+              updatedAt: new Date().toISOString(),
+            }
+          : workspace,
+      ),
+    );
+    logAction(`ui.workspace.save({ id: '${activeWorkspaceId}' });`);
+  };
+
+  const saveWorkspaceCopy = () => {
+    const fallbackName = activeWorkspace?.builtIn
+      ? `${activeWorkspace.name} Kopie`
+      : activeWorkspace?.name || "Eigener Workspace";
+    const name = globalThis.prompt?.("Workspace speichern als", fallbackName);
+    if (!name?.trim()) {
+      return;
+    }
+    const workspace = createCustomWorkspace(name, mosaicValue);
+    setCustomWorkspaces((current) => [...current, workspace]);
+    setActiveWorkspaceId(workspace.id);
+    logAction(`ui.workspace.create({ id: '${workspace.id}' });`);
+  };
+
+  const deleteActiveWorkspace = () => {
+    if (activeWorkspace?.builtIn) {
+      return;
+    }
+    const nextWorkspace = BUILT_IN_WORKSPACES[0];
+    setCustomWorkspaces((current) =>
+      current.filter((workspace) => workspace.id !== activeWorkspaceId),
+    );
+    setActiveWorkspaceId(nextWorkspace.id);
+    setMosaicValue(
+      cloneMosaicNode(nextWorkspace.layout) ?? DEFAULT_MOSAIC_LAYOUT,
+    );
+    logAction(`ui.workspace.delete({ id: '${activeWorkspaceId}' });`);
+  };
+
   const restoreMosaicView = (id: MosaicViewId) => {
     setMosaicValue((current) => addMosaicView(current, id));
     logAction(`ui.restoreWindow({ view: '${id}' });`);
   };
 
   const resetMosaicLayout = () => {
-    setMosaicValue(DEFAULT_MOSAIC_LAYOUT);
-    logAction("ui.resetLayout();");
+    setMosaicValue(
+      cloneMosaicNode(activeWorkspace?.layout) ?? DEFAULT_MOSAIC_LAYOUT,
+    );
+    logAction(`ui.resetLayout({ workspace: '${activeWorkspaceId}' });`);
   };
 
   const replaceDocument = (
@@ -436,6 +709,30 @@ export default function IfcWorkspace() {
     if (log) {
       logAction(log);
     }
+    return session;
+  };
+
+  const rememberRecentIfc = (
+    session: WorkspaceDocumentSession,
+    source: RecentIfcFileEntry["source"],
+    file?: File | null,
+  ) => {
+    const filePath =
+      file && "path" in file && typeof (file as File & { path?: unknown }).path === "string"
+        ? (file as File & { path?: string }).path
+        : undefined;
+    const entry: RecentIfcFileEntry = {
+      documentId: session.id,
+      entityCount: session.document.entities.length,
+      id: `${filePath || session.document.fileName}:${Date.now().toString(36)}`,
+      name: session.document.fileName,
+      openedAt: new Date().toISOString(),
+      path: filePath,
+      schema: session.document.schema,
+      size: file?.size ?? session.sourceIfcBytes?.byteLength,
+      source,
+    };
+    setRecentIfcFiles((current) => mergeRecentIfcFile(current, entry));
   };
 
   const commitDocument = (
@@ -553,7 +850,7 @@ export default function IfcWorkspace() {
         `ui.openIfc.start({ file: '${asset.name}', parser: 'worker' });`,
       );
       const parsed = await parseNativeIfcFileInWorker(asset.file, asset.name);
-      replaceDocument(
+      const session = replaceDocument(
         parsed.document,
         undefined,
         `ui.openIfc({ file: '${asset.name}', parser: 'worker', ms: ${Math.round(parsed.elapsedMs)} });`,
@@ -562,6 +859,7 @@ export default function IfcWorkspace() {
         parsed.bytes,
         asset.file,
       );
+      rememberRecentIfc(session, "opened", asset.file);
     } catch (error) {
       logAction(`ui.error(${JSON.stringify(String(error))});`);
     } finally {
@@ -584,12 +882,12 @@ export default function IfcWorkspace() {
       const nextSessions: WorkspaceDocumentSession[] = [];
       for (const asset of assets) {
         const parsed = await parseNativeIfcFileInWorker(asset.file, asset.name);
-        nextSessions.push(
-          createWorkspaceDocumentSession(parsed.document, {
-            bytes: parsed.bytes,
-            file: asset.file,
-          }),
-        );
+        const session = createWorkspaceDocumentSession(parsed.document, {
+          bytes: parsed.bytes,
+          file: asset.file,
+        });
+        nextSessions.push(session);
+        rememberRecentIfc(session, "added", asset.file);
         logAction(
           `ui.addIfc.file({ file: '${asset.name}', parser: 'worker', ms: ${Math.round(parsed.elapsedMs)} });`,
         );
@@ -678,11 +976,12 @@ export default function IfcWorkspace() {
   };
 
   const loadSample = () => {
-    replaceDocument(
+    const session = replaceDocument(
       createNativeSampleDocument(),
       undefined,
       "ui.loadSample('IFCnative Builder Sample.ifc');",
     );
+    rememberRecentIfc(session, "sample");
   };
 
   const exportIfc = async () => {
@@ -701,6 +1000,94 @@ export default function IfcWorkspace() {
     URL.revokeObjectURL(url);
     logAction(`ui.exportIfc({ file: '${fileName}.ifc' });`);
   };
+
+  useEffect(() => {
+    saveCustomWorkspaces(customWorkspaces);
+  }, [customWorkspaces]);
+
+  useEffect(() => {
+    saveActiveWorkspaceId(activeWorkspaceId || DEFAULT_WORKSPACE_ID);
+  }, [activeWorkspaceId]);
+
+  useEffect(() => {
+    saveRecentIfcFiles(recentIfcFiles);
+  }, [recentIfcFiles]);
+
+  useEffect(() => {
+    saveNotes(notes);
+  }, [notes]);
+
+  useEffect(() => {
+    if (!detachedToken || !desktopApi?.getDetachedViewPayload) {
+      setDetachedLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    void desktopApi
+      .getDetachedViewPayload(detachedToken)
+      .then((payload) => {
+        if (cancelled) {
+          return;
+        }
+        const snapshot =
+          payload && isWorkspaceSyncSnapshot(payload.snapshot)
+            ? payload.snapshot
+            : createWorkspaceSnapshotFromDetachedPayload(payload);
+        if (snapshot) {
+          applyWorkspaceSyncSnapshot(snapshot, "payload");
+          logAction(
+            `ui.detachWindow.payload({ view: '${payload?.viewId ?? detachedViewId}' });`,
+          );
+        }
+        setDetachedLoading(false);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setDetachedLoading(false);
+          logAction(`ui.detachWindow.error(${JSON.stringify(String(error))});`);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [desktopApi, detachedToken, detachedViewId]);
+
+  useEffect(() => {
+    if (!desktopApi?.onWorkspaceSync) {
+      return;
+    }
+
+    return desktopApi.onWorkspaceSync((message) => {
+      if (
+        !isWorkspaceSyncMessage(message) ||
+        message.clientId === syncClientIdRef.current
+      ) {
+        return;
+      }
+      applyWorkspaceSyncSnapshot(message.snapshot, message.clientId);
+    });
+  }, [desktopApi]);
+
+  useEffect(() => {
+    if (!desktopApi?.publishWorkspaceSync || detachedLoading) {
+      return;
+    }
+    const signature = createWorkspaceSyncSignature(workspaceSyncSnapshot);
+    if (signature === lastWorkspaceSyncSignatureRef.current) {
+      return;
+    }
+    lastWorkspaceSyncSignatureRef.current = signature;
+    desktopApi.publishWorkspaceSync({
+      clientId: syncClientIdRef.current,
+      snapshot: {
+        ...workspaceSyncSnapshot,
+        version: Date.now(),
+      },
+      type: "snapshot",
+    });
+  }, [desktopApi, detachedLoading, workspaceSyncSnapshot]);
 
   useEffect(() => {
     if (!desktopApi) {
@@ -1519,6 +1906,63 @@ export default function IfcWorkspace() {
     </TileContent>
   );
 
+  const detachMosaicView = async (id: MosaicViewId) => {
+    if (!desktopApi?.openDetachedView) {
+      logAction(`ui.detachWindow({ view: '${id}', ok: false });`);
+      return;
+    }
+    const documentSnapshot =
+      documentTextDirty || !documentText
+        ? serializeNativeIfcDocument(document)
+        : documentText;
+    const result = await desktopApi.openDetachedView({
+      activeDocumentId: activeSession.id,
+      documentText: documentSnapshot,
+      fileName: document.fileName,
+      notes,
+      recentIfcFiles,
+      selectedId,
+      snapshot: {
+        ...workspaceSyncSnapshot,
+        documentText: documentSnapshot,
+        version: Date.now(),
+      },
+      title: MOSAIC_TITLES[id],
+      viewId: id,
+      workspaceName: activeWorkspace?.name,
+    });
+    if (result?.ok) {
+      logAction(`ui.detachWindow({ view: '${id}', ok: true });`);
+    } else {
+      logAction(
+        `ui.detachWindow({ view: '${id}', ok: false, reason: '${result?.reason ?? "unknown"}' });`,
+      );
+    }
+  };
+
+  const renderToolbarControls = (id: MosaicViewId) => [
+    desktopApi?.openDetachedView ? (
+        <button
+          key="detach"
+          aria-label={`${MOSAIC_TITLES[id]} als eigenes Fenster oeffnen`}
+          className="mosaic-default-control detach-button"
+          title="Als eigenes Fenster oeffnen"
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            void detachMosaicView(id);
+          }}
+        >
+          <PanelTopOpen aria-hidden className="size-3.5" />
+        </button>
+    ) : null,
+    ...DEFAULT_CONTROLS_WITHOUT_CREATION.map((control, index) =>
+      isValidElement(control)
+        ? cloneElement(control, { key: `default-${index}` })
+        : control,
+    ),
+  ];
+
   const renderTileContent = (id: MosaicViewId) => {
     switch (id) {
       case "structure":
@@ -1618,6 +2062,27 @@ export default function IfcWorkspace() {
             <DiagnosticsPanel document={document} />
           </TileContent>
         );
+      case "recent":
+        return (
+          <TileContent>
+            <RecentFilesPanel
+              activeDocumentId={activeSession.id}
+              entries={recentIfcFiles}
+              onClear={() => setRecentIfcFiles([])}
+              onSelectDocument={(documentId) => {
+                if (documentSessions.some((session) => session.id === documentId)) {
+                  setActiveDocumentId(documentId);
+                }
+              }}
+            />
+          </TileContent>
+        );
+      case "notes":
+        return (
+          <TileContent>
+            <NotesPanel notes={notes} onNotesChange={setNotes} />
+          </TileContent>
+        );
     }
   };
 
@@ -1631,9 +2096,98 @@ export default function IfcWorkspace() {
           ? selectedEntity?.name || MOSAIC_TITLES[id]
           : MOSAIC_TITLES[id]
       }
+      toolbarControls={renderToolbarControls(id)}
     >
       {renderTileContent(id)}
     </MosaicWindow>
+  );
+
+  const renderWorkspaceSwitcher = () => (
+    <div className="flex shrink-0 items-center gap-1">
+      <Select
+        value={activeWorkspace?.id ?? DEFAULT_WORKSPACE_ID}
+        onValueChange={(nextValue) => {
+          if (nextValue) {
+            selectWorkspace(nextValue);
+          }
+        }}
+      >
+        <SelectTrigger
+          aria-label="Workspace"
+          className="w-52 bg-background"
+          size="sm"
+        >
+          <SelectValue>{activeWorkspace?.name ?? "Workspace"}</SelectValue>
+        </SelectTrigger>
+        <SelectContent
+          align="start"
+          className="!w-[30rem] max-w-[calc(100vw-2rem)]"
+        >
+          <SelectGroup>
+            <SelectLabel>Standard</SelectLabel>
+            {BUILT_IN_WORKSPACES.map((workspace) => (
+              <SelectItem key={workspace.id} value={workspace.id}>
+                <span className="flex min-w-0 flex-col">
+                  <span className="truncate">{workspace.name}</span>
+                  <span className="truncate text-xs text-muted-foreground">
+                    {workspace.description}
+                  </span>
+                </span>
+              </SelectItem>
+            ))}
+          </SelectGroup>
+          {customWorkspaces.length ? (
+            <>
+              <SelectSeparator />
+              <SelectGroup>
+                <SelectLabel>Eigene</SelectLabel>
+                {customWorkspaces.map((workspace) => (
+                  <SelectItem key={workspace.id} value={workspace.id}>
+                    <span className="flex min-w-0 flex-col">
+                      <span className="truncate">{workspace.name}</span>
+                      <span className="truncate text-xs text-muted-foreground">
+                        {workspace.updatedAt
+                          ? new Date(workspace.updatedAt).toLocaleString()
+                          : workspace.description}
+                      </span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </>
+          ) : null}
+        </SelectContent>
+      </Select>
+      <IconButton
+        aria-label="Workspace speichern"
+        size="icon-sm"
+        title="Workspace speichern"
+        variant="outline"
+        onClick={saveActiveWorkspace}
+      >
+        <Save aria-hidden className="size-3.5" />
+      </IconButton>
+      <IconButton
+        aria-label="Workspace-Kopie speichern"
+        size="icon-sm"
+        title="Workspace-Kopie speichern"
+        variant="outline"
+        onClick={saveWorkspaceCopy}
+      >
+        <CopyPlus aria-hidden className="size-3.5" />
+      </IconButton>
+      {!activeWorkspace?.builtIn ? (
+        <IconButton
+          aria-label="Workspace loeschen"
+          size="icon-sm"
+          title="Workspace loeschen"
+          variant="outline"
+          onClick={deleteActiveWorkspace}
+        >
+          <Trash2 aria-hidden className="size-3.5" />
+        </IconButton>
+      ) : null}
+    </div>
   );
 
   const renderDocumentTabs = () => (
@@ -1680,6 +2234,39 @@ export default function IfcWorkspace() {
     </Tabs>
   );
 
+  const renderDetachedWorkspace = (viewId: MosaicViewId) => (
+    <div className="flex min-h-screen flex-col bg-background text-foreground">
+      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border/70 bg-card/95 px-4 py-2 shadow-sm">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold">
+            {MOSAIC_TITLES[viewId]}
+          </div>
+          <div className="truncate text-[0.7rem] text-muted-foreground">
+            {document.fileName}
+          </div>
+        </div>
+        <div className="rounded-md border border-border/70 bg-muted/45 px-2 py-1 text-[0.65rem] font-semibold uppercase text-muted-foreground">
+          IFCnative
+        </div>
+      </header>
+      <main className="min-h-0 flex-1 p-2">
+        <div className="h-full min-h-[520px] overflow-hidden rounded-lg border border-border/60 bg-card p-3">
+          {detachedLoading ? (
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              Laedt...
+            </div>
+          ) : (
+            renderTileContent(viewId)
+          )}
+        </div>
+      </main>
+    </div>
+  );
+
+  if (detachedViewId) {
+    return renderDetachedWorkspace(detachedViewId);
+  }
+
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
       <header className="relative z-20 flex shrink-0 flex-col gap-2 border-b border-border/70 bg-card/95 px-4 pt-2 pb-0 shadow-sm backdrop-blur lg:flex-row lg:items-center lg:gap-4">
@@ -1701,6 +2288,7 @@ export default function IfcWorkspace() {
           </div>
           <div className="mx-2 hidden h-6 w-px bg-border/70 lg:block" />
         </div>
+        {renderWorkspaceSwitcher()}
         <div className="min-w-0 flex-1">{renderDocumentTabs()}</div>
         <div className="flex shrink-0 flex-wrap items-center gap-1.5 pb-2 lg:pb-0">
           <div className="flex items-center gap-1 rounded-md">
@@ -1884,6 +2472,181 @@ function addMosaicView<T extends string | number>(
     first: node,
     second: id,
     splitPercentage: 74,
+  };
+}
+
+function createWorkspaceSyncClientId() {
+  return `renderer:${Date.now().toString(36)}:${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
+}
+
+function createWorkspaceSyncSignature(snapshot: WorkspaceSyncSnapshot) {
+  return JSON.stringify({
+    activeDocumentId: snapshot.activeDocumentId,
+    documentText: snapshot.documentText,
+    fileName: snapshot.fileName,
+    notes: snapshot.notes,
+    recentIfcFiles: snapshot.recentIfcFiles,
+    selectedId: snapshot.selectedId,
+    ui: snapshot.ui,
+  });
+}
+
+function isWorkspaceSyncMessage(value: unknown): value is WorkspaceSyncMessage {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Partial<WorkspaceSyncMessage>;
+  return (
+    candidate.type === "snapshot" &&
+    typeof candidate.clientId === "string" &&
+    isWorkspaceSyncSnapshot(candidate.snapshot)
+  );
+}
+
+function isWorkspaceSyncSnapshot(
+  value: unknown,
+): value is WorkspaceSyncSnapshot {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Partial<WorkspaceSyncSnapshot>;
+  return (
+    typeof candidate.activeDocumentId === "string" &&
+    typeof candidate.documentText === "string" &&
+    typeof candidate.fileName === "string" &&
+    typeof candidate.notes === "string" &&
+    Array.isArray(candidate.recentIfcFiles) &&
+    typeof candidate.selectedId === "number" &&
+    isWorkspaceUiSyncState(candidate.ui) &&
+    typeof candidate.version === "number"
+  );
+}
+
+function isWorkspaceUiSyncState(value: unknown): value is WorkspaceUiSyncState {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Partial<WorkspaceUiSyncState>;
+  return (
+    typeof candidate.graphDepth === "number" &&
+    isNativeGraphPreset(candidate.graphPreset) &&
+    Array.isArray(candidate.graphRelationshipTypes) &&
+    candidate.graphRelationshipTypes.every((type) => typeof type === "string") &&
+    isInspectorMode(candidate.inspectorMode) &&
+    typeof candidate.search === "string" &&
+    (candidate.structureMode === "tree" || candidate.structureMode === "graph")
+  );
+}
+
+function createWorkspaceSnapshotFromDetachedPayload(
+  value: unknown,
+): WorkspaceSyncSnapshot | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const payload = value as Partial<{
+    activeDocumentId: string;
+    documentText: string;
+    fileName: string;
+    notes: string;
+    recentIfcFiles: unknown[];
+    selectedId: number;
+  }>;
+  if (
+    typeof payload.documentText !== "string" ||
+    typeof payload.fileName !== "string"
+  ) {
+    return undefined;
+  }
+  return {
+    activeDocumentId:
+      typeof payload.activeDocumentId === "string"
+        ? payload.activeDocumentId
+        : createWorkspaceDocumentId(payload.fileName),
+    documentText: payload.documentText,
+    fileName: payload.fileName,
+    notes: typeof payload.notes === "string" ? payload.notes : "",
+    recentIfcFiles: Array.isArray(payload.recentIfcFiles)
+      ? payload.recentIfcFiles.filter(isRecentIfcFileEntry)
+      : [],
+    selectedId:
+      typeof payload.selectedId === "number" && Number.isFinite(payload.selectedId)
+        ? payload.selectedId
+        : 0,
+    ui: createDefaultWorkspaceUiSyncState(),
+    version: Date.now(),
+  };
+}
+
+function isRecentIfcFileEntry(value: unknown): value is RecentIfcFileEntry {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Partial<RecentIfcFileEntry>;
+  return (
+    typeof candidate.id === "string" &&
+    typeof candidate.name === "string" &&
+    typeof candidate.openedAt === "string" &&
+    (candidate.source === "opened" ||
+      candidate.source === "added" ||
+      candidate.source === "sample")
+  );
+}
+
+function createDefaultWorkspaceUiSyncState(): WorkspaceUiSyncState {
+  return {
+    graphDepth: 1,
+    graphPreset: "all",
+    graphRelationshipTypes: [],
+    inspectorMode: "info",
+    search: "",
+    structureMode: "tree",
+  };
+}
+
+function isNativeGraphPreset(value: unknown): value is NativeGraphPreset {
+  return (
+    value === "all" ||
+    value === "spatial" ||
+    value === "properties" ||
+    value === "resources" ||
+    value === "geometry"
+  );
+}
+
+function isInspectorMode(value: unknown): value is InspectorMode {
+  return (
+    value === "info" ||
+    value === "edit" ||
+    value === "placement" ||
+    value === "psets" ||
+    value === "object-info" ||
+    value === "relations" ||
+    value === "resources" ||
+    value === "refs" ||
+    value === "units"
+  );
+}
+
+function readDetachedWorkspaceDescriptor(): DetachedWorkspaceDescriptor | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const params = new URLSearchParams(window.location.search);
+  const viewId = params.get("detachedView");
+  const token = params.get("detachedToken");
+  if (
+    !token ||
+    !viewId ||
+    !MOSAIC_VIEW_IDS.includes(viewId as MosaicViewId)
+  ) {
+    return null;
+  }
+  return {
+    token,
+    viewId: viewId as MosaicViewId,
   };
 }
 

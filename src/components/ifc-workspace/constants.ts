@@ -14,6 +14,8 @@ export const MOSAIC_VIEW_IDS: MosaicViewId[] = [
   "object-info",
   "console",
   "diagnostics",
+  "recent",
+  "notes",
 ];
 
 export const DEFAULT_MOSAIC_LAYOUT: MosaicNode<MosaicViewId> = {
@@ -43,6 +45,114 @@ export const DEFAULT_MOSAIC_LAYOUT: MosaicNode<MosaicViewId> = {
   splitPercentage: 27,
 };
 
+export const REVIEW_MOSAIC_LAYOUT: MosaicNode<MosaicViewId> = {
+  direction: "row",
+  first: {
+    direction: "column",
+    first: "viewer",
+    second: {
+      direction: "row",
+      first: "object-info",
+      second: "diagnostics",
+      splitPercentage: 52,
+    },
+    splitPercentage: 70,
+  },
+  second: {
+    direction: "column",
+    first: "inspector",
+    second: "notes",
+    splitPercentage: 58,
+  },
+  splitPercentage: 68,
+};
+
+export const BUILD_MOSAIC_LAYOUT: MosaicNode<MosaicViewId> = {
+  direction: "row",
+  first: {
+    direction: "column",
+    first: "structure",
+    second: "recent",
+    splitPercentage: 68,
+  },
+  second: {
+    direction: "row",
+    first: "builder",
+    second: {
+      direction: "column",
+      first: "inspector",
+      second: "notes",
+      splitPercentage: 64,
+    },
+    splitPercentage: 47,
+  },
+  splitPercentage: 28,
+};
+
+export const COORDINATION_MOSAIC_LAYOUT: MosaicNode<MosaicViewId> = {
+  direction: "row",
+  first: {
+    direction: "column",
+    first: "viewer",
+    second: "console",
+    splitPercentage: 76,
+  },
+  second: {
+    direction: "column",
+    first: "structure",
+    second: {
+      direction: "row",
+      first: "recent",
+      second: "notes",
+      splitPercentage: 50,
+    },
+    splitPercentage: 58,
+  },
+  splitPercentage: 64,
+};
+
+export interface WorkspaceDefinition {
+  builtIn?: boolean;
+  description: string;
+  id: string;
+  layout: MosaicNode<MosaicViewId> | null;
+  name: string;
+  updatedAt?: string;
+}
+
+export const DEFAULT_WORKSPACE_ID = "builtin:editor";
+
+export const BUILT_IN_WORKSPACES: WorkspaceDefinition[] = [
+  {
+    builtIn: true,
+    description: "Viewer, Struktur, Builder, Inspector und Review-Tools.",
+    id: DEFAULT_WORKSPACE_ID,
+    layout: DEFAULT_MOSAIC_LAYOUT,
+    name: "Editor",
+  },
+  {
+    builtIn: true,
+    description: "Grosses Modellfenster mit Pruefung und Notizen.",
+    id: "builtin:review",
+    layout: REVIEW_MOSAIC_LAYOUT,
+    name: "Review",
+  },
+  {
+    builtIn: true,
+    description: "Bauen, Strukturieren und zuletzt genutzte IFCs.",
+    id: "builtin:build",
+    layout: BUILD_MOSAIC_LAYOUT,
+    name: "Build",
+  },
+  {
+    builtIn: true,
+    description: "Koordination mit Viewer, Baum, Console und Ablage.",
+    id: "builtin:coordination",
+    layout: COORDINATION_MOSAIC_LAYOUT,
+    name: "Koordination",
+  },
+];
+
 export const MOSAIC_TITLES: Record<MosaicViewId, string> = {
   builder: "Baukasten",
   catalog: "Objektkatalog",
@@ -50,7 +160,9 @@ export const MOSAIC_TITLES: Record<MosaicViewId, string> = {
   console: "JS Console",
   diagnostics: "Diagnostics",
   inspector: "Inspector",
+  notes: "Notizen",
   "object-info": "Objektinfo: IDs",
+  recent: "Kuerzlich verwendet",
   structure: "Structure",
   viewer: "3D Viewer",
 };

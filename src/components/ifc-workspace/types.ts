@@ -20,7 +20,9 @@ export type MosaicViewId =
   | "catalog-review"
   | "object-info"
   | "console"
-  | "diagnostics";
+  | "diagnostics"
+  | "recent"
+  | "notes";
 
 export interface Point {
   x: number;
