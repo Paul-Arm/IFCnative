@@ -19,12 +19,16 @@ import {
 
 import {
     catalogObjectLabel,
+    getNativeBodyRepresentation,
     getNativePlacement,
+    relationshipTypesForEntities,
+    splitTopLevel,
     unquote,
     type CatalogObjectType,
     type CatalogPropertyRule,
     type CatalogValidationFinding,
     type IfcObjectCatalog,
+    type NativeBodyProfile,
     type NativeIfcDocument,
     type NativeIfcEntity,
     type NativeIfcPropertySet,
@@ -35,7 +39,10 @@ import {
 import { cn } from "@/lib/utils";
 
 import {
+    CONSTRAINT_GRADES,
     ENTITY_TYPES,
+    GROUP_TYPES,
+    OBJECTIVE_QUALIFIERS,
     PROPERTY_VALUE_TYPES,
     QUANTITY_TYPES,
     RELATION_TYPES,
@@ -44,11 +51,12 @@ import {
     UNIT_TYPES,
 } from "./constants";
 import { findTreePath } from "./StructurePanel";
-import type { EntityEditDraft, InspectorMode } from "./types";
+import type { BodyElementDraft, EntityEditDraft, InspectorMode } from "./types";
 import {
     Badge,
     Button,
     CollapsibleSection,
+    ColorInput,
     DataTable,
     DataTableCell,
     DropdownField,
@@ -71,9 +79,21 @@ export function InspectorPanel({
   objectInfoFindings,
   objectInfoIndex,
   selectedId,
+  onAddApproval,
   onAddClassification,
+  onAddConstraint,
   onAddDocumentReference,
+  onAddGroupAssignment,
+  onAddLibraryReference,
   onAddMaterial,
+  onAddMaterialConstituentSet,
+  onAddMaterialLayerSet,
+  onAddMaterialLayerSetUsage,
+  onAddMaterialProfileSet,
+  onAddMaterialProfileSetUsage,
+  onAddMaterialStyle,
+  onAddMaterialWithProperties,
+  onAssignBodyToSelected,
   onAssignType,
   onAddEmptyPset,
   onAddPropertyToSet,
@@ -100,17 +120,78 @@ export function InspectorPanel({
   objectInfoFindings: ObjectInfoValidationFinding[];
   objectInfoIndex: ObjectInfoIndex;
   selectedId: number;
+  onAddApproval(identifier: string, name: string, status: string): void;
   onAddClassification(
     identification: string,
     name: string,
     location: string,
+  ): void;
+  onAddConstraint(
+    name: string,
+    grade: string,
+    source: string,
+    qualifier: string,
+    intent: string,
   ): void;
   onAddDocumentReference(
     identification: string,
     name: string,
     location: string,
   ): void;
+  onAddGroupAssignment(
+    groupType: string,
+    groupName: string,
+    objectType: string,
+    longName: string,
+  ): void;
+  onAddLibraryReference(
+    identification: string,
+    name: string,
+    location: string,
+  ): void;
   onAddMaterial(materialName: string, materialCategory: string): void;
+  onAddMaterialWithProperties(
+    materialName: string,
+    materialCategory: string,
+    propertySetName: string,
+    propertyRows: string,
+  ): void;
+  onAddMaterialStyle(
+    materialName: string,
+    materialCategory: string,
+    styleName: string,
+    color: string,
+    transparency: string,
+  ): void;
+  onAddMaterialConstituentSet(setName: string, constituentRows: string): void;
+  onAddMaterialLayerSet(setName: string, layerRows: string): void;
+  onAddMaterialLayerSetUsage(
+    setName: string,
+    layerRows: string,
+    direction: string,
+    directionSense: string,
+    offset: string,
+    referenceExtent: string,
+  ): void;
+  onAddMaterialProfileSet(
+    setName: string,
+    profileName: string,
+    materialName: string,
+    category: string,
+    width: string,
+    depth: string,
+  ): void;
+  onAddMaterialProfileSetUsage(
+    setName: string,
+    profileName: string,
+    materialName: string,
+    category: string,
+    width: string,
+    depth: string,
+    cardinalPoint: string,
+    referenceExtent: string,
+  ): void;
+  onAssignBodyToSelected(options: BodyElementDraft): void;
   onAssignType(typeName: string, typeClass: string, tag: string): void;
   onAddEmptyPset(psetName: string): void;
   onAddPropertyToSet(
@@ -197,6 +278,16 @@ export function InspectorPanel({
       />
     );
   }
+  if (mode === "geometry") {
+    return (
+      <GeometryPanel
+        document={document}
+        entity={entity}
+        selectedId={selectedId}
+        onAssignBodyToSelected={onAssignBodyToSelected}
+      />
+    );
+  }
   if (mode === "relations") {
     return (
       <RelationsPanel
@@ -216,9 +307,20 @@ export function InspectorPanel({
       <ResourcesPanel
         document={document}
         selectedId={selectedId}
+        onAddApproval={onAddApproval}
         onAddClassification={onAddClassification}
+        onAddConstraint={onAddConstraint}
         onAddDocumentReference={onAddDocumentReference}
+        onAddGroupAssignment={onAddGroupAssignment}
+        onAddLibraryReference={onAddLibraryReference}
         onAddMaterial={onAddMaterial}
+        onAddMaterialConstituentSet={onAddMaterialConstituentSet}
+        onAddMaterialLayerSet={onAddMaterialLayerSet}
+        onAddMaterialLayerSetUsage={onAddMaterialLayerSetUsage}
+        onAddMaterialProfileSet={onAddMaterialProfileSet}
+        onAddMaterialProfileSetUsage={onAddMaterialProfileSetUsage}
+        onAddMaterialStyle={onAddMaterialStyle}
+        onAddMaterialWithProperties={onAddMaterialWithProperties}
         onAssignType={onAssignType}
       />
     );
@@ -703,6 +805,162 @@ function PlacementPanel({
   );
 }
 
+function GeometryPanel({
+  document,
+  entity,
+  selectedId,
+  onAssignBodyToSelected,
+}: {
+  document: NativeIfcDocument;
+  entity: NativeIfcEntity;
+  selectedId: number;
+  onAssignBodyToSelected(options: BodyElementDraft): void;
+}) {
+  const body = getNativeBodyRepresentation(document, selectedId);
+  const placement = getNativePlacement(document, selectedId);
+  const [profile, setProfile] = useState<NativeBodyProfile>(
+    body.profile ?? "rectangle",
+  );
+  const [width, setWidth] = useState(formatEditableNumber(body.width, "1"));
+  const [depth, setDepth] = useState(formatEditableNumber(body.depth, "1"));
+  const [height, setHeight] = useState(formatEditableNumber(body.height, "1"));
+
+  useEffect(() => {
+    setProfile(body.profile ?? "rectangle");
+    setWidth(formatEditableNumber(body.width, "1"));
+    setDepth(formatEditableNumber(body.depth ?? body.width, "1"));
+    setHeight(formatEditableNumber(body.height, "1"));
+  }, [
+    body.bodyRepresentationId,
+    body.depth,
+    body.height,
+    body.profile,
+    body.profileId,
+    body.solidId,
+    body.width,
+  ]);
+
+  const representationSummary = body.hasRepresentation
+    ? [
+        body.shapeId ? `Shape #${body.shapeId}` : undefined,
+        body.bodyRepresentationId ? `Body #${body.bodyRepresentationId}` : undefined,
+        body.solidId ? `Solid #${body.solidId}` : undefined,
+        body.profileId ? `Profile #${body.profileId}` : undefined,
+      ]
+        .filter(Boolean)
+        .join(" / ") || "Representation assigned"
+    : "No Representation";
+  const bodyDraft: BodyElementDraft = {
+    depth,
+    height,
+    name: entity.name || "Assigned Body",
+    profile,
+    type: entity.type,
+    width,
+    x: "0",
+    y: "0",
+    z: "0",
+  };
+
+  return (
+    <PanelShell scroll>
+      <PanelHeader
+        eyebrow={`Auswahl #${selectedId}`}
+        title="Geometry"
+        description={representationSummary}
+        meta={
+          <Badge tone={body.canEdit ? "success" : body.canAssign ? "info" : "neutral"}>
+            {body.canEdit ? "Editable" : body.canAssign ? "Assignable" : "Read only"}
+          </Badge>
+        }
+      />
+      <InfoSection title="Representation">
+        <InfoRow label="Product" value={`#${body.productId} ${entity.type}`} />
+        <InfoRow
+          label="ObjectPlacement"
+          value={
+            placement
+              ? `#${placement.placementId} / Point #${placement.pointId}`
+              : "$"
+          }
+        />
+        <InfoRow
+          label="ProductDefinitionShape"
+          value={body.shapeId ? `#${body.shapeId}` : "$"}
+        />
+        <InfoRow
+          label="ShapeRepresentations"
+          value={
+            body.representationIds.length
+              ? body.representationIds.map((id) => `#${id}`).join(", ")
+              : "$"
+          }
+        />
+        <InfoRow
+          label="Body"
+          value={body.bodyRepresentationId ? `#${body.bodyRepresentationId}` : "$"}
+        />
+        <InfoRow label="Solid" value={body.solidId ? `#${body.solidId}` : "$"} />
+        <InfoRow
+          label="Profile"
+          value={
+            body.profileId
+              ? `#${body.profileId} ${body.profileType ?? ""}`.trim()
+              : "$"
+          }
+        />
+        {body.message ? <TextLine>{body.message}</TextLine> : null}
+      </InfoSection>
+
+      <InfoSection title="Dimensions">
+        <ResponsiveRow>
+          <ResponsiveField>
+            <DropdownField
+              label="Profile"
+              options={[
+                { label: "Rectangle", value: "rectangle" },
+                { label: "Cylinder", value: "cylinder" },
+              ]}
+              value={profile}
+              onChange={(value) => setProfile(value as NativeBodyProfile)}
+            />
+          </ResponsiveField>
+          <ResponsiveField>
+            <LabeledInput
+              label={profile === "cylinder" ? "Diameter X" : "Width X"}
+              keyboardType="numeric"
+              value={width}
+              onChangeText={setWidth}
+            />
+          </ResponsiveField>
+          <ResponsiveField>
+            <LabeledInput
+              label={profile === "cylinder" ? "Diameter Y" : "Depth Y"}
+              keyboardType="numeric"
+              value={depth}
+              onChangeText={setDepth}
+            />
+          </ResponsiveField>
+          <ResponsiveField>
+            <LabeledInput
+              label="Height Z"
+              keyboardType="numeric"
+              value={height}
+              onChangeText={setHeight}
+            />
+          </ResponsiveField>
+        </ResponsiveRow>
+        <Button
+          disabled={!body.canAssign}
+          label={body.hasRepresentation ? "Update Geometry" : "Assign Geometry"}
+          primary
+          onPress={() => onAssignBodyToSelected(bodyDraft)}
+        />
+      </InfoSection>
+    </PanelShell>
+  );
+}
+
 function PsetPanel({
   activeCatalogObjectId,
   catalog,
@@ -1014,9 +1272,10 @@ function PsetTableSection({
     setSetName(set.name);
   }, [set.id, set.name]);
 
-  const renameSet = (nextName: string) => {
-    setSetName(nextName);
-    onRenamePropertySet(set.id, nextName);
+  const commitSetName = (nextName = setName) => {
+    if (nextName.trim() !== set.name) {
+      onRenamePropertySet(set.id, nextName);
+    }
   };
 
   const isQto = set.kind === "Qto";
@@ -1044,7 +1303,14 @@ function PsetTableSection({
         <Input
           className="h-7 min-w-40 flex-1 rounded-md border-transparent bg-transparent px-2 text-sm font-semibold text-foreground shadow-none hover:bg-white/70 focus-visible:border-ring focus-visible:bg-white"
           value={setName}
-          onChange={(event) => renameSet(event.currentTarget.value)}
+          onBlur={() => commitSetName()}
+          onChange={(event) => setSetName(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              event.currentTarget.blur();
+            }
+          }}
         />
         <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
           #{set.id} ·{" "}
@@ -1079,10 +1345,7 @@ function PsetTableSection({
             <EditablePropertyTableCells
               columns={PSET_TABLE_COLUMNS}
               property={value}
-              rawValue={editableSetValue(
-                document.entityById.get(value.id),
-                value.value,
-              )}
+              propertyEntity={document.entityById.get(value.id)}
               setId={set.id}
               typeOptions={typeOptions}
               onRemove={onRemovePropertyFromSet}
@@ -1115,7 +1378,7 @@ function PsetTableSection({
 function EditablePropertyTableCells({
   columns,
   property,
-  rawValue,
+  propertyEntity,
   setId,
   typeOptions,
   onRemove,
@@ -1123,7 +1386,7 @@ function EditablePropertyTableCells({
 }: {
   columns: DataTableColumn[];
   property: { id: number; name: string; value: string; type: string };
-  rawValue: string;
+  propertyEntity?: NativeIfcEntity;
   setId: number;
   typeOptions: string[];
   onRemove(setId: number, propertyId: number): void;
@@ -1134,24 +1397,38 @@ function EditablePropertyTableCells({
     propertyValueType: string,
   ): void;
 }) {
-  const parsed = parseTypedPropertyValue(rawValue);
+  const rawValue = editableSetValue(propertyEntity, property.value);
+  const parsed = parseTypedPropertyValue(rawValue, propertyEntity);
   const [name, setName] = useState(property.name);
   const [valueType, setValueType] = useState(parsed.valueType);
   const [value, setValue] = useState(parsed.value);
 
-  const updateName = (nextName: string) => {
-    setName(nextName);
-    onUpdate(property.id, nextName, value, valueType);
+  const commitUpdate = (next: {
+    name?: string;
+    value?: string;
+    valueType?: string;
+  } = {}) => {
+    const committedName = next.name ?? name;
+    const committedValue = next.value ?? value;
+    const committedValueType = next.valueType ?? valueType;
+    if (
+      committedName === property.name &&
+      committedValue === parsed.value &&
+      committedValueType === parsed.valueType
+    ) {
+      return;
+    }
+    onUpdate(
+      property.id,
+      committedName,
+      committedValue,
+      committedValueType,
+    );
   };
 
   const updateValueType = (nextType: string) => {
     setValueType(nextType);
-    onUpdate(property.id, name, value, nextType);
-  };
-
-  const updateValue = (nextValue: string) => {
-    setValue(nextValue);
-    onUpdate(property.id, name, nextValue, valueType);
+    commitUpdate({ valueType: nextType });
   };
 
   useEffect(() => {
@@ -1165,7 +1442,14 @@ function EditablePropertyTableCells({
       <DataTableCell column={columns[0]}>
         <PsetCellInput
           value={name}
-          onChange={(event) => updateName(event.currentTarget.value)}
+          onBlur={() => commitUpdate()}
+          onChange={(event) => setName(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              event.currentTarget.blur();
+            }
+          }}
         />
       </DataTableCell>
       <DataTableCell column={columns[1]}>
@@ -1178,7 +1462,14 @@ function EditablePropertyTableCells({
       <DataTableCell column={columns[2]}>
         <PsetCellInput
           value={value}
-          onChange={(event) => updateValue(event.currentTarget.value)}
+          onBlur={() => commitUpdate()}
+          onChange={(event) => setValue(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              event.currentTarget.blur();
+            }
+          }}
         />
       </DataTableCell>
       <DataTableCell column={columns[3]}>
@@ -1294,12 +1585,14 @@ function PsetTypeSelect({
         className="h-7 w-full rounded-md border-transparent bg-transparent px-2 text-sm shadow-none hover:bg-muted/45 focus-visible:ring-1"
         size="sm"
       >
-        <SelectValue className="truncate">{selectedType}</SelectValue>
+        <SelectValue className="truncate">
+          {propertyValueTypeLabel(selectedType)}
+        </SelectValue>
       </SelectTrigger>
       <SelectContent align="start" className="max-h-72">
         {normalizedTypeOptions.map((typeOption) => (
           <SelectItem key={typeOption} value={typeOption}>
-            {typeOption}
+            {propertyValueTypeLabel(typeOption)}
           </SelectItem>
         ))}
       </SelectContent>
@@ -1363,11 +1656,32 @@ function RelationsPanel({
   const [targetId, setTargetId] = useState(String(selectedId));
   const validSource = document.entityById.has(Number(sourceId));
   const validTarget = document.entityById.has(Number(targetId));
+  const relationshipTypeOptions = useMemo(
+    () =>
+      relationshipTypesForEntities(
+        document,
+        RELATION_TYPES,
+        Number(sourceId),
+        Number(targetId),
+      ),
+    [document, sourceId, targetId],
+  );
+  const canCreateRelationship =
+    validSource && validTarget && relationshipTypeOptions.includes(relType);
 
   useEffect(() => {
     setSourceId(String(selectedId));
     setTargetId(String(selectedId));
   }, [selectedId]);
+
+  useEffect(() => {
+    if (
+      relationshipTypeOptions.length &&
+      !relationshipTypeOptions.includes(relType)
+    ) {
+      setRelType(relationshipTypeOptions[0]);
+    }
+  }, [relationshipTypeOptions, relType]);
 
   return (
     <PanelShell scroll>
@@ -1380,7 +1694,7 @@ function RelationsPanel({
       <EditBlock title="Add Relationship">
         <DropdownField
           label="Relationship class"
-          options={RELATION_TYPES}
+          options={relationshipTypeOptions}
           value={relType}
           onChange={setRelType}
         />
@@ -1396,8 +1710,11 @@ function RelationsPanel({
           value={targetId}
           onChange={setTargetId}
         />
+        {!relationshipTypeOptions.length ? (
+          <TextLine>No valid relationship for this source/target class.</TextLine>
+        ) : null}
         <Button
-          disabled={!validSource || !validTarget}
+          disabled={!canCreateRelationship}
           label="+ Add Relationship"
           primary
           onPress={() =>
@@ -1449,18 +1766,40 @@ function EditableRelationship({
   const [type, setType] = useState(relationship.type);
   const [sourceId, setSourceId] = useState(String(currentSourceId));
   const [targetId, setTargetId] = useState(String(currentTargetId));
+  const compatibleTypeOptions = useMemo(
+    () =>
+      relationshipTypesForEntities(
+        document,
+        RELATION_TYPES,
+        Number(sourceId),
+        Number(targetId),
+      ),
+    [document, sourceId, targetId],
+  );
   const typeOptions = useMemo(
-    () => uniqueStrings([...RELATION_TYPES, relationship.type]),
-    [relationship.type],
+    () =>
+      uniqueStrings([
+        ...compatibleTypeOptions,
+        relationship.type,
+      ]),
+    [compatibleTypeOptions, relationship.type],
   );
   const validSource = document.entityById.has(Number(sourceId));
   const validTarget = document.entityById.has(Number(targetId));
+  const canSaveRelationship =
+    validSource && validTarget && compatibleTypeOptions.includes(type);
 
   useEffect(() => {
     setType(relationship.type);
     setSourceId(String(currentSourceId));
     setTargetId(String(currentTargetId));
   }, [currentSourceId, currentTargetId, relationship.id, relationship.type]);
+
+  useEffect(() => {
+    if (compatibleTypeOptions.length && !compatibleTypeOptions.includes(type)) {
+      setType(compatibleTypeOptions[0]);
+    }
+  }, [compatibleTypeOptions, type]);
 
   return (
     <EditBlock>
@@ -1486,7 +1825,7 @@ function EditableRelationship({
       <ResponsiveRow>
         <ResponsiveField>
           <Button
-            disabled={!validSource || !validTarget}
+            disabled={!canSaveRelationship}
             label="Save Relationship"
             onPress={() =>
               onUpdate(
@@ -1512,24 +1851,95 @@ function EditableRelationship({
 function ResourcesPanel({
   document,
   selectedId,
+  onAddApproval,
   onAddClassification,
+  onAddConstraint,
   onAddDocumentReference,
+  onAddGroupAssignment,
+  onAddLibraryReference,
   onAddMaterial,
+  onAddMaterialConstituentSet,
+  onAddMaterialLayerSet,
+  onAddMaterialLayerSetUsage,
+  onAddMaterialProfileSet,
+  onAddMaterialProfileSetUsage,
+  onAddMaterialStyle,
+  onAddMaterialWithProperties,
   onAssignType,
 }: {
   document: NativeIfcDocument;
   selectedId: number;
+  onAddApproval(identifier: string, name: string, status: string): void;
   onAddClassification(
     identification: string,
     name: string,
     location: string,
+  ): void;
+  onAddConstraint(
+    name: string,
+    grade: string,
+    source: string,
+    qualifier: string,
+    intent: string,
   ): void;
   onAddDocumentReference(
     identification: string,
     name: string,
     location: string,
   ): void;
+  onAddGroupAssignment(
+    groupType: string,
+    groupName: string,
+    objectType: string,
+    longName: string,
+  ): void;
+  onAddLibraryReference(
+    identification: string,
+    name: string,
+    location: string,
+  ): void;
   onAddMaterial(materialName: string, materialCategory: string): void;
+  onAddMaterialWithProperties(
+    materialName: string,
+    materialCategory: string,
+    propertySetName: string,
+    propertyRows: string,
+  ): void;
+  onAddMaterialStyle(
+    materialName: string,
+    materialCategory: string,
+    styleName: string,
+    color: string,
+    transparency: string,
+  ): void;
+  onAddMaterialConstituentSet(setName: string, constituentRows: string): void;
+  onAddMaterialLayerSet(setName: string, layerRows: string): void;
+  onAddMaterialLayerSetUsage(
+    setName: string,
+    layerRows: string,
+    direction: string,
+    directionSense: string,
+    offset: string,
+    referenceExtent: string,
+  ): void;
+  onAddMaterialProfileSet(
+    setName: string,
+    profileName: string,
+    materialName: string,
+    category: string,
+    width: string,
+    depth: string,
+  ): void;
+  onAddMaterialProfileSetUsage(
+    setName: string,
+    profileName: string,
+    materialName: string,
+    category: string,
+    width: string,
+    depth: string,
+    cardinalPoint: string,
+    referenceExtent: string,
+  ): void;
   onAssignType(typeName: string, typeClass: string, tag: string): void;
 }) {
   const resources = document.resourcesByEntity.get(selectedId) ?? [];
@@ -1537,6 +1947,45 @@ function ResourcesPanel({
     document.typeAssignmentsByEntity.get(selectedId) ?? [];
   const [materialName, setMaterialName] = useState("Inspektionsbeton");
   const [materialCategory, setMaterialCategory] = useState("Beton");
+  const [materialPropertySetName, setMaterialPropertySetName] =
+    useState("Pset_MaterialCommon");
+  const [materialPropertyRows, setMaterialPropertyRows] = useState(
+    "MassDensity | 2400 | IFCREAL\nThermalConductivity | 1.7 | IFCREAL",
+  );
+  const [materialStyleName, setMaterialStyleName] = useState(
+    "IFCnative Surface Style",
+  );
+  const [materialColor, setMaterialColor] = useState("#8ea7c2");
+  const [materialTransparency, setMaterialTransparency] = useState("0");
+  const [layerSetName, setLayerSetName] = useState("Wall Layer Set");
+  const [layerRows, setLayerRows] = useState(
+    "Core | Concrete | 0.2 | LoadBearing\nInsulation | Mineral wool | 0.08 | Insulation",
+  );
+  const [layerDirection, setLayerDirection] = useState("AXIS2");
+  const [layerDirectionSense, setLayerDirectionSense] = useState("POSITIVE");
+  const [layerOffset, setLayerOffset] = useState("0");
+  const [layerReferenceExtent, setLayerReferenceExtent] = useState("");
+  const [profileSetName, setProfileSetName] = useState("Beam Profile Set");
+  const [profileName, setProfileName] = useState("Rectangular Profile");
+  const [profileMaterialName, setProfileMaterialName] = useState("Steel");
+  const [profileMaterialCategory, setProfileMaterialCategory] =
+    useState("LoadBearing");
+  const [profileWidth, setProfileWidth] = useState("0.2");
+  const [profileDepth, setProfileDepth] = useState("0.3");
+  const [profileCardinalPoint, setProfileCardinalPoint] = useState("5");
+  const [profileReferenceExtent, setProfileReferenceExtent] = useState("");
+  const [constituentSetName, setConstituentSetName] = useState(
+    "Window Constituent Set",
+  );
+  const [constituentRows, setConstituentRows] = useState(
+    "Frame | Aluminium | 0.6 | Frame\nGlazing | Glass | 0.4 | Glazing",
+  );
+  const [groupType, setGroupType] = useState("IFCZONE");
+  const [groupName, setGroupName] = useState("Brandschutzbereich A");
+  const [groupObjectType, setGroupObjectType] = useState("Fire compartment");
+  const [groupLongName, setGroupLongName] = useState(
+    "Brandschutzbereich Ebene 1",
+  );
   const [typeClass, setTypeClass] = useState("IFCTYPEOBJECT");
   const [typeName, setTypeName] = useState("Inspektionselement-Typ");
   const [typeTag, setTypeTag] = useState("TYPE-INSPECTION");
@@ -1552,6 +2001,24 @@ function ResourcesPanel({
   const [documentName, setDocumentName] = useState("Inspektionsbericht");
   const [documentUri, setDocumentUri] = useState(
     "https://ifcnative.local/documents/inspection-report",
+  );
+  const [libraryId, setLibraryId] = useState("LIB-INSPECTION");
+  const [libraryName, setLibraryName] = useState("Inspektionsbibliothek");
+  const [libraryUri, setLibraryUri] = useState(
+    "https://ifcnative.local/library/inspection",
+  );
+  const [approvalId, setApprovalId] = useState("APP-INSPECTION");
+  const [approvalName, setApprovalName] = useState("Pruefung freigegeben");
+  const [approvalStatus, setApprovalStatus] = useState("Approved");
+  const [constraintName, setConstraintName] = useState(
+    "Objektanforderung erfuellen",
+  );
+  const [constraintGrade, setConstraintGrade] = useState("HARD");
+  const [constraintSource, setConstraintSource] = useState("IFCnative");
+  const [constraintQualifier, setConstraintQualifier] =
+    useState("REQUIREMENT");
+  const [constraintIntent, setConstraintIntent] = useState(
+    "EXPECTED PERFORMANCE",
   );
 
   return (
@@ -1622,6 +2089,321 @@ function ResourcesPanel({
           primary
           onPress={() => onAddMaterial(materialName, materialCategory)}
         />
+        <ResponsiveRow>
+          <ResponsiveField>
+            <LabeledInput
+              label="Material property set"
+              value={materialPropertySetName}
+              onChangeText={setMaterialPropertySetName}
+            />
+          </ResponsiveField>
+          <ResponsiveField>
+            <Button
+              label="+ Add Material Properties"
+              onPress={() =>
+                onAddMaterialWithProperties(
+                  materialName,
+                  materialCategory,
+                  materialPropertySetName,
+                  materialPropertyRows,
+                )
+              }
+            />
+          </ResponsiveField>
+        </ResponsiveRow>
+        <LabeledInput
+          label="Name | Value | IFC type"
+          multiline
+          mono
+          value={materialPropertyRows}
+          onChangeText={setMaterialPropertyRows}
+        />
+        <ResponsiveRow>
+          <ResponsiveField>
+            <LabeledInput
+              label="Material style"
+              value={materialStyleName}
+              onChangeText={setMaterialStyleName}
+            />
+          </ResponsiveField>
+          <ResponsiveField>
+            <ColorInput
+              label="Color"
+              value={materialColor}
+              onChangeText={setMaterialColor}
+            />
+          </ResponsiveField>
+          <ResponsiveField>
+            <LabeledInput
+              label="Transparency 0..1"
+              keyboardType="numeric"
+              value={materialTransparency}
+              onChangeText={setMaterialTransparency}
+            />
+          </ResponsiveField>
+        </ResponsiveRow>
+        <Button
+          label="+ Add Material Style"
+          onPress={() =>
+            onAddMaterialStyle(
+              materialName,
+              materialCategory,
+              materialStyleName,
+              materialColor,
+              materialTransparency,
+            )
+          }
+        />
+      </EditBlock>
+      <EditBlock title="Add Material Layer Set">
+        <ResponsiveRow>
+          <ResponsiveField>
+            <LabeledInput
+              label="Set name"
+              value={layerSetName}
+              onChangeText={setLayerSetName}
+            />
+          </ResponsiveField>
+          <ResponsiveField>
+            <Button
+              label="+ Add Layer Set"
+              onPress={() => onAddMaterialLayerSet(layerSetName, layerRows)}
+            />
+          </ResponsiveField>
+        </ResponsiveRow>
+        <LabeledInput
+          label="Name | Material | Thickness | Category"
+          multiline
+          mono
+          value={layerRows}
+          onChangeText={setLayerRows}
+        />
+        <ResponsiveRow>
+          <ResponsiveField>
+            <DropdownField
+              label="Direction"
+              options={["AXIS1", "AXIS2", "AXIS3"]}
+              value={layerDirection}
+              onChange={setLayerDirection}
+            />
+          </ResponsiveField>
+          <ResponsiveField>
+            <DropdownField
+              label="Sense"
+              options={["POSITIVE", "NEGATIVE"]}
+              value={layerDirectionSense}
+              onChange={setLayerDirectionSense}
+            />
+          </ResponsiveField>
+          <ResponsiveField>
+            <LabeledInput
+              label="Offset"
+              keyboardType="numeric"
+              value={layerOffset}
+              onChangeText={setLayerOffset}
+            />
+          </ResponsiveField>
+        </ResponsiveRow>
+        <ResponsiveRow>
+          <ResponsiveField>
+            <LabeledInput
+              label="Reference extent"
+              keyboardType="numeric"
+              value={layerReferenceExtent}
+              onChangeText={setLayerReferenceExtent}
+            />
+          </ResponsiveField>
+          <ResponsiveField>
+            <Button
+              label="+ Add Layer Usage"
+              onPress={() =>
+                onAddMaterialLayerSetUsage(
+                  layerSetName,
+                  layerRows,
+                  layerDirection,
+                  layerDirectionSense,
+                  layerOffset,
+                  layerReferenceExtent,
+                )
+              }
+            />
+          </ResponsiveField>
+        </ResponsiveRow>
+      </EditBlock>
+      <EditBlock title="Add Material Profile Set">
+        <ResponsiveRow>
+          <ResponsiveField>
+            <LabeledInput
+              label="Set name"
+              value={profileSetName}
+              onChangeText={setProfileSetName}
+            />
+          </ResponsiveField>
+          <ResponsiveField>
+            <LabeledInput
+              label="Profile"
+              value={profileName}
+              onChangeText={setProfileName}
+            />
+          </ResponsiveField>
+          <ResponsiveField>
+            <LabeledInput
+              label="Material"
+              value={profileMaterialName}
+              onChangeText={setProfileMaterialName}
+            />
+          </ResponsiveField>
+        </ResponsiveRow>
+        <ResponsiveRow>
+          <ResponsiveField>
+            <LabeledInput
+              label="Category"
+              value={profileMaterialCategory}
+              onChangeText={setProfileMaterialCategory}
+            />
+          </ResponsiveField>
+          <ResponsiveField>
+            <LabeledInput
+              label="XDim"
+              keyboardType="numeric"
+              value={profileWidth}
+              onChangeText={setProfileWidth}
+            />
+          </ResponsiveField>
+          <ResponsiveField>
+            <LabeledInput
+              label="YDim"
+              keyboardType="numeric"
+              value={profileDepth}
+              onChangeText={setProfileDepth}
+            />
+          </ResponsiveField>
+        </ResponsiveRow>
+        <Button
+          label="+ Add Profile Set"
+          onPress={() =>
+            onAddMaterialProfileSet(
+              profileSetName,
+              profileName,
+              profileMaterialName,
+              profileMaterialCategory,
+              profileWidth,
+              profileDepth,
+            )
+          }
+        />
+        <ResponsiveRow>
+          <ResponsiveField>
+            <LabeledInput
+              label="Cardinal point"
+              keyboardType="numeric"
+              value={profileCardinalPoint}
+              onChangeText={setProfileCardinalPoint}
+            />
+          </ResponsiveField>
+          <ResponsiveField>
+            <LabeledInput
+              label="Reference extent"
+              keyboardType="numeric"
+              value={profileReferenceExtent}
+              onChangeText={setProfileReferenceExtent}
+            />
+          </ResponsiveField>
+          <ResponsiveField>
+            <Button
+              label="+ Add Profile Usage"
+              onPress={() =>
+                onAddMaterialProfileSetUsage(
+                  profileSetName,
+                  profileName,
+                  profileMaterialName,
+                  profileMaterialCategory,
+                  profileWidth,
+                  profileDepth,
+                  profileCardinalPoint,
+                  profileReferenceExtent,
+                )
+              }
+            />
+          </ResponsiveField>
+        </ResponsiveRow>
+      </EditBlock>
+      <EditBlock title="Add Material Constituent Set">
+        <ResponsiveRow>
+          <ResponsiveField>
+            <LabeledInput
+              label="Set name"
+              value={constituentSetName}
+              onChangeText={setConstituentSetName}
+            />
+          </ResponsiveField>
+          <ResponsiveField>
+            <Button
+              label="+ Add Constituent Set"
+              onPress={() =>
+                onAddMaterialConstituentSet(
+                  constituentSetName,
+                  constituentRows,
+                )
+              }
+            />
+          </ResponsiveField>
+        </ResponsiveRow>
+        <LabeledInput
+          label="Name | Material | Fraction | Category"
+          multiline
+          mono
+          value={constituentRows}
+          onChangeText={setConstituentRows}
+        />
+      </EditBlock>
+      <EditBlock title="Assign Group / Zone / System">
+        <ResponsiveRow>
+          <ResponsiveField>
+            <DropdownField
+              label="Group type"
+              options={GROUP_TYPES}
+              value={groupType}
+              onChange={setGroupType}
+            />
+          </ResponsiveField>
+          <ResponsiveField>
+            <LabeledInput
+              label="Group name"
+              value={groupName}
+              onChangeText={setGroupName}
+            />
+          </ResponsiveField>
+          <ResponsiveField>
+            <LabeledInput
+              label="ObjectType"
+              value={groupObjectType}
+              onChangeText={setGroupObjectType}
+            />
+          </ResponsiveField>
+        </ResponsiveRow>
+        <ResponsiveRow>
+          <ResponsiveField>
+            <LabeledInput
+              label="LongName"
+              value={groupLongName}
+              onChangeText={setGroupLongName}
+            />
+          </ResponsiveField>
+          <ResponsiveField>
+            <Button
+              label="+ Assign Group"
+              onPress={() =>
+                onAddGroupAssignment(
+                  groupType,
+                  groupName,
+                  groupObjectType,
+                  groupLongName,
+                )
+              }
+            />
+          </ResponsiveField>
+        </ResponsiveRow>
       </EditBlock>
       <EditBlock title="Add Classification">
         <LabeledInput
@@ -1670,6 +2452,97 @@ function ResourcesPanel({
           label="+ Add Document"
           onPress={() =>
             onAddDocumentReference(documentId, documentName, documentUri)
+          }
+        />
+      </EditBlock>
+      <EditBlock title="Add Library">
+        <LabeledInput
+          label="Identification"
+          value={libraryId}
+          onChangeText={setLibraryId}
+        />
+        <LabeledInput
+          label="Name"
+          value={libraryName}
+          onChangeText={setLibraryName}
+        />
+        <LabeledInput
+          label="Location / URI"
+          value={libraryUri}
+          onChangeText={setLibraryUri}
+        />
+        <Button
+          label="+ Add Library"
+          onPress={() =>
+            onAddLibraryReference(libraryId, libraryName, libraryUri)
+          }
+        />
+      </EditBlock>
+      <EditBlock title="Add Approval">
+        <LabeledInput
+          label="Identifier"
+          value={approvalId}
+          onChangeText={setApprovalId}
+        />
+        <LabeledInput
+          label="Name"
+          value={approvalName}
+          onChangeText={setApprovalName}
+        />
+        <LabeledInput
+          label="Status"
+          value={approvalStatus}
+          onChangeText={setApprovalStatus}
+        />
+        <Button
+          label="+ Add Approval"
+          onPress={() => onAddApproval(approvalId, approvalName, approvalStatus)}
+        />
+      </EditBlock>
+      <EditBlock title="Add Constraint">
+        <LabeledInput
+          label="Name"
+          value={constraintName}
+          onChangeText={setConstraintName}
+        />
+        <ResponsiveRow>
+          <ResponsiveField>
+            <DropdownField
+              label="Grade"
+              options={CONSTRAINT_GRADES}
+              value={constraintGrade}
+              onChange={setConstraintGrade}
+            />
+          </ResponsiveField>
+          <ResponsiveField>
+            <DropdownField
+              label="Qualifier"
+              options={OBJECTIVE_QUALIFIERS}
+              value={constraintQualifier}
+              onChange={setConstraintQualifier}
+            />
+          </ResponsiveField>
+        </ResponsiveRow>
+        <LabeledInput
+          label="Source"
+          value={constraintSource}
+          onChangeText={setConstraintSource}
+        />
+        <LabeledInput
+          label="Intent"
+          value={constraintIntent}
+          onChangeText={setConstraintIntent}
+        />
+        <Button
+          label="+ Add Constraint"
+          onPress={() =>
+            onAddConstraint(
+              constraintName,
+              constraintGrade,
+              constraintSource,
+              constraintQualifier,
+              constraintIntent,
+            )
           }
         />
       </EditBlock>
@@ -1770,10 +2643,68 @@ function editableSetValue(
   if (QUANTITY_TYPES.includes(entity.type)) {
     return `${entity.type}(${entity.args[3] ?? "0"})`;
   }
+  if (entity.type === "IFCPROPERTYLISTVALUE") {
+    return parseStepValueList(entity.args[2])
+      .map((value) => parseIfcValue(value).value)
+      .join("; ");
+  }
+  if (entity.type === "IFCPROPERTYENUMERATEDVALUE") {
+    return parseStepValueList(entity.args[2])
+      .map((value) => parseIfcValue(value).value)
+      .join("; ");
+  }
+  if (entity.type === "IFCPROPERTYBOUNDEDVALUE") {
+    const upper = parseOptionalIfcValue(entity.args[2]);
+    const lower = parseOptionalIfcValue(entity.args[3]);
+    const setPoint = parseOptionalIfcValue(entity.args[5]);
+    return `${lower}..${upper}${setPoint ? `; ${setPoint}` : ""}`;
+  }
+  if (entity.type === "IFCPROPERTYTABLEVALUE") {
+    const defining = parseStepValueList(entity.args[2]).map(
+      (value) => parseIfcValue(value).value,
+    );
+    const defined = parseStepValueList(entity.args[3]).map(
+      (value) => parseIfcValue(value).value,
+    );
+    return defining
+      .map((value, index) => `${value}=>${defined[index] ?? ""}`)
+      .join("; ");
+  }
   return entity.args[2] ?? fallback;
 }
 
-function parseTypedPropertyValue(rawValue: string) {
+function parseTypedPropertyValue(
+  rawValue: string,
+  entity?: NativeIfcEntity,
+) {
+  if (entity?.type === "IFCPROPERTYLISTVALUE") {
+    return {
+      value: rawValue,
+      valueType: `IFCPROPERTYLISTVALUE:${readStepListValueType(entity.args[2])}`,
+    };
+  }
+  if (entity?.type === "IFCPROPERTYENUMERATEDVALUE") {
+    return {
+      value: rawValue,
+      valueType: `IFCPROPERTYENUMERATEDVALUE:${readStepListValueType(entity.args[2])}`,
+    };
+  }
+  if (entity?.type === "IFCPROPERTYBOUNDEDVALUE") {
+    return {
+      value: rawValue,
+      valueType: `IFCPROPERTYBOUNDEDVALUE:${readFirstStepValueType([
+        entity.args[2],
+        entity.args[3],
+        entity.args[5],
+      ])}`,
+    };
+  }
+  if (entity?.type === "IFCPROPERTYTABLEVALUE") {
+    return {
+      value: rawValue,
+      valueType: `IFCPROPERTYTABLEVALUE:${readStepListValueType(entity.args[2])}:${readStepListValueType(entity.args[3])}`,
+    };
+  }
   const trimmed = rawValue.trim();
   const match = trimmed.match(/^([A-Z0-9_]+)\(([\s\S]*)\)$/i);
   if (!match) {
@@ -1792,6 +2723,47 @@ function parseTypedPropertyValue(rawValue: string) {
   return { value: inner.replace(/^\./, "").replace(/\.$/, ""), valueType };
 }
 
+function parseStepValueList(rawValue = "") {
+  const trimmed = rawValue.trim();
+  if (!trimmed || trimmed === "$") {
+    return [];
+  }
+  return splitTopLevel(trimmed.replace(/^\(/, "").replace(/\)$/, ""));
+}
+
+function parseOptionalIfcValue(rawValue = "") {
+  return rawValue && rawValue !== "$" ? parseIfcValue(rawValue).value : "";
+}
+
+function parseIfcValue(rawValue = "") {
+  const trimmed = rawValue.trim();
+  const match = trimmed.match(/^([A-Z0-9_]+)\(([\s\S]*)\)$/i);
+  if (!match) {
+    return { value: trimmed, valueType: "IFCLABEL" };
+  }
+  const valueType = normalizePropertyValueType(match[1]);
+  const inner = match[2].trim();
+  if (valueType === "IFCBOOLEAN") {
+    const flag = inner.replace(/^\./, "").replace(/\.$/, "").toUpperCase();
+    return { value: flag === "F" ? "False" : "True", valueType };
+  }
+  const unquoted = inner.match(/^'([\s\S]*)'$/)?.[1];
+  if (unquoted != null) {
+    return { value: unquote(inner) ?? unquoted.replace(/''/g, "'"), valueType };
+  }
+  return { value: inner.replace(/^\./, "").replace(/\.$/, ""), valueType };
+}
+
+function readStepListValueType(rawValue = "") {
+  const first = parseStepValueList(rawValue)[0];
+  return first ? parseIfcValue(first).valueType : "IFCLABEL";
+}
+
+function readFirstStepValueType(values: Array<string | undefined>) {
+  const rawValue = values.find((value) => value && value !== "$");
+  return rawValue ? parseIfcValue(rawValue).valueType : "IFCLABEL";
+}
+
 function filterPropertySets(
   sets: NativeIfcPropertySet[],
   document: NativeIfcDocument,
@@ -1808,7 +2780,7 @@ function filterPropertySets(
     const values = set.values.filter((value) =>
       matchesPropertyValueQuery(
         value,
-        editableSetValue(document.entityById.get(value.id), value.value),
+        document.entityById.get(value.id),
         query,
       ),
     );
@@ -1822,10 +2794,11 @@ function matchesPsetQuery(set: NativeIfcPropertySet, query: string) {
 
 function matchesPropertyValueQuery(
   value: NativeIfcPropertySet["values"][number],
-  rawValue: string,
+  entity: NativeIfcEntity | undefined,
   query: string,
 ) {
-  const parsed = parseTypedPropertyValue(rawValue);
+  const rawValue = editableSetValue(entity, value.value);
+  const parsed = parseTypedPropertyValue(rawValue, entity);
   return matchesQuery(
     [
       value.id,
@@ -1858,6 +2831,32 @@ function normalizePropertyValueType(type: string) {
     .toUpperCase()
     .replace(/[^A-Z0-9_]/g, "");
   return normalized.startsWith("IFC") ? normalized : "IFCLABEL";
+}
+
+function propertyValueTypeLabel(valueType: string) {
+  const [kind, firstType, secondType] = valueType.split(":");
+  const shortKind = shortIfcName(kind);
+  if (kind === "IFCPROPERTYLISTVALUE") {
+    return `List ${shortIfcName(firstType ?? "IFCLABEL")}`;
+  }
+  if (kind === "IFCPROPERTYENUMERATEDVALUE") {
+    return `Enum ${shortIfcName(firstType ?? "IFCLABEL")}`;
+  }
+  if (kind === "IFCPROPERTYBOUNDEDVALUE") {
+    return `Bounded ${shortIfcName(firstType ?? "IFCREAL")}`;
+  }
+  if (kind === "IFCPROPERTYTABLEVALUE") {
+    return `Table ${shortIfcName(firstType ?? "IFCREAL")} -> ${shortIfcName(secondType ?? "IFCREAL")}`;
+  }
+  return shortKind;
+}
+
+function shortIfcName(value: string) {
+  return value.replace(/^IFCPROPERTY/i, "").replace(/^IFC/i, "");
+}
+
+function formatEditableNumber(value: number | undefined, fallback: string) {
+  return value === undefined || !Number.isFinite(value) ? fallback : String(value);
 }
 
 function groupCatalogPsets(objectType: CatalogObjectType | undefined) {

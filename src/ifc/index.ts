@@ -14,5 +14,6 @@ export * from "./nativeDocumentWorker";
 export * from "./objectInfoValidation";
 export * from "./preflight";
 export * from "./propertyIndex";
+export * from "./relationshipRules";
 export * from "./types";
 export * from "./webIfcRuntime";

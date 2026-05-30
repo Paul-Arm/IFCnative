@@ -427,6 +427,28 @@ export function LabeledInput({
   );
 }
 
+export function ColorInput({
+  label,
+  onChangeText,
+  value,
+}: {
+  label: string;
+  onChangeText(value: string): void;
+  value: string;
+}) {
+  return (
+    <label className="grid gap-1.5 text-xs text-muted-foreground">
+      {label}
+      <Input
+        className="h-9 w-full cursor-pointer rounded-md p-1"
+        type="color"
+        value={normalizeColorInputValue(value)}
+        onChange={(event) => onChangeText(event.currentTarget.value)}
+      />
+    </label>
+  );
+}
+
 export interface DropdownOption {
   value: string;
   label: string;
@@ -559,6 +581,17 @@ function normalizeDropdownOptions(options: (string | DropdownOption)[]) {
   return normalized;
 }
 
+function normalizeColorInputValue(value: string) {
+  const text = value.trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(text)) {
+    return text;
+  }
+  if (/^[0-9a-fA-F]{6}$/.test(text)) {
+    return `#${text}`;
+  }
+  return "#8ea7c2";
+}
+
 export function typeOption(value: string): DropdownOption {
   return {
     label: shortType(value),
@@ -646,5 +679,18 @@ export function InfoRow({ label, value }: { label: string; value: string }) {
 }
 
 function shortType(type: string) {
+  const [kind, firstType, secondType] = type.split(":");
+  if (kind === "IFCPROPERTYLISTVALUE") {
+    return `List ${shortType(firstType ?? "IFCLABEL")}`;
+  }
+  if (kind === "IFCPROPERTYENUMERATEDVALUE") {
+    return `Enum ${shortType(firstType ?? "IFCLABEL")}`;
+  }
+  if (kind === "IFCPROPERTYBOUNDEDVALUE") {
+    return `Bounded ${shortType(firstType ?? "IFCREAL")}`;
+  }
+  if (kind === "IFCPROPERTYTABLEVALUE") {
+    return `Table ${shortType(firstType ?? "IFCREAL")} -> ${shortType(secondType ?? "IFCREAL")}`;
+  }
   return type.replace(/^IFC/i, "");
 }

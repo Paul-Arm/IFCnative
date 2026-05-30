@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import type { NativeIfcDocument, NativeIfcEntity } from "@/ifc";
 import {
@@ -6,7 +6,7 @@ import {
     layoutGraph,
     retainPinnedPositions,
 } from "@/ifc/graphLayout";
-import type { NativeGraphPreset } from "@/ifc/nativeGraph";
+import type { NativeGraphPreset, NativeGraphWarning } from "@/ifc/nativeGraph";
 
 import RelationshipFlow from "../relationship-flow";
 import type {
@@ -27,6 +27,7 @@ export function GraphPanel({
   depth,
   document,
   expanded,
+  focusRequest,
   pinned,
   positions,
   preset,
@@ -45,6 +46,7 @@ export function GraphPanel({
   onRemoveNode,
   onRemoveRelationship,
   onRelationshipTypeFilters,
+  onRevealWarningEntity,
   onSelect,
   onToggleChildren,
   onTogglePin,
@@ -55,6 +57,7 @@ export function GraphPanel({
   depth: number;
   document: NativeIfcDocument;
   expanded: Set<number>;
+  focusRequest?: { entityId: number; nonce: number } | null;
   pinned: Set<number>;
   positions: Map<number, Point>;
   preset: NativeGraphPreset;
@@ -88,6 +91,7 @@ export function GraphPanel({
   onRemoveNode(id: number): void;
   onRemoveRelationship(relationshipId: number): void;
   onRelationshipTypeFilters(filters: string[]): void;
+  onRevealWarningEntity(id: number): void;
   onSelect(id: number, source?: string): void;
   onToggleChildren(id: number, loaded: boolean): void;
   onTogglePin(id: number, point?: Point): void;
@@ -243,62 +247,147 @@ export function GraphPanel({
   };
 
   return (
-    <RelationshipFlow
-      capped={graph.capped}
-      classOptions={classOptions}
-      depth={depth}
-      edges={flowEdges}
-      layoutMode={layoutMode}
-      nodes={flowNodes}
-      preset={preset}
-      presetOptions={GRAPH_PRESETS}
-      relationshipOptions={relationshipOptions}
-      relationshipCount={graph.edges.length}
-      relationshipTypeFilters={[...relationshipTypeFilters]}
-      relationshipTypes={graph.relationshipTypes}
-      relationshipWarnings={graph.warnings.map((warning) => warning.message)}
-      search={search}
-      searchActiveId={activeSearchMatch?.id ?? null}
-      searchActiveIndex={activeSearchIndex}
-      searchMatchCount={searchMatches.length}
-      onClearPositions={() => {
-        onPositions(retainPinnedPositions(positions, pinned));
-        onLog(`graph.autoLayout({ mode: '${layoutMode}' });`);
-      }}
-      onConnectNodes={onConnectNodes}
-      onCreateNodeFromConnection={onCreateNodeFromConnection}
-      onDepth={(value) => {
-        onDepth(value);
-        onLog(`graph.depth(${value});`);
-      }}
-      onLayoutMode={(value) => {
-        setLayoutMode(value);
-        onPositions(retainPinnedPositions(positions, pinned));
-      }}
-      onLog={onLog}
-      onMoveEnd={(id, point) =>
-        onLog(
-          `graph.moveNode({ id: ${id}, x: ${point.x.toFixed(1)}, y: ${point.y.toFixed(1)} });`,
-        )
-      }
-      onMoveNode={moveNode}
-      onMoveNodes={moveNodes}
-      onMoveNodesEnd={(moves) => {
-        const ids = moves
-          .map((move) => move.id)
-          .slice(0, 12)
-          .join(", ");
-        onLog(`graph.moveNodes({ count: ${moves.length}, ids: [${ids}] });`);
-      }}
-      onPasteNodes={onPasteNodes}
-      onPreset={(value) => onPreset(value as NativeGraphPreset)}
-      onRemoveNode={onRemoveNode}
-      onRemoveRelationship={onRemoveRelationship}
-      onRelationshipTypeFilters={onRelationshipTypeFilters}
-      onSearchNavigate={navigateSearchResult}
-      onSelect={(id) => onSelect(id, "graph")}
-      onToggleChildren={(id, loaded) => onToggleChildren(id, loaded)}
-      onTogglePin={onTogglePin}
-    />
+    <div className="ifc-graph-panel">
+      <div className="ifc-graph-panel-viewer">
+        <RelationshipFlow
+          capped={graph.capped}
+          classOptions={classOptions}
+          depth={depth}
+          edges={flowEdges}
+          focusNodeId={focusRequest?.entityId ?? null}
+          focusNonce={focusRequest?.nonce ?? 0}
+          layoutMode={layoutMode}
+          nodes={flowNodes}
+          preset={preset}
+          presetOptions={GRAPH_PRESETS}
+          relationshipOptions={relationshipOptions}
+          relationshipCount={graph.edges.length}
+          relationshipTypeFilters={[...relationshipTypeFilters]}
+          relationshipTypes={graph.relationshipTypes}
+          search={search}
+          searchActiveId={activeSearchMatch?.id ?? null}
+          searchActiveIndex={activeSearchIndex}
+          searchMatchCount={searchMatches.length}
+          onClearPositions={() => {
+            onPositions(retainPinnedPositions(positions, pinned));
+            onLog(`graph.autoLayout({ mode: '${layoutMode}' });`);
+          }}
+          onConnectNodes={onConnectNodes}
+          onCreateNodeFromConnection={onCreateNodeFromConnection}
+          onDepth={(value) => {
+            onDepth(value);
+            onLog(`graph.depth(${value});`);
+          }}
+          onLayoutMode={(value) => {
+            setLayoutMode(value);
+            onPositions(retainPinnedPositions(positions, pinned));
+          }}
+          onLog={onLog}
+          onMoveEnd={(id, point) =>
+            onLog(
+              `graph.moveNode({ id: ${id}, x: ${point.x.toFixed(1)}, y: ${point.y.toFixed(1)} });`,
+            )
+          }
+          onMoveNode={moveNode}
+          onMoveNodes={moveNodes}
+          onMoveNodesEnd={(moves) => {
+            const ids = moves
+              .map((move) => move.id)
+              .slice(0, 12)
+              .join(", ");
+            onLog(`graph.moveNodes({ count: ${moves.length}, ids: [${ids}] });`);
+          }}
+          onPasteNodes={onPasteNodes}
+          onPreset={(value) => onPreset(value as NativeGraphPreset)}
+          onRemoveNode={onRemoveNode}
+          onRemoveRelationship={onRemoveRelationship}
+          onRelationshipTypeFilters={onRelationshipTypeFilters}
+          onSearchNavigate={navigateSearchResult}
+          onSelect={(id) => onSelect(id, "graph")}
+          onToggleChildren={(id, loaded) => onToggleChildren(id, loaded)}
+          onTogglePin={onTogglePin}
+        />
+      </div>
+      <GraphWarningsPanel
+        document={document}
+        warnings={graph.warnings}
+        onRevealEntity={onRevealWarningEntity}
+      />
+    </div>
   );
+}
+
+function GraphWarningsPanel({
+  document,
+  warnings,
+  onRevealEntity,
+}: {
+  document: NativeIfcDocument;
+  warnings: NativeGraphWarning[];
+  onRevealEntity(id: number): void;
+}) {
+  return (
+    <section className="ifc-graph-warnings-panel" aria-label="Graph warnings">
+      <div className="ifc-graph-warnings-header">
+        <strong>
+          {warnings.length} graph warning{warnings.length === 1 ? "" : "s"}
+        </strong>
+      </div>
+      {warnings.length ? (
+        <div className="ifc-graph-warnings-list">
+          {warnings.map((warning, index) => (
+            <div
+              className="ifc-graph-warning-item"
+              key={`${warning.message}-${index}`}
+            >
+              <div className="ifc-graph-warning-message">
+                {renderWarningMessage(document, warning.message, onRevealEntity)}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p>No graph warnings for the visible graph.</p>
+      )}
+    </section>
+  );
+}
+
+function renderWarningMessage(
+  document: NativeIfcDocument,
+  message: string,
+  onRevealEntity: (id: number) => void,
+) {
+  const parts: ReactNode[] = [];
+  const pattern = /#(\d+)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(message))) {
+    const id = Number(match[1]);
+    const entity = document.entityById.get(id);
+    if (match.index > lastIndex) {
+      parts.push(message.slice(lastIndex, match.index));
+    }
+    parts.push(
+      entity ? (
+        <button
+          key={`${id}-${match.index}`}
+          type="button"
+          onClick={() => onRevealEntity(id)}
+        >
+          #{id} {entity.type}
+        </button>
+      ) : (
+        match[0]
+      ),
+    );
+    lastIndex = match.index + match[0].length;
+    if (entity && message.slice(lastIndex).startsWith(` ${entity.type}`)) {
+      lastIndex += entity.type.length + 1;
+    }
+  }
+  if (lastIndex < message.length) {
+    parts.push(message.slice(lastIndex));
+  }
+  return parts;
 }

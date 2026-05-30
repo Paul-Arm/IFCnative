@@ -1,13 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import {
+    relationshipTypesForEntities,
     viewerWorldPointToIfcPlacementPoint,
     type NativeIfcDocument,
     type NativeIfcEntity,
 } from "@/ifc";
 
 import {
+    CONSTRAINT_GRADES,
     ENTITY_TYPES,
+    GROUP_TYPES,
+    OBJECTIVE_QUALIFIERS,
     PROPERTY_VALUE_TYPES,
     QUANTITY_TYPES,
     RELATION_TYPES,
@@ -20,6 +24,7 @@ import {
     Badge,
     Button,
     CollapsibleSection,
+    ColorInput,
     DropdownField,
     EntityDropdown,
     LabeledInput,
@@ -31,13 +36,24 @@ export function BuilderPanel({
   coordinateClipboard,
   document,
   selectedId,
+  onAddApproval,
   onAddClassification,
+  onAddConstraint,
   onAddDocumentReference,
+  onAddGroupAssignment,
+  onAddLibraryReference,
   onAddBodyElement,
   onAssignBodyToSelected,
   onAssignType,
   onAddElement,
   onAddMaterial,
+  onAddMaterialConstituentSet,
+  onAddMaterialLayerSet,
+  onAddMaterialLayerSetUsage,
+  onAddMaterialProfileSet,
+  onAddMaterialProfileSetUsage,
+  onAddMaterialStyle,
+  onAddMaterialWithProperties,
   onAddPset,
   onAddQuantity,
   onAddRelationship,
@@ -47,12 +63,31 @@ export function BuilderPanel({
   coordinateClipboard: CoordinateClipboard | null;
   document: NativeIfcDocument;
   selectedId: number;
+  onAddApproval(identifier: string, name: string, status: string): void;
   onAddClassification(
     identification: string,
     name: string,
     location: string,
   ): void;
+  onAddConstraint(
+    name: string,
+    grade: string,
+    source: string,
+    qualifier: string,
+    intent: string,
+  ): void;
   onAddDocumentReference(
+    identification: string,
+    name: string,
+    location: string,
+  ): void;
+  onAddGroupAssignment(
+    groupType: string,
+    groupName: string,
+    objectType: string,
+    longName: string,
+  ): void;
+  onAddLibraryReference(
     identification: string,
     name: string,
     location: string,
@@ -62,6 +97,47 @@ export function BuilderPanel({
   onAssignType(typeName: string, typeClass: string, tag: string): void;
   onAddElement(type: string, name: string, parentId?: number): void;
   onAddMaterial(materialName: string, materialCategory: string): void;
+  onAddMaterialWithProperties(
+    materialName: string,
+    materialCategory: string,
+    propertySetName: string,
+    propertyRows: string,
+  ): void;
+  onAddMaterialStyle(
+    materialName: string,
+    materialCategory: string,
+    styleName: string,
+    color: string,
+    transparency: string,
+  ): void;
+  onAddMaterialConstituentSet(setName: string, constituentRows: string): void;
+  onAddMaterialLayerSet(setName: string, layerRows: string): void;
+  onAddMaterialLayerSetUsage(
+    setName: string,
+    layerRows: string,
+    direction: string,
+    directionSense: string,
+    offset: string,
+    referenceExtent: string,
+  ): void;
+  onAddMaterialProfileSet(
+    setName: string,
+    profileName: string,
+    materialName: string,
+    category: string,
+    width: string,
+    depth: string,
+  ): void;
+  onAddMaterialProfileSetUsage(
+    setName: string,
+    profileName: string,
+    materialName: string,
+    category: string,
+    width: string,
+    depth: string,
+    cardinalPoint: string,
+    referenceExtent: string,
+  ): void;
   onAddPset(
     psetName: string,
     propertyName: string,
@@ -108,6 +184,45 @@ export function BuilderPanel({
   const [quantityType, setQuantityType] = useState("IFCQUANTITYLENGTH");
   const [materialName, setMaterialName] = useState("Inspektionsbeton");
   const [materialCategory, setMaterialCategory] = useState("Beton");
+  const [materialPropertySetName, setMaterialPropertySetName] =
+    useState("Pset_MaterialCommon");
+  const [materialPropertyRows, setMaterialPropertyRows] = useState(
+    "MassDensity | 2400 | IFCREAL\nThermalConductivity | 1.7 | IFCREAL",
+  );
+  const [materialStyleName, setMaterialStyleName] = useState(
+    "IFCnative Surface Style",
+  );
+  const [materialColor, setMaterialColor] = useState("#8ea7c2");
+  const [materialTransparency, setMaterialTransparency] = useState("0");
+  const [layerSetName, setLayerSetName] = useState("Wall Layer Set");
+  const [layerRows, setLayerRows] = useState(
+    "Core | Concrete | 0.2 | LoadBearing\nInsulation | Mineral wool | 0.08 | Insulation",
+  );
+  const [layerDirection, setLayerDirection] = useState("AXIS2");
+  const [layerDirectionSense, setLayerDirectionSense] = useState("POSITIVE");
+  const [layerOffset, setLayerOffset] = useState("0");
+  const [layerReferenceExtent, setLayerReferenceExtent] = useState("");
+  const [profileSetName, setProfileSetName] = useState("Beam Profile Set");
+  const [profileName, setProfileName] = useState("Rectangular Profile");
+  const [profileMaterialName, setProfileMaterialName] = useState("Steel");
+  const [profileMaterialCategory, setProfileMaterialCategory] =
+    useState("LoadBearing");
+  const [profileWidth, setProfileWidth] = useState("0.2");
+  const [profileDepth, setProfileDepth] = useState("0.3");
+  const [profileCardinalPoint, setProfileCardinalPoint] = useState("5");
+  const [profileReferenceExtent, setProfileReferenceExtent] = useState("");
+  const [constituentSetName, setConstituentSetName] = useState(
+    "Window Constituent Set",
+  );
+  const [constituentRows, setConstituentRows] = useState(
+    "Frame | Aluminium | 0.6 | Frame\nGlazing | Glass | 0.4 | Glazing",
+  );
+  const [groupType, setGroupType] = useState("IFCZONE");
+  const [groupName, setGroupName] = useState("Brandschutzbereich A");
+  const [groupObjectType, setGroupObjectType] = useState("Fire compartment");
+  const [groupLongName, setGroupLongName] = useState(
+    "Brandschutzbereich Ebene 1",
+  );
   const [typeClass, setTypeClass] = useState("IFCTYPEOBJECT");
   const [typeName, setTypeName] = useState("Inspektionselement-Typ");
   const [typeTag, setTypeTag] = useState("TYPE-INSPECTION");
@@ -124,10 +239,40 @@ export function BuilderPanel({
   const [documentUri, setDocumentUri] = useState(
     "https://ifcnative.local/documents/inspection-report",
   );
+  const [libraryId, setLibraryId] = useState("LIB-INSPECTION");
+  const [libraryName, setLibraryName] = useState("Inspektionsbibliothek");
+  const [libraryUri, setLibraryUri] = useState(
+    "https://ifcnative.local/library/inspection",
+  );
+  const [approvalId, setApprovalId] = useState("APP-INSPECTION");
+  const [approvalName, setApprovalName] = useState("Pruefung freigegeben");
+  const [approvalStatus, setApprovalStatus] = useState("Approved");
+  const [constraintName, setConstraintName] = useState(
+    "Objektanforderung erfuellen",
+  );
+  const [constraintGrade, setConstraintGrade] = useState("HARD");
+  const [constraintSource, setConstraintSource] = useState("IFCnative");
+  const [constraintQualifier, setConstraintQualifier] =
+    useState("REQUIREMENT");
+  const [constraintIntent, setConstraintIntent] = useState(
+    "EXPECTED PERFORMANCE",
+  );
   const [unitType, setUnitType] = useState("LENGTHUNIT");
   const [unitName, setUnitName] = useState("METRE");
   const validSource = document.entityById.has(Number(sourceId));
   const validTarget = document.entityById.has(Number(targetId));
+  const relationshipTypeOptions = useMemo(
+    () =>
+      relationshipTypesForEntities(
+        document,
+        RELATION_TYPES,
+        Number(sourceId),
+        Number(targetId),
+      ),
+    [document, sourceId, targetId],
+  );
+  const canCreateRelationship =
+    validSource && validTarget && relationshipTypeOptions.includes(relType);
   const canAssignBody = isBodyAssignableEntity(
     document.entityById.get(selectedId),
   );
@@ -136,6 +281,15 @@ export function BuilderPanel({
     setSourceId(String(selectedId));
     setTargetId(String(selectedId));
   }, [selectedId]);
+
+  useEffect(() => {
+    if (
+      relationshipTypeOptions.length &&
+      !relationshipTypeOptions.includes(relType)
+    ) {
+      setRelType(relationshipTypeOptions[0]);
+    }
+  }, [relationshipTypeOptions, relType]);
 
   const loadCoordinateClipboard = async () => {
     if (!coordinateClipboard) {
@@ -359,7 +513,7 @@ export function BuilderPanel({
       <CollapsibleSection title="Beziehung" meta={shortIfc(relType)}>
         <DropdownField
           label="Beziehung"
-          options={RELATION_TYPES}
+          options={relationshipTypeOptions}
           value={relType}
           onChange={setRelType}
         />
@@ -381,8 +535,13 @@ export function BuilderPanel({
             />
           </FormField>
         </FormRow>
+        {!relationshipTypeOptions.length ? (
+          <HintLine>
+            Keine gueltige Beziehung fuer diese Quell-/Zielklasse.
+          </HintLine>
+        ) : null}
         <Button
-          disabled={!validSource || !validTarget}
+          disabled={!canCreateRelationship}
           label="+ Beziehung anlegen"
           onPress={() =>
             onAddRelationship(relType, Number(sourceId), Number(targetId))
@@ -500,6 +659,317 @@ export function BuilderPanel({
           label="+ Material zur Auswahl hinzufügen"
           onPress={() => onAddMaterial(materialName, materialCategory)}
         />
+        <FormRow>
+          <FormField>
+            <LabeledInput
+              label="Material-Pset"
+              value={materialPropertySetName}
+              onChangeText={setMaterialPropertySetName}
+            />
+          </FormField>
+          <FormField>
+            <Button
+              label="+ Material mit Eigenschaften"
+              onPress={() =>
+                onAddMaterialWithProperties(
+                  materialName,
+                  materialCategory,
+                  materialPropertySetName,
+                  materialPropertyRows,
+                )
+              }
+            />
+          </FormField>
+        </FormRow>
+        <LabeledInput
+          label="Materialeigenschaft: Name | Wert | IFC-Typ"
+          multiline
+          mono
+          value={materialPropertyRows}
+          onChangeText={setMaterialPropertyRows}
+        />
+        <FormRow>
+          <FormField>
+            <LabeledInput
+              label="Material-Stil"
+              value={materialStyleName}
+              onChangeText={setMaterialStyleName}
+            />
+          </FormField>
+          <FormField>
+            <ColorInput
+              label="Farbe"
+              value={materialColor}
+              onChangeText={setMaterialColor}
+            />
+          </FormField>
+          <FormField>
+            <LabeledInput
+              label="Transparenz 0..1"
+              keyboardType="numeric"
+              value={materialTransparency}
+              onChangeText={setMaterialTransparency}
+            />
+          </FormField>
+        </FormRow>
+        <Button
+          label="+ Materialdarstellung"
+          onPress={() =>
+            onAddMaterialStyle(
+              materialName,
+              materialCategory,
+              materialStyleName,
+              materialColor,
+              materialTransparency,
+            )
+          }
+        />
+        <Separator />
+        <FormRow>
+          <FormField>
+            <LabeledInput
+              label="Layer-Set"
+              value={layerSetName}
+              onChangeText={setLayerSetName}
+            />
+          </FormField>
+          <FormField>
+            <Button
+              label="+ Material-Layer-Set"
+              onPress={() => onAddMaterialLayerSet(layerSetName, layerRows)}
+            />
+          </FormField>
+        </FormRow>
+        <LabeledInput
+          label="Layer: Name | Material | Dicke | Kategorie"
+          multiline
+          mono
+          value={layerRows}
+          onChangeText={setLayerRows}
+        />
+        <FormRow>
+          <FormField>
+            <DropdownField
+              label="Layer-Richtung"
+              options={["AXIS1", "AXIS2", "AXIS3"]}
+              value={layerDirection}
+              onChange={setLayerDirection}
+            />
+          </FormField>
+          <FormField>
+            <DropdownField
+              label="DirectionSense"
+              options={["POSITIVE", "NEGATIVE"]}
+              value={layerDirectionSense}
+              onChange={setLayerDirectionSense}
+            />
+          </FormField>
+          <FormField>
+            <LabeledInput
+              label="Offset"
+              keyboardType="numeric"
+              value={layerOffset}
+              onChangeText={setLayerOffset}
+            />
+          </FormField>
+        </FormRow>
+        <FormRow>
+          <FormField>
+            <LabeledInput
+              label="ReferenceExtent"
+              keyboardType="numeric"
+              value={layerReferenceExtent}
+              onChangeText={setLayerReferenceExtent}
+            />
+          </FormField>
+          <FormField>
+            <Button
+              label="+ Layer-Set-Usage"
+              onPress={() =>
+                onAddMaterialLayerSetUsage(
+                  layerSetName,
+                  layerRows,
+                  layerDirection,
+                  layerDirectionSense,
+                  layerOffset,
+                  layerReferenceExtent,
+                )
+              }
+            />
+          </FormField>
+        </FormRow>
+        <Separator />
+        <FormRow>
+          <FormField>
+            <LabeledInput
+              label="Profile-Set"
+              value={profileSetName}
+              onChangeText={setProfileSetName}
+            />
+          </FormField>
+          <FormField>
+            <LabeledInput
+              label="Profilname"
+              value={profileName}
+              onChangeText={setProfileName}
+            />
+          </FormField>
+          <FormField>
+            <LabeledInput
+              label="Profilmaterial"
+              value={profileMaterialName}
+              onChangeText={setProfileMaterialName}
+            />
+          </FormField>
+        </FormRow>
+        <FormRow>
+          <FormField>
+            <LabeledInput
+              label="Profilkategorie"
+              value={profileMaterialCategory}
+              onChangeText={setProfileMaterialCategory}
+            />
+          </FormField>
+          <FormField>
+            <LabeledInput
+              label="XDim"
+              keyboardType="numeric"
+              value={profileWidth}
+              onChangeText={setProfileWidth}
+            />
+          </FormField>
+          <FormField>
+            <LabeledInput
+              label="YDim"
+              keyboardType="numeric"
+              value={profileDepth}
+              onChangeText={setProfileDepth}
+            />
+          </FormField>
+        </FormRow>
+        <Button
+          label="+ Material-Profile-Set"
+          onPress={() =>
+            onAddMaterialProfileSet(
+              profileSetName,
+              profileName,
+              profileMaterialName,
+              profileMaterialCategory,
+              profileWidth,
+              profileDepth,
+            )
+          }
+        />
+        <FormRow>
+          <FormField>
+            <LabeledInput
+              label="CardinalPoint"
+              keyboardType="numeric"
+              value={profileCardinalPoint}
+              onChangeText={setProfileCardinalPoint}
+            />
+          </FormField>
+          <FormField>
+            <LabeledInput
+              label="ReferenceExtent"
+              keyboardType="numeric"
+              value={profileReferenceExtent}
+              onChangeText={setProfileReferenceExtent}
+            />
+          </FormField>
+          <FormField>
+            <Button
+              label="+ Profile-Set-Usage"
+              onPress={() =>
+                onAddMaterialProfileSetUsage(
+                  profileSetName,
+                  profileName,
+                  profileMaterialName,
+                  profileMaterialCategory,
+                  profileWidth,
+                  profileDepth,
+                  profileCardinalPoint,
+                  profileReferenceExtent,
+                )
+              }
+            />
+          </FormField>
+        </FormRow>
+        <Separator />
+        <FormRow>
+          <FormField>
+            <LabeledInput
+              label="Constituent-Set"
+              value={constituentSetName}
+              onChangeText={setConstituentSetName}
+            />
+          </FormField>
+          <FormField>
+            <Button
+              label="+ Material-Constituent-Set"
+              onPress={() =>
+                onAddMaterialConstituentSet(
+                  constituentSetName,
+                  constituentRows,
+                )
+              }
+            />
+          </FormField>
+        </FormRow>
+        <LabeledInput
+          label="Constituent: Name | Material | Anteil | Kategorie"
+          multiline
+          mono
+          value={constituentRows}
+          onChangeText={setConstituentRows}
+        />
+        <Separator />
+        <FormRow>
+          <FormField>
+            <DropdownField
+              label="Gruppentyp"
+              options={GROUP_TYPES}
+              value={groupType}
+              onChange={setGroupType}
+            />
+          </FormField>
+          <FormField>
+            <LabeledInput
+              label="Gruppenname"
+              value={groupName}
+              onChangeText={setGroupName}
+            />
+          </FormField>
+          <FormField>
+            <LabeledInput
+              label="ObjectType"
+              value={groupObjectType}
+              onChangeText={setGroupObjectType}
+            />
+          </FormField>
+        </FormRow>
+        <FormRow>
+          <FormField>
+            <LabeledInput
+              label="LongName"
+              value={groupLongName}
+              onChangeText={setGroupLongName}
+            />
+          </FormField>
+          <FormField>
+            <Button
+              label="+ Gruppe/Zone/System"
+              onPress={() =>
+                onAddGroupAssignment(
+                  groupType,
+                  groupName,
+                  groupObjectType,
+                  groupLongName,
+                )
+              }
+            />
+          </FormField>
+        </FormRow>
         <Separator />
         <DropdownField
           label="Typklasse"
@@ -592,6 +1062,114 @@ export function BuilderPanel({
             onAddDocumentReference(documentId, documentName, documentUri)
           }
         />
+        <Separator />
+        <FormRow>
+          <FormField>
+            <LabeledInput
+              label="Bibliotheks-ID"
+              value={libraryId}
+              onChangeText={setLibraryId}
+            />
+          </FormField>
+          <FormField>
+            <LabeledInput
+              label="Bibliotheksname"
+              value={libraryName}
+              onChangeText={setLibraryName}
+            />
+          </FormField>
+        </FormRow>
+        <LabeledInput
+          label="Bibliotheks-URI"
+          value={libraryUri}
+          onChangeText={setLibraryUri}
+        />
+        <Button
+          label="+ Bibliothek hinzufuegen"
+          onPress={() =>
+            onAddLibraryReference(libraryId, libraryName, libraryUri)
+          }
+        />
+        <Separator />
+        <FormRow>
+          <FormField>
+            <LabeledInput
+              label="Approval-ID"
+              value={approvalId}
+              onChangeText={setApprovalId}
+            />
+          </FormField>
+          <FormField>
+            <LabeledInput
+              label="Approval-Name"
+              value={approvalName}
+              onChangeText={setApprovalName}
+            />
+          </FormField>
+        </FormRow>
+        <LabeledInput
+          label="Approval-Status"
+          value={approvalStatus}
+          onChangeText={setApprovalStatus}
+        />
+        <Button
+          label="+ Approval hinzufuegen"
+          onPress={() => onAddApproval(approvalId, approvalName, approvalStatus)}
+        />
+        <Separator />
+        <FormRow>
+          <FormField>
+            <LabeledInput
+              label="Constraint"
+              value={constraintName}
+              onChangeText={setConstraintName}
+            />
+          </FormField>
+          <FormField>
+            <DropdownField
+              label="Constraint-Grade"
+              options={CONSTRAINT_GRADES}
+              value={constraintGrade}
+              onChange={setConstraintGrade}
+            />
+          </FormField>
+          <FormField>
+            <DropdownField
+              label="Objective"
+              options={OBJECTIVE_QUALIFIERS}
+              value={constraintQualifier}
+              onChange={setConstraintQualifier}
+            />
+          </FormField>
+        </FormRow>
+        <FormRow>
+          <FormField>
+            <LabeledInput
+              label="Constraint-Quelle"
+              value={constraintSource}
+              onChangeText={setConstraintSource}
+            />
+          </FormField>
+          <FormField>
+            <LabeledInput
+              label="Constraint-Intent"
+              value={constraintIntent}
+              onChangeText={setConstraintIntent}
+            />
+          </FormField>
+        </FormRow>
+        <Button
+          label="+ Constraint hinzufuegen"
+          onPress={() =>
+            onAddConstraint(
+              constraintName,
+              constraintGrade,
+              constraintSource,
+              constraintQualifier,
+              constraintIntent,
+            )
+          }
+        />
       </CollapsibleSection>
 
       <CollapsibleSection title="Einheiten" meta={`${unitType}: ${unitName}`}>
@@ -652,6 +1230,10 @@ function FormRow({ children }: { children: ReactNode }) {
 
 function FormField({ children }: { children: ReactNode }) {
   return <div className="min-w-0">{children}</div>;
+}
+
+function HintLine({ children }: { children: ReactNode }) {
+  return <div className="text-xs leading-5 text-muted-foreground">{children}</div>;
 }
 
 function Separator() {

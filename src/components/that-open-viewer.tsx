@@ -27,6 +27,7 @@ export interface ThatOpenViewerProps {
   activeModelDeferredReason?: string;
   activeModelFileName?: string;
   activeModelLoaded?: boolean;
+  focusRequest?: { documentId: string; entityId: number; nonce: number } | null;
   models: ThatOpenViewerModel[];
   onLoadActiveModel?(): void;
   onLog?(line: string): void;

@@ -20,7 +20,7 @@ export const IFC_CAPABILITY_MATRIX: CapabilityItem[] = [
   {
     title: 'Relationship graph',
     status: 'implemented',
-    detail: 'Indexes aggregates, containment, types, groups, materials, classifications, documents and common relationship families.',
+    detail: 'Indexes aggregates, containment, types, groups/zones/systems, materials, classifications, documents, libraries, constraints, approvals and common relationship families using per-entity relationship lookups.',
   },
   {
     title: 'Spatial and containment trees',
@@ -30,7 +30,7 @@ export const IFC_CAPABILITY_MATRIX: CapabilityItem[] = [
   {
     title: 'Properties and quantities',
     status: 'implemented',
-    detail: 'Reads IfcPropertySet, IfcElementQuantity and type-level HasPropertySets when available.',
+    detail: 'Reads and authors IfcPropertySet, IfcElementQuantity, single/list/enumerated/bounded/table simple properties and type-level HasPropertySets when available.',
   },
   {
     title: 'Geometry streaming',
@@ -40,7 +40,7 @@ export const IFC_CAPABILITY_MATRIX: CapabilityItem[] = [
   {
     title: 'Writer/export',
     status: 'partial',
-    detail: 'Exports loaded models via SaveModel and authors IFC4X3_ADD2 project, spatial structure, products, geometry, Psets, QTOs, materials, classifications and documents.',
+    detail: 'Exports loaded models via SaveModel and authors IFC4X3_ADD2 project, spatial structure, products, geometry, Psets, QTOs, simple materials, material properties, material visual styles via material definition representations, material layer/profile/constituent sets, occurrence-specific layer/profile set usages, groups/zones/systems via IfcRelAssignsToGroup, classifications, documents, libraries, approvals and objective constraints.',
   },
   {
     title: 'IDS/MVD validation',

@@ -28,6 +28,8 @@ import React, {
     useState,
 } from "react";
 
+import { relationshipTypesForEndpointTypes } from "@/ifc";
+
 import type {
     FlowPoint,
     RelationshipFlowClipboardNode,
@@ -108,6 +110,8 @@ export default function RelationshipFlow({
   classOptions,
   depth,
   edges,
+  focusNodeId,
+  focusNonce,
   nodes,
   preset,
   presetOptions,
@@ -115,7 +119,6 @@ export default function RelationshipFlow({
   relationshipCount,
   relationshipTypeFilters,
   relationshipTypes,
-  relationshipWarnings,
   search,
   searchActiveId,
   searchActiveIndex,
@@ -149,6 +152,7 @@ export default function RelationshipFlow({
   const flowEdgesRef = useRef<IfcFlowEdge[]>([]);
   const pasteSerialRef = useRef(0);
   const connectionSourceRef = useRef<ConnectionDraftSource | null>(null);
+  const handledFocusNonceRef = useRef<number | undefined>(undefined);
   const [pendingCreate, setPendingCreate] = useState<PendingCreate | null>(
     null,
   );
@@ -163,6 +167,10 @@ export default function RelationshipFlow({
   const trimmedSearch = search.trim();
   const searchFocusNodeId =
     searchActiveId === null ? "" : String(searchActiveId);
+  const requestedFocusNodeId =
+    focusNodeId === null || focusNodeId === undefined
+      ? ""
+      : String(focusNodeId);
   const nodeSignature = useMemo(
     () => nodes.map((node) => node.id).join(","),
     [nodes],
@@ -192,6 +200,40 @@ export default function RelationshipFlow({
         type: "ifcNode",
       })),
     [nodes, onToggleChildren, onTogglePin],
+  );
+  const nodeTypeById = useMemo(
+    () => new Map(nodes.map((node) => [node.id, node.entity.type])),
+    [nodes],
+  );
+  const relationshipOptionsForTypes = useCallback(
+    (
+      sourceType: string | undefined,
+      targetType: string | undefined,
+      sourceId?: number,
+      targetId?: number,
+    ) => {
+      const allowed = new Set(
+        relationshipTypesForEndpointTypes(
+          relationshipOptions.map((option) => option.value),
+          sourceType,
+          targetType,
+          sourceId,
+          targetId,
+        ),
+      );
+      return relationshipOptions.filter((option) => allowed.has(option.value));
+    },
+    [relationshipOptions],
+  );
+  const relationshipOptionsForIds = useCallback(
+    (sourceId: number, targetId: number) =>
+      relationshipOptionsForTypes(
+        nodeTypeById.get(sourceId),
+        nodeTypeById.get(targetId),
+        sourceId,
+        targetId,
+      ),
+    [nodeTypeById, relationshipOptionsForTypes],
   );
   const [flowNodes, setFlowNodes] = useState<IfcFlowNode[]>(baseFlowNodes);
   const flowEdges = useMemo<IfcFlowEdge[]>(
@@ -294,6 +336,30 @@ export default function RelationshipFlow({
     return () => window.cancelAnimationFrame(frame);
   }, [focusNode, nodeSignature, searchFocusNodeId, trimmedSearch]);
 
+  useEffect(() => {
+    if (
+      !requestedFocusNodeId ||
+      !flowRef.current ||
+      focusNonce === undefined ||
+      handledFocusNonceRef.current === focusNonce
+    ) {
+      return;
+    }
+    handledFocusNonceRef.current = focusNonce;
+    const firstFrame = window.requestAnimationFrame(() => {
+      focusNode(requestedFocusNodeId);
+    });
+    const secondFrame = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        focusNode(requestedFocusNodeId);
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+    };
+  }, [focusNode, focusNonce, requestedFocusNodeId]);
+
   const handleNodesChange = useCallback(
     (changes: NodeChange<IfcFlowNode>[]) => {
       setFlowNodes((currentNodes) =>
@@ -343,9 +409,13 @@ export default function RelationshipFlow({
       }
       setSelectedRelationship(null);
       setPendingCreate(null);
+      const validRelationshipOptions = relationshipOptionsForIds(
+        sourceId,
+        targetId,
+      );
       setPendingConnect({
         relationshipType: preferredRelationship(
-          relationshipOptions,
+          validRelationshipOptions,
           prefersAggregateRelationship(
             connection.sourceHandle,
             connection.targetHandle,
@@ -360,7 +430,7 @@ export default function RelationshipFlow({
         `graph.connectDraft({ sourceId: ${sourceId}, targetId: ${targetId} });`,
       );
     },
-    [onLog, relationshipOptions],
+    [onLog, relationshipOptionsForIds],
   );
 
   const handleConnectStart = useCallback(
@@ -390,13 +460,18 @@ export default function RelationshipFlow({
       const point = clientPointFromEvent(event);
       const position = flowRef.current?.screenToFlowPosition(point) ?? point;
       const type = preferredClass(classOptions);
+      const validRelationshipOptions = relationshipOptionsForTypes(
+        nodeTypeById.get(sourceId),
+        type,
+        sourceId,
+      );
       setSelectedRelationship(null);
       setPendingConnect(null);
       setPendingCreate({
         name: `New ${shortType(type)}`,
         position,
         relationshipType: preferredRelationship(
-          relationshipOptions,
+          validRelationshipOptions,
           source.handleId === AGGREGATE_SOURCE_HANDLE
             ? AGGREGATE_RELATIONSHIP_TYPE
             : "IFCRELASSIGNSTOGROUP",
@@ -408,7 +483,7 @@ export default function RelationshipFlow({
         `graph.createDraft({ sourceId: ${sourceId}, x: ${position.x.toFixed(1)}, y: ${position.y.toFixed(1)} });`,
       );
     },
-    [classOptions, onLog, relationshipOptions],
+    [classOptions, nodeTypeById, onLog, relationshipOptionsForTypes],
   );
 
   const fitView = () => {
@@ -461,7 +536,11 @@ export default function RelationshipFlow({
         );
       })?.data?.relationshipType;
       const relationshipType = preferredRelationship(
-        relationshipOptions,
+        relationshipOptionsForTypes(
+          nodeTypeById.get(sourceId),
+          copiedNodes[0]?.type,
+          sourceId,
+        ),
         copiedIncomingRelationship ?? AGGREGATE_RELATIONSHIP_TYPE,
       );
       pasteSerialRef.current += 1;
@@ -480,7 +559,13 @@ export default function RelationshipFlow({
         `graph.pasteNodes({ sourceId: ${sourceId}, relationship: '${relationshipType}', connect: ${connect}, count: ${copiedNodes.length} });`,
       );
     },
-    [copiedNodes, onLog, onPasteNodes, relationshipOptions],
+    [
+      copiedNodes,
+      nodeTypeById,
+      onLog,
+      onPasteNodes,
+      relationshipOptionsForTypes,
+    ],
   );
 
   useEffect(() => {
@@ -530,6 +615,20 @@ export default function RelationshipFlow({
     },
     [onLog],
   );
+
+  const pendingCreateRelationshipOptions = pendingCreate
+    ? relationshipOptionsForTypes(
+        nodeTypeById.get(pendingCreate.sourceId),
+        pendingCreate.type,
+        pendingCreate.sourceId,
+      )
+    : [];
+  const pendingConnectRelationshipOptions = pendingConnect
+    ? relationshipOptionsForIds(
+        pendingConnect.sourceId,
+        pendingConnect.targetId,
+      )
+    : [];
 
   return (
     <div
@@ -678,12 +777,6 @@ export default function RelationshipFlow({
           );
         })}
       </div>
-      {relationshipWarnings.length ? (
-        <div className="ifc-graph-warning-bar" title={relationshipWarnings.join('\n')}>
-          <strong>{relationshipWarnings.length} graph warning{relationshipWarnings.length === 1 ? '' : 's'}</strong>
-          <span>{relationshipWarnings[0]}</span>
-        </div>
-      ) : null}
       <div className="ifc-reactflow-shell">
         <ReactFlow
           connectionMode={ConnectionMode.Loose}
@@ -757,6 +850,14 @@ export default function RelationshipFlow({
                         name: current.name.startsWith("New ")
                           ? `New ${shortType(type)}`
                           : current.name,
+                        relationshipType: preferredRelationship(
+                          relationshipOptionsForTypes(
+                            nodeTypeById.get(current.sourceId),
+                            type,
+                            current.sourceId,
+                          ),
+                          current.relationshipType,
+                        ),
                         type,
                       }
                     : current,
@@ -793,16 +894,26 @@ export default function RelationshipFlow({
                 );
               }}
             >
-              {relationshipOptions.map((option, index) => (
+              {pendingCreateRelationshipOptions.map((option, index) => (
                 <option key={optionKey(option, index)} value={option.value}>
                   {option.label}
                 </option>
               ))}
             </select>
           </label>
+          {!pendingCreateRelationshipOptions.length ? (
+            <div className="ifc-flow-popover-note">
+              No valid relationship for this source/class pair.
+            </div>
+          ) : null}
           <div className="ifc-flow-popover-actions">
             <button
               className="primary"
+              disabled={
+                !pendingCreateRelationshipOptions.some(
+                  (option) => option.value === pendingCreate.relationshipType,
+                )
+              }
               type="button"
               onClick={() => {
                 onCreateNodeFromConnection(
@@ -837,16 +948,26 @@ export default function RelationshipFlow({
                 );
               }}
             >
-              {relationshipOptions.map((option, index) => (
+              {pendingConnectRelationshipOptions.map((option, index) => (
                 <option key={optionKey(option, index)} value={option.value}>
                   {option.label}
                 </option>
               ))}
             </select>
           </label>
+          {!pendingConnectRelationshipOptions.length ? (
+            <div className="ifc-flow-popover-note">
+              No valid relationship for these endpoint classes.
+            </div>
+          ) : null}
           <div className="ifc-flow-popover-actions">
             <button
               className="primary"
+              disabled={
+                !pendingConnectRelationshipOptions.some(
+                  (option) => option.value === pendingConnect.relationshipType,
+                )
+              }
               type="button"
               onClick={() => {
                 onConnectNodes(

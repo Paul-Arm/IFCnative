@@ -18,6 +18,7 @@ export default function ThatOpenViewer({
   activeModelDeferredReason,
   activeModelFileName,
   activeModelLoaded = true,
+  focusRequest,
   models,
   onLoadActiveModel,
   onLog,
@@ -34,6 +35,7 @@ export default function ThatOpenViewer({
   const onMoveSelectedRef = useRef(onMoveSelected);
   const onPickCoordinatesRef = useRef(onPickCoordinates);
   const onSelectRef = useRef(onSelect);
+  const handledFocusNonceRef = useRef<number | undefined>(undefined);
   const pickerActiveRef = useRef(false);
   const [runtimeReady, setRuntimeReady] = useState(0);
   const [modelReady, setModelReady] = useState(0);
@@ -206,6 +208,21 @@ export default function ThatOpenViewer({
     }
     void runtime.highlight(activeDocumentId, activeSelectedId);
   }, [activeDocumentId, activeSelectedId, modelReady]);
+
+  useEffect(() => {
+    const runtime = runtimeRef.current;
+    if (
+      !runtime ||
+      !modelReady ||
+      !focusRequest ||
+      focusRequest.documentId !== activeDocumentId ||
+      handledFocusNonceRef.current === focusRequest.nonce
+    ) {
+      return;
+    }
+    handledFocusNonceRef.current = focusRequest.nonce;
+    void runtime.focusSelected(focusRequest.documentId, focusRequest.entityId);
+  }, [activeDocumentId, focusRequest, modelReady]);
 
   useEffect(() => {
     const runtime = runtimeRef.current;
@@ -674,6 +691,22 @@ async function createThatOpenRuntime(
     await world.camera.fitToItems(getFitItems());
   }
 
+  async function focusSelected(documentId: string, localId: number) {
+    const loaded = modelsByDocumentId.get(documentId);
+    if (!loaded || !Number.isFinite(localId) || localId <= 0) {
+      return;
+    }
+    await highlight(documentId, localId).catch(() => undefined);
+    await world.camera
+      .fitToItems({
+        [loaded.model.modelId]: new Set([localId]),
+      })
+      .catch(() => fit());
+    callbacks.onLog(
+      `viewer.camera.center({ file: '${loaded.fileName}', id: ${localId} });`,
+    );
+  }
+
   async function resetCamera() {
     await world.camera.controls.setLookAt(8, 6, 8, 0, 0, 0, true);
     if (modelsByDocumentId.size) {
@@ -715,6 +748,7 @@ async function createThatOpenRuntime(
   return {
     dispose,
     fit,
+    focusSelected,
     highlight,
     hideCoordinateCursor: coordinateCursor.hide,
     resetCamera,

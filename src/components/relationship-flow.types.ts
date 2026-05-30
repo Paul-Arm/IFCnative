@@ -60,11 +60,12 @@ export interface RelationshipFlowProps {
   nodes: RelationshipFlowNode[];
   preset: string;
   presetOptions: RelationshipFlowOption[];
+  focusNodeId?: number | null;
+  focusNonce?: number;
   relationshipOptions: RelationshipFlowOption[];
   relationshipCount: number;
   relationshipTypeFilters: string[];
   relationshipTypes: string[];
-  relationshipWarnings: string[];
   search: string;
   searchActiveId: number | null;
   searchActiveIndex: number;
