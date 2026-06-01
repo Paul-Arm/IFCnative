@@ -18,8 +18,9 @@ import {
     startTransition,
     useEffect,
     useMemo,
+    useRef,
     useState,
-    type SetStateAction
+    type SetStateAction,
 } from "react";
 import {
     DEFAULT_CONTROLS_WITHOUT_CREATION,
@@ -92,6 +93,7 @@ import {
     typeOption,
 } from "@/components/ifc-workspace/ui";
 import { ChildWindow } from "./child-window";
+import { registerEmergencySave } from "./error-boundary";
 import { BuilderPanel } from "./ifc-workspace/BuilderPanel";
 import { CatalogPanel, CatalogReviewPanel } from "./ifc-workspace/CatalogPanel";
 import {
@@ -944,6 +946,32 @@ export default function IfcWorkspace() {
   useEffect(() => {
     saveNotes(notes);
   }, [notes]);
+
+  const emergencyStateRef = useRef({
+    activeWorkspaceId,
+    customWorkspaces,
+    notes,
+    recentIfcFiles,
+  });
+  emergencyStateRef.current = {
+    activeWorkspaceId,
+    customWorkspaces,
+    notes,
+    recentIfcFiles,
+  };
+  useEffect(
+    () =>
+      registerEmergencySave(() => {
+        const snapshot = emergencyStateRef.current;
+        saveNotes(snapshot.notes);
+        saveRecentIfcFiles(snapshot.recentIfcFiles);
+        saveCustomWorkspaces(snapshot.customWorkspaces);
+        saveActiveWorkspaceId(
+          snapshot.activeWorkspaceId || DEFAULT_WORKSPACE_ID,
+        );
+      }),
+    [],
+  );
 
   useEffect(() => {
     if (!desktopApi) {

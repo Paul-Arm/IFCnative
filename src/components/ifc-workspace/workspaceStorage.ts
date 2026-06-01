@@ -1,10 +1,10 @@
 import type { MosaicNode } from "react-mosaic-component";
 
 import {
-  BUILT_IN_WORKSPACES,
-  DEFAULT_WORKSPACE_ID,
-  MOSAIC_VIEW_IDS,
-  type WorkspaceDefinition,
+    BUILT_IN_WORKSPACES,
+    DEFAULT_WORKSPACE_ID,
+    MOSAIC_VIEW_IDS,
+    type WorkspaceDefinition,
 } from "./constants";
 import type { MosaicViewId } from "./types";
 
@@ -32,6 +32,14 @@ export function loadActiveWorkspaceId() {
 
 export function saveActiveWorkspaceId(id: string) {
   writeLocalStorage(ACTIVE_WORKSPACE_STORAGE_KEY, id);
+}
+
+/**
+ * Resets the persisted UI layout to the default workspace. Used by the error
+ * boundary to recover from a corrupted or crash-inducing layout state.
+ */
+export function resetWorkspaceUi() {
+  writeLocalStorage(ACTIVE_WORKSPACE_STORAGE_KEY, DEFAULT_WORKSPACE_ID);
 }
 
 export function loadCustomWorkspaces(): WorkspaceDefinition[] {
