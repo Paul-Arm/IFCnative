@@ -5,67 +5,69 @@ import * as WebIFC from "web-ifc";
 
 import { createMinimalIfcProject } from "../src/ifc/builder";
 import {
-  previewEntityAwareDiffLines,
-  summarizeEntityAwareDiff,
-} from "../src/ifc/entityDiff";
-import {
-  viewerWorldDeltaToIfcPlacementDelta,
-  viewerWorldPointToIfcPlacementPoint,
+    viewerWorldDeltaToIfcPlacementDelta,
+    viewerWorldDirectionToIfcPlacementDirection,
+    viewerWorldPointToIfcPlacementPoint,
 } from "../src/ifc/coordinateMapping";
 import {
-  buildNativeDocumentFromFragments,
-  type FragmentDocumentModel,
+    previewEntityAwareDiffLines,
+    summarizeEntityAwareDiff,
+} from "../src/ifc/entityDiff";
+import {
+    buildNativeDocumentFromFragments,
+    type FragmentDocumentModel,
 } from "../src/ifc/fragmentDocument";
 import { buildGraphIndex, summarizeLine } from "../src/ifc/graphIndex";
 import {
-  addNativeBodyElement,
-  addNativeApproval,
-  addNativeClassification,
-  addNativeConstraintObjective,
-  addNativeDocumentReference,
-  addNativeElement,
-  addNativeEmptyPropertySet,
-  addNativeGroupAssignment,
-  addNativeLibraryReference,
-  addNativeMaterial,
-  addNativeMaterialConstituentSet,
-  addNativeMaterialLayerSet,
-  addNativeMaterialLayerSetUsage,
-  addNativeMaterialProfileSet,
-  addNativeMaterialProfileSetUsage,
-  addNativeMaterialStyle,
-  addNativeMaterialWithProperties,
-  addNativePropertySet,
-  addNativePropertySetValues,
-  addNativePropertyToSet,
-  addNativeQuantitySet,
-  addNativeRelationship,
-  addNativeSiUnit,
-  addNativeTypeAssignment,
-  assignNativeBodyRepresentation,
-  createNativeSampleDocument,
-  duplicateNativePropertySet,
-  getNativeBodyRepresentation,
-  getNativePlacement,
-  parseNativeIfcText,
-  quote,
-  removeNativeEntity,
-  removeNativePropertyFromSet,
-  removeNativePropertySet,
-  removeNativeRelationship,
-  resolveNativeMovableProductId,
-  serializeNativeIfcDocument,
-  updateNativeEntity,
-  updateNativePlacement,
-  updateNativePropertySetName,
-  updateNativePropertyValue,
-  updateNativeRelationship,
-  unquote,
+    addNativeApproval,
+    addNativeBodyElement,
+    addNativeClassification,
+    addNativeConstraintObjective,
+    addNativeDocumentReference,
+    addNativeElement,
+    addNativeEmptyPropertySet,
+    addNativeGroupAssignment,
+    addNativeLibraryReference,
+    addNativeMaterial,
+    addNativeMaterialConstituentSet,
+    addNativeMaterialLayerSet,
+    addNativeMaterialLayerSetUsage,
+    addNativeMaterialProfileSet,
+    addNativeMaterialProfileSetUsage,
+    addNativeMaterialStyle,
+    addNativeMaterialWithProperties,
+    addNativePropertySet,
+    addNativePropertySetValues,
+    addNativePropertyToSet,
+    addNativeQuantitySet,
+    addNativeRelationship,
+    addNativeSiUnit,
+    addNativeTypeAssignment,
+    assignNativeBodyRepresentation,
+    createNativeSampleDocument,
+    duplicateNativePropertySet,
+    getNativeBodyRepresentation,
+    getNativePlacement,
+    parseNativeIfcText,
+    quote,
+    removeNativeEntity,
+    removeNativePropertyFromSet,
+    removeNativePropertySet,
+    removeNativeRelationship,
+    resolveNativeMovableProductId,
+    serializeNativeIfcDocument,
+    unquote,
+    updateNativeEntity,
+    updateNativePlacement,
+    updateNativePlacementRotation,
+    updateNativePropertySetName,
+    updateNativePropertyValue,
+    updateNativeRelationship,
 } from "../src/ifc/nativeDocument";
 import { buildNativeGraphNeighborhood } from "../src/ifc/nativeGraph";
 import {
-  buildObjectInfoIndex,
-  validateObjectInfoReferences,
+    buildObjectInfoIndex,
+    validateObjectInfoReferences,
 } from "../src/ifc/objectInfoValidation";
 import { preflightIfcText } from "../src/ifc/preflight";
 import { buildPropertyIndex } from "../src/ifc/propertyIndex";
@@ -647,8 +649,7 @@ test("native document edits keep indexes live", async () => {
       .get(wall.id)
       ?.some(
         (resource) =>
-          resource.includes("IFCZONE") &&
-          resource.includes("RN Fire Zone"),
+          resource.includes("IFCZONE") && resource.includes("RN Fire Zone"),
       ),
   );
   assert.ok(
@@ -832,8 +833,7 @@ test("native document edits keep indexes live", async () => {
       .get(wall.id)
       ?.some(
         (resource) =>
-          resource.includes("IFCZONE") &&
-          resource.includes("RN Fire Zone"),
+          resource.includes("IFCZONE") && resource.includes("RN Fire Zone"),
       ),
   );
   assert.ok(
@@ -895,9 +895,9 @@ test("native property editor authors extended IFC simple property types", async 
     "IFCPROPERTYTABLEVALUE:IFCREAL:IFCREAL",
   );
 
-  const values = withTable.propertySetsByEntity.get(block.id)?.find(
-    (item) => item.name === "Pset_ExtendedValues",
-  )?.values;
+  const values = withTable.propertySetsByEntity
+    .get(block.id)
+    ?.find((item) => item.name === "Pset_ExtendedValues")?.values;
   assert.ok(values?.some((value) => value.type === "IFCPROPERTYLISTVALUE"));
   assert.ok(
     values?.some((value) => value.type === "IFCPROPERTYENUMERATEDVALUE"),
@@ -1011,7 +1011,9 @@ test("native type assignments are indexed and endpoint-validated", () => {
 
 test("native document diagnostics flag unit/schema and physical product shape issues", () => {
   const sample = createNativeSampleDocument();
-  const project = sample.entities.find((entity) => entity.type === "IFCPROJECT");
+  const project = sample.entities.find(
+    (entity) => entity.type === "IFCPROJECT",
+  );
   const block = sample.entities.find(
     (entity) => entity.type === "IFCBUILTELEMENT",
   );
@@ -1566,7 +1568,9 @@ test("native graph presets filter relationship neighborhoods", () => {
   });
   assert.deepEqual(explicit.relationshipTypes, ["IFCRELDEFINESBYPROPERTIES"]);
   assert.ok(explicit.edges.length > 0);
-  assert.ok(explicit.edges.every((edge) => edge.type === 'IFCRELDEFINESBYPROPERTIES'));
+  assert.ok(
+    explicit.edges.every((edge) => edge.type === "IFCRELDEFINESBYPROPERTIES"),
+  );
 });
 
 test("native graph expands from indexed relationships without scanning the relationship array", () => {
@@ -1584,7 +1588,8 @@ test("native graph expands from indexed relationships without scanning the relat
     "Approved",
   );
   const approval = withResource.entities.find(
-    (entity) => entity.type === "IFCAPPROVAL" && entity.name === "Graph Approval",
+    (entity) =>
+      entity.type === "IFCAPPROVAL" && entity.name === "Graph Approval",
   );
   assert.ok(approval);
 
@@ -1602,9 +1607,11 @@ test("native graph expands from indexed relationships without scanning the relat
   assert.ok(graph.relationshipTypes.includes("IFCRELASSOCIATESAPPROVAL"));
 });
 
-test('native graph geometry preset expands placement and representation references', () => {
+test("native graph geometry preset expands placement and representation references", () => {
   const sample = createNativeSampleDocument();
-  const block = sample.entities.find((entity) => entity.type === 'IFCBUILTELEMENT');
+  const block = sample.entities.find(
+    (entity) => entity.type === "IFCBUILTELEMENT",
+  );
   assert.ok(block);
 
   const placement = getNativePlacement(sample, block.id);
@@ -1612,7 +1619,7 @@ test('native graph geometry preset expands placement and representation referenc
 
   const graph = buildNativeGraphNeighborhood(sample, {
     depth: 4,
-    preset: 'geometry',
+    preset: "geometry",
     selectedId: block.id,
   });
 
@@ -1620,33 +1627,61 @@ test('native graph geometry preset expands placement and representation referenc
   assert.ok(graph.nodeIds.includes(placement.axisPlacementId));
   assert.ok(graph.nodeIds.includes(placement.pointId));
   assert.ok(graph.nodeIds.includes(Number(block.args[6].slice(1))));
-  assert.ok(graph.edges.some((edge) => edge.type === 'IFCREFGEOMETRY' && edge.label === 'ObjectPlacement'));
-  assert.ok(graph.edges.some((edge) => edge.type === 'IFCREFGEOMETRY' && edge.label === 'Representation'));
-  assert.ok(graph.relationshipTypes.includes('IFCLOCALPLACEMENT'));
+  assert.ok(
+    graph.edges.some(
+      (edge) =>
+        edge.type === "IFCREFGEOMETRY" && edge.label === "ObjectPlacement",
+    ),
+  );
+  assert.ok(
+    graph.edges.some(
+      (edge) =>
+        edge.type === "IFCREFGEOMETRY" && edge.label === "Representation",
+    ),
+  );
+  assert.ok(graph.relationshipTypes.includes("IFCLOCALPLACEMENT"));
 });
 
-test('native graph surfaces visible relationship validation warnings', () => {
+test("native graph surfaces visible relationship validation warnings", () => {
   const sample = createNativeSampleDocument();
-  const block = sample.entities.find((entity) => entity.type === 'IFCBUILTELEMENT');
+  const block = sample.entities.find(
+    (entity) => entity.type === "IFCBUILTELEMENT",
+  );
   assert.ok(block);
 
-  const typed = addNativeTypeAssignment(sample, block.id, 'Graph Warning Type', 'IFCTYPEOBJECT', 'WARN-TYPE');
+  const typed = addNativeTypeAssignment(
+    sample,
+    block.id,
+    "Graph Warning Type",
+    "IFCTYPEOBJECT",
+    "WARN-TYPE",
+  );
   const assignment = typed.typeAssignmentsByEntity.get(block.id)?.[0];
   assert.ok(assignment);
 
   const broken = updateNativeRelationship(typed, assignment.relationshipId, {
     sourceId: block.id,
     targetId: block.id,
-    type: 'IFCRELDEFINESBYTYPE',
+    type: "IFCRELDEFINESBYTYPE",
   });
   const graph = buildNativeGraphNeighborhood(broken, {
     depth: 1,
-    preset: 'all',
+    preset: "all",
     selectedId: block.id,
   });
 
-  assert.ok(graph.warnings.some((warning) => warning.relationshipId === assignment.relationshipId));
-  assert.ok(graph.warnings.some((warning) => warning.message.includes('IFCRELDEFINESBYTYPE expects type object definitions')));
+  assert.ok(
+    graph.warnings.some(
+      (warning) => warning.relationshipId === assignment.relationshipId,
+    ),
+  );
+  assert.ok(
+    graph.warnings.some((warning) =>
+      warning.message.includes(
+        "IFCRELDEFINESBYTYPE expects type object definitions",
+      ),
+    ),
+  );
 });
 
 test("relationship create menus filter relationship classes by endpoint types", () => {
@@ -1688,39 +1723,55 @@ test("relationship create menus filter relationship classes by endpoint types", 
   );
 });
 
-test('entity-aware diff groups STEP changes by entity id', () => {
+test("entity-aware diff groups STEP changes by entity id", () => {
   const sample = createNativeSampleDocument();
-  const storey = sample.entities.find((entity) => entity.type === 'IFCBUILDINGSTOREY');
+  const storey = sample.entities.find(
+    (entity) => entity.type === "IFCBUILDINGSTOREY",
+  );
   assert.ok(storey);
 
   const withBody = addNativeBodyElement(sample, {
-    depth: '1',
-    height: '1',
-    name: 'Diff Block',
+    depth: "1",
+    height: "1",
+    name: "Diff Block",
     parentId: storey.id,
-    type: 'IFCBUILDINGELEMENTPROXY',
-    width: '1',
+    type: "IFCBUILDINGELEMENTPROXY",
+    width: "1",
   });
-  const lines = previewEntityAwareDiffLines(serializeNativeIfcDocument(sample), serializeNativeIfcDocument(withBody));
-  const text = lines.map((line) => line.text).join('\n');
+  const lines = previewEntityAwareDiffLines(
+    serializeNativeIfcDocument(sample),
+    serializeNativeIfcDocument(withBody),
+  );
+  const text = lines.map((line) => line.text).join("\n");
 
-  assert.ok(text.includes('Entity-aware STEP diff'));
-  assert.ok(text.includes('IFCBUILDINGELEMENTPROXY'));
+  assert.ok(text.includes("Entity-aware STEP diff"));
+  assert.ok(text.includes("IFCBUILDINGELEMENTPROXY"));
   assert.ok(text.includes("'Diff Block' added"));
-  assert.ok(lines.some((line) => line.kind === 'add' && line.text.includes('IFCRELCONTAINEDINSPATIALSTRUCTURE')));
+  assert.ok(
+    lines.some(
+      (line) =>
+        line.kind === "add" &&
+        line.text.includes("IFCRELCONTAINEDINSPATIALSTRUCTURE"),
+    ),
+  );
 
-  const summary = summarizeEntityAwareDiff(serializeNativeIfcDocument(sample), serializeNativeIfcDocument(withBody));
+  const summary = summarizeEntityAwareDiff(
+    serializeNativeIfcDocument(sample),
+    serializeNativeIfcDocument(withBody),
+  );
   assert.ok(summary.addedEntities > 0);
   assert.ok(
     summary.relationshipChanges.some(
-      (change) => change.action === 'added' && change.type === 'IFCRELCONTAINEDINSPATIALSTRUCTURE',
+      (change) =>
+        change.action === "added" &&
+        change.type === "IFCRELCONTAINEDINSPATIALSTRUCTURE",
     ),
   );
   const solidChange = summary.geometryChanges.find(
     (change) =>
-      change.action === 'added' &&
-      change.type === 'IFCEXTRUDEDAREASOLID' &&
-      change.affectedProducts.some((product) => product.name === 'Diff Block'),
+      change.action === "added" &&
+      change.type === "IFCEXTRUDEDAREASOLID" &&
+      change.affectedProducts.some((product) => product.name === "Diff Block"),
   );
   assert.ok(solidChange);
   assert.ok(solidChange.after?.includes("rectangle 1."));
@@ -2217,6 +2268,46 @@ test("viewer-world move deltas are converted to IFC placement axes", async () =>
 
   api.CloseModel(beforeModelID);
   api.CloseModel(afterModelID);
+});
+
+test("viewer-world rotation writes valid IFC placement directions", async () => {
+  const sample = createNativeSampleDocument();
+  const block = sample.entities.find(
+    (entity) => entity.type === "IFCBUILTELEMENT",
+  );
+  assert.ok(block);
+
+  const rotated = updateNativePlacementRotation(sample, block.id, {
+    axis: viewerWorldDirectionToIfcPlacementDirection({ x: 0, y: 1, z: 0 }),
+    refDirection: viewerWorldDirectionToIfcPlacementDirection({
+      x: 0,
+      y: 0,
+      z: -1,
+    }),
+  });
+  const text = serializeNativeIfcDocument(rotated);
+  const reparsed = parseNativeIfcText(text, "rotated.ifc");
+  const placement = getNativePlacement(reparsed, block.id);
+  assert.ok(placement);
+  const axisPlacement = reparsed.entityById.get(placement.axisPlacementId);
+  assert.equal(axisPlacement?.type, "IFCAXIS2PLACEMENT3D");
+  assert.notEqual(
+    axisPlacement?.args[1],
+    "$",
+    "Axis direction should be written for rotated placements",
+  );
+  assert.notEqual(
+    axisPlacement?.args[2],
+    "$",
+    "RefDirection should be written for rotated placements",
+  );
+
+  const api = new WebIFC.IfcAPI();
+  await api.Init();
+  const modelID = api.OpenModel(new TextEncoder().encode(text));
+  assert.ok(modelID >= 0);
+  assert.ok(streamGeometryVertexCount(api, modelID) > 0);
+  api.CloseModel(modelID);
 });
 
 test("viewer-world picked points are converted to IFC placement axes", () => {

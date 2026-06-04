@@ -52,7 +52,6 @@ export class ErrorBoundary extends Component<
   componentDidCatch(error: Error, info: ErrorInfo) {
     const saved = runEmergencySaves();
     this.setState({ saved: saved > 0 });
-    // eslint-disable-next-line no-console
     console.error("IFCnative ist abgestuerzt:", error, info.componentStack);
   }
 

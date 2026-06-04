@@ -1,10 +1,10 @@
 import { createMinimalIfcProject } from "./builder";
 import {
-  decodeStepString,
-  decodeStepValue,
-  encodeStepString,
-  quoteStepString,
-  unquoteStepString,
+    decodeStepString,
+    decodeStepValue,
+    encodeStepString,
+    quoteStepString,
+    unquoteStepString,
 } from "./stepEncoding";
 
 export { decodeStepString, decodeStepValue, encodeStepString };
@@ -355,7 +355,9 @@ export function getNativeBodyRepresentation(
   entityId: number,
 ): NativeBodyRepresentationSummary {
   const product = document.entityById.get(entityId);
-  const canAssign = product ? isRepresentationAssignableProduct(product) : false;
+  const canAssign = product
+    ? isRepresentationAssignableProduct(product)
+    : false;
   const shapeId = readReferences(product?.args[6] ?? "")[0];
   const shape = shapeId ? document.entityById.get(shapeId) : undefined;
 
@@ -443,7 +445,8 @@ export function getNativeBodyRepresentation(
     return {
       bodyRepresentationId: bodyRepresentation.id,
       canAssign,
-      canEdit: width !== undefined && depth !== undefined && height !== undefined,
+      canEdit:
+        width !== undefined && depth !== undefined && height !== undefined,
       depth,
       hasRepresentation: true,
       height,
@@ -461,7 +464,9 @@ export function getNativeBodyRepresentation(
   if (profile?.type === "IFCCIRCLEPROFILEDEF") {
     const radius = readStepNumber(profile.args[3]);
     const diameter =
-      radius === undefined ? undefined : Math.round(radius * 2 * 1_000_000) / 1_000_000;
+      radius === undefined
+        ? undefined
+        : Math.round(radius * 2 * 1_000_000) / 1_000_000;
     return {
       bodyRepresentationId: bodyRepresentation.id,
       canAssign,
@@ -562,6 +567,58 @@ export function updateNativePlacement(
   const y = numericStepNumber(coordinates.y, placement.y);
   const z = numericStepNumber(coordinates.z, placement.z);
   setArg(point.args, 0, `(${x},${y},${z})`);
+
+  return parseNativeIfcText(
+    serializeEntities(document, next),
+    document.fileName,
+  );
+}
+
+export function updateNativePlacementRotation(
+  document: NativeIfcDocument,
+  entityId: number,
+  axes: {
+    axis: { x: number; y: number; z: number };
+    refDirection: { x: number; y: number; z: number };
+  },
+) {
+  const placement = getNativePlacement(document, entityId);
+  if (!placement) {
+    return document;
+  }
+
+  const next = cloneDocumentEntities(document);
+  const axisPlacement = next.find(
+    (entity) =>
+      entity.id === placement.axisPlacementId &&
+      entity.type === "IFCAXIS2PLACEMENT3D",
+  );
+  if (!axisPlacement) {
+    return document;
+  }
+
+  const axis = normalizeDirection(axes.axis, { x: 0, y: 0, z: 1 });
+  const refDirection = normalizeDirection(axes.refDirection, {
+    x: 1,
+    y: 0,
+    z: 0,
+  });
+  let nextId = nextEntityId(next);
+  const axisDirection = ensureDirectionEntity(
+    next,
+    axisPlacement.args[1],
+    nextId,
+  );
+  nextId = Math.max(nextId, axisDirection.id + 1);
+  const refDirectionEntity = ensureDirectionEntity(
+    next,
+    axisPlacement.args[2],
+    nextId,
+  );
+  setArg(axisPlacement.args, 1, `#${axisDirection.id}`);
+  setArg(axisPlacement.args, 2, `#${refDirectionEntity.id}`);
+  setArg(axisDirection.args, 0, formatDirectionTuple(axis));
+  setArg(refDirectionEntity.args, 0, formatDirectionTuple(refDirection));
 
   return parseNativeIfcText(
     serializeEntities(document, next),
@@ -1324,8 +1381,6 @@ export function addNativeRelationship(
     relationshipType === "IFCRELCONTAINEDINSPATIALSTRUCTURE"
       ? [quote(createIfcGuid(id)), "$", "$", "$", target, source]
       : relationshipType === "IFCRELASSIGNSTOGROUP"
-        ? [quote(createIfcGuid(id)), "$", "$", "$", `(#${sourceId})`, "$", `#${targetId}`]
-      : relationshipType === "IFCRELASSOCIATESCONSTRAINT"
         ? [
             quote(createIfcGuid(id)),
             "$",
@@ -1335,17 +1390,27 @@ export function addNativeRelationship(
             "$",
             `#${targetId}`,
           ]
-        : relationshipType.startsWith("IFCRELASSOCIATES") ||
-            relationshipType.startsWith("IFCRELASSIGNS")
+        : relationshipType === "IFCRELASSOCIATESCONSTRAINT"
           ? [
               quote(createIfcGuid(id)),
               "$",
               "$",
               "$",
               `(#${sourceId})`,
+              "$",
               `#${targetId}`,
             ]
-          : [quote(createIfcGuid(id)), "$", "$", "$", source, target];
+          : relationshipType.startsWith("IFCRELASSOCIATES") ||
+              relationshipType.startsWith("IFCRELASSIGNS")
+            ? [
+                quote(createIfcGuid(id)),
+                "$",
+                "$",
+                "$",
+                `(#${sourceId})`,
+                `#${targetId}`,
+              ]
+            : [quote(createIfcGuid(id)), "$", "$", "$", source, target];
   next.push({
     args,
     description: "",
@@ -1943,8 +2008,7 @@ export function addNativeMaterialWithProperties(
   const materialId = nextId++;
   const materialPropertiesId = nextId++;
   const relationshipId = nextId;
-  const cleanPropertySetName =
-    propertySetName.trim() || "Pset_MaterialCommon";
+  const cleanPropertySetName = propertySetName.trim() || "Pset_MaterialCommon";
   added.push(createMaterialEntity(materialId, materialName, materialCategory));
   added.push({
     args: [
@@ -1993,7 +2057,8 @@ export function addNativeMaterialStyle(
   const materialRepresentationId = nextId++;
   const relationshipId = nextId;
   const cleanMaterialName = materialName.trim() || "Styled Material";
-  const cleanStyleName = styleName.trim() || `${cleanMaterialName} Surface Style`;
+  const cleanStyleName =
+    styleName.trim() || `${cleanMaterialName} Surface Style`;
   const colorComponents = colorStepNumbers(color);
   const contextRef = `#${document.entities.find((entity) => entity.type === "IFCGEOMETRICREPRESENTATIONCONTEXT")?.id ?? 10}`;
   const added: NativeIfcEntity[] = [
@@ -2041,7 +2106,12 @@ export function addNativeMaterialStyle(
       type: "IFCSTYLEDITEM",
     },
     {
-      args: [contextRef, quote("Style"), quote("Material"), `(#${styledItemId})`],
+      args: [
+        contextRef,
+        quote("Style"),
+        quote("Material"),
+        `(#${styledItemId})`,
+      ],
       description: "",
       globalId: "",
       id: styledRepresentationId,
@@ -2082,8 +2152,18 @@ export function addNativeMaterialLayerSet(
     return document;
   }
   const rows = parseMaterialRows(layerRows, [
-    { category: "LoadBearing", materialName: "Concrete", name: "Core", value: "0.2" },
-    { category: "Insulation", materialName: "Insulation", name: "Insulation", value: "0.08" },
+    {
+      category: "LoadBearing",
+      materialName: "Concrete",
+      name: "Core",
+      value: "0.2",
+    },
+    {
+      category: "Insulation",
+      materialName: "Insulation",
+      name: "Insulation",
+      value: "0.08",
+    },
   ]);
   let nextId = getNextNativeEntityId(document);
   const added: NativeIfcEntity[] = [];
@@ -2091,7 +2171,9 @@ export function addNativeMaterialLayerSet(
   for (const row of rows) {
     const materialId = nextId++;
     const layerId = nextId++;
-    added.push(createMaterialEntity(materialId, row.materialName, row.category));
+    added.push(
+      createMaterialEntity(materialId, row.materialName, row.category),
+    );
     added.push({
       args: [
         `#${materialId}`,
@@ -2120,7 +2202,15 @@ export function addNativeMaterialLayerSet(
     name: cleanSetName,
     type: "IFCMATERIALLAYERSET",
   });
-  added.push(createAssociationEntity(nextId, entityId, setId, "IFCRELASSOCIATESMATERIAL", "Material Layer Set"));
+  added.push(
+    createAssociationEntity(
+      nextId,
+      entityId,
+      setId,
+      "IFCRELASSOCIATESMATERIAL",
+      "Material Layer Set",
+    ),
+  );
   return appendNativeEntities(document, added);
 }
 
@@ -2138,8 +2228,18 @@ export function addNativeMaterialLayerSetUsage(
     return document;
   }
   const rows = parseMaterialRows(layerRows, [
-    { category: "LoadBearing", materialName: "Concrete", name: "Core", value: "0.2" },
-    { category: "Insulation", materialName: "Insulation", name: "Insulation", value: "0.08" },
+    {
+      category: "LoadBearing",
+      materialName: "Concrete",
+      name: "Core",
+      value: "0.2",
+    },
+    {
+      category: "Insulation",
+      materialName: "Insulation",
+      name: "Insulation",
+      value: "0.08",
+    },
   ]);
   let nextId = getNextNativeEntityId(document);
   const added: NativeIfcEntity[] = [];
@@ -2147,7 +2247,9 @@ export function addNativeMaterialLayerSetUsage(
   for (const row of rows) {
     const materialId = nextId++;
     const layerId = nextId++;
-    added.push(createMaterialEntity(materialId, row.materialName, row.category));
+    added.push(
+      createMaterialEntity(materialId, row.materialName, row.category),
+    );
     added.push({
       args: [
         `#${materialId}`,
@@ -2257,19 +2359,20 @@ export function addNativeMaterialProfileSet(
       type: "IFCMATERIALPROFILE",
     },
     {
-      args: [
-        quote(cleanSetName),
-        "$",
-        `(#${materialProfileId})`,
-        "$",
-      ],
+      args: [quote(cleanSetName), "$", `(#${materialProfileId})`, "$"],
       description: "",
       globalId: "",
       id: setId,
       name: cleanSetName,
       type: "IFCMATERIALPROFILESET",
     },
-    createAssociationEntity(nextId, entityId, setId, "IFCRELASSOCIATESMATERIAL", "Material Profile Set"),
+    createAssociationEntity(
+      nextId,
+      entityId,
+      setId,
+      "IFCRELASSOCIATESMATERIAL",
+      "Material Profile Set",
+    ),
   ];
   return appendNativeEntities(document, added);
 }
@@ -2371,8 +2474,18 @@ export function addNativeMaterialConstituentSet(
     return document;
   }
   const rows = parseMaterialRows(constituentRows, [
-    { category: "Frame", materialName: "Aluminium", name: "Frame", value: "0.6" },
-    { category: "Glazing", materialName: "Glass", name: "Glazing", value: "0.4" },
+    {
+      category: "Frame",
+      materialName: "Aluminium",
+      name: "Frame",
+      value: "0.6",
+    },
+    {
+      category: "Glazing",
+      materialName: "Glass",
+      name: "Glazing",
+      value: "0.4",
+    },
   ]);
   let nextId = getNextNativeEntityId(document);
   const added: NativeIfcEntity[] = [];
@@ -2380,7 +2493,9 @@ export function addNativeMaterialConstituentSet(
   for (const row of rows) {
     const materialId = nextId++;
     const constituentId = nextId++;
-    added.push(createMaterialEntity(materialId, row.materialName, row.category));
+    added.push(
+      createMaterialEntity(materialId, row.materialName, row.category),
+    );
     added.push({
       args: [
         quoteOrDollar(row.name),
@@ -2407,7 +2522,15 @@ export function addNativeMaterialConstituentSet(
     name: cleanSetName,
     type: "IFCMATERIALCONSTITUENTSET",
   });
-  added.push(createAssociationEntity(nextId, entityId, setId, "IFCRELASSOCIATESMATERIAL", "Material Constituent Set"));
+  added.push(
+    createAssociationEntity(
+      nextId,
+      entityId,
+      setId,
+      "IFCRELASSOCIATESMATERIAL",
+      "Material Constituent Set",
+    ),
+  );
   return appendNativeEntities(document, added);
 }
 
@@ -3122,15 +3245,18 @@ function readPropertySummaryValue(entity: NativeIfcEntity) {
     return readIfcValueList(entity.args[2]).map(compactValue).join("; ");
   }
   if (entity.type === "IFCPROPERTYBOUNDEDVALUE") {
-    const lower = entity.args[3] && entity.args[3] !== "$"
-      ? compactValue(entity.args[3])
-      : "";
-    const upper = entity.args[2] && entity.args[2] !== "$"
-      ? compactValue(entity.args[2])
-      : "";
-    const setPoint = entity.args[5] && entity.args[5] !== "$"
-      ? compactValue(entity.args[5])
-      : "";
+    const lower =
+      entity.args[3] && entity.args[3] !== "$"
+        ? compactValue(entity.args[3])
+        : "";
+    const upper =
+      entity.args[2] && entity.args[2] !== "$"
+        ? compactValue(entity.args[2])
+        : "";
+    const setPoint =
+      entity.args[5] && entity.args[5] !== "$"
+        ? compactValue(entity.args[5])
+        : "";
     return `${lower}..${upper}${setPoint ? `; ${setPoint}` : ""}`;
   }
   if (entity.type === "IFCPROPERTYTABLEVALUE") {
@@ -3152,11 +3278,10 @@ function readResources(
   entityById: Map<number, NativeIfcEntity>,
 ) {
   const result = new Map<number, string[]>();
-  const materialPropertiesByMaterial = readMaterialPropertiesByMaterial(entities);
-  const materialRepresentationsByMaterial = readMaterialRepresentationsByMaterial(
-    entities,
-    entityById,
-  );
+  const materialPropertiesByMaterial =
+    readMaterialPropertiesByMaterial(entities);
+  const materialRepresentationsByMaterial =
+    readMaterialRepresentationsByMaterial(entities, entityById);
   for (const rel of entities) {
     if (
       !rel.type.startsWith("IFCRELASSOCIATES") &&
@@ -3349,13 +3474,17 @@ function validateNativeDocument(
   const globalIdOwners = new Map<string, number[]>();
 
   if (!/^\s*ISO-10303-21;/i.test(sourceText)) {
-    diagnostics.push('Warning: STEP file is missing ISO-10303-21 start marker.');
+    diagnostics.push(
+      "Warning: STEP file is missing ISO-10303-21 start marker.",
+    );
   }
   if (!/END-ISO-10303-21;\s*$/i.test(sourceText)) {
-    diagnostics.push('Warning: STEP file is missing END-ISO-10303-21 end marker.');
+    diagnostics.push(
+      "Warning: STEP file is missing END-ISO-10303-21 end marker.",
+    );
   }
-  if (schema === 'UNKNOWN') {
-    diagnostics.push('Warning: FILE_SCHEMA is missing or could not be read.');
+  if (schema === "UNKNOWN") {
+    diagnostics.push("Warning: FILE_SCHEMA is missing or could not be read.");
   }
   for (const entity of entities) {
     if (entity.globalId && entity.globalId !== "$") {
@@ -3379,20 +3508,32 @@ function validateNativeDocument(
     }
   }
 
-  const unitAssignments = entities.filter((entity) => entity.type === 'IFCUNITASSIGNMENT');
+  const unitAssignments = entities.filter(
+    (entity) => entity.type === "IFCUNITASSIGNMENT",
+  );
   if (units.length === 0) {
     diagnostics.push("Warning: no IFCUNITASSIGNMENT units are indexed.");
   }
   if (unitAssignments.length > 1) {
-    diagnostics.push(`Warning: multiple IFCUNITASSIGNMENT entities found: ${unitAssignments.map((entity) => `#${entity.id}`).join(', ')}.`);
+    diagnostics.push(
+      `Warning: multiple IFCUNITASSIGNMENT entities found: ${unitAssignments.map((entity) => `#${entity.id}`).join(", ")}.`,
+    );
   }
   const projectUnitRefs = entities
-    .filter((entity) => entity.type === 'IFCPROJECT')
-    .flatMap((entity) => readReferences(entity.args[8] ?? ''));
+    .filter((entity) => entity.type === "IFCPROJECT")
+    .flatMap((entity) => readReferences(entity.args[8] ?? ""));
   if (unitAssignments.length > 0 && projectUnitRefs.length === 0) {
-    diagnostics.push('Warning: IFCPROJECT does not reference an IFCUNITASSIGNMENT in UnitsInContext.');
-  } else if (projectUnitRefs.some((id) => entityById.get(id)?.type !== 'IFCUNITASSIGNMENT')) {
-    diagnostics.push('Warning: IFCPROJECT UnitsInContext does not point to an IFCUNITASSIGNMENT.');
+    diagnostics.push(
+      "Warning: IFCPROJECT does not reference an IFCUNITASSIGNMENT in UnitsInContext.",
+    );
+  } else if (
+    projectUnitRefs.some(
+      (id) => entityById.get(id)?.type !== "IFCUNITASSIGNMENT",
+    )
+  ) {
+    diagnostics.push(
+      "Warning: IFCPROJECT UnitsInContext does not point to an IFCUNITASSIGNMENT.",
+    );
   }
   diagnostics.push(...validateUnitAssignments(unitAssignments, entityById));
   diagnostics.push(...validatePhysicalProducts(entities, entityById));
@@ -3442,9 +3583,11 @@ function validateUnitAssignments(
 ) {
   const diagnostics: string[] = [];
   for (const assignment of unitAssignments) {
-    const unitRefs = readReferences(assignment.args[0] ?? '');
+    const unitRefs = readReferences(assignment.args[0] ?? "");
     if (unitRefs.length === 0) {
-      diagnostics.push(`Warning: #${assignment.id} IFCUNITASSIGNMENT contains no unit references.`);
+      diagnostics.push(
+        `Warning: #${assignment.id} IFCUNITASSIGNMENT contains no unit references.`,
+      );
       continue;
     }
     const seenUnitTypes = new Map<string, number[]>();
@@ -3454,11 +3597,16 @@ function validateUnitAssignments(
         continue;
       }
       const unitKind = compactValue(unit.args[1] ?? unit.type);
-      seenUnitTypes.set(unitKind, [...(seenUnitTypes.get(unitKind) ?? []), unitId]);
+      seenUnitTypes.set(unitKind, [
+        ...(seenUnitTypes.get(unitKind) ?? []),
+        unitId,
+      ]);
     }
     for (const [unitKind, ids] of seenUnitTypes) {
       if (unitKind && ids.length > 1) {
-        diagnostics.push(`Warning: #${assignment.id} IFCUNITASSIGNMENT has duplicate ${unitKind} units: ${ids.map((id) => `#${id}`).join(', ')}.`);
+        diagnostics.push(
+          `Warning: #${assignment.id} IFCUNITASSIGNMENT has duplicate ${unitKind} units: ${ids.map((id) => `#${id}`).join(", ")}.`,
+        );
       }
     }
   }
@@ -3470,19 +3618,31 @@ function validatePhysicalProducts(
   entityById: Map<number, NativeIfcEntity>,
 ) {
   const diagnostics: string[] = [];
-  for (const product of entities.filter((entity) => isPhysicalProduct(entity.type))) {
-    const placementId = readReferences(product.args[5] ?? '')[0];
+  for (const product of entities.filter((entity) =>
+    isPhysicalProduct(entity.type),
+  )) {
+    const placementId = readReferences(product.args[5] ?? "")[0];
     if (!placementId) {
-      diagnostics.push(`Warning: #${product.id} ${product.type} has no ObjectPlacement.`);
-    } else if (entityById.get(placementId)?.type !== 'IFCLOCALPLACEMENT') {
-      diagnostics.push(`Warning: #${product.id} ${product.type} ObjectPlacement points to #${placementId}, not IFCLOCALPLACEMENT.`);
+      diagnostics.push(
+        `Warning: #${product.id} ${product.type} has no ObjectPlacement.`,
+      );
+    } else if (entityById.get(placementId)?.type !== "IFCLOCALPLACEMENT") {
+      diagnostics.push(
+        `Warning: #${product.id} ${product.type} ObjectPlacement points to #${placementId}, not IFCLOCALPLACEMENT.`,
+      );
     }
 
-    const representationId = readReferences(product.args[6] ?? '')[0];
+    const representationId = readReferences(product.args[6] ?? "")[0];
     if (!representationId) {
-      diagnostics.push(`Warning: #${product.id} ${product.type} has no Representation.`);
-    } else if (entityById.get(representationId)?.type !== 'IFCPRODUCTDEFINITIONSHAPE') {
-      diagnostics.push(`Warning: #${product.id} ${product.type} Representation points to #${representationId}, not IFCPRODUCTDEFINITIONSHAPE.`);
+      diagnostics.push(
+        `Warning: #${product.id} ${product.type} has no Representation.`,
+      );
+    } else if (
+      entityById.get(representationId)?.type !== "IFCPRODUCTDEFINITIONSHAPE"
+    ) {
+      diagnostics.push(
+        `Warning: #${product.id} ${product.type} Representation points to #${representationId}, not IFCPRODUCTDEFINITIONSHAPE.`,
+      );
     }
   }
   return diagnostics;
@@ -3565,7 +3725,8 @@ function validateRelationshipCompatibility(
   }
   if (relationship.type === "IFCRELASSOCIATESLIBRARY") {
     return targetTypes.every(
-      (type) => type === "IFCLIBRARYINFORMATION" || type === "IFCLIBRARYREFERENCE",
+      (type) =>
+        type === "IFCLIBRARYINFORMATION" || type === "IFCLIBRARYREFERENCE",
     )
       ? undefined
       : `expects library resources, got ${targetTypes.join(", ")}`;
@@ -3586,7 +3747,9 @@ function validateRelationshipCompatibility(
     if (!targetTypes.every(isGroupObject)) {
       return `expects group, system or zone targets, got ${targetTypes.join(", ")}`;
     }
-    if (relationship.sourceIds.some((id) => relationship.targetIds.includes(id))) {
+    if (
+      relationship.sourceIds.some((id) => relationship.targetIds.includes(id))
+    ) {
       return "contains a group self-reference";
     }
     return sourceTypes.some((type) => type.startsWith("IFCREL"))
@@ -3771,6 +3934,51 @@ function parseCoordinateTuple(value = ""): [number, number, number] {
     Number.isFinite(coordinates[1]) ? coordinates[1] : 0,
     Number.isFinite(coordinates[2]) ? coordinates[2] : 0,
   ];
+}
+
+function normalizeDirection(
+  value: { x: number; y: number; z: number },
+  fallback: { x: number; y: number; z: number },
+) {
+  const length = Math.hypot(value.x, value.y, value.z);
+  if (!Number.isFinite(length) || length < 0.000001) {
+    return fallback;
+  }
+  return {
+    x: value.x / length,
+    y: value.y / length,
+    z: value.z / length,
+  };
+}
+
+function formatDirectionTuple(value: { x: number; y: number; z: number }) {
+  return `(${formatDecimal(value.x)},${formatDecimal(value.y)},${formatDecimal(value.z)})`;
+}
+
+function ensureDirectionEntity(
+  entities: NativeIfcEntity[],
+  reference: string | undefined,
+  fallbackId: number,
+) {
+  const directionId = readReferences(reference ?? "")[0];
+  const existing = directionId
+    ? entities.find(
+        (entity) => entity.id === directionId && entity.type === "IFCDIRECTION",
+      )
+    : undefined;
+  if (existing) {
+    return existing;
+  }
+  const created: NativeIfcEntity = {
+    args: ["(0.,0.,1.)"],
+    description: "",
+    globalId: "",
+    id: fallbackId,
+    name: "",
+    type: "IFCDIRECTION",
+  };
+  entities.push(created);
+  return created;
 }
 
 function readStepNumber(value = "") {
@@ -4401,7 +4609,12 @@ function readPropertyValueTypeSpec(entity: NativeIfcEntity) {
 }
 
 function readIfcValueType(value = "") {
-  return value.trim().match(/^([A-Z0-9_]+)\(/i)?.[1]?.toUpperCase() ?? "IFCLABEL";
+  return (
+    value
+      .trim()
+      .match(/^([A-Z0-9_]+)\(/i)?.[1]
+      ?.toUpperCase() ?? "IFCLABEL"
+  );
 }
 
 function readIfcValueListType(value = "") {
@@ -4585,8 +4798,7 @@ function isQuantityType(type: string) {
 
 function isMaterialUsageType(type: string) {
   return (
-    type === "IFCMATERIALLAYERSETUSAGE" ||
-    type === "IFCMATERIALPROFILESETUSAGE"
+    type === "IFCMATERIALLAYERSETUSAGE" || type === "IFCMATERIALPROFILESETUSAGE"
   );
 }
 
@@ -4639,7 +4851,9 @@ function nonNegativeStepNumber(
             .trim()
             .replace(",", "."),
         );
-  return formatDecimal(Math.max(Number.isFinite(numeric) ? numeric : fallback, 0));
+  return formatDecimal(
+    Math.max(Number.isFinite(numeric) ? numeric : fallback, 0),
+  );
 }
 
 function optionalPositiveStepNumber(value: number | string | undefined) {
@@ -4701,9 +4915,9 @@ function colorStepNumbers(value: string) {
     .filter((part) => Number.isFinite(part));
   if (parts.length >= 3) {
     const scale = parts.some((part) => part > 1) ? 255 : 1;
-    return parts.slice(0, 3).map((part) =>
-      formatDecimal(Math.min(Math.max(part / scale, 0), 1)),
-    );
+    return parts
+      .slice(0, 3)
+      .map((part) => formatDecimal(Math.min(Math.max(part / scale, 0), 1)));
   }
 
   return ["0.5569", "0.6549", "0.7608"];
@@ -4749,7 +4963,7 @@ function setRelationshipArgs(
     setArg(
       entity.args,
       5,
-      readReferences(entity.args[5]).length ? "$" : (entity.args[5] || "$"),
+      readReferences(entity.args[5]).length ? "$" : entity.args[5] || "$",
     );
     setArg(entity.args, 6, `#${targetId}`);
     return;

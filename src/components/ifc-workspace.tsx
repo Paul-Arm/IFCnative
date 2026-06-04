@@ -48,14 +48,12 @@ import {
     addNativeMaterialProfileSetUsage,
     addNativeMaterialStyle,
     addNativeMaterialWithProperties,
-    addNativePropertySet,
     addNativePropertyToSet,
     addNativeQuantitySet,
     addNativeRelationship,
     addNativeSiUnit,
     addNativeTypeAssignment,
     applyCatalogQuickFix,
-    assignNativeBodyRepresentation,
     buildObjectInfoIndex,
     createNativeSampleDocument,
     duplicateNativePropertySet,
@@ -73,12 +71,15 @@ import {
     suggestCatalogObjectForEntity,
     updateNativeEntity,
     updateNativePlacement,
+    updateNativePlacementRotation,
     updateNativePropertySetName,
     updateNativePropertyValue,
     updateNativeRelationship,
     validateEntityAgainstCatalogObject,
     validateObjectInfoIndex,
     viewerWorldDeltaToIfcPlacementDelta,
+    viewerWorldDirectionToIfcPlacementDirection,
+    viewerWorldPointToIfcPlacementPoint,
     type CatalogValidationFinding,
     type IfcObjectCatalog,
     type NativeIfcDocument,
@@ -141,7 +142,13 @@ import {
     type RecentIfcFileEntry,
 } from "./ifc-workspace/workspaceStorage";
 import type { RelationshipFlowClipboardNode } from "./relationship-flow.types";
-import type { ViewerCoordinatePick } from "./that-open-viewer";
+import type {
+    ViewerCoordinatePick,
+    ViewerCreateBodyRequest,
+    ViewerEditBodyRequest,
+    ViewerFragmentsModelChange,
+    ViewerRotationChange,
+} from "./that-open-viewer";
 import ThatOpenViewer from "./that-open-viewer";
 
 interface WorkspaceDocumentSession {
@@ -166,8 +173,6 @@ interface WorkspaceDocumentSession {
   viewerModelText: string;
 }
 
-const AUTO_VIEWER_LOAD_LIMIT_BYTES = 80 * 1024 * 1024;
-
 let nextWorkspaceDocumentId = 0;
 
 function createWorkspaceDocumentSession(
@@ -187,11 +192,8 @@ function createWorkspaceDocumentSession(
   const sourceFile = options?.file ?? null;
   const text =
     options?.text ?? (sourceBytes ? "" : serializeNativeIfcDocument(document));
-  const viewerModelLoadRequested =
-    options?.viewerModelLoadRequested ?? shouldAutoLoadViewer(sourceBytes);
-  const viewerModelDeferredReason = viewerModelLoadRequested
-    ? ""
-    : `3D-Konvertierung fuer grosse IFC (${formatByteSize(sourceBytes?.byteLength ?? 0)}) pausiert.`;
+  const viewerModelLoadRequested = options?.viewerModelLoadRequested ?? true;
+  const viewerModelDeferredReason = "";
   const fallbackId =
     document.spatialRoots[0]?.id ?? document.entities[0]?.id ?? 0;
   const selectedId = document.entityById.has(options?.selectedId ?? 0)
@@ -218,17 +220,6 @@ function createWorkspaceDocumentSession(
     viewerModelRevision: options?.viewerModelRevision ?? 0,
     viewerModelText: text,
   };
-}
-
-function shouldAutoLoadViewer(bytes: ArrayBuffer | null) {
-  return !bytes || bytes.byteLength <= AUTO_VIEWER_LOAD_LIMIT_BYTES;
-}
-
-function formatByteSize(bytes: number) {
-  if (bytes >= 1024 * 1024 * 1024) {
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-  }
-  return `${Math.max(1, Math.round(bytes / (1024 * 1024)))} MB`;
 }
 
 function createWorkspaceDocumentId(fileName: string) {
@@ -302,6 +293,10 @@ export default function IfcWorkspace() {
     entityId: number;
     nonce: number;
   } | null>(null);
+  const [fragmentBodyCreateRequest, setFragmentBodyCreateRequest] =
+    useState<ViewerCreateBodyRequest | null>(null);
+  const [fragmentBodyEditRequest, setFragmentBodyEditRequest] =
+    useState<ViewerEditBodyRequest | null>(null);
   const [loadingIfcName, setLoadingIfcName] = useState("");
   const [catalog, setCatalog] = useState<IfcObjectCatalog | null>(null);
   const [catalogImporting, setCatalogImporting] = useState(false);
@@ -1045,41 +1040,39 @@ export default function IfcWorkspace() {
     );
   };
 
-  const addElement = (type: string, name: string, parentId?: number) => {
-    const addedId = getNextNativeEntityId(document);
-    const next = addNativeElement(document, parentId, type, name);
-    const added = next.entityById.get(addedId);
-    commitDocument(
-      next,
-      added?.id,
-      `Add ${type} '${name}'${parentId ? ` under #${parentId}` : ""}`,
-      `addElement({ class: '${type}', name: '${name}' });`,
-    );
-  };
-
   const addBodyElement = (options: BodyElementDraft) => {
+    const parentId = options.parentId ?? selectedId;
     const addedId = getNextNativeEntityId(document);
-    const next = addNativeBodyElement(document, options);
-    const added = next.entityById.get(addedId);
+    const nativeOptions = toNativeBodyElementOptions({
+      ...options,
+      parentId,
+    });
+    const next = addNativeBodyElement(document, {
+      ...nativeOptions,
+    });
+    setFragmentBodyCreateRequest(null);
     commitDocument(
       next,
-      added?.id,
-      `Add ${options.type} body '${options.name}'${options.parentId ? ` under #${options.parentId}` : ""}`,
-      `addBodyElement({ class: '${options.type}', name: '${options.name}', profile: '${options.profile ?? "rectangle"}', width: ${options.width}, depth: ${options.depth}, height: ${options.height} });`,
+      addedId,
+      `Create ${options.type} '${options.name}' under #${parentId}`,
+      `builder.createBodyElement({ class: '${options.type}', name: ${JSON.stringify(options.name)}, parentId: ${parentId}, id: ${addedId}, profile: '${options.profile ?? "rectangle"}', width: ${options.width}, depth: ${options.depth}, height: ${options.height} });`,
       undefined,
       { reloadViewer: true },
+    );
+    logAction(
+      `viewer.reloadForNativeBody({ id: ${addedId}, parentId: ${parentId}, ifcX: ${nativeOptions.x}, ifcY: ${nativeOptions.y}, ifcZ: ${nativeOptions.z} });`,
     );
   };
 
   const assignBodyToSelected = (options: BodyElementDraft) => {
-    const next = assignNativeBodyRepresentation(document, selectedId, options);
-    commitDocument(
-      next,
+    setFragmentBodyEditRequest({
+      documentId: activeSession.id,
+      nonce: Date.now(),
+      options,
       selectedId,
-      `Assign ${options.profile ?? "rectangle"} body representation to #${selectedId}`,
-      `assignBodyRepresentation({ id: ${selectedId}, profile: '${options.profile ?? "rectangle"}', width: ${options.width}, depth: ${options.depth}, height: ${options.height} });`,
-      undefined,
-      { reloadViewer: true },
+    });
+    logAction(
+      `fragments.editBody.request({ id: ${selectedId}, profile: '${options.profile ?? "rectangle"}', width: ${options.width}, depth: ${options.depth}, height: ${options.height} });`,
     );
   };
 
@@ -1211,28 +1204,6 @@ export default function IfcWorkspace() {
       setGraphExpanded((current) => addToSet(current, sourceId));
       setGraphCollapsed((current) => removeFromSet(current, sourceId));
     }
-  };
-
-  const addPset = (
-    psetName: string,
-    propertyName: string,
-    propertyValue: string,
-    propertyValueType = "IFCLABEL",
-  ) => {
-    const next = addNativePropertySet(
-      document,
-      selectedId,
-      psetName,
-      propertyName,
-      propertyValue,
-      propertyValueType,
-    );
-    commitDocument(
-      next,
-      selectedId,
-      `Add Pset '${psetName}' to #${selectedId}`,
-      `addPset({ objectId: ${selectedId}, name: '${psetName}' });`,
-    );
   };
 
   const addEmptyPset = (psetName: string) => {
@@ -1810,40 +1781,81 @@ export default function IfcWorkspace() {
     y?: number;
     z?: number;
   }) => {
-    const sourceDocument = document;
-    const moveTargetId = resolveNativeMovableProductId(
-      sourceDocument,
-      selectedId,
-    );
-    if (moveTargetId == null) {
-      logAction(
-        `movePlacement.nudgeSkipped({ id: ${selectedId}, reason: 'no-movable-placement' });`,
-      );
-      return;
-    }
-    const placement = getNativePlacement(sourceDocument, moveTargetId);
+    const placement = getNativePlacement(document, selectedId);
     if (!placement) {
       logAction(
-        `movePlacement.nudgeSkipped({ id: ${selectedId}, reason: 'no-movable-placement' });`,
+        `fragments.viewerDeltaSkipped({ id: ${selectedId}, reason: 'no-native-placement' });`,
       );
       return;
     }
-    const nativeDelta = viewerWorldDeltaToIfcPlacementDelta(delta);
-    const x = formatCoordinate(placement.x + nativeDelta.x);
-    const y = formatCoordinate(placement.y + nativeDelta.y);
-    const z = formatCoordinate(placement.z + nativeDelta.z);
-    const next = updateNativePlacement(sourceDocument, moveTargetId, {
-      x,
-      y,
-      z,
+    const ifcDelta = viewerWorldDeltaToIfcPlacementDelta(delta);
+    const next = updateNativePlacement(document, selectedId, {
+      x: placement.x + ifcDelta.x,
+      y: placement.y + ifcDelta.y,
+      z: placement.z + ifcDelta.z,
     });
+    if (next === document) {
+      logAction(
+        `fragments.viewerDeltaSkipped({ id: ${selectedId}, reason: 'placement-update-failed' });`,
+      );
+      return;
+    }
     commitDocument(
       next,
-      moveTargetId,
-      `Move #${moveTargetId} placement by viewer delta (${formatCoordinate(delta.x ?? 0)}, ${formatCoordinate(delta.y ?? 0)}, ${formatCoordinate(delta.z ?? 0)}) to IFC (${x}, ${y}, ${z})`,
-      `movePlacement.viewerDelta({ id: ${moveTargetId}, selectedId: ${selectedId}, dx: ${delta.x ?? 0}, dy: ${delta.y ?? 0}, dz: ${delta.z ?? 0} });`,
+      selectedId,
+      `Move #${selectedId} placement by viewer delta`,
+      `fragments.viewerDelta({ id: ${selectedId}, dx: ${delta.x ?? 0}, dy: ${delta.y ?? 0}, dz: ${delta.z ?? 0} });`,
       undefined,
       { reloadViewer: true },
+    );
+  };
+
+  const rotateSelectedPlacement = (rotation: ViewerRotationChange) => {
+    const axis = viewerWorldDirectionToIfcPlacementDirection(rotation.axis);
+    const refDirection = viewerWorldDirectionToIfcPlacementDirection(
+      rotation.refDirection,
+    );
+    const next = updateNativePlacementRotation(document, selectedId, {
+      axis,
+      refDirection,
+    });
+    if (next === document) {
+      logAction(
+        `fragments.viewerRotateSkipped({ id: ${selectedId}, reason: 'placement-update-failed' });`,
+      );
+      return;
+    }
+    commitDocument(
+      next,
+      selectedId,
+      `Rotate #${selectedId} placement with viewer gizmo`,
+      `fragments.viewerRotate({ id: ${selectedId}, rx: ${rotation.rotation.x ?? 0}, ry: ${rotation.rotation.y ?? 0}, rz: ${rotation.rotation.z ?? 0} });`,
+      undefined,
+      { reloadViewer: true },
+    );
+  };
+
+  const applyFragmentsModelChange = (change: ViewerFragmentsModelChange) => {
+    setDocumentSessions((current) =>
+      current.map((session) => {
+        if (session.id !== change.documentId) {
+          return session;
+        }
+        const nextSelectedId = change.document.entityById.has(change.selectedId)
+          ? change.selectedId
+          : (change.document.spatialRoots[0]?.id ??
+            change.document.entities[0]?.id ??
+            session.selectedId);
+        return {
+          ...session,
+          document: change.document,
+          documentTextDirty: true,
+          selectedId: nextSelectedId,
+        };
+      }),
+    );
+    logAction(
+      `fragments.documentChanged({ file: '${change.document.fileName}', selectedId: ${change.selectedId}, summary: ${JSON.stringify(change.summary)} });`,
     );
   };
 
@@ -2175,12 +2187,16 @@ export default function IfcWorkspace() {
               }
               activeModelFileName={activeSession.document.fileName}
               activeModelLoaded={activeSession.viewerModelLoadRequested}
+              createBodyRequest={fragmentBodyCreateRequest}
+              editBodyRequest={fragmentBodyEditRequest}
               focusRequest={viewerFocusRequest}
               models={viewerModels}
+              onFragmentsModelChanged={applyFragmentsModelChange}
               onLog={logAction}
               onLoadActiveModel={requestActiveViewerLoad}
               onMoveSelected={nudgeSelectedPlacement}
               onPickCoordinates={storePickedCoordinates}
+              onRotateSelected={rotateSelectedPlacement}
               onSelect={selectEntity}
             />
           </TileContent>
@@ -2198,28 +2214,8 @@ export default function IfcWorkspace() {
               coordinateClipboard={coordinateClipboard}
               document={document}
               selectedId={selectedId}
-              onAddApproval={addApproval}
-              onAddClassification={addClassification}
-              onAddConstraint={addConstraint}
-              onAddDocumentReference={addDocumentReference}
-              onAddGroupAssignment={addGroupAssignment}
-              onAddLibraryReference={addLibraryReference}
-              onAssignType={assignType}
-              onAddElement={addElement}
               onAddBodyElement={addBodyElement}
               onAssignBodyToSelected={assignBodyToSelected}
-              onAddMaterial={addMaterial}
-              onAddMaterialConstituentSet={addMaterialConstituentSet}
-              onAddMaterialLayerSet={addMaterialLayerSet}
-              onAddMaterialLayerSetUsage={addMaterialLayerSetUsage}
-              onAddMaterialProfileSet={addMaterialProfileSet}
-              onAddMaterialProfileSetUsage={addMaterialProfileSetUsage}
-              onAddMaterialStyle={addMaterialStyle}
-              onAddMaterialWithProperties={addMaterialWithProperties}
-              onAddRelationship={addRelationship}
-              onAddPset={addPset}
-              onAddQuantity={addQuantity}
-              onAddUnit={addUnit}
               onLoadSystemCoordinates={loadSystemCoordinateClipboard}
             />
           </TileContent>
@@ -2711,6 +2707,29 @@ function formatCoordinate(value: number) {
   }
   const rounded = Math.round(value * 1000) / 1000;
   return String(Object.is(rounded, -0) ? 0 : rounded);
+}
+
+function toNativeBodyElementOptions(options: BodyElementDraft) {
+  const ifcPoint = viewerWorldPointToIfcPlacementPoint({
+    x: readBodyCoordinate(options.x),
+    y: readBodyCoordinate(options.y),
+    z: readBodyCoordinate(options.z),
+  });
+  return {
+    ...options,
+    x: formatCoordinate(ifcPoint.x),
+    y: formatCoordinate(ifcPoint.y),
+    z: formatCoordinate(ifcPoint.z),
+  };
+}
+
+function readBodyCoordinate(value: string | undefined) {
+  const numeric = Number(
+    String(value ?? "")
+      .trim()
+      .replace(",", "."),
+  );
+  return Number.isFinite(numeric) ? numeric : 0;
 }
 
 function parseCoordinateClipboardText(

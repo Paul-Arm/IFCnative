@@ -1,3 +1,6 @@
+import type { NativeIfcDocument } from "@/ifc";
+import type { BodyElementDraft } from "./ifc-workspace/types";
+
 export interface ViewerCoordinatePick {
   documentId?: string;
   entityId?: number;
@@ -27,11 +30,15 @@ export interface ThatOpenViewerProps {
   activeModelDeferredReason?: string;
   activeModelFileName?: string;
   activeModelLoaded?: boolean;
+  createBodyRequest?: ViewerCreateBodyRequest | null;
+  editBodyRequest?: ViewerEditBodyRequest | null;
   focusRequest?: { documentId: string; entityId: number; nonce: number } | null;
   models: ThatOpenViewerModel[];
   onLoadActiveModel?(): void;
+  onFragmentsModelChanged?(change: ViewerFragmentsModelChange): void;
   onLog?(line: string): void;
   onMoveSelected?(delta: ViewerMoveDelta): void;
+  onRotateSelected?(rotation: ViewerRotationChange): void;
   onPickCoordinates?(pick: ViewerCoordinatePick): void;
   onSelect(
     id: number,
@@ -40,11 +47,37 @@ export interface ThatOpenViewerProps {
     documentId?: string,
   ): void;
 }
+export interface ViewerCreateBodyRequest {
+  documentId: string;
+  nonce: number;
+  options: BodyElementDraft;
+  selectedId: number;
+}
+
+export interface ViewerEditBodyRequest {
+  documentId: string;
+  nonce: number;
+  options: BodyElementDraft;
+  selectedId: number;
+}
+
+export interface ViewerFragmentsModelChange {
+  document: NativeIfcDocument;
+  documentId: string;
+  selectedId: number;
+  summary: string;
+}
 
 export interface ViewerMoveDelta {
   x?: number;
   y?: number;
   z?: number;
+}
+
+export interface ViewerRotationChange {
+  axis: Required<ViewerMoveDelta>;
+  refDirection: Required<ViewerMoveDelta>;
+  rotation: ViewerMoveDelta;
 }
 
 export default function ThatOpenViewer({

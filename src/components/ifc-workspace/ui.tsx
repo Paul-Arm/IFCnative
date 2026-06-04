@@ -77,7 +77,7 @@ export function PanelShell({
     <div
       className={cn(
         "flex h-full min-h-0 flex-col gap-2.5",
-        scroll && "overflow-auto pr-0.5",
+        scroll && "overflow-x-hidden overflow-y-auto pr-0.5",
       )}
     >
       {children}
@@ -404,7 +404,7 @@ export function LabeledInput({
   value: string;
 }) {
   return (
-    <label className="grid gap-1.5 text-xs text-muted-foreground">
+    <label className="grid min-w-0 gap-1.5 text-xs text-muted-foreground">
       {label}
       {multiline ? (
         <Textarea
@@ -437,7 +437,7 @@ export function ColorInput({
   value: string;
 }) {
   return (
-    <label className="grid gap-1.5 text-xs text-muted-foreground">
+    <label className="grid min-w-0 gap-1.5 text-xs text-muted-foreground">
       {label}
       <Input
         className="h-9 w-full cursor-pointer rounded-md p-1"
@@ -479,7 +479,7 @@ export function DropdownField({
   };
 
   return (
-    <label className="grid gap-1.5 text-xs text-muted-foreground">
+    <label className="grid min-w-0 gap-1.5 text-xs text-muted-foreground">
       {label}
       <Select
         value={value}
@@ -489,8 +489,15 @@ export function DropdownField({
           }
         }}
       >
-        <SelectTrigger className={cn("w-full", overlay && "relative z-20")}>
-          <SelectValue>{selected.label}</SelectValue>
+        <SelectTrigger
+          className={cn(
+            "min-w-0 max-w-full overflow-hidden w-full",
+            overlay && "relative z-20",
+          )}
+        >
+          <SelectValue className="min-w-0 truncate">
+            {selected.label}
+          </SelectValue>
         </SelectTrigger>
         <SelectContent align="start" className="max-h-72">
           {normalized.map((option) => (

@@ -4,11 +4,15 @@ import {
     convertIfcToFragmentsInWorker,
     type ConvertIfcToFragmentsProgress,
 } from "../ifc/fragmentConversionWorker";
+import { buildNativeDocumentFromFragments } from "../ifc/fragmentDocument";
 import type {
     ThatOpenViewerModel,
     ThatOpenViewerProps,
     ViewerCoordinatePick,
+    ViewerCreateBodyRequest,
+    ViewerEditBodyRequest,
     ViewerMoveDelta,
+    ViewerRotationChange,
 } from "./that-open-viewer";
 
 type ViewerRuntime = Awaited<ReturnType<typeof createThatOpenRuntime>>;
@@ -18,11 +22,15 @@ export default function ThatOpenViewer({
   activeModelDeferredReason,
   activeModelFileName,
   activeModelLoaded = true,
+  createBodyRequest,
+  editBodyRequest,
   focusRequest,
   models,
   onLoadActiveModel,
+  onFragmentsModelChanged,
   onLog,
   onMoveSelected,
+  onRotateSelected,
   onPickCoordinates,
   onSelect,
 }: ThatOpenViewerProps) {
@@ -32,16 +40,23 @@ export default function ThatOpenViewer({
   const modelsRef = useRef(models);
   const selectedByDocumentIdRef = useRef(new Map<string, number>());
   const onLogRef = useRef(onLog);
+  const onFragmentsModelChangedRef = useRef(onFragmentsModelChanged);
   const onMoveSelectedRef = useRef(onMoveSelected);
+  const onRotateSelectedRef = useRef(onRotateSelected);
   const onPickCoordinatesRef = useRef(onPickCoordinates);
   const onSelectRef = useRef(onSelect);
   const handledFocusNonceRef = useRef<number | undefined>(undefined);
+  const handledCreateBodyNonceRef = useRef<number | undefined>(undefined);
+  const handledEditBodyNonceRef = useRef<number | undefined>(undefined);
   const pickerActiveRef = useRef(false);
   const [runtimeReady, setRuntimeReady] = useState(0);
   const [modelReady, setModelReady] = useState(0);
   const [, setStatus] = useState("Starting ThatOpen viewer...");
   const [error, setError] = useState("");
   const [moveGizmoActive, setMoveGizmoActive] = useState(false);
+  const [moveGizmoMode, setMoveGizmoMode] = useState<"translate" | "rotate">(
+    "translate",
+  );
   const [pickerActive, setPickerActive] = useState(false);
   const [lastPick, setLastPick] = useState<ViewerCoordinatePick | null>(null);
   const [copyStatus, setCopyStatus] = useState("");
@@ -76,7 +91,9 @@ export default function ThatOpenViewer({
     models.map((model) => [model.documentId, model.selectedId]),
   );
   onLogRef.current = onLog;
+  onFragmentsModelChangedRef.current = onFragmentsModelChanged;
   onMoveSelectedRef.current = onMoveSelected;
+  onRotateSelectedRef.current = onRotateSelected;
   onPickCoordinatesRef.current = onPickCoordinates;
   onSelectRef.current = onSelect;
   pickerActiveRef.current = pickerActive;
@@ -113,7 +130,10 @@ export default function ThatOpenViewer({
           setStatus("ThatOpen viewer error");
         },
         onLog: (line) => onLogRef.current?.(line),
+        onFragmentsModelChanged: (change) =>
+          onFragmentsModelChangedRef.current?.(change),
         onMoveSelected: (delta) => onMoveSelectedRef.current?.(delta),
+        onRotateSelected: (rotation) => onRotateSelectedRef.current?.(rotation),
         onPickCoordinates: (pick) => {
           setLastPick(pick);
           onPickCoordinatesRef.current?.(pick);
@@ -226,11 +246,61 @@ export default function ThatOpenViewer({
 
   useEffect(() => {
     const runtime = runtimeRef.current;
+    if (
+      !runtime ||
+      !modelReady ||
+      !createBodyRequest ||
+      createBodyRequest.documentId !== activeDocumentId ||
+      handledCreateBodyNonceRef.current === createBodyRequest.nonce
+    ) {
+      return;
+    }
+    handledCreateBodyNonceRef.current = createBodyRequest.nonce;
+    void runtime.createBodyElement(createBodyRequest).catch((reason) => {
+      const message = stringifyError(reason);
+      setError(message);
+      onLogRef.current?.(
+        `fragments.createBodyError(${JSON.stringify(message)});`,
+      );
+    });
+  }, [activeDocumentId, createBodyRequest, modelReady]);
+
+  useEffect(() => {
+    const runtime = runtimeRef.current;
+    if (
+      !runtime ||
+      !modelReady ||
+      !editBodyRequest ||
+      editBodyRequest.documentId !== activeDocumentId ||
+      handledEditBodyNonceRef.current === editBodyRequest.nonce
+    ) {
+      return;
+    }
+    handledEditBodyNonceRef.current = editBodyRequest.nonce;
+    void runtime.editBodyElement(editBodyRequest).catch((reason) => {
+      const message = stringifyError(reason);
+      setError(message);
+      onLogRef.current?.(
+        `fragments.editBodyError(${JSON.stringify(message)});`,
+      );
+    });
+  }, [activeDocumentId, editBodyRequest, modelReady]);
+
+  useEffect(() => {
+    const runtime = runtimeRef.current;
     if (!runtime || !runtimeReady) {
       return;
     }
     void runtime.setMoveGizmoEnabled(moveGizmoActive);
   }, [moveGizmoActive, runtimeReady]);
+
+  useEffect(() => {
+    const runtime = runtimeRef.current;
+    if (!runtime || !runtimeReady) {
+      return;
+    }
+    runtime.setMoveGizmoMode(moveGizmoMode);
+  }, [moveGizmoMode, runtimeReady]);
 
   return (
     <div className="ifcnative-thatopen-shell">
@@ -264,12 +334,34 @@ export default function ThatOpenViewer({
             {pickerActive ? "Picker aktiv" : "Koordinaten wählen"}
           </button>
           <button
-            className={`ifcnative-thatopen-button${moveGizmoActive ? " is-active" : ""}`}
+            className={`ifcnative-thatopen-button${moveGizmoActive && moveGizmoMode === "translate" ? " is-active" : ""}`}
             disabled={!activeModelVisible}
             type="button"
-            onClick={() => setMoveGizmoActive((current) => !current)}
+            onClick={() => {
+              setMoveGizmoMode("translate");
+              setMoveGizmoActive((current) =>
+                moveGizmoMode === "translate" ? !current : true,
+              );
+            }}
           >
-            {moveGizmoActive ? "Move-Gizmo aktiv" : "Move-Gizmo"}
+            {moveGizmoActive && moveGizmoMode === "translate"
+              ? "Move-Gizmo aktiv"
+              : "Move-Gizmo"}
+          </button>
+          <button
+            className={`ifcnative-thatopen-button${moveGizmoActive && moveGizmoMode === "rotate" ? " is-active" : ""}`}
+            disabled={!activeModelVisible}
+            type="button"
+            onClick={() => {
+              setMoveGizmoMode("rotate");
+              setMoveGizmoActive((current) =>
+                moveGizmoMode === "rotate" ? !current : true,
+              );
+            }}
+          >
+            {moveGizmoActive && moveGizmoMode === "rotate"
+              ? "Rotate-Gizmo aktiv"
+              : "Rotate-Gizmo"}
           </button>
           {showDeferredActiveModel ? (
             <button
@@ -370,8 +462,14 @@ async function createThatOpenRuntime(
     isCoordinatePickerActive(): boolean;
     onError(message: string): void;
     onCoordinatePickerUsed(): void;
+    onFragmentsModelChanged(
+      change: Parameters<
+        NonNullable<ThatOpenViewerProps["onFragmentsModelChanged"]>
+      >[0],
+    ): void;
     onLog(line: string): void;
     onMoveSelected(delta: ViewerMoveDelta): void;
+    onRotateSelected(rotation: ViewerRotationChange): void;
     onPickCoordinates(pick: ViewerCoordinatePick): void;
     onSelect(
       id: number,
@@ -420,21 +518,6 @@ async function createThatOpenRuntime(
 
   const grids = components.get(OBC.Grids);
   grids.create(world);
-  const viewCube = createThatOpenViewCube(THREE, container, world.camera);
-  const moveGizmo = createMoveGizmo(
-    THREE,
-    transformControlsModule.TransformControls,
-    world.scene.three,
-    world.camera.three,
-    world.camera.controls,
-    canvasFromRenderer(world.renderer),
-    callbacks.onMoveSelected,
-    (line) => callbacks.onLog(line),
-    () => void fragments.core.update(true),
-  );
-  const coordinateCursor = createCoordinateCursor(THREE);
-  world.scene.three.add(coordinateCursor.group, coordinateCursor.rayLine);
-
   const fragments = components.get(OBC.FragmentsManager);
   const fragmentsWorkerUrl = resolvePublicAssetUrl("fragments/worker.mjs");
   fragments.init(fragmentsWorkerUrl);
@@ -444,6 +527,44 @@ async function createThatOpenRuntime(
   if (coreWithSettings.settings) {
     coreWithSettings.settings.autoCoordinate = true;
   }
+  const viewCube = createThatOpenViewCube(THREE, container, world.camera);
+  const moveGizmo = createMoveGizmo(
+    THREE,
+    transformControlsModule.TransformControls,
+    fragments.core,
+    world.scene.three,
+    world.camera.three,
+    world.camera.controls,
+    canvasFromRenderer(world.renderer),
+    async (change) => {
+      const activeDocumentId = callbacks.getActiveDocumentId();
+      const loaded = modelsByDocumentId.get(activeDocumentId);
+      if (!loaded || !Number.isFinite(change.localId) || change.localId <= 0) {
+        callbacks.onLog(
+          `fragments.moveSkipped({ reason: 'no-active-selection' });`,
+        );
+        return;
+      }
+      await highlight(activeDocumentId, change.localId);
+      if (change.mode === "translate" && change.delta) {
+        callbacks.onMoveSelected(change.delta);
+        callbacks.onLog(
+          `fragments.move({ file: '${loaded.fileName}', id: ${change.localId}, dx: ${formatCoordinate(change.delta.x ?? 0)}, dy: ${formatCoordinate(change.delta.y ?? 0)}, dz: ${formatCoordinate(change.delta.z ?? 0)} });`,
+        );
+        return;
+      }
+      if (change.rotationChange) {
+        callbacks.onRotateSelected(change.rotationChange);
+      }
+      callbacks.onLog(
+        `fragments.rotate({ file: '${loaded.fileName}', id: ${change.localId}, rx: ${formatCoordinate(change.rotation?.x ?? 0)}, ry: ${formatCoordinate(change.rotation?.y ?? 0)}, rz: ${formatCoordinate(change.rotation?.z ?? 0)} });`,
+      );
+    },
+    (line) => callbacks.onLog(line),
+    () => void fragments.core.update(true),
+  );
+  const coordinateCursor = createCoordinateCursor(THREE);
+  world.scene.three.add(coordinateCursor.group, coordinateCursor.rayLine);
 
   const selectionMaterial = {
     color: new THREE.Color(0xffb703),
@@ -663,7 +784,11 @@ async function createThatOpenRuntime(
     );
   }
 
-  async function highlight(documentId: string, localId: number) {
+  async function highlight(
+    documentId: string,
+    localId: number,
+    options?: { updateGizmo?: boolean },
+  ) {
     const loaded = modelsByDocumentId.get(documentId);
     if (!loaded || !Number.isFinite(localId) || localId <= 0) {
       return;
@@ -673,7 +798,9 @@ async function createThatOpenRuntime(
       [loaded.model.modelId]: new Set([localId]),
     });
     await fragments.core.update(true);
-    await moveGizmo.updateSelection(localId, loaded.model);
+    if (options?.updateGizmo ?? true) {
+      await moveGizmo.updateSelection(localId, loaded.model);
+    }
   }
 
   async function fit() {
@@ -726,6 +853,93 @@ async function createThatOpenRuntime(
     return entries.length ? Object.fromEntries(entries) : undefined;
   }
 
+  async function emitFragmentsDocumentChanged(
+    loaded: LoadedViewerModel,
+    selectedId: number,
+    summary: string,
+  ) {
+    const document = await buildNativeDocumentFromFragments(loaded.model, {
+      fileName: loaded.fileName,
+    });
+    callbacks.onFragmentsModelChanged({
+      document,
+      documentId: loaded.documentId,
+      selectedId,
+      summary,
+    });
+  }
+
+  async function createBodyElement(request: ViewerCreateBodyRequest) {
+    const loaded = modelsByDocumentId.get(request.documentId);
+    if (!loaded) {
+      callbacks.onLog(
+        `fragments.createBodySkipped({ reason: 'model-not-loaded', documentId: '${request.documentId}' });`,
+      );
+      return;
+    }
+    const element = await createFragmentBodyElement(
+      fragments.core,
+      loaded.model,
+      toTargetModelBodyOptions(loaded.model, request.options, THREE),
+      THREE,
+    );
+    if (!element) {
+      callbacks.onLog(
+        `fragments.createBodySkipped({ file: '${loaded.fileName}', reason: 'no-created-element' });`,
+      );
+      return;
+    }
+    await fragments.core.update(true);
+    await highlight(request.documentId, element.localId);
+    await emitFragmentsDocumentChanged(
+      loaded,
+      element.localId,
+      `Create ${request.options.type} '${request.options.name}' with Fragments Elements API`,
+    );
+    callbacks.onSelect(
+      element.localId,
+      "fragments",
+      undefined,
+      request.documentId,
+    );
+    callbacks.onLog(
+      `fragments.createBody({ file: '${loaded.fileName}', id: ${element.localId}, class: '${request.options.type}', name: ${JSON.stringify(request.options.name)} });`,
+    );
+  }
+
+  async function editBodyElement(request: ViewerEditBodyRequest) {
+    const loaded = modelsByDocumentId.get(request.documentId);
+    if (!loaded) {
+      callbacks.onLog(
+        `fragments.editBodySkipped({ reason: 'model-not-loaded', documentId: '${request.documentId}' });`,
+      );
+      return;
+    }
+    const changed = await replaceFragmentElementGeometry(
+      fragments.core,
+      loaded.model,
+      request.selectedId,
+      toTargetModelBodyOptions(loaded.model, request.options, THREE),
+      THREE,
+    );
+    if (!changed) {
+      callbacks.onLog(
+        `fragments.editBodySkipped({ file: '${loaded.fileName}', id: ${request.selectedId}, reason: 'no-editable-meshes' });`,
+      );
+      return;
+    }
+    await fragments.core.update(true);
+    await highlight(request.documentId, request.selectedId);
+    await emitFragmentsDocumentChanged(
+      loaded,
+      request.selectedId,
+      `Edit #${request.selectedId} geometry with Fragments Elements API`,
+    );
+    callbacks.onLog(
+      `fragments.editBody({ file: '${loaded.fileName}', id: ${request.selectedId}, profile: '${request.options.profile ?? "rectangle"}', width: ${request.options.width}, depth: ${request.options.depth}, height: ${request.options.height} });`,
+    );
+  }
+
   async function dispose() {
     canvas.removeEventListener("pointerdown", trackPointerDown, {
       capture: true,
@@ -747,12 +961,15 @@ async function createThatOpenRuntime(
 
   return {
     dispose,
+    createBodyElement,
+    editBodyElement,
     fit,
     focusSelected,
     highlight,
     hideCoordinateCursor: coordinateCursor.hide,
     resetCamera,
     setMoveGizmoEnabled: moveGizmo.setEnabled,
+    setMoveGizmoMode: moveGizmo.setMode,
     syncModels,
   };
 }
@@ -764,8 +981,41 @@ interface CameraControlsLike {
   enabled: boolean;
 }
 
-interface FragmentModelLike {
-  getMergedBox(localIds: number[]): Promise<import("three").Box3>;
+type MoveGizmoMode = "translate" | "rotate";
+
+interface MoveGizmoCommit {
+  delta?: ViewerMoveDelta;
+  localId: number;
+  mode: MoveGizmoMode;
+  rotation?: ViewerMoveDelta;
+  rotationChange?: ViewerRotationChange;
+}
+
+interface EditableFragmentElementLike {
+  disposeMeshes(meshes: import("three").Group): void;
+  getMeshes(): Promise<import("three").Group>;
+  getRequests(): unknown[] | undefined;
+  setMeshes(meshes: import("three").Group): Promise<void>;
+}
+
+interface EditableFragmentsLike {
+  editor: {
+    edit(
+      modelId: string,
+      requests: unknown[],
+      options?: unknown,
+    ): Promise<void>;
+    getElements(
+      modelId: string,
+      localIds: number[],
+    ): Promise<EditableFragmentElementLike[]>;
+  };
+  update(force?: boolean): Promise<void>;
+}
+
+interface EditableFragmentModelLike {
+  modelId: string;
+  setVisible?(localIds: number[] | undefined, visible: boolean): Promise<void>;
 }
 
 interface FitFragmentModelLike {
@@ -788,82 +1038,111 @@ function canvasFromRenderer(
 function createMoveGizmo(
   THREE: typeof import("three"),
   TransformControls: TransformControlsConstructor,
+  fragments: EditableFragmentsLike,
   scene: import("three").Scene,
   camera: import("three").Camera,
   cameraControls: CameraControlsLike,
   canvas: HTMLCanvasElement,
-  onMoveSelected: (delta: ViewerMoveDelta) => void,
+  onTransformCommitted: (change: MoveGizmoCommit) => Promise<void>,
   onLog: (line: string) => void,
   onSceneChange: () => void,
 ) {
-  const anchor = new THREE.Object3D();
-  anchor.name = "IFCnativeMoveGizmoAnchor";
-  scene.add(anchor);
-
   const controls = new TransformControls(camera, canvas);
   controls.setMode("translate");
   controls.setSpace("world");
   controls.size = 0.85;
-  controls.showXY = false;
-  controls.showYZ = false;
-  controls.showXZ = false;
   const helper = controls.getHelper();
   helper.name = "IFCnativeMoveGizmo";
   helper.visible = false;
   scene.add(helper);
-  const previewBox = new THREE.Box3Helper(
-    new THREE.Box3(),
-    new THREE.Color(0xf59e0b),
-  );
-  previewBox.name = "IFCnativeMovePreviewBox";
-  previewBox.visible = false;
-  scene.add(previewBox);
 
   let enabled = false;
   let dragging = false;
+  let mode: MoveGizmoMode = "translate";
   let selectedLocalId = 0;
-  let selectedModel: FragmentModelLike | null = null;
+  let selectedModel: EditableFragmentModelLike | null = null;
+  let editElement: EditableFragmentElementLike | null = null;
+  let editMeshes: import("three").Group | null = null;
   const dragStart = new THREE.Vector3();
-  const selectedBox = new THREE.Box3();
+  const dragStartRotation = new THREE.Euler();
+
+  const disposeEditable = async (restoreVisible: boolean) => {
+    const model = selectedModel;
+    const localId = selectedLocalId;
+    controls.detach();
+    helper.visible = false;
+    if (editMeshes) {
+      editMeshes.removeFromParent();
+      editElement?.disposeMeshes(editMeshes);
+      editMeshes = null;
+      editElement = null;
+    }
+    if (restoreVisible && model && Number.isFinite(localId) && localId > 0) {
+      await model.setVisible?.([localId], true).catch(() => undefined);
+      await fragments.update(true).catch(() => undefined);
+    }
+    onSceneChange();
+  };
+
+  const loadEditable = async (
+    localId: number,
+    model: EditableFragmentModelLike,
+  ) => {
+    await disposeEditable(false);
+    const [element] = await fragments.editor.getElements(model.modelId, [
+      localId,
+    ]);
+    if (!element) {
+      onLog(
+        `viewer.transformGizmo.selectionSkipped({ id: ${localId}, reason: 'no-editable-element' });`,
+      );
+      return;
+    }
+    await model.setVisible?.([localId], false).catch(() => undefined);
+    editElement = element;
+    editMeshes = await element.getMeshes();
+    editMeshes.name = "IFCnativeEditableElement";
+    scene.add(editMeshes);
+    controls.setMode(mode);
+    controls.attach(editMeshes);
+    helper.visible = true;
+    await fragments.update(true).catch(() => undefined);
+    onSceneChange();
+  };
 
   const updateSelection = async (
     localId: number,
-    model: FragmentModelLike | null,
+    model: EditableFragmentModelLike | null,
   ) => {
+    const selectionChanged =
+      localId !== selectedLocalId || model !== selectedModel;
+    if (selectionChanged) {
+      await disposeEditable(true);
+    }
     selectedLocalId = localId;
     selectedModel = model;
     if (!enabled || !model || !Number.isFinite(localId) || localId <= 0) {
-      controls.detach();
-      helper.visible = false;
-      previewBox.visible = false;
+      await disposeEditable(true);
       return;
     }
-    const box = await model.getMergedBox([localId]).catch(() => undefined);
-    if (!box || box.isEmpty()) {
-      controls.detach();
-      helper.visible = false;
-      previewBox.visible = false;
-      return;
+    if (!editMeshes || selectionChanged) {
+      await loadEditable(localId, model);
     }
-    selectedBox.copy(box);
-    previewBox.box.copy(selectedBox);
-    previewBox.visible = false;
-    box.getCenter(anchor.position);
-    controls.attach(anchor);
-    helper.visible = true;
-    onSceneChange();
   };
 
   const setEnabled = async (nextEnabled: boolean) => {
     enabled = nextEnabled;
     if (!enabled) {
-      controls.detach();
-      helper.visible = false;
-      previewBox.visible = false;
-      onSceneChange();
+      await disposeEditable(true);
       return;
     }
     await updateSelection(selectedLocalId, selectedModel);
+  };
+
+  const setMode = (nextMode: MoveGizmoMode) => {
+    mode = nextMode;
+    controls.setMode(nextMode);
+    onSceneChange();
   };
 
   const onDraggingChanged = (event: { value: unknown }) => {
@@ -871,31 +1150,89 @@ function createMoveGizmo(
     cameraControls.enabled = !dragging;
   };
   const onMouseDown = () => {
-    dragStart.copy(anchor.position);
-    previewBox.box.copy(selectedBox);
-    previewBox.visible = true;
+    if (!editMeshes) {
+      return;
+    }
+    dragStart.copy(editMeshes.position);
+    dragStartRotation.copy(editMeshes.rotation);
     onSceneChange();
   };
   const onMouseUp = () => {
-    const delta = anchor.position.clone().sub(dragStart);
-    previewBox.visible = false;
-    if (delta.lengthSq() < 0.000001) {
+    void commitCurrentTransform();
+  };
+
+  const commitCurrentTransform = async () => {
+    if (!editElement || !editMeshes || !selectedModel || selectedLocalId <= 0) {
       onSceneChange();
       return;
     }
-    onMoveSelected({ x: delta.x, y: delta.y, z: delta.z });
+    const delta = editMeshes.position.clone().sub(dragStart);
+    const rotation = {
+      x: editMeshes.rotation.x - dragStartRotation.x,
+      y: editMeshes.rotation.y - dragStartRotation.y,
+      z: editMeshes.rotation.z - dragStartRotation.z,
+    };
+    const rotationChange = readRotationChange(THREE, editMeshes, rotation);
+    const changed =
+      mode === "translate"
+        ? delta.lengthSq() >= 0.000001
+        : Math.abs(rotation.x) + Math.abs(rotation.y) + Math.abs(rotation.z) >=
+          0.000001;
+    if (!changed) {
+      onSceneChange();
+      return;
+    }
+
+    const element = editElement;
+    const meshes = editMeshes;
+    const model = selectedModel;
+    const localId = selectedLocalId;
+    controls.detach();
+    helper.visible = false;
+    meshes.removeFromParent();
+    element.disposeMeshes(meshes);
+    editElement = null;
+    editMeshes = null;
+    await model.setVisible?.([localId], true).catch(() => undefined);
+    await fragments.update(true).catch(() => undefined);
+    await onTransformCommitted({
+      localId,
+      mode,
+      ...(mode === "translate"
+        ? { delta: { x: delta.x, y: delta.y, z: delta.z } }
+        : { rotation, rotationChange }),
+    });
     onLog(
-      `viewer.moveGizmo.delta({ dx: ${formatCoordinate(delta.x)}, dy: ${formatCoordinate(delta.y)}, dz: ${formatCoordinate(delta.z)} });`,
+      mode === "translate"
+        ? `viewer.moveGizmo.delta({ dx: ${formatCoordinate(delta.x)}, dy: ${formatCoordinate(delta.y)}, dz: ${formatCoordinate(delta.z)} });`
+        : `viewer.rotateGizmo.delta({ rx: ${formatCoordinate(rotation.x)}, ry: ${formatCoordinate(rotation.y)}, rz: ${formatCoordinate(rotation.z)} });`,
     );
     onSceneChange();
   };
+
+  const readRotationChange = (
+    THREE: typeof import("three"),
+    meshes: import("three").Group,
+    rotation: ViewerMoveDelta,
+  ): ViewerRotationChange => {
+    const axis = new THREE.Vector3(0, 1, 0)
+      .applyQuaternion(meshes.quaternion)
+      .normalize();
+    const refDirection = new THREE.Vector3(1, 0, 0)
+      .applyQuaternion(meshes.quaternion)
+      .normalize();
+    return {
+      axis: { x: axis.x, y: axis.y, z: axis.z },
+      refDirection: {
+        x: refDirection.x,
+        y: refDirection.y,
+        z: refDirection.z,
+      },
+      rotation,
+    };
+  };
+
   const onChange = () => {
-    if (dragging) {
-      previewBox.box
-        .copy(selectedBox)
-        .translate(anchor.position.clone().sub(dragStart));
-      previewBox.visible = true;
-    }
     onSceneChange();
   };
 
@@ -911,18 +1248,206 @@ function createMoveGizmo(
     controls.removeEventListener("change", onChange);
     controls.detach();
     controls.dispose();
-    worldDispose(previewBox);
-    previewBox.removeFromParent();
     helper.removeFromParent();
-    anchor.removeFromParent();
+    void disposeEditable(true);
   };
 
   return {
     dispose,
     isDragging: () => dragging,
     setEnabled,
+    setMode,
     updateSelection,
   };
+}
+
+async function createFragmentBodyElement(
+  fragments: import("@thatopen/fragments").FragmentsModels,
+  model: import("@thatopen/fragments").FragmentsModel,
+  options: ViewerCreateBodyRequest["options"],
+  THREE: typeof import("three"),
+) {
+  const width = readPositiveDraftNumber(options.width, 1);
+  const depth = readPositiveDraftNumber(options.depth, width);
+  const height = readPositiveDraftNumber(options.height, 1);
+  const x = readDraftNumber(options.x, 0);
+  const y = readDraftNumber(options.y, 0);
+  const z = readDraftNumber(options.z, 0);
+  const geometry = createDraftBodyGeometry(
+    THREE,
+    options,
+    width,
+    depth,
+    height,
+  );
+  const material = new THREE.MeshLambertMaterial({
+    color: 0x8ea7c2,
+    side: THREE.DoubleSide,
+  });
+  try {
+    const created = await fragments.editor.createElements(model.modelId, [
+      {
+        attributes: {
+          _category: { value: normalizeFragmentCategory(options.type) },
+          _guid: { value: createFragmentGuid() },
+          Name: { value: options.name || "Fragment Body", type: "IFCLABEL" },
+          ObjectType: {
+            value: options.tag || "IFCnative Fragment Body",
+            type: "IFCLABEL",
+          },
+        },
+        globalTransform: new THREE.Matrix4().makeTranslation(x, y, z),
+        samples: [
+          {
+            localTransform: new THREE.Matrix4(),
+            material,
+            representation: geometry,
+          },
+        ],
+      },
+    ]);
+    return created?.[0] ?? null;
+  } finally {
+    geometry.dispose();
+    material.dispose();
+  }
+}
+
+async function replaceFragmentElementGeometry(
+  fragments: import("@thatopen/fragments").FragmentsModels,
+  model: import("@thatopen/fragments").FragmentsModel,
+  localId: number,
+  options: ViewerEditBodyRequest["options"],
+  THREE: typeof import("three"),
+) {
+  const [element] = await fragments.editor.getElements(model.modelId, [
+    localId,
+  ]);
+  if (!element) {
+    return false;
+  }
+  const meshes = await element.getMeshes();
+  const replacement = createDraftBodyGeometry(THREE, options);
+  let changedMeshes = 0;
+  try {
+    meshes.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) {
+        return;
+      }
+      object.geometry.copy(replacement);
+      object.geometry.computeBoundingBox();
+      object.geometry.computeBoundingSphere();
+      object.geometry.computeVertexNormals();
+      changedMeshes += 1;
+    });
+    if (!changedMeshes) {
+      return false;
+    }
+    if (options.placementMode === "world") {
+      meshes.position.set(
+        readDraftNumber(options.x, 0),
+        readDraftNumber(options.y, 0),
+        readDraftNumber(options.z, 0),
+      );
+    }
+    meshes.updateMatrixWorld(true);
+    await element.setMeshes(meshes);
+    const requests = element.getRequests();
+    if (!requests?.length) {
+      return false;
+    }
+    await fragments.editor.edit(model.modelId, requests);
+    return true;
+  } finally {
+    replacement.dispose();
+    element.disposeMeshes(meshes);
+  }
+}
+
+function toTargetModelBodyOptions(
+  model: import("@thatopen/fragments").FragmentsModel,
+  options: ViewerCreateBodyRequest["options"],
+  THREE: typeof import("three"),
+): ViewerCreateBodyRequest["options"] {
+  if (options.placementMode !== "world") {
+    return options;
+  }
+  const worldPoint = new THREE.Vector3(
+    readDraftNumber(options.x, 0),
+    readDraftNumber(options.y, 0),
+    readDraftNumber(options.z, 0),
+  );
+  model.object.updateWorldMatrix(true, false);
+  const targetPoint = model.object.worldToLocal(worldPoint.clone());
+  return {
+    ...options,
+    x: formatDraftNumber(targetPoint.x),
+    y: formatDraftNumber(targetPoint.y),
+    z: formatDraftNumber(targetPoint.z),
+  };
+}
+
+function createDraftBodyGeometry(
+  THREE: typeof import("three"),
+  options: Pick<
+    ViewerCreateBodyRequest["options"],
+    "depth" | "height" | "profile" | "width"
+  >,
+  width = readPositiveDraftNumber(options.width, 1),
+  depth = readPositiveDraftNumber(options.depth, width),
+  height = readPositiveDraftNumber(options.height, 1),
+) {
+  const geometry =
+    options.profile === "cylinder"
+      ? new THREE.CylinderGeometry(
+          Math.max(width, depth) / 2,
+          Math.max(width, depth) / 2,
+          height,
+          32,
+        ).rotateX(Math.PI / 2)
+      : new THREE.BoxGeometry(width, depth, height);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function normalizeFragmentCategory(value: string) {
+  const normalized = value.trim().toUpperCase();
+  if (!normalized) {
+    return "IFCBUILDINGELEMENTPROXY";
+  }
+  return normalized.startsWith("IFC") ? normalized : `IFC${normalized}`;
+}
+
+function readDraftNumber(value: string | number | undefined, fallback: number) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : fallback;
+  }
+  const numeric = Number(
+    String(value ?? "")
+      .trim()
+      .replace(",", "."),
+  );
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function readPositiveDraftNumber(
+  value: string | number | undefined,
+  fallback: number,
+) {
+  const numeric = readDraftNumber(value, fallback);
+  return numeric > 0 ? numeric : fallback;
+}
+
+function formatDraftNumber(value: number) {
+  const rounded = Math.round(value * 1000) / 1000;
+  return String(Object.is(rounded, -0) ? 0 : rounded);
+}
+
+function createFragmentGuid() {
+  const uuid =
+    globalThis.crypto?.randomUUID?.() ??
+    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return `IFCnative-${uuid}`;
 }
 
 interface ThatOpenViewCubeElement extends HTMLElement {

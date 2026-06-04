@@ -15,3 +15,9 @@ export function viewerWorldDeltaToIfcPlacementDelta(delta: ViewerWorldDelta) {
 export function viewerWorldPointToIfcPlacementPoint(point: ViewerWorldDelta) {
   return viewerWorldDeltaToIfcPlacementDelta(point);
 }
+
+export function viewerWorldDirectionToIfcPlacementDirection(
+  direction: ViewerWorldDelta,
+) {
+  return viewerWorldDeltaToIfcPlacementDelta(direction);
+}

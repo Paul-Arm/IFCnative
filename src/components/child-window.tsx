@@ -75,7 +75,6 @@ export function ChildWindow({
       externalWindow.removeEventListener("beforeunload", handleBeforeUnload);
       externalWindow.close();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
