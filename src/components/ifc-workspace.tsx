@@ -35,7 +35,6 @@ import {
     addNativeBodyElement,
     addNativeClassification,
     addNativeConstraintObjective,
-    addDiagnosticObjectiveReference as addNativeDiagnosticObjectiveReference,
     addNativeDocumentReference,
     addNativeElement,
     addNativeEmptyPropertySet,
@@ -70,6 +69,7 @@ import {
     removeNativeRelationship,
     resolveNativeMovableProductId,
     serializeNativeIfcDocument,
+    setDiagnosticObjectiveReferences as setNativeDiagnosticObjectiveReferences,
     splitTopLevel,
     suggestCatalogObjectForEntity,
     updateNativeEntity,
@@ -937,15 +937,15 @@ export default function IfcWorkspace() {
     );
   };
 
-  const addDiagnosticObjectiveReference = (
+  const setDiagnosticObjectiveReferences = (
     setId: number,
-    objectiveId: string,
+    objectiveIds: string[],
   ) => {
-    const next = addNativeDiagnosticObjectiveReference(
+    const next = setNativeDiagnosticObjectiveReferences(
       document,
       selectedId,
       setId,
-      objectiveId,
+      objectiveIds,
     );
     if (next === document) {
       return;
@@ -953,8 +953,8 @@ export default function IfcWorkspace() {
     commitDocument(
       next,
       selectedId,
-      `Add investigation objective ${objectiveId} to #${setId}`,
-      `diagnostics.objective({ setId: ${setId}, value: ${JSON.stringify(objectiveId)} });`,
+      `Set investigation objectives on #${setId}`,
+      `diagnostics.objectives({ setId: ${setId}, values: ${JSON.stringify(objectiveIds)} });`,
     );
   };
 
@@ -2331,7 +2331,7 @@ export default function IfcWorkspace() {
               catalog={catalog}
               document={viewerDocument}
               selectedId={selectedId}
-              onAddObjectiveReference={addDiagnosticObjectiveReference}
+              onSetObjectiveReferences={setDiagnosticObjectiveReferences}
               onAddPropertyToSet={addPropertyToSet}
               onApplyObjectInfo={applyDiagnosticObjectInfoDraft}
               onApplyProcedure={applyDiagnosticProcedure}

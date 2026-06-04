@@ -16,6 +16,8 @@ import {
     buildDiagnosticObjectInfoDraft,
     buildDiagnosticSelectionContext,
     findDiagnosticObjectives,
+    readDiagnosticObjectiveReferences,
+    setDiagnosticObjectiveReferences,
     suggestDiagnosticProcedureCatalogObjects,
 } from "../src/ifc/diagnosticsAssistant";
 import {
@@ -1611,6 +1613,9 @@ test("diagnostics assistant stores objective IDs as one semicolon list", () => {
     .get(probe.id)
     ?.find((set) => set.name === "ePset_Druckfestigkeit");
   assert.ok(procedureSet);
+  assert.deepEqual(readDiagnosticObjectiveReferences(procedureSet), [
+    "5692001.2.05387_02_FM_DIA_2012.Baustoffeigenschaften",
+  ]);
 
   const updated = addDiagnosticObjectiveReference(
     withProcedure,
@@ -1635,6 +1640,39 @@ test("diagnostics assistant stores objective IDs as one semicolon list", () => {
     value:
       "IFCLABEL('5692001.2.05387_02_FM_DIA_2012.Baustoffeigenschaften; 5692001.2.05387_02_FM_DIA_2012.Dauerhaftigkeit')",
   });
+  assert.deepEqual(readDiagnosticObjectiveReferences(updatedSet), [
+    "5692001.2.05387_02_FM_DIA_2012.Baustoffeigenschaften",
+    "5692001.2.05387_02_FM_DIA_2012.Dauerhaftigkeit",
+  ]);
+
+  const replaced = setDiagnosticObjectiveReferences(
+    updated,
+    probe.id,
+    procedureSet.id,
+    [
+      "5692001.2.05387_02_FM_DIA_2012.Tragfaehigkeit",
+      "5692001.2.05387_02_FM_DIA_2012.Tragfaehigkeit",
+    ],
+  );
+  const replacedSet = replaced.propertySetsByEntity
+    .get(probe.id)
+    ?.find((set) => set.id === procedureSet.id);
+  assert.ok(replacedSet);
+  assert.deepEqual(readDiagnosticObjectiveReferences(replacedSet), [
+    "5692001.2.05387_02_FM_DIA_2012.Tragfaehigkeit",
+  ]);
+
+  const cleared = setDiagnosticObjectiveReferences(
+    replaced,
+    probe.id,
+    procedureSet.id,
+    [],
+  );
+  const clearedSet = cleared.propertySetsByEntity
+    .get(probe.id)
+    ?.find((set) => set.id === procedureSet.id);
+  assert.ok(clearedSet);
+  assert.deepEqual(readDiagnosticObjectiveReferences(clearedSet), []);
 });
 
 function catalogObject(

@@ -209,24 +209,43 @@ export function addDiagnosticObjectiveReference(
   setId: number,
   objectiveId: string,
 ) {
+  const procedureSet = findDiagnosticProcedureSet(document, entityId, setId);
+  const nextObjectiveId = objectiveId.trim();
+  if (!procedureSet || !nextObjectiveId) {
+    return document;
+  }
+
+  return setDiagnosticObjectiveReferences(document, entityId, setId, [
+    ...readDiagnosticObjectiveReferences(procedureSet),
+    nextObjectiveId,
+  ]);
+}
+
+export function setDiagnosticObjectiveReferences(
+  document: NativeIfcDocument,
+  entityId: number,
+  setId: number,
+  objectiveIds: string[],
+) {
   const procedureSet = (document.propertySetsByEntity.get(entityId) ?? []).find(
     (set) => set.id === setId,
   );
-  const nextObjectiveId = objectiveId.trim();
-  if (!procedureSet || !nextObjectiveId) {
+  if (!procedureSet) {
     return document;
   }
 
   const objectiveProperties = procedureSet.values.filter((value) =>
     isInvestigationObjectiveIdProperty(value.name),
   );
-  const objectiveIds = uniqueStrings([
-    ...objectiveProperties.flatMap((value) =>
-      parseObjectiveIdList(value.value),
-    ),
-    nextObjectiveId,
-  ]);
-  const objectiveValue = objectiveIds.join("; ");
+  const nextObjectiveIds = uniqueStrings(objectiveIds);
+  if (!nextObjectiveIds.length) {
+    return objectiveProperties.reduce(
+      (next, property) => removeNativePropertyFromSet(next, setId, property.id),
+      document,
+    );
+  }
+
+  const objectiveValue = nextObjectiveIds.join("; ");
   const primaryProperty =
     objectiveProperties.find(
       (value) => value.name === DIAGNOSTIC_OBJECTIVE_IDS_PROPERTY,
@@ -253,6 +272,16 @@ export function addDiagnosticObjectiveReference(
   }
 
   return next;
+}
+
+export function readDiagnosticObjectiveReferences(
+  procedureSet: NativeIfcPropertySet,
+) {
+  return uniqueStrings(
+    procedureSet.values
+      .filter((value) => isInvestigationObjectiveIdProperty(value.name))
+      .flatMap((value) => parseObjectiveIdList(value.value)),
+  );
 }
 
 export function findDiagnosticObjectives(
@@ -479,6 +508,16 @@ function findObjectInfoPset(document: NativeIfcDocument, entityId: number) {
   );
 }
 
+function findDiagnosticProcedureSet(
+  document: NativeIfcDocument,
+  entityId: number,
+  setId: number,
+) {
+  return (document.propertySetsByEntity.get(entityId) ?? []).find(
+    (set) => set.id === setId,
+  );
+}
+
 function findProperty(set: NativeIfcPropertySet, propertyName: string) {
   return set.values.find(
     (value) =>
@@ -614,9 +653,10 @@ function isInvestigationObjectiveIdProperty(name: string) {
 
 function parseObjectiveIdList(value: string) {
   const typedValue = unwrapIfcTypedValue(value);
-  return typedValue
+  const textValue = unquote(typedValue.trim()).trim();
+  return textValue
     .split(";")
-    .map((entry) => unquote(entry.trim()).trim())
+    .map((entry) => entry.trim())
     .filter(Boolean);
 }
 

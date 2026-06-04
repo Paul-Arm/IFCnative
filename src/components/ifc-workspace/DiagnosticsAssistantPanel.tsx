@@ -1,22 +1,25 @@
-import { Input } from "@/components/ui/input";
 import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
+    DropdownMenu,
+    DropdownMenuCheckboxItem,
+    DropdownMenuContent,
+    DropdownMenuLabel,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import {
     buildDiagnosticObjectInfoDraft,
     buildDiagnosticSelectionContext,
     catalogObjectLabel,
+    readDiagnosticObjectiveReferences,
     suggestDiagnosticProcedureCatalogObjects,
     type CatalogObjectType,
     type DiagnosticObjectInfoDraft,
     type DiagnosticObjectRole,
+    type DiagnosticObjectiveSummary,
     type IfcObjectCatalog,
     type NativeIfcDocument,
 } from "@/ifc";
+import { ChevronDown } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { PsetTableSection } from "./InspectorPanel";
@@ -37,7 +40,7 @@ export function DiagnosticsAssistantPanel({
   selectedId,
   onApplyObjectInfo,
   onApplyProcedure,
-  onAddObjectiveReference,
+  onSetObjectiveReferences,
   onAddPropertyToSet,
   onDuplicatePropertySet,
   onRemovePropertyFromSet,
@@ -50,7 +53,7 @@ export function DiagnosticsAssistantPanel({
   selectedId: number;
   onApplyObjectInfo(draft: DiagnosticObjectInfoDraft): void;
   onApplyProcedure(objectType: CatalogObjectType): void;
-  onAddObjectiveReference(setId: number, objectiveId: string): void;
+  onSetObjectiveReferences(setId: number, objectiveIds: string[]): void;
   onAddPropertyToSet(
     setId: number,
     propertyName: string,
@@ -196,8 +199,11 @@ export function DiagnosticsAssistantPanel({
                   <ProcedureObjectivePicker
                     disabled={!context.objectives.length}
                     objectives={context.objectives}
-                    onSelectObjective={(objectiveId) =>
-                      onAddObjectiveReference(set.id, objectiveId)
+                    selectedObjectiveIds={readDiagnosticObjectiveReferences(
+                      set,
+                    )}
+                    onChangeObjectiveIds={(objectiveIds) =>
+                      onSetObjectiveReferences(set.id, objectiveIds)
                     }
                   />
                   <PsetTableSection
@@ -268,40 +274,77 @@ export function DiagnosticsAssistantPanel({
 function ProcedureObjectivePicker({
   disabled,
   objectives,
-  onSelectObjective,
+  selectedObjectiveIds,
+  onChangeObjectiveIds,
 }: {
   disabled: boolean;
-  objectives: Array<{ label: string; objectInfoId?: string; psetName: string }>;
-  onSelectObjective(objectiveId: string): void;
+  objectives: DiagnosticObjectiveSummary[];
+  selectedObjectiveIds: string[];
+  onChangeObjectiveIds(objectiveIds: string[]): void;
 }) {
+  const selectedObjectiveIdSet = new Set(selectedObjectiveIds);
+  const selectedLabels = objectives
+    .filter((objective) =>
+      selectedObjectiveIdSet.has(objective.objectInfoId || objective.psetName),
+    )
+    .map((objective) => objective.label);
+  const unknownSelectedCount =
+    selectedObjectiveIds.length - selectedLabels.length;
+  const summary = selectedObjectiveIds.length
+    ? [
+        ...selectedLabels,
+        unknownSelectedCount ? `${unknownSelectedCount} weitere` : "",
+      ]
+        .filter(Boolean)
+        .join(", ")
+    : "Untersuchungsziele waehlen";
+
+  const toggleObjective = (objectiveId: string, checked: boolean) => {
+    const nextObjectiveIds = checked
+      ? [...selectedObjectiveIds, objectiveId]
+      : selectedObjectiveIds.filter((selectedId) => selectedId !== objectiveId);
+    onChangeObjectiveIds(nextObjectiveIds);
+  };
+
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/60 bg-muted/20 px-2.5 py-2">
       <div className="min-w-0 text-xs text-muted-foreground">
-        _UntersuchungszielIDs hinzufuegen
+        _UntersuchungszielIDs
       </div>
-      <Select
-        disabled={disabled}
-        value=""
-        onValueChange={(value) => {
-          if (value) {
-            onSelectObjective(value);
-          }
-        }}
-      >
-        <SelectTrigger className="h-8 min-w-56" size="sm">
-          <SelectValue placeholder="Untersuchungsziel waehlen" />
-        </SelectTrigger>
-        <SelectContent align="end" className="max-h-72">
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          className="flex h-8 min-w-56 max-w-full items-center justify-between gap-2 rounded-md border border-input bg-background px-2.5 text-left text-xs text-foreground shadow-xs outline-none transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+          disabled={disabled}
+        >
+          <span className="min-w-0 truncate">{summary}</span>
+          <ChevronDown aria-hidden className="size-3.5 shrink-0 opacity-60" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="max-h-72 w-80">
+          <DropdownMenuLabel>Untersuchungsziele zuordnen</DropdownMenuLabel>
           {objectives.map((objective) => {
             const value = objective.objectInfoId || objective.psetName;
             return (
-              <SelectItem key={`${objective.psetName}-${value}`} value={value}>
-                {objective.label} · {value}
-              </SelectItem>
+              <DropdownMenuCheckboxItem
+                key={`${objective.psetName}-${value}`}
+                checked={selectedObjectiveIdSet.has(value)}
+                className="items-start gap-2 py-1.5 text-xs"
+                onCheckedChange={(checked) =>
+                  toggleObjective(value, checked === true)
+                }
+              >
+                <span className="grid min-w-0 gap-0.5 pr-1">
+                  <span className="truncate font-medium">
+                    {objective.label}
+                  </span>
+                  <span className="truncate font-mono text-[11px] text-muted-foreground">
+                    {value}
+                  </span>
+                </span>
+              </DropdownMenuCheckboxItem>
             );
           })}
-        </SelectContent>
-      </Select>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }
