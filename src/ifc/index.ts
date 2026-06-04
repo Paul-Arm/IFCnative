@@ -3,6 +3,7 @@ export * from "./catalog";
 export * from "./catalogValidation";
 export * from "./coordinateMapping";
 export * from "./coverage";
+export * from "./diagnosticsAssistant";
 export * from "./fragmentAssets";
 export * from "./fragmentDocument";
 export * from "./fragmentSession";

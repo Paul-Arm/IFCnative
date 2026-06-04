@@ -1,6 +1,10 @@
 import { unquote, type NativeIfcDocument } from "./nativeDocument";
 
-export const OBJECT_INFO_PSET_NAME = "ePset_Objektinformationen";
+export const OBJECT_INFO_PSET_NAME = "ePset_Objektinformation";
+export const OBJECT_INFO_PSET_ALIASES = [
+  OBJECT_INFO_PSET_NAME,
+  "ePset_Objektinformationen",
+];
 export const OBJECT_INFO_ID_PROPERTY_NAME = "_ID";
 
 export type ObjectInfoValidationSeverity = "error" | "warning" | "info";
@@ -377,9 +381,9 @@ export function validateObjectInfoIndex(
 }
 
 export function isObjectInfoPset(name: string) {
-  return (
-    normalizeObjectInfoName(name) ===
-    normalizeObjectInfoName(OBJECT_INFO_PSET_NAME)
+  const normalized = normalizeObjectInfoName(name);
+  return OBJECT_INFO_PSET_ALIASES.some(
+    (alias) => normalized === normalizeObjectInfoName(alias),
   );
 }
 

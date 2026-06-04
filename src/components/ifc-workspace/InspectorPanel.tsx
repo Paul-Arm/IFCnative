@@ -21,8 +21,8 @@ import {
     catalogObjectLabel,
     getNativeBodyRepresentation,
     getNativePlacement,
-    relationshipTypesForEntities,
     quote,
+    relationshipTypesForEntities,
     splitTopLevel,
     unquote,
     type CatalogObjectType,
@@ -811,7 +811,9 @@ function GeometryPanel({
   const representationSummary = body.hasRepresentation
     ? [
         body.shapeId ? `Shape #${body.shapeId}` : undefined,
-        body.bodyRepresentationId ? `Body #${body.bodyRepresentationId}` : undefined,
+        body.bodyRepresentationId
+          ? `Body #${body.bodyRepresentationId}`
+          : undefined,
         body.solidId ? `Solid #${body.solidId}` : undefined,
         body.profileId ? `Profile #${body.profileId}` : undefined,
       ]
@@ -837,8 +839,16 @@ function GeometryPanel({
         title="Geometry"
         description={representationSummary}
         meta={
-          <Badge tone={body.canEdit ? "success" : body.canAssign ? "info" : "neutral"}>
-            {body.canEdit ? "Editable" : body.canAssign ? "Assignable" : "Read only"}
+          <Badge
+            tone={
+              body.canEdit ? "success" : body.canAssign ? "info" : "neutral"
+            }
+          >
+            {body.canEdit
+              ? "Editable"
+              : body.canAssign
+                ? "Assignable"
+                : "Read only"}
           </Badge>
         }
       />
@@ -866,9 +876,14 @@ function GeometryPanel({
         />
         <InfoRow
           label="Body"
-          value={body.bodyRepresentationId ? `#${body.bodyRepresentationId}` : "$"}
+          value={
+            body.bodyRepresentationId ? `#${body.bodyRepresentationId}` : "$"
+          }
         />
-        <InfoRow label="Solid" value={body.solidId ? `#${body.solidId}` : "$"} />
+        <InfoRow
+          label="Solid"
+          value={body.solidId ? `#${body.solidId}` : "$"}
+        />
         <InfoRow
           label="Profile"
           value={
@@ -1190,7 +1205,7 @@ const PSET_TABLE_COLUMNS: DataTableColumn[] = [
   { header: "", key: "actions", width: 32 },
 ];
 
-function PsetTableSection({
+export function PsetTableSection({
   document,
   set,
   visibleValues,
@@ -1371,11 +1386,13 @@ function EditablePropertyTableCells({
   const [valueType, setValueType] = useState(parsed.valueType);
   const [value, setValue] = useState(parsed.value);
 
-  const commitUpdate = (next: {
-    name?: string;
-    value?: string;
-    valueType?: string;
-  } = {}) => {
+  const commitUpdate = (
+    next: {
+      name?: string;
+      value?: string;
+      valueType?: string;
+    } = {},
+  ) => {
     const committedName = next.name ?? name;
     const committedValue = next.value ?? value;
     const committedValueType = next.valueType ?? valueType;
@@ -1386,12 +1403,7 @@ function EditablePropertyTableCells({
     ) {
       return;
     }
-    onUpdate(
-      property.id,
-      committedName,
-      committedValue,
-      committedValueType,
-    );
+    onUpdate(property.id, committedName, committedValue, committedValueType);
   };
 
   const updateValueType = (nextType: string) => {
@@ -1679,7 +1691,9 @@ function RelationsPanel({
           onChange={setTargetId}
         />
         {!relationshipTypeOptions.length ? (
-          <TextLine>No valid relationship for this source/target class.</TextLine>
+          <TextLine>
+            No valid relationship for this source/target class.
+          </TextLine>
         ) : null}
         <Button
           disabled={!canCreateRelationship}
@@ -1745,11 +1759,7 @@ function EditableRelationship({
     [document, sourceId, targetId],
   );
   const typeOptions = useMemo(
-    () =>
-      uniqueStrings([
-        ...compatibleTypeOptions,
-        relationship.type,
-      ]),
+    () => uniqueStrings([...compatibleTypeOptions, relationship.type]),
     [compatibleTypeOptions, relationship.type],
   );
   const validSource = document.entityById.has(Number(sourceId));
@@ -1887,8 +1897,9 @@ export function ResourcesPanel({
     document.typeAssignmentsByEntity.get(selectedId) ?? [];
   const [materialName, setMaterialName] = useState("Inspektionsbeton");
   const [materialCategory, setMaterialCategory] = useState("Beton");
-  const [materialPropertySetName, setMaterialPropertySetName] =
-    useState("Pset_MaterialCommon");
+  const [materialPropertySetName, setMaterialPropertySetName] = useState(
+    "Pset_MaterialCommon",
+  );
   const [materialPropertyRows, setMaterialPropertyRows] = useState(
     "MassDensity | 2400 | IFCREAL\nThermalConductivity | 1.7 | IFCREAL",
   );
@@ -2250,10 +2261,7 @@ export function ResourcesPanel({
             <Button
               label="+ Add Constituent Set"
               onPress={() =>
-                onAddMaterialConstituentSet(
-                  constituentSetName,
-                  constituentRows,
-                )
+                onAddMaterialConstituentSet(constituentSetName, constituentRows)
               }
             />
           </ResponsiveField>
@@ -2352,9 +2360,7 @@ function getResourceAssociations(
       }
       return relationship.targetIds.flatMap((resourceId) => {
         const resource = document.entityById.get(resourceId);
-        return resource
-          ? [{ relationship, relationshipEntity, resource }]
-          : [];
+        return resource ? [{ relationship, relationshipEntity, resource }] : [];
       });
     },
   );
@@ -2368,7 +2374,9 @@ function EditableReferenceResource({
   association: ResourceAssociation;
 } & ResourceEditCallbacks) {
   const { relationship, resource } = association;
-  const [location, setLocation] = useState(readOptionalStepString(resource.args[0]));
+  const [location, setLocation] = useState(
+    readOptionalStepString(resource.args[0]),
+  );
   const [identification, setIdentification] = useState(
     readOptionalStepString(resource.args[1]),
   );
@@ -2586,7 +2594,9 @@ function EditableApprovalResource({
     readOptionalStepString(resource.args[0]),
   );
   const [name, setName] = useState(readOptionalStepString(resource.args[1]));
-  const [status, setStatus] = useState(readOptionalStepString(resource.args[4]));
+  const [status, setStatus] = useState(
+    readOptionalStepString(resource.args[4]),
+  );
 
   useEffect(() => {
     setIdentifier(readOptionalStepString(resource.args[0]));
@@ -2642,7 +2652,9 @@ function EditableConstraintResource({
   const { relationship, relationshipEntity, resource } = association;
   const [name, setName] = useState(readOptionalStepString(resource.args[0]));
   const [grade, setGrade] = useState(readStepEnum(resource.args[2]));
-  const [source, setSource] = useState(readOptionalStepString(resource.args[3]));
+  const [source, setSource] = useState(
+    readOptionalStepString(resource.args[3]),
+  );
   const [qualifier, setQualifier] = useState(readStepEnum(resource.args[9]));
   const [intent, setIntent] = useState(
     readOptionalStepString(relationshipEntity.args[5]),
@@ -2654,7 +2666,12 @@ function EditableConstraintResource({
     setSource(readOptionalStepString(resource.args[3]));
     setQualifier(readStepEnum(resource.args[9]));
     setIntent(readOptionalStepString(relationshipEntity.args[5]));
-  }, [relationshipEntity.args, relationshipEntity.id, resource.args, resource.id]);
+  }, [
+    relationshipEntity.args,
+    relationshipEntity.id,
+    resource.args,
+    resource.id,
+  ]);
 
   return (
     <CompactResourceCard
@@ -2793,26 +2810,28 @@ export function ResourceReferencesPanel({
             />
           ))
         ) : (
-          <EmptyBlock>Keine Klassifikation, kein Dokument und keine Library zugewiesen.</EmptyBlock>
+          <EmptyBlock>
+            Keine Klassifikation, kein Dokument und keine Library zugewiesen.
+          </EmptyBlock>
         )}
       </div>
       <CompactAddSection title="Add Classification">
         <div className="grid grid-cols-[repeat(auto-fit,minmax(8.5rem,1fr))] gap-2">
-        <CompactTextInput
-          label="Identification"
-          value={classificationId}
-          onChangeText={setClassificationId}
-        />
-        <CompactTextInput
-          label="Name"
-          value={classificationName}
-          onChangeText={setClassificationName}
-        />
-        <CompactTextInput
-          label="Location / URI"
-          value={classificationUri}
-          onChangeText={setClassificationUri}
-        />
+          <CompactTextInput
+            label="Identification"
+            value={classificationId}
+            onChangeText={setClassificationId}
+          />
+          <CompactTextInput
+            label="Name"
+            value={classificationName}
+            onChangeText={setClassificationName}
+          />
+          <CompactTextInput
+            label="Location / URI"
+            value={classificationUri}
+            onChangeText={setClassificationUri}
+          />
         </div>
         <CompactCreateButton
           label="Add Classification"
@@ -2827,21 +2846,21 @@ export function ResourceReferencesPanel({
       </CompactAddSection>
       <CompactAddSection title="Add Document">
         <div className="grid grid-cols-[repeat(auto-fit,minmax(8.5rem,1fr))] gap-2">
-        <CompactTextInput
-          label="Identification"
-          value={documentId}
-          onChangeText={setDocumentId}
-        />
-        <CompactTextInput
-          label="Name"
-          value={documentName}
-          onChangeText={setDocumentName}
-        />
-        <CompactTextInput
-          label="Location / URI"
-          value={documentUri}
-          onChangeText={setDocumentUri}
-        />
+          <CompactTextInput
+            label="Identification"
+            value={documentId}
+            onChangeText={setDocumentId}
+          />
+          <CompactTextInput
+            label="Name"
+            value={documentName}
+            onChangeText={setDocumentName}
+          />
+          <CompactTextInput
+            label="Location / URI"
+            value={documentUri}
+            onChangeText={setDocumentUri}
+          />
         </div>
         <CompactCreateButton
           label="Add Document"
@@ -2852,21 +2871,21 @@ export function ResourceReferencesPanel({
       </CompactAddSection>
       <CompactAddSection title="Add Library">
         <div className="grid grid-cols-[repeat(auto-fit,minmax(8.5rem,1fr))] gap-2">
-        <CompactTextInput
-          label="Identification"
-          value={libraryId}
-          onChangeText={setLibraryId}
-        />
-        <CompactTextInput
-          label="Name"
-          value={libraryName}
-          onChangeText={setLibraryName}
-        />
-        <CompactTextInput
-          label="Location / URI"
-          value={libraryUri}
-          onChangeText={setLibraryUri}
-        />
+          <CompactTextInput
+            label="Identification"
+            value={libraryId}
+            onChangeText={setLibraryId}
+          />
+          <CompactTextInput
+            label="Name"
+            value={libraryName}
+            onChangeText={setLibraryName}
+          />
+          <CompactTextInput
+            label="Location / URI"
+            value={libraryUri}
+            onChangeText={setLibraryUri}
+          />
         </div>
         <CompactCreateButton
           label="Add Library"
@@ -2915,8 +2934,7 @@ export function ResourceControlsPanel({
   );
   const [constraintGrade, setConstraintGrade] = useState("HARD");
   const [constraintSource, setConstraintSource] = useState("IFCnative");
-  const [constraintQualifier, setConstraintQualifier] =
-    useState("REQUIREMENT");
+  const [constraintQualifier, setConstraintQualifier] = useState("REQUIREMENT");
   const [constraintIntent, setConstraintIntent] = useState(
     "EXPECTED PERFORMANCE",
   );
@@ -2949,61 +2967,65 @@ export function ResourceControlsPanel({
             ),
           )
         ) : (
-          <EmptyBlock>Keine Freigabe und kein Constraint zugewiesen.</EmptyBlock>
+          <EmptyBlock>
+            Keine Freigabe und kein Constraint zugewiesen.
+          </EmptyBlock>
         )}
       </div>
       <CompactAddSection title="Add Approval">
         <div className="grid grid-cols-[repeat(auto-fit,minmax(8.5rem,1fr))] gap-2">
-        <CompactTextInput
-          label="Identifier"
-          value={approvalId}
-          onChangeText={setApprovalId}
-        />
-        <CompactTextInput
-          label="Name"
-          value={approvalName}
-          onChangeText={setApprovalName}
-        />
-        <CompactTextInput
-          label="Status"
-          value={approvalStatus}
-          onChangeText={setApprovalStatus}
-        />
+          <CompactTextInput
+            label="Identifier"
+            value={approvalId}
+            onChangeText={setApprovalId}
+          />
+          <CompactTextInput
+            label="Name"
+            value={approvalName}
+            onChangeText={setApprovalName}
+          />
+          <CompactTextInput
+            label="Status"
+            value={approvalStatus}
+            onChangeText={setApprovalStatus}
+          />
         </div>
         <CompactCreateButton
           label="Add Approval"
-          onClick={() => onAddApproval(approvalId, approvalName, approvalStatus)}
+          onClick={() =>
+            onAddApproval(approvalId, approvalName, approvalStatus)
+          }
         />
       </CompactAddSection>
       <CompactAddSection title="Add Constraint">
         <div className="grid grid-cols-[repeat(auto-fit,minmax(8.5rem,1fr))] gap-2">
-        <CompactTextInput
-          label="Name"
-          value={constraintName}
-          onChangeText={setConstraintName}
-        />
-        <CompactSelectInput
-          label="Grade"
-          options={CONSTRAINT_GRADES}
-          value={constraintGrade}
-          onChange={setConstraintGrade}
-        />
-        <CompactSelectInput
-          label="Qualifier"
-          options={OBJECTIVE_QUALIFIERS}
-          value={constraintQualifier}
-          onChange={setConstraintQualifier}
-        />
-        <CompactTextInput
-          label="Source"
-          value={constraintSource}
-          onChangeText={setConstraintSource}
-        />
-        <CompactTextInput
-          label="Intent"
-          value={constraintIntent}
-          onChangeText={setConstraintIntent}
-        />
+          <CompactTextInput
+            label="Name"
+            value={constraintName}
+            onChangeText={setConstraintName}
+          />
+          <CompactSelectInput
+            label="Grade"
+            options={CONSTRAINT_GRADES}
+            value={constraintGrade}
+            onChange={setConstraintGrade}
+          />
+          <CompactSelectInput
+            label="Qualifier"
+            options={OBJECTIVE_QUALIFIERS}
+            value={constraintQualifier}
+            onChange={setConstraintQualifier}
+          />
+          <CompactTextInput
+            label="Source"
+            value={constraintSource}
+            onChangeText={setConstraintSource}
+          />
+          <CompactTextInput
+            label="Intent"
+            value={constraintIntent}
+            onChangeText={setConstraintIntent}
+          />
         </div>
         <CompactCreateButton
           label="Add Constraint"
@@ -3145,10 +3167,7 @@ function editableSetValue(
   return entity.args[2] ?? fallback;
 }
 
-function parseTypedPropertyValue(
-  rawValue: string,
-  entity?: NativeIfcEntity,
-) {
+function parseTypedPropertyValue(rawValue: string, entity?: NativeIfcEntity) {
   if (entity?.type === "IFCPROPERTYLISTVALUE") {
     return {
       value: rawValue,
@@ -3358,7 +3377,9 @@ function shortIfcName(value: string) {
 }
 
 function formatEditableNumber(value: number | undefined, fallback: string) {
-  return value === undefined || !Number.isFinite(value) ? fallback : String(value);
+  return value === undefined || !Number.isFinite(value)
+    ? fallback
+    : String(value);
 }
 
 function groupCatalogPsets(objectType: CatalogObjectType | undefined) {

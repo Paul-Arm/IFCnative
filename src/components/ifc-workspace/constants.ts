@@ -189,7 +189,7 @@ export const MOSAIC_TITLES: Record<MosaicViewId, string> = {
   catalog: "Objektkatalog",
   "catalog-review": "Objektkatalog: Pruefung",
   console: "JS Console",
-  diagnostics: "Diagnostics",
+  diagnostics: "Diagnostik",
   inspector: "Inspector",
   notes: "Notizen",
   "object-info": "Objektinfo: IDs",
@@ -301,12 +301,7 @@ export const TYPE_CLASSES = [
   "IFCCOLUMNTYPE",
 ];
 
-export const GROUP_TYPES = [
-  "IFCGROUP",
-  "IFCSYSTEM",
-  "IFCZONE",
-  "IFCASSET",
-];
+export const GROUP_TYPES = ["IFCGROUP", "IFCSYSTEM", "IFCZONE", "IFCASSET"];
 
 export const CONSTRAINT_GRADES = [
   "HARD",

@@ -35,6 +35,7 @@ import {
     addNativeBodyElement,
     addNativeClassification,
     addNativeConstraintObjective,
+    addDiagnosticObjectiveReference as addNativeDiagnosticObjectiveReference,
     addNativeDocumentReference,
     addNativeElement,
     addNativeEmptyPropertySet,
@@ -54,6 +55,8 @@ import {
     addNativeSiUnit,
     addNativeTypeAssignment,
     applyCatalogQuickFix,
+    applyDiagnosticObjectInfo,
+    applyDiagnosticProcedureFromCatalog,
     buildObjectInfoIndex,
     createNativeSampleDocument,
     duplicateNativePropertySet,
@@ -80,7 +83,9 @@ import {
     viewerWorldDeltaToIfcPlacementDelta,
     viewerWorldDirectionToIfcPlacementDirection,
     viewerWorldPointToIfcPlacementPoint,
+    type CatalogObjectType,
     type CatalogValidationFinding,
+    type DiagnosticObjectInfoDraft,
     type IfcObjectCatalog,
     type NativeIfcDocument,
     type NativeIfcEntity,
@@ -106,6 +111,7 @@ import {
     MOSAIC_VIEW_IDS,
     RELATION_TYPES,
 } from "./ifc-workspace/constants";
+import { DiagnosticsAssistantPanel } from "./ifc-workspace/DiagnosticsAssistantPanel";
 import { GraphPanel } from "./ifc-workspace/GraphPanel";
 import {
     InspectorPanel,
@@ -113,7 +119,7 @@ import {
     ResourceReferencesPanel,
 } from "./ifc-workspace/InspectorPanel";
 import { ObjectInfoPanel } from "./ifc-workspace/ObjectInfoPanel";
-import { ConsolePanel, DiagnosticsPanel } from "./ifc-workspace/ReviewPanels";
+import { ConsolePanel } from "./ifc-workspace/ReviewPanels";
 import { StructurePanel } from "./ifc-workspace/StructurePanel";
 import type {
     BodyElementDraft,
@@ -897,6 +903,58 @@ export default function IfcWorkspace() {
       selectedId,
       `Apply ${fixes.length.toLocaleString()} catalog quick fixes to #${selectedId}`,
       `catalog.quickFixAll({ id: ${selectedId}, fixes: ${fixes.length} });`,
+    );
+  };
+
+  const applyDiagnosticObjectInfoDraft = (draft: DiagnosticObjectInfoDraft) => {
+    const next = applyDiagnosticObjectInfo(document, selectedId, draft);
+    if (next === document) {
+      return;
+    }
+    commitDocument(
+      next,
+      selectedId,
+      `Apply diagnostics object information to #${selectedId}`,
+      `diagnostics.objectInfo({ id: ${selectedId}, role: '${draft.role}' });`,
+    );
+  };
+
+  const applyDiagnosticProcedure = (objectType: CatalogObjectType) => {
+    const next = applyDiagnosticProcedureFromCatalog(
+      document,
+      selectedId,
+      objectType,
+    );
+    if (next === document) {
+      return;
+    }
+    setSelectedCatalogObjectId(objectType.id);
+    commitDocument(
+      next,
+      selectedId,
+      `Apply diagnostics procedure ${objectType.code || objectType.name} to #${selectedId}`,
+      `diagnostics.procedure({ id: ${selectedId}, catalogObject: '${objectType.id}' });`,
+    );
+  };
+
+  const addDiagnosticObjectiveReference = (
+    setId: number,
+    objectiveId: string,
+  ) => {
+    const next = addNativeDiagnosticObjectiveReference(
+      document,
+      selectedId,
+      setId,
+      objectiveId,
+    );
+    if (next === document) {
+      return;
+    }
+    commitDocument(
+      next,
+      selectedId,
+      `Add investigation objective ${objectiveId} to #${setId}`,
+      `diagnostics.objective({ setId: ${setId}, value: ${JSON.stringify(objectiveId)} });`,
     );
   };
 
@@ -2269,7 +2327,20 @@ export default function IfcWorkspace() {
       case "diagnostics":
         return (
           <TileContent>
-            <DiagnosticsPanel document={document} />
+            <DiagnosticsAssistantPanel
+              catalog={catalog}
+              document={viewerDocument}
+              selectedId={selectedId}
+              onAddObjectiveReference={addDiagnosticObjectiveReference}
+              onAddPropertyToSet={addPropertyToSet}
+              onApplyObjectInfo={applyDiagnosticObjectInfoDraft}
+              onApplyProcedure={applyDiagnosticProcedure}
+              onDuplicatePropertySet={duplicatePset}
+              onRemovePropertyFromSet={deletePsetProperty}
+              onRemovePropertySet={deletePset}
+              onRenamePropertySet={renamePset}
+              onUpdateProperty={updatePsetProperty}
+            />
           </TileContent>
         );
       case "recent":

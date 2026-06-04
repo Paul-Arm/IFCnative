@@ -4,11 +4,20 @@ import test from "node:test";
 import * as WebIFC from "web-ifc";
 
 import { createMinimalIfcProject } from "../src/ifc/builder";
+import type { IfcObjectCatalog } from "../src/ifc/catalog";
 import {
     viewerWorldDeltaToIfcPlacementDelta,
     viewerWorldDirectionToIfcPlacementDirection,
     viewerWorldPointToIfcPlacementPoint,
 } from "../src/ifc/coordinateMapping";
+import {
+    addDiagnosticObjectiveReference,
+    applyDiagnosticObjectInfo,
+    buildDiagnosticObjectInfoDraft,
+    buildDiagnosticSelectionContext,
+    findDiagnosticObjectives,
+    suggestDiagnosticProcedureCatalogObjects,
+} from "../src/ifc/diagnosticsAssistant";
 import {
     previewEntityAwareDiffLines,
     summarizeEntityAwareDiff,
@@ -1370,6 +1379,294 @@ test("object info validation indexes definitions and ID references", () => {
     false,
   );
 });
+
+test("object info validation accepts singular diagnostics object info psets", () => {
+  const sample = createNativeSampleDocument();
+  const storey = sample.entities.find(
+    (entity) => entity.type === "IFCBUILDINGSTOREY",
+  );
+  assert.ok(storey);
+  const withWall = addNativeElement(
+    sample,
+    storey.id,
+    "IFCWALL",
+    "Singular ObjectInfo",
+  );
+  const wall = withWall.entities.find(
+    (entity) =>
+      entity.type === "IFCWALL" && entity.name === "Singular ObjectInfo",
+  );
+  assert.ok(wall);
+
+  const document = addNativePropertySetValues(
+    withWall,
+    wall.id,
+    "ePset_Objektinformation",
+    [{ name: "_ID", value: "OBJ-SINGULAR" }],
+  );
+
+  const index = buildObjectInfoIndex(document);
+  assert.equal(
+    index.definitionsByValue.get("OBJ-SINGULAR")?.[0].entityId,
+    wall.id,
+  );
+});
+
+test("diagnostics assistant creates probe object info from US context", () => {
+  const sample = createNativeSampleDocument();
+  const storey = sample.entities.find(
+    (entity) => entity.type === "IFCBUILDINGSTOREY",
+  );
+  assert.ok(storey);
+  const withUs = addNativeElement(
+    sample,
+    storey.id,
+    "IFCBUILDINGELEMENTPROXY",
+    "US.01",
+  );
+  const us = withUs.entities.find(
+    (entity) =>
+      entity.type === "IFCBUILDINGELEMENTPROXY" && entity.name === "US.01",
+  );
+  assert.ok(us);
+  const usWithInfo = applyDiagnosticObjectInfo(withUs, us.id, {
+    bemerkung: "",
+    bezeichnung: "US.01",
+    id: "5692001.2.05387_02_FM_DIA_2012.US.01",
+    role: "untersuchungsstelle",
+  });
+  const withProbe = addNativeElement(
+    usWithInfo,
+    us.id,
+    "IFCBUILDINGELEMENTPROXY",
+    "Probe01.01",
+  );
+  const probe = withProbe.entities.find(
+    (entity) =>
+      entity.type === "IFCBUILDINGELEMENTPROXY" && entity.name === "Probe01.01",
+  );
+  assert.ok(probe);
+
+  const draft = buildDiagnosticObjectInfoDraft(withProbe, probe.id, "probe");
+  assert.equal(draft.id, "5692001.2.05387_02_FM_DIA_2012.Probe01.01");
+  assert.equal(
+    draft.untersuchungsstelleId,
+    "5692001.2.05387_02_FM_DIA_2012.US.01",
+  );
+
+  const document = applyDiagnosticObjectInfo(withProbe, probe.id, draft);
+  const pset = document.propertySetsByEntity
+    .get(probe.id)
+    ?.find((set) => set.name === "ePset_Objektinformation");
+  assert.ok(pset);
+  assert.deepEqual(
+    pset.values.map((value) => [value.name, value.value]),
+    [
+      ["_ID", "IFCLABEL('5692001.2.05387_02_FM_DIA_2012.Probe01.01')"],
+      [
+        "_UntersuchungsstelleID",
+        "IFCLABEL('5692001.2.05387_02_FM_DIA_2012.US.01')",
+      ],
+      ["_Bezeichnung", "IFCLABEL('Probe01.01')"],
+      ["_Bemerkung", "IFCTEXT('')"],
+    ],
+  );
+});
+
+test("diagnostics assistant detects existing site and probe role psets", () => {
+  const sample = createNativeSampleDocument();
+  const storey = sample.entities.find(
+    (entity) => entity.type === "IFCBUILDINGSTOREY",
+  );
+  assert.ok(storey);
+  const withSite = addNativeElement(
+    sample,
+    storey.id,
+    "IFCBUILDINGELEMENTPROXY",
+    "Legacy Site",
+  );
+  const site = withSite.entities.find(
+    (entity) =>
+      entity.type === "IFCBUILDINGELEMENTPROXY" &&
+      entity.name === "Legacy Site",
+  );
+  assert.ok(site);
+  const siteDocument = addNativePropertySetValues(
+    withSite,
+    site.id,
+    "ePset_Untersuchungsstelle",
+    [{ name: "_Status_US", value: "angelegt" }],
+  );
+  const siteContext = buildDiagnosticSelectionContext(siteDocument, site.id);
+  assert.equal(siteContext.detectedRole, "untersuchungsstelle");
+  assert.equal(siteContext.detectedRoleReason, "ePset_Untersuchungsstelle");
+  assert.equal(siteContext.procedures.length, 0);
+
+  const withProbe = addNativeElement(
+    siteDocument,
+    storey.id,
+    "IFCBUILDINGELEMENTPROXY",
+    "Legacy Probe",
+  );
+  const probe = withProbe.entities.find(
+    (entity) =>
+      entity.type === "IFCBUILDINGELEMENTPROXY" &&
+      entity.name === "Legacy Probe",
+  );
+  assert.ok(probe);
+  const probeDocument = addNativePropertySetValues(
+    withProbe,
+    probe.id,
+    "ePset_Probe",
+    [{ name: "_Status_PR", value: "angelegt" }],
+  );
+  const probeContext = buildDiagnosticSelectionContext(probeDocument, probe.id);
+  assert.equal(probeContext.detectedRole, "probe");
+  assert.equal(probeContext.detectedRoleReason, "ePset_Probe");
+  assert.equal(probeContext.procedures.length, 0);
+});
+
+test("diagnostics assistant summarizes objectives and procedure catalog entries", () => {
+  const sample = createNativeSampleDocument();
+  const building = sample.entitiesByType.get("IFCBUILDING")?.[0];
+  assert.ok(building);
+  const withObjective = addNativePropertySetValues(
+    sample,
+    building.id,
+    "ePset_Untersuchungsziel01",
+    [
+      { name: "_ID", value: "UZ-01" },
+      { name: "_Bezeichnung", value: "Druckfestigkeit" },
+    ],
+  );
+  const objectives = findDiagnosticObjectives(withObjective, building.id);
+  assert.deepEqual(objectives, [
+    {
+      id: objectives[0].id,
+      label: "Druckfestigkeit",
+      objectInfoId: "UZ-01",
+      psetName: "ePset_Untersuchungsziel01",
+    },
+  ]);
+
+  const catalog: IfcObjectCatalog = {
+    diagnostics: [],
+    fileName: "catalog.xlsx",
+    importedAt: "2026-06-04T00:00:00.000Z",
+    objectTypes: [
+      catalogObject(
+        "bwd-dfk",
+        "Druckfestigkeit",
+        "BWD - DFK",
+        "ePset_Druckfestigkeit",
+      ),
+      catalogObject(
+        "bwd-us",
+        "Untersuchungsstelle",
+        "BWD - US",
+        "ePset_Objektinformation",
+      ),
+    ],
+  };
+  assert.deepEqual(
+    suggestDiagnosticProcedureCatalogObjects(catalog).map(
+      (objectType) => objectType.id,
+    ),
+    ["bwd-dfk"],
+  );
+
+  const context = buildDiagnosticSelectionContext(withObjective, building.id);
+  assert.equal(context.objectives[0].label, "Druckfestigkeit");
+});
+
+test("diagnostics assistant stores objective IDs as one semicolon list", () => {
+  const sample = createNativeSampleDocument();
+  const storey = sample.entities.find(
+    (entity) => entity.type === "IFCBUILDINGSTOREY",
+  );
+  assert.ok(storey);
+  const withProbe = addNativeElement(
+    sample,
+    storey.id,
+    "IFCBUILDINGELEMENTPROXY",
+    "Probe01.01",
+  );
+  const probe = withProbe.entities.find(
+    (entity) =>
+      entity.type === "IFCBUILDINGELEMENTPROXY" && entity.name === "Probe01.01",
+  );
+  assert.ok(probe);
+  const withProcedure = addNativePropertySetValues(
+    withProbe,
+    probe.id,
+    "ePset_Druckfestigkeit",
+    [
+      {
+        name: "_UntersuchungszielID",
+        value: "5692001.2.05387_02_FM_DIA_2012.Baustoffeigenschaften",
+      },
+    ],
+  );
+  const procedureSet = withProcedure.propertySetsByEntity
+    .get(probe.id)
+    ?.find((set) => set.name === "ePset_Druckfestigkeit");
+  assert.ok(procedureSet);
+
+  const updated = addDiagnosticObjectiveReference(
+    withProcedure,
+    probe.id,
+    procedureSet.id,
+    "5692001.2.05387_02_FM_DIA_2012.Dauerhaftigkeit",
+  );
+  const updatedSet = updated.propertySetsByEntity
+    .get(probe.id)
+    ?.find((set) => set.id === procedureSet.id);
+  assert.ok(updatedSet);
+  assert.equal(
+    updatedSet.values.filter((value) =>
+      value.name.toLowerCase().startsWith("_untersuchungszielid"),
+    ).length,
+    1,
+  );
+  assert.deepEqual(updatedSet.values[0], {
+    id: updatedSet.values[0].id,
+    name: "_UntersuchungszielIDs",
+    type: "IFCPROPERTYSINGLEVALUE",
+    value:
+      "IFCLABEL('5692001.2.05387_02_FM_DIA_2012.Baustoffeigenschaften; 5692001.2.05387_02_FM_DIA_2012.Dauerhaftigkeit')",
+  });
+});
+
+function catalogObject(
+  id: string,
+  name: string,
+  code: string,
+  psetName: string,
+) {
+  return {
+    code,
+    id,
+    ifcClass: "IFCBUILDINGELEMENTPROXY",
+    name,
+    propertyRules: [
+      {
+        format: "",
+        id: `${id}-property`,
+        loiMarkers: {},
+        propertyName: "_Datum_DFK",
+        psetName,
+        requirement: "required" as const,
+        sourceRow: 1,
+        sourceSheet: "Alle Merkmale (Propertys)",
+        tradeMarkers: {},
+        unit: "",
+        valueType: "IFCDATE",
+      },
+    ],
+    sheetName: "Alle Merkmale (Propertys)",
+    version: "",
+  };
+}
 
 test("object info validation reports duplicate and empty object info IDs", () => {
   const sample = createNativeSampleDocument();
