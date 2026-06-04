@@ -28,6 +28,7 @@ import {
     buildNativeDocumentFromFragments,
     type FragmentDocumentModel,
 } from "../src/ifc/fragmentDocument";
+import { exportIfcFromFragments } from "../src/ifc/fragmentIfcExport";
 import { buildGraphIndex, summarizeLine } from "../src/ifc/graphIndex";
 import {
     addNativeApproval,
@@ -213,6 +214,9 @@ test("fragments adapter projects model data into the native document contract", 
       }),
     ],
   });
+  const fragmentBody = fragmentItem(4, "Fragment Body", {
+    IFCnativeParentId: { value: 2 },
+  });
   const pset = fragmentItem(10, "Pset_\\X\\C4nderung", {
     HasProperties: [
       fragmentItem(11, "Ma\\X\\DFnahme", {
@@ -224,7 +228,7 @@ test("fragments adapter projects model data into the native document contract", 
   project.IsDecomposedBy = [storey];
   storey.ContainsElements = [wall];
   wall.IsDefinedBy = [pset];
-  for (const item of [project, storey, wall, pset]) {
+  for (const item of [project, storey, wall, fragmentBody, pset]) {
     items.set(Number((item.localId as { value: number }).value), item);
   }
 
@@ -232,6 +236,7 @@ test("fragments adapter projects model data into the native document contract", 
     ["IFCPROJECT", [1]],
     ["IFCBUILDINGSTOREY", [2]],
     ["IFCWALL", [3]],
+    ["IFCBUILTELEMENT", [4]],
     ["IFCPROPERTYSET", [10]],
   ]);
   const model = {
@@ -249,7 +254,7 @@ test("fragments adapter projects model data into the native document contract", 
       }
       return result;
     },
-    getLocalIds: async () => [1, 2, 3, 10],
+    getLocalIds: async () => [1, 2, 3, 4, 10],
     getMetadata: async () => ({ schema: "IFC4X3_ADD2" }),
     getRelationNames: async () => [
       "IsDecomposedBy",
@@ -284,12 +289,26 @@ test("fragments adapter projects model data into the native document contract", 
   assert.equal(document.entityById.get(3)?.type, "IFCWALL");
   assert.equal(document.entityById.get(3)?.name, "Basic Wall");
   assert.equal(document.spatialRoots[0]?.children[0]?.children[0]?.id, 3);
+  assert.equal(document.entityById.get(4)?.type, "IFCBUILTELEMENT");
+  assert.equal(document.entityById.get(4)?.name, "Fragment Body");
+  assert.deepEqual(
+    document.spatialRoots[0]?.children[0]?.children.map((child) => child.id),
+    [3, 4],
+  );
   assert.ok(
     document.relationships.some(
       (relationship) =>
         relationship.type === "IFCRELCONTAINEDINSPATIALSTRUCTURE" &&
         relationship.sourceIds.includes(2) &&
         relationship.targetIds.includes(3),
+    ),
+  );
+  assert.ok(
+    document.relationships.some(
+      (relationship) =>
+        relationship.type === "IFCRELCONTAINEDINSPATIALSTRUCTURE" &&
+        relationship.sourceIds.includes(2) &&
+        relationship.targetIds.includes(4),
     ),
   );
   assert.deepEqual(document.propertySetsByEntity.get(3)?.[0], {
@@ -309,6 +328,27 @@ test("fragments adapter projects model data into the native document contract", 
     document.resourcesByEntity.get(3)?.[0],
     "B-123 openSIM BIM Objektkatalog",
   );
+});
+
+test("fragments export bridge serializes dirty compatibility document", () => {
+  const document = updateNativeEntity(createNativeSampleDocument(), 1, {
+    name: "Dirty Fragments Export",
+  });
+
+  const result = exportIfcFromFragments({
+    document,
+    documentText: "OLD IFC TEXT",
+    documentTextDirty: true,
+    fragmentsBuffer: new ArrayBuffer(8),
+    fragmentsDirty: true,
+    sourceIfcBytes: new TextEncoder().encode("OLD IFC BYTES").buffer,
+  });
+
+  assert.equal(result.source, "fragments-dirty-compat");
+  assert.equal(typeof result.contents, "string");
+  assert.match(String(result.contents), /Dirty Fragments Export/);
+  assert.doesNotMatch(String(result.contents), /OLD IFC/);
+  assert.ok(result.diagnostics.length > 0);
 });
 
 function fragmentItem(

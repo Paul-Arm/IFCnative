@@ -17,9 +17,7 @@ export interface ViewerCoordinatePick {
 export interface ThatOpenViewerModel {
   documentId: string;
   fileName: string;
-  ifcBytes?: ArrayBuffer | null;
-  ifcFile?: File | null;
-  ifcText: string;
+  fragmentsBuffer?: ArrayBuffer | null;
   revision: number;
   selectedId: number;
   selectedName?: string;
@@ -64,6 +62,7 @@ export interface ViewerEditBodyRequest {
 export interface ViewerFragmentsModelChange {
   document: NativeIfcDocument;
   documentId: string;
+  fragmentsBuffer: ArrayBuffer;
   selectedId: number;
   summary: string;
 }

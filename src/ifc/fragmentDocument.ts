@@ -89,11 +89,10 @@ export async function buildNativeDocumentFromFragments(
   });
   const entityById = new Map(entities.map((entity) => [entity.id, entity]));
   const entitiesByType = groupMap(entities, (entity) => entity.type);
-  const relationships = readFragmentRelationships(
-    localIds,
-    dataById,
-    entityById,
-  );
+  const relationships = [
+    ...readFragmentRelationships(localIds, dataById, entityById),
+    ...readIfcNativeParentRelationships(localIds, dataById, entityById),
+  ];
   const relationshipsByEntity = new Map<number, NativeIfcRelationship[]>();
   for (const relationship of relationships) {
     for (const id of uniqueNumbers([
@@ -124,11 +123,16 @@ export async function buildNativeDocumentFromFragments(
     .getSpatialStructure()
     .then((root) => spatialTreeToNativeRoots(root, entityById))
     .catch(() => []);
-  const roots = spatialRoots.length
+  const baseRoots = spatialRoots.length
     ? spatialRoots
     : entities
         .filter((entity) => entity.type === "IFCPROJECT")
         .map((entity) => ({ children: [], id: entity.id, relation: "root" }));
+  const roots = appendRelationshipTreeChildren(
+    baseRoots,
+    relationships,
+    entityById,
+  );
   const outgoingRefs = new Map<number, number[]>();
   const incomingRefs = new Map<number, NativeIfcEntity[]>();
   for (const relationship of relationships) {
@@ -274,6 +278,39 @@ function readFragmentRelationships(
         type: mapped.type,
       });
     }
+  }
+  return relationships;
+}
+
+function readIfcNativeParentRelationships(
+  localIds: number[],
+  dataById: Map<number, ItemData>,
+  entityById: Map<number, NativeIfcEntity>,
+) {
+  const relationships: NativeIfcRelationship[] = [];
+  let syntheticId = 950_000_000;
+  for (const localId of localIds) {
+    const data = dataById.get(localId);
+    const entity = entityById.get(localId);
+    const parentId = readNumericAttribute(data, [
+      "IFCnativeParentId",
+      "ifcnativeParentId",
+      "parentId",
+    ]);
+    const parent = parentId ? entityById.get(parentId) : undefined;
+    if (!data || !entity || !parent || parent.id === entity.id) {
+      continue;
+    }
+    const parentIsSpatial = isFragmentSpatialType(parent.type);
+    relationships.push({
+      family: parentIsSpatial ? "contains" : "aggregates",
+      id: syntheticId++,
+      sourceIds: [parent.id],
+      targetIds: [entity.id],
+      type: parentIsSpatial
+        ? "IFCRELCONTAINEDINSPATIALSTRUCTURE"
+        : "IFCRELAGGREGATES",
+    });
   }
   return relationships;
 }
@@ -470,6 +507,83 @@ function spatialItemToNativeNodes(
   ];
 }
 
+function appendRelationshipTreeChildren(
+  roots: NativeIfcTreeNode[],
+  relationships: NativeIfcRelationship[],
+  entityById: Map<number, NativeIfcEntity>,
+) {
+  const childrenByParent = new Map<
+    number,
+    { id: number; relation: string }[]
+  >();
+  for (const relationship of relationships) {
+    if (
+      relationship.type !== "IFCRELAGGREGATES" &&
+      relationship.type !== "IFCRELCONTAINEDINSPATIALSTRUCTURE"
+    ) {
+      continue;
+    }
+    for (const sourceId of relationship.sourceIds) {
+      for (const targetId of relationship.targetIds) {
+        if (!entityById.has(sourceId) || !entityById.has(targetId)) {
+          continue;
+        }
+        pushMapValue(childrenByParent, sourceId, {
+          id: targetId,
+          relation: relationship.family,
+        });
+      }
+    }
+  }
+
+  const clonedRoots = roots.map(cloneTreeNode);
+  const existingIds = new Set<number>();
+  for (const root of clonedRoots) {
+    collectTreeIds(root, existingIds);
+  }
+
+  const attachMissingChildren = (node: NativeIfcTreeNode, path: Set<number>) => {
+    const children = childrenByParent.get(node.id) ?? [];
+    for (const child of children) {
+      if (existingIds.has(child.id) || path.has(child.id)) {
+        continue;
+      }
+      const childNode: NativeIfcTreeNode = {
+        children: [],
+        id: child.id,
+        relation: child.relation,
+      };
+      node.children.push(childNode);
+      existingIds.add(child.id);
+    }
+    for (const childNode of node.children) {
+      const nextPath = new Set(path);
+      nextPath.add(childNode.id);
+      attachMissingChildren(childNode, nextPath);
+    }
+  };
+
+  for (const root of clonedRoots) {
+    attachMissingChildren(root, new Set([root.id]));
+  }
+  return clonedRoots;
+}
+
+function cloneTreeNode(node: NativeIfcTreeNode): NativeIfcTreeNode {
+  return {
+    children: node.children.map(cloneTreeNode),
+    id: node.id,
+    relation: node.relation,
+  };
+}
+
+function collectTreeIds(node: NativeIfcTreeNode, ids: Set<number>) {
+  ids.add(node.id);
+  for (const child of node.children) {
+    collectTreeIds(child, ids);
+  }
+}
+
 function readNamedRelationData(data: ItemData | undefined, names: string[]) {
   if (!data) {
     return [];
@@ -562,6 +676,16 @@ function unwrapAttribute(value: unknown): unknown {
 function readMetadataSchema(metadata: Record<string, unknown>) {
   const schema = metadata.schema ?? metadata.Schema ?? metadata.ifcSchema;
   return typeof schema === "string" && schema ? schema : "FRAGMENTS";
+}
+
+function isFragmentSpatialType(type: string) {
+  return (
+    type === "IFCPROJECT" ||
+    type === "IFCSITE" ||
+    type === "IFCBUILDING" ||
+    type === "IFCBUILDINGSTOREY" ||
+    type === "IFCSPACE"
+  );
 }
 
 function normalizeIfcType(value: string | undefined) {

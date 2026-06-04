@@ -630,18 +630,15 @@ function EditPanel({
   entity: NativeIfcEntity;
   onSave(draft: EntityEditDraft): void;
 }) {
-  const rawArgsValue = entity.args.join(",");
   const [type, setType] = useState(entity.type);
   const [name, setName] = useState(entity.name);
   const [description, setDescription] = useState(entity.description);
-  const [rawArgs, setRawArgs] = useState(rawArgsValue);
 
   useEffect(() => {
     setType(entity.type);
     setName(entity.name);
     setDescription(entity.description);
-    setRawArgs(rawArgsValue);
-  }, [entity.description, entity.id, entity.name, entity.type, rawArgsValue]);
+  }, [entity.description, entity.id, entity.name, entity.type]);
 
   return (
     <PanelShell scroll>
@@ -649,7 +646,7 @@ function EditPanel({
         eyebrow={`#${entity.id}`}
         title="Entity bearbeiten"
         description={entity.type}
-        meta={<Badge tone="warning">STEP</Badge>}
+        meta={<Badge>Fragments</Badge>}
       />
       <DropdownField
         label="Class"
@@ -664,17 +661,10 @@ function EditPanel({
         onChangeText={setDescription}
         multiline
       />
-      <LabeledInput
-        label="Raw STEP arguments"
-        value={rawArgs}
-        onChangeText={setRawArgs}
-        multiline
-        mono
-      />
       <Button
         label="Save Entity"
         primary
-        onPress={() => onSave({ description, name, rawArgs, type })}
+        onPress={() => onSave({ description, name, rawArgs: "", type })}
       />
     </PanelShell>
   );
@@ -3059,7 +3049,7 @@ function ReferencesPanel({
         eyebrow={`Auswahl #${selectedId}`}
         title="Referenzen"
         description={`${outgoing.length.toLocaleString()} ausgehend / ${incoming.length.toLocaleString()} eingehend`}
-        meta={<Badge tone="neutral">STEP</Badge>}
+        meta={<Badge tone="neutral">Fragments</Badge>}
       />
       <InfoSection title="Outgoing">
         {outgoing.length ? (

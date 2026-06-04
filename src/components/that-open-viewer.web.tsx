@@ -1,9 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import {
-    convertIfcToFragmentsInWorker,
-    type ConvertIfcToFragmentsProgress,
-} from "../ifc/fragmentConversionWorker";
 import { buildNativeDocumentFromFragments } from "../ifc/fragmentDocument";
 import type {
     ThatOpenViewerModel,
@@ -70,7 +66,7 @@ export default function ThatOpenViewer({
   const showDeferredActiveModel =
     !activeModelLoaded && Boolean(activeModelDeferredReason);
   const largeLoadWarning = useMemo(
-    () => describeLargeIfcWarning(models),
+    () => describeLargeFragmentsWarning(models),
     [models],
   );
   const modelLoadSignature = useMemo(
@@ -78,7 +74,7 @@ export default function ThatOpenViewer({
       models
         .map(
           (model) =>
-            `${model.documentId}:${model.revision}:${model.ifcBytes?.byteLength ?? model.ifcText.length}`,
+            `${model.documentId}:${model.revision}:${model.fragmentsBuffer?.byteLength ?? 0}`,
         )
         .join("|"),
     [models],
@@ -183,7 +179,7 @@ export default function ThatOpenViewer({
     }
     let cancelled = false;
     setError("");
-    setStatus("Converting IFC with ThatOpen...");
+    setStatus("Loading Fragments with ThatOpen...");
     if (largeLoadWarning && lastWarningRef.current !== largeLoadWarning) {
       lastWarningRef.current = largeLoadWarning;
       onLogRef.current?.(
@@ -210,7 +206,7 @@ export default function ThatOpenViewer({
           }
           const message = stringifyError(reason);
           setError(message);
-          setStatus("ThatOpen IFC load failed");
+          setStatus("ThatOpen Fragments load failed");
           onLogRef.current?.(`viewer.loadError(${JSON.stringify(message)});`);
         });
     });
@@ -424,18 +420,17 @@ export default function ThatOpenViewer({
   );
 }
 
-const LARGE_IFC_WARNING_BYTES = 120 * 1024 * 1024;
+const LARGE_FRAGMENTS_WARNING_BYTES = 120 * 1024 * 1024;
 
-function describeLargeIfcWarning(models: ThatOpenViewerModel[]) {
+function describeLargeFragmentsWarning(models: ThatOpenViewerModel[]) {
   const estimatedBytes = models.reduce(
-    (total, model) =>
-      total + (model.ifcBytes?.byteLength ?? model.ifcText.length),
+    (total, model) => total + (model.fragmentsBuffer?.byteLength ?? 0),
     0,
   );
-  if (estimatedBytes < LARGE_IFC_WARNING_BYTES) {
+  if (estimatedBytes < LARGE_FRAGMENTS_WARNING_BYTES) {
     return "";
   }
-  return `Große IFC-Auswahl (${formatByteSize(estimatedBytes)}): Viewer lädt alle sichtbaren Modelle vollständig; Konvertierung kann spürbar dauern.`;
+  return `Große Fragments-Auswahl (${formatByteSize(estimatedBytes)}): Viewer lädt alle sichtbaren Modelle vollständig.`;
 }
 
 function formatByteSize(bytes: number) {
@@ -443,15 +438,6 @@ function formatByteSize(bytes: number) {
     return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
   }
   return `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
-}
-
-function formatFragmentConversionProgress(
-  progress: ConvertIfcToFragmentsProgress,
-) {
-  const percent = Math.round(progress.progress * 100);
-  const process = progress.process ? ` ${progress.process}` : "";
-  const state = progress.state ? ` ${progress.state}` : "";
-  return `Converting ${progress.fileName}${process}${state} ${percent}%`;
 }
 
 async function createThatOpenRuntime(
@@ -578,6 +564,7 @@ async function createThatOpenRuntime(
     documentId: string;
     fileName: string;
     fitItems?: Set<number>;
+    geometryLocalIds: Set<number>;
     loadKey: string;
     model: import("@thatopen/fragments").FragmentsModel;
   };
@@ -713,7 +700,7 @@ async function createThatOpenRuntime(
     await fragments.resetHighlight().catch(() => undefined);
 
     for (const nextModel of nextModels) {
-      const loadKey = `${nextModel.documentId}:${nextModel.revision}:${nextModel.ifcBytes?.byteLength ?? nextModel.ifcText.length}`;
+      const loadKey = `${nextModel.documentId}:${nextModel.revision}:${nextModel.fragmentsBuffer?.byteLength ?? 0}`;
       const current = modelsByDocumentId.get(nextModel.documentId);
       if (current?.loadKey === loadKey) {
         continue;
@@ -725,30 +712,28 @@ async function createThatOpenRuntime(
         documentIdByModelId.delete(current.model.modelId);
       }
 
-      callbacks.onStatus(
-        `Converting ${nextModel.fileName} to ThatOpen fragments in worker...`,
-      );
       const modelId = `${toModelId(nextModel.fileName)}-${++loadCounter}`;
-      const converted = await convertIfcToFragmentsInWorker(
-        {
-          bytes: nextModel.ifcFile ? null : nextModel.ifcBytes,
-          file: nextModel.ifcFile,
-          fileName: nextModel.fileName,
-          text:
-            nextModel.ifcFile || nextModel.ifcBytes ? "" : nextModel.ifcText,
-          wasmPath: resolvePublicAssetUrl("wasm/"),
-        },
-        (progress) =>
-          callbacks.onStatus(formatFragmentConversionProgress(progress)),
-      );
+      const fragmentData = nextModel.fragmentsBuffer;
+      if (!fragmentData) {
+        callbacks.onStatus(`Fragments for ${nextModel.fileName} are pending...`);
+        callbacks.onLog(
+          `viewer.fragments.missing({ file: '${nextModel.fileName}' });`,
+        );
+        continue;
+      }
+      callbacks.onStatus(`Loading ${nextModel.fileName} fragments...`);
       callbacks.onLog(
-        `viewer.convert({ engine: 'worker', file: '${nextModel.fileName}', ms: ${Math.round(converted.elapsedMs)} });`,
+        `viewer.fragments.useCanonical({ file: '${nextModel.fileName}', bytes: ${fragmentData.byteLength} });`,
       );
-      const model = await fragments.core.load(converted.fragments, {
+      const model = await fragments.core.load(fragmentData.slice(0), {
         camera: world.camera.three,
         modelId,
       });
-      const fitModelItems = await getCameraFitLocalIds(model);
+      const geometryLocalIds = await getRenderableLocalIds(model);
+      const fitModelItems = await getCameraFitLocalIds(
+        model,
+        geometryLocalIds,
+      );
       const fitItems =
         fitModelItems.ignored > 0 ? fitModelItems.localIds : undefined;
       if (fitModelItems.ignored > 0) {
@@ -762,6 +747,7 @@ async function createThatOpenRuntime(
         documentId: nextModel.documentId,
         fileName: nextModel.fileName,
         fitItems,
+        geometryLocalIds,
         loadKey,
         model,
       });
@@ -775,7 +761,7 @@ async function createThatOpenRuntime(
       await fit();
     }
     callbacks.onStatus(
-      `ThatOpen loaded ${nextModels.length.toLocaleString()} IFC model(s)`,
+      `ThatOpen loaded ${nextModels.length.toLocaleString()} Fragments model(s)`,
     );
     const activeDocumentId = callbacks.getActiveDocumentId();
     await highlight(
@@ -794,6 +780,16 @@ async function createThatOpenRuntime(
       return;
     }
     await fragments.resetHighlight();
+    if (!loaded.geometryLocalIds.has(localId)) {
+      await fragments.core.update(true);
+      if (options?.updateGizmo ?? true) {
+        await moveGizmo.updateSelection(0, null);
+      }
+      callbacks.onLog(
+        `viewer.highlightSkipped({ file: '${loaded.fileName}', id: ${localId}, reason: 'no-renderable-geometry' });`,
+      );
+      return;
+    }
     await fragments.highlight(selectionMaterial, {
       [loaded.model.modelId]: new Set([localId]),
     });
@@ -821,6 +817,15 @@ async function createThatOpenRuntime(
   async function focusSelected(documentId: string, localId: number) {
     const loaded = modelsByDocumentId.get(documentId);
     if (!loaded || !Number.isFinite(localId) || localId <= 0) {
+      return;
+    }
+    if (!loaded.geometryLocalIds.has(localId)) {
+      await fragments.resetHighlight().catch(() => undefined);
+      await fragments.core.update(true).catch(() => undefined);
+      await fit();
+      callbacks.onLog(
+        `viewer.camera.centerSkipped({ file: '${loaded.fileName}', id: ${localId}, reason: 'no-renderable-geometry' });`,
+      );
       return;
     }
     await highlight(documentId, localId).catch(() => undefined);
@@ -858,12 +863,19 @@ async function createThatOpenRuntime(
     selectedId: number,
     summary: string,
   ) {
+    await fragments.core.editor.save(loaded.model.modelId).catch((reason) => {
+      callbacks.onLog(
+        `fragments.saveWarning({ file: '${loaded.fileName}', message: ${JSON.stringify(stringifyError(reason))} });`,
+      );
+    });
+    const fragmentsBuffer = await loaded.model.getBuffer(false);
     const document = await buildNativeDocumentFromFragments(loaded.model, {
       fileName: loaded.fileName,
     });
     callbacks.onFragmentsModelChanged({
       document,
       documentId: loaded.documentId,
+      fragmentsBuffer,
       selectedId,
       summary,
     });
@@ -946,6 +958,7 @@ async function createThatOpenRuntime(
     });
     canvas.removeEventListener("click", selectFromPointer, { capture: true });
     resizeObserver.disconnect();
+    await moveGizmo.dispose().catch(() => undefined);
     for (const loaded of modelsByDocumentId.values()) {
       loaded.model.object.removeFromParent();
       await loaded.model.dispose().catch(() => undefined);
@@ -953,7 +966,6 @@ async function createThatOpenRuntime(
     modelsByDocumentId.clear();
     documentIdByModelId.clear();
     fragments.dispose();
-    moveGizmo.dispose();
     viewCube.dispose();
     coordinateCursor.dispose();
     components.dispose();
@@ -1026,6 +1038,7 @@ interface FitFragmentModelLike {
       relationsDefault?: { attributes: boolean; relations: boolean };
     },
   ): Promise<unknown[]>;
+  getItemsIdsWithGeometry(): Promise<number[]>;
   getLocalIds(): Promise<number[]>;
 }
 
@@ -1241,7 +1254,7 @@ function createMoveGizmo(
   controls.addEventListener("mouseUp", onMouseUp);
   controls.addEventListener("change", onChange);
 
-  const dispose = () => {
+  const dispose = async () => {
     controls.removeEventListener("dragging-changed", onDraggingChanged);
     controls.removeEventListener("mouseDown", onMouseDown);
     controls.removeEventListener("mouseUp", onMouseUp);
@@ -1249,7 +1262,7 @@ function createMoveGizmo(
     controls.detach();
     controls.dispose();
     helper.removeFromParent();
-    void disposeEditable(true);
+    await disposeEditable(true);
   };
 
   return {
@@ -1290,6 +1303,14 @@ async function createFragmentBodyElement(
         attributes: {
           _category: { value: normalizeFragmentCategory(options.type) },
           _guid: { value: createFragmentGuid() },
+          IFCnativeParentId: {
+            value: Number.isFinite(options.parentId) ? options.parentId : 0,
+            type: "IFCINTEGER",
+          },
+          IFCnativePlacementMode: {
+            value: options.placementMode ?? "parent",
+            type: "IFCLABEL",
+          },
           Name: { value: options.name || "Fragment Body", type: "IFCLABEL" },
           ObjectType: {
             value: options.tag || "IFCnative Fragment Body",
@@ -1757,8 +1778,20 @@ async function readItemData(
   return dataByModel?.[modelId]?.[0];
 }
 
-async function getCameraFitLocalIds(model: FitFragmentModelLike) {
-  const localIds = await model.getLocalIds().catch(() => []);
+async function getRenderableLocalIds(model: FitFragmentModelLike) {
+  try {
+    const geometryLocalIds = await model.getItemsIdsWithGeometry();
+    return new Set(geometryLocalIds);
+  } catch {
+    return new Set(await model.getLocalIds().catch(() => []));
+  }
+}
+
+async function getCameraFitLocalIds(
+  model: FitFragmentModelLike,
+  renderableLocalIds: Set<number>,
+) {
+  const localIds = [...renderableLocalIds];
   const fitLocalIds = new Set<number>();
   let ignored = 0;
   const chunkSize = 1500;

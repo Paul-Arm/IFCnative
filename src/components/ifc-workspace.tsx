@@ -32,7 +32,6 @@ import {
 
 import {
     addNativeApproval,
-    addNativeBodyElement,
     addNativeClassification,
     addNativeConstraintObjective,
     addNativeDocumentReference,
@@ -57,21 +56,24 @@ import {
     applyDiagnosticObjectInfo,
     applyDiagnosticProcedureFromCatalog,
     buildObjectInfoIndex,
+    buildDocumentFromFragmentBuffer,
+    convertIfcToFragmentsInWorker,
     createNativeSampleDocument,
     duplicateNativePropertySet,
+    exportIfcFromFragments,
     findCatalogObject,
     getNativePlacement,
     getNextNativeEntityId,
-    parseNativeIfcFileInWorker,
     removeNativeEntity,
     removeNativePropertyFromSet,
     removeNativePropertySet,
     removeNativeRelationship,
+    resolveIfcPublicAssetUrl,
     resolveNativeMovableProductId,
     serializeNativeIfcDocument,
     setDiagnosticObjectiveReferences as setNativeDiagnosticObjectiveReferences,
-    splitTopLevel,
     suggestCatalogObjectForEntity,
+    updateFragmentEntityAttributes,
     updateNativeEntity,
     updateNativePlacement,
     updateNativePlacementRotation,
@@ -82,10 +84,10 @@ import {
     validateObjectInfoIndex,
     viewerWorldDeltaToIfcPlacementDelta,
     viewerWorldDirectionToIfcPlacementDirection,
-    viewerWorldPointToIfcPlacementPoint,
     type CatalogObjectType,
     type CatalogValidationFinding,
     type DiagnosticObjectInfoDraft,
+    type FragmentEntityEditResult,
     type IfcObjectCatalog,
     type NativeIfcDocument,
     type NativeIfcEntity,
@@ -162,6 +164,8 @@ interface WorkspaceDocumentSession {
   document: NativeIfcDocument;
   documentText: string;
   documentTextDirty: boolean;
+  fragmentsBuffer: ArrayBuffer | null;
+  fragmentsDirty: boolean;
   graphAnchorId: number;
   graphCollapsed: Set<number>;
   graphExpanded: Set<number>;
@@ -171,12 +175,10 @@ interface WorkspaceDocumentSession {
   sourceIfcBytes: ArrayBuffer | null;
   sourceIfcFile: File | null;
   treeExpanded: Set<number>;
-  viewerModelBytes: ArrayBuffer | null;
   viewerModelDeferredReason: string;
-  viewerModelFile: File | null;
+  viewerModelFragments: ArrayBuffer | null;
   viewerModelLoadRequested: boolean;
   viewerModelRevision: number;
-  viewerModelText: string;
 }
 
 let nextWorkspaceDocumentId = 0;
@@ -186,6 +188,7 @@ function createWorkspaceDocumentSession(
   options?: {
     bytes?: ArrayBuffer | null;
     file?: File | null;
+    fragments?: ArrayBuffer | null;
     graphPositions?: Map<number, Point>;
     id?: string;
     selectedId?: number;
@@ -196,8 +199,10 @@ function createWorkspaceDocumentSession(
 ): WorkspaceDocumentSession {
   const sourceBytes = options?.bytes ?? null;
   const sourceFile = options?.file ?? null;
+  const fragmentsBuffer = options?.fragments ?? null;
   const text =
-    options?.text ?? (sourceBytes ? "" : serializeNativeIfcDocument(document));
+    options?.text ??
+    (sourceBytes || fragmentsBuffer ? "" : serializeNativeIfcDocument(document));
   const viewerModelLoadRequested = options?.viewerModelLoadRequested ?? true;
   const viewerModelDeferredReason = "";
   const fallbackId =
@@ -209,6 +214,8 @@ function createWorkspaceDocumentSession(
     document,
     documentText: text,
     documentTextDirty: false,
+    fragmentsBuffer,
+    fragmentsDirty: false,
     graphAnchorId: selectedId,
     graphCollapsed: new Set(),
     graphExpanded: new Set(),
@@ -216,15 +223,13 @@ function createWorkspaceDocumentSession(
     graphPositions: options?.graphPositions ?? new Map(),
     id: options?.id ?? createWorkspaceDocumentId(document.fileName),
     selectedId,
-    sourceIfcBytes: sourceBytes,
+    sourceIfcBytes: fragmentsBuffer ? null : sourceBytes,
     sourceIfcFile: sourceFile,
     treeExpanded: new Set(),
-    viewerModelBytes: sourceBytes,
     viewerModelDeferredReason,
-    viewerModelFile: sourceFile,
+    viewerModelFragments: fragmentsBuffer,
     viewerModelLoadRequested,
     viewerModelRevision: options?.viewerModelRevision ?? 0,
-    viewerModelText: text,
   };
 }
 
@@ -445,14 +450,12 @@ export default function IfcWorkspace() {
   const viewerModels = useMemo(
     () =>
       documentSessions.flatMap((session) =>
-        session.viewerModelLoadRequested
+        session.viewerModelLoadRequested && session.viewerModelFragments
           ? [
               {
                 documentId: session.id,
                 fileName: session.document.fileName,
-                ifcBytes: session.viewerModelBytes,
-                ifcFile: session.viewerModelFile,
-                ifcText: session.viewerModelText,
+                fragmentsBuffer: session.viewerModelFragments,
                 revision: session.viewerModelRevision,
                 selectedId: session.selectedId,
                 selectedName: session.document.entityById.get(
@@ -493,6 +496,77 @@ export default function IfcWorkspace() {
       `${new Date().toLocaleTimeString()}  ${code}`,
     ]);
   };
+
+  useEffect(() => {
+    if (
+      !activeSession.viewerModelLoadRequested ||
+      (!activeSession.fragmentsDirty && activeSession.fragmentsBuffer)
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    const sessionId = activeSession.id;
+    const sourceDocument = activeSession.document;
+    const fileName = sourceDocument.fileName;
+    const ifcText = serializeNativeIfcDocument(sourceDocument);
+
+    logAction(`fragments.refresh.start({ file: '${fileName}' });`);
+    void convertIfcToFragmentsInWorker(
+      {
+        bytes: null,
+        file: null,
+        fileName,
+        text: ifcText,
+        wasmPath: resolveIfcPublicAssetUrl("wasm/"),
+      },
+      (progress) => {
+        if (!cancelled && progress.progress >= 1) {
+          logAction(`fragments.refresh.progress({ file: '${fileName}' });`);
+        }
+      },
+    )
+      .then((converted) => {
+        if (cancelled) {
+          return;
+        }
+        setDocumentSessions((current) =>
+          current.map((session) =>
+            session.id === sessionId && session.document === sourceDocument
+              ? {
+                  ...session,
+                  documentText: ifcText,
+                  documentTextDirty: true,
+                  fragmentsBuffer: converted.fragments,
+                  fragmentsDirty: false,
+                  sourceIfcBytes: null,
+                  viewerModelDeferredReason: "",
+                  viewerModelFragments: converted.fragments,
+                  viewerModelRevision: session.viewerModelRevision + 1,
+                }
+              : session,
+          ),
+        );
+        logAction(
+          `fragments.refresh.done({ file: '${fileName}', ms: ${Math.round(converted.elapsedMs)}, bytes: ${converted.fragments.byteLength} });`,
+        );
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          logAction(`fragments.refresh.error(${JSON.stringify(String(error))});`);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeSession.document,
+    activeSession.fragmentsBuffer,
+    activeSession.fragmentsDirty,
+    activeSession.id,
+    activeSession.viewerModelLoadRequested,
+  ]);
 
   const selectWorkspace = (id: string) => {
     const workspace =
@@ -566,10 +640,12 @@ export default function IfcWorkspace() {
     nextText?: string,
     nextBytes?: ArrayBuffer | null,
     nextFile?: File | null,
+    nextFragments?: ArrayBuffer | null,
   ) => {
     const session = createWorkspaceDocumentSession(next, {
       bytes: nextBytes,
       file: nextFile,
+      fragments: nextFragments,
       graphPositions: nextGraphPositions,
       selectedId: nextSelectedId,
       text: nextText,
@@ -641,30 +717,59 @@ export default function IfcWorkspace() {
           ...session,
           document: next,
           documentText: nextText ?? session.documentText,
-          documentTextDirty: options?.reloadViewer ? false : true,
+          documentTextDirty: true,
+          fragmentsBuffer: session.fragmentsBuffer,
+          fragmentsDirty: true,
           graphPositions: nextGraphPositions ?? session.graphPositions,
           selectedId: resolvedSelectedId,
           sourceIfcBytes: options?.reloadViewer ? null : session.sourceIfcBytes,
           sourceIfcFile: options?.reloadViewer ? null : session.sourceIfcFile,
-          viewerModelBytes: options?.reloadViewer
-            ? null
-            : session.viewerModelBytes,
           viewerModelDeferredReason: options?.reloadViewer
             ? session.viewerModelLoadRequested
               ? ""
               : session.viewerModelDeferredReason ||
                 "3D-Konvertierung pausiert."
             : session.viewerModelDeferredReason,
-          viewerModelFile: options?.reloadViewer
-            ? null
-            : session.viewerModelFile,
+          viewerModelFragments: session.viewerModelFragments,
           viewerModelLoadRequested: session.viewerModelLoadRequested,
-          viewerModelRevision: options?.reloadViewer
-            ? session.viewerModelRevision + 1
-            : session.viewerModelRevision,
-          viewerModelText: nextText ?? session.viewerModelText,
+          viewerModelRevision: session.viewerModelRevision,
         };
       }),
+    );
+    if (log) {
+      logAction(log);
+    }
+  };
+
+  const commitFragmentDocument = (
+    result: FragmentEntityEditResult,
+    nextSelectedId: number | undefined,
+    log?: string,
+  ) => {
+    const committedSessionId = activeSession.id;
+    const next = result.document;
+    const resolvedSelectedId = next.entityById.has(nextSelectedId ?? 0)
+      ? (nextSelectedId as number)
+      : (next.spatialRoots[0]?.id ?? next.entities[0]?.id ?? selectedId);
+    setDocumentSessions((current) =>
+      current.map((session) =>
+        session.id === committedSessionId
+          ? {
+              ...session,
+              document: next,
+              documentText: "",
+              documentTextDirty: true,
+              fragmentsBuffer: result.fragmentsBuffer,
+              fragmentsDirty: false,
+              selectedId: resolvedSelectedId,
+              sourceIfcBytes: null,
+              sourceIfcFile: null,
+              viewerModelDeferredReason: "",
+              viewerModelFragments: result.fragmentsBuffer,
+              viewerModelRevision: session.viewerModelRevision + 1,
+            }
+          : session,
+      ),
     );
     if (log) {
       logAction(log);
@@ -770,6 +875,42 @@ export default function IfcWorkspace() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [activeSession, selectedId, structureMode]);
 
+  const convertIfcAssetToFragments = async (asset: {
+    file: File;
+    name: string;
+  }) => {
+    const converted = await convertIfcToFragmentsInWorker(
+      {
+        file: asset.file,
+        fileName: asset.name,
+        wasmPath: resolveIfcPublicAssetUrl("wasm/"),
+      },
+      (progress) => {
+        if (progress.progress >= 1) {
+          logAction(`ui.importFragments.progress({ file: '${asset.name}' });`);
+        }
+      },
+    );
+    logAction(
+      `ui.importFragments.convert({ file: '${asset.name}', ms: ${Math.round(converted.elapsedMs)}, bytes: ${converted.fragments.byteLength} });`,
+    );
+    return converted.fragments;
+  };
+
+  const indexFragmentsAsset = async (
+    fileName: string,
+    fragmentsBuffer: ArrayBuffer,
+  ) => {
+    const indexed = await buildDocumentFromFragmentBuffer(
+      fragmentsBuffer.slice(0),
+      fileName,
+    );
+    logAction(
+      `ui.importFragments.index({ file: '${fileName}', ms: ${Math.round(indexed.elapsedMs)} });`,
+    );
+    return indexed.document;
+  };
+
   const openIfc = async () => {
     try {
       const asset = await pickIfcFile();
@@ -778,17 +919,22 @@ export default function IfcWorkspace() {
       }
       setLoadingIfcName(asset.name);
       logAction(
-        `ui.openIfc.start({ file: '${asset.name}', parser: 'worker' });`,
+        `ui.openIfc.start({ file: '${asset.name}', importer: 'fragments' });`,
       );
-      const parsed = await parseNativeIfcFileInWorker(asset.file, asset.name);
+      const fragmentsBuffer = await convertIfcAssetToFragments(asset);
+      const fragmentDocument = await indexFragmentsAsset(
+        asset.name,
+        fragmentsBuffer,
+      );
       const session = replaceDocument(
-        parsed.document,
+        fragmentDocument,
         undefined,
-        `ui.openIfc({ file: '${asset.name}', parser: 'worker', ms: ${Math.round(parsed.elapsedMs)} });`,
+        `ui.openIfc({ file: '${asset.name}', importer: 'fragments' });`,
         undefined,
-        undefined,
-        parsed.bytes,
+        "",
+        null,
         asset.file,
+        fragmentsBuffer,
       );
       rememberRecentIfc(session, "opened", asset.file);
     } catch (error) {
@@ -812,15 +958,20 @@ export default function IfcWorkspace() {
       logAction(`ui.addIfc.start({ files: ${assets.length} });`);
       const nextSessions: WorkspaceDocumentSession[] = [];
       for (const asset of assets) {
-        const parsed = await parseNativeIfcFileInWorker(asset.file, asset.name);
-        const session = createWorkspaceDocumentSession(parsed.document, {
-          bytes: parsed.bytes,
+        const fragmentsBuffer = await convertIfcAssetToFragments(asset);
+        const fragmentDocument = await indexFragmentsAsset(
+          asset.name,
+          fragmentsBuffer,
+        );
+        const session = createWorkspaceDocumentSession(fragmentDocument, {
           file: asset.file,
+          fragments: fragmentsBuffer,
+          text: "",
         });
         nextSessions.push(session);
         rememberRecentIfc(session, "added", asset.file);
         logAction(
-          `ui.addIfc.file({ file: '${asset.name}', parser: 'worker', ms: ${Math.round(parsed.elapsedMs)} });`,
+          `ui.addIfc.file({ file: '${asset.name}', importer: 'fragments' });`,
         );
       }
       startTransition(() => {
@@ -958,30 +1109,55 @@ export default function IfcWorkspace() {
     );
   };
 
-  const loadSample = () => {
+  const loadSample = async () => {
+    const sample = createNativeSampleDocument();
+    const sampleText = serializeNativeIfcDocument(sample);
+    const converted = await convertIfcToFragmentsInWorker({
+      fileName: sample.fileName,
+      text: sampleText,
+      wasmPath: resolveIfcPublicAssetUrl("wasm/"),
+    });
+    const fragmentDocument = await indexFragmentsAsset(
+      sample.fileName,
+      converted.fragments,
+    );
     const session = replaceDocument(
-      createNativeSampleDocument(),
+      fragmentDocument,
       undefined,
-      "ui.loadSample('IFCnative Builder Sample.ifc');",
+      `ui.loadSample({ file: '${sample.fileName}', fragments: true, ms: ${Math.round(converted.elapsedMs)} });`,
+      undefined,
+      "",
+      null,
+      null,
+      converted.fragments,
     );
     rememberRecentIfc(session, "sample");
   };
 
   const exportIfc = async () => {
-    const contents: BlobPart = documentTextDirty
-      ? serializeNativeIfcDocument(document)
-      : documentText ||
-        activeSession.sourceIfcBytes ||
-        serializeNativeIfcDocument(document);
+    const exportResult = exportIfcFromFragments({
+      document,
+      documentText,
+      documentTextDirty,
+      fragmentsBuffer: activeSession.fragmentsBuffer,
+      fragmentsDirty: activeSession.fragmentsDirty,
+      sourceIfcBytes: activeSession.sourceIfcBytes,
+      sourceIfcFile: activeSession.sourceIfcFile,
+    });
+    for (const diagnostic of exportResult.diagnostics) {
+      logAction(`ui.exportIfc.diagnostic(${JSON.stringify(diagnostic)});`);
+    }
     const fileName = document.fileName.replace(/\.ifc$/i, "") || "IFCnative";
-    const blob = new Blob([contents], { type: "application/x-step" });
+    const blob = new Blob([exportResult.contents], { type: "application/x-step" });
     const url = URL.createObjectURL(blob);
     const anchor = globalThis.document.createElement("a");
     anchor.href = url;
     anchor.download = `${fileName}.ifc`;
     anchor.click();
     URL.revokeObjectURL(url);
-    logAction(`ui.exportIfc({ file: '${fileName}.ifc' });`);
+    logAction(
+      `ui.exportIfc({ file: '${fileName}.ifc', source: '${exportResult.source}' });`,
+    );
   };
 
   useEffect(() => {
@@ -1044,7 +1220,7 @@ export default function IfcWorkspace() {
           }
           break;
         case "load-sample":
-          loadSample();
+          void loadSample();
           break;
         case "import-catalog":
           if (!catalogImporting) {
@@ -1081,44 +1257,53 @@ export default function IfcWorkspace() {
     });
   }, [catalog, catalogImporting, closedMosaicIds, desktopApi, loadingIfcName]);
 
-  const saveSelectedEdit = (draft: EntityEditDraft) => {
-    const next = updateNativeEntity(document, selectedId, {
-      args: splitTopLevel(draft.rawArgs),
-      description: draft.description,
-      name: draft.name,
-      type: draft.type,
-    });
-    commitDocument(
-      next,
-      selectedId,
-      `Edit #${selectedId} ${draft.type}`,
-      `saveEdit({ id: ${selectedId}, class: '${draft.type}' });`,
-      undefined,
-      { reloadViewer: true },
-    );
+  const saveSelectedEdit = async (draft: EntityEditDraft) => {
+    if (!activeSession.fragmentsBuffer || activeSession.fragmentsDirty) {
+      logAction(
+        `fragments.editSkipped({ id: ${selectedId}, reason: 'fragments-pending' });`,
+      );
+      return;
+    }
+
+    try {
+      const result = await updateFragmentEntityAttributes({
+        edit: {
+          description: draft.description,
+          localId: selectedId,
+          name: draft.name,
+          type: draft.type,
+        },
+        fileName: document.fileName,
+        fragmentsBuffer: activeSession.fragmentsBuffer,
+      });
+      commitFragmentDocument(
+        result,
+        selectedId,
+        `fragments.saveEdit({ id: ${selectedId}, class: '${draft.type}', ms: ${Math.round(result.elapsedMs)}, bytes: ${result.fragmentsBuffer.byteLength} });`,
+      );
+      if (draft.rawArgs.trim()) {
+        logAction(
+          `fragments.rawArgsIgnored({ id: ${selectedId}, reason: 'step-args-are-export-only' });`,
+        );
+      }
+    } catch (error) {
+      logAction(`fragments.editError(${JSON.stringify(String(error))});`);
+    }
   };
 
   const addBodyElement = (options: BodyElementDraft) => {
     const parentId = options.parentId ?? selectedId;
-    const addedId = getNextNativeEntityId(document);
-    const nativeOptions = toNativeBodyElementOptions({
-      ...options,
-      parentId,
+    setFragmentBodyCreateRequest({
+      documentId: activeSession.id,
+      nonce: Date.now(),
+      options: {
+        ...options,
+        parentId,
+      },
+      selectedId: parentId,
     });
-    const next = addNativeBodyElement(document, {
-      ...nativeOptions,
-    });
-    setFragmentBodyCreateRequest(null);
-    commitDocument(
-      next,
-      addedId,
-      `Create ${options.type} '${options.name}' under #${parentId}`,
-      `builder.createBodyElement({ class: '${options.type}', name: ${JSON.stringify(options.name)}, parentId: ${parentId}, id: ${addedId}, profile: '${options.profile ?? "rectangle"}', width: ${options.width}, depth: ${options.depth}, height: ${options.height} });`,
-      undefined,
-      { reloadViewer: true },
-    );
     logAction(
-      `viewer.reloadForNativeBody({ id: ${addedId}, parentId: ${parentId}, ifcX: ${nativeOptions.x}, ifcY: ${nativeOptions.y}, ifcZ: ${nativeOptions.z} });`,
+      `fragments.createBody.request({ parentId: ${parentId}, class: '${options.type}', name: ${JSON.stringify(options.name)}, profile: '${options.profile ?? "rectangle"}', width: ${options.width}, depth: ${options.depth}, height: ${options.height} });`,
     );
   };
 
@@ -1894,6 +2079,8 @@ export default function IfcWorkspace() {
   };
 
   const applyFragmentsModelChange = (change: ViewerFragmentsModelChange) => {
+    setFragmentBodyCreateRequest(null);
+    setFragmentBodyEditRequest(null);
     setDocumentSessions((current) =>
       current.map((session) => {
         if (session.id !== change.documentId) {
@@ -1907,8 +2094,16 @@ export default function IfcWorkspace() {
         return {
           ...session,
           document: change.document,
+          documentText: "",
           documentTextDirty: true,
+          fragmentsBuffer: change.fragmentsBuffer,
+          fragmentsDirty: false,
           selectedId: nextSelectedId,
+          sourceIfcBytes: null,
+          sourceIfcFile: null,
+          viewerModelDeferredReason: "",
+          viewerModelFragments: change.fragmentsBuffer,
+          viewerModelRevision: session.viewerModelRevision + 1,
         };
       }),
     );
@@ -1982,6 +2177,10 @@ export default function IfcWorkspace() {
           ? {
               ...session,
               viewerModelDeferredReason: "",
+              viewerModelFragments:
+                session.fragmentsDirty || !session.fragmentsBuffer
+                  ? session.viewerModelFragments
+                  : session.fragmentsBuffer,
               viewerModelLoadRequested: true,
               viewerModelRevision: session.viewerModelRevision + 1,
             }
@@ -2578,7 +2777,7 @@ export default function IfcWorkspace() {
               label="Hinzufügen"
               onPress={() => void addIfcFiles()}
             />
-            <Button label="Beispiel" onPress={loadSample} />
+            <Button label="Beispiel" onPress={() => void loadSample()} />
           </div>
           <div className="mx-1 h-5 w-px bg-border/70" />
           <div className="flex items-center gap-1">
@@ -2778,29 +2977,6 @@ function formatCoordinate(value: number) {
   }
   const rounded = Math.round(value * 1000) / 1000;
   return String(Object.is(rounded, -0) ? 0 : rounded);
-}
-
-function toNativeBodyElementOptions(options: BodyElementDraft) {
-  const ifcPoint = viewerWorldPointToIfcPlacementPoint({
-    x: readBodyCoordinate(options.x),
-    y: readBodyCoordinate(options.y),
-    z: readBodyCoordinate(options.z),
-  });
-  return {
-    ...options,
-    x: formatCoordinate(ifcPoint.x),
-    y: formatCoordinate(ifcPoint.y),
-    z: formatCoordinate(ifcPoint.z),
-  };
-}
-
-function readBodyCoordinate(value: string | undefined) {
-  const numeric = Number(
-    String(value ?? "")
-      .trim()
-      .replace(",", "."),
-  );
-  return Number.isFinite(numeric) ? numeric : 0;
 }
 
 function parseCoordinateClipboardText(
