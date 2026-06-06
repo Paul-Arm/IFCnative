@@ -1,11 +1,28 @@
 <UserControl x:Class="IFCnative.NativeWindows.Views.ConsolePanelView"
              xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-  <Grid RowDefinitions="Auto,*" Margin="8" RowSpacing="8">
-    <TextBlock Classes="sectionTitle" Text="Console" />
-    <ListBox Grid.Row="1"
-             Classes="compact"
+  <Grid RowDefinitions="Auto,Auto,*" Margin="8" RowSpacing="8">
+    <Grid ColumnDefinitions="*,Auto">
+      <TextBlock Classes="sectionTitle" Text="Console" />
+      <TextBlock Grid.Column="1"
+                 Classes="caption"
+                 VerticalAlignment="Center"
+                 Text="copyable" />
+    </Grid>
+    <TextBox Grid.Row="1"
+             MinHeight="42"
              FontFamily="Consolas, Cascadia Mono, monospace"
-             ItemsSource="{Binding Lines}" />
+             IsReadOnly="True"
+             AcceptsReturn="True"
+             TextWrapping="Wrap"
+             Text="{Binding CurrentStatus, Mode=OneWay}" />
+    <TextBox Grid.Row="2"
+             FontFamily="Consolas, Cascadia Mono, monospace"
+             IsReadOnly="True"
+             AcceptsReturn="True"
+             TextWrapping="NoWrap"
+             ScrollViewer.HorizontalScrollBarVisibility="Auto"
+             ScrollViewer.VerticalScrollBarVisibility="Auto"
+             Text="{Binding LogText, Mode=OneWay}" />
   </Grid>
 </UserControl>

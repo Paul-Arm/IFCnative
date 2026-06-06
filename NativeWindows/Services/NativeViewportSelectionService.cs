@@ -19,6 +19,6 @@ public static class NativeViewportSelectionService
         return new NativeViewportMeshSelection(
             mesh.ProductSourceId,
             mesh.PrimitiveSourceId,
-            $"Selected product #{mesh.ProductSourceId} from native mesh #{mesh.PrimitiveSourceId}. {backendStatus}");
+            $"Selected product #{mesh.ProductSourceId} from mesh #{mesh.PrimitiveSourceId}. {backendStatus}");
     }
 }

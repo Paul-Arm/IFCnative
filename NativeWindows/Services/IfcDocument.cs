@@ -1,4 +1,6 @@
 using IFCnative.NativeWindows.Models;
+using Xbim.Ifc;
+using Xbim.ModelGeometry.Scene;
 
 namespace IFCnative.NativeWindows.Services;
 
@@ -43,6 +45,12 @@ public sealed class IfcDocument
     public IfcMemoryModel MemoryModel { get; internal set; } = IfcMemoryModel.Empty;
 
     public IfcDiagnostics Diagnostics { get; } = new();
+
+    public IfcStore? XbimStore { get; internal set; }
+
+    public Xbim3DModelContext? XbimGeometryContext { get; internal set; }
+
+    public string GeometryBackendStatus { get; internal set; } = string.Empty;
 
     public string ToStepText()
     {

@@ -12,6 +12,7 @@ public sealed record IfcSelectionDetails(
     IfcPlacementDetails Placement,
     IReadOnlyList<string> Representations,
     IReadOnlyList<IfcPropertyDetails> PropertySets,
+    IReadOnlyList<IfcPropertySetTableDetails> PropertySetTables,
     IReadOnlyList<string> TypeAssignments,
     IReadOnlyList<string> Resources,
     IReadOnlyList<string> Units);

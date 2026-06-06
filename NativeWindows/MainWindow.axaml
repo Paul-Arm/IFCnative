@@ -46,7 +46,16 @@
             BorderThickness="0,1,0,0"
             Padding="10,6">
       <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
-        <TextBlock Classes="caption" Text="{Binding StatusText}" />
+        <Button Classes="statusLink"
+                Command="{Binding OpenLogCommand}"
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Stretch"
+                ToolTip.Tip="Open copyable log">
+          <TextBlock Classes="caption"
+                     Text="{Binding StatusText}"
+                     TextWrapping="NoWrap"
+                     TextTrimming="CharacterEllipsis" />
+        </Button>
         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12">
           <TextBlock Classes="caption" Text="{Binding ActiveSchema}" />
           <TextBlock Classes="caption" Text="{Binding ActiveEntityCount}" />

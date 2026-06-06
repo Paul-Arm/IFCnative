@@ -58,24 +58,104 @@
       </TabItem>
 
       <TabItem Header="Psets">
-        <Grid Margin="8" RowDefinitions="*,Auto" RowSpacing="8">
-          <ListBox Classes="compact"
-                   ItemsSource="{Binding PropertySets}"
-                   SelectedItem="{Binding SelectedProperty}">
-            <ListBox.ItemTemplate>
-              <DataTemplate>
-                <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" />
-              </DataTemplate>
-            </ListBox.ItemTemplate>
-          </ListBox>
-          <StackPanel Grid.Row="1" Spacing="6">
-            <TextBox Watermark="Value" Text="{Binding PropertyValue}" />
-            <WrapPanel>
-              <Button Classes="primary" Content="Save value" Command="{Binding SavePropertyCommand}" />
-              <Button Classes="ghost" Content="Common Pset" Command="{Binding AddCommonPsetCommand}" />
-              <Button Classes="ghost" Content="Base Qto" Command="{Binding AddBaseQtoCommand}" />
-            </WrapPanel>
-          </StackPanel>
+        <Grid Margin="8" RowDefinitions="Auto,*" RowSpacing="8">
+          <Border Classes="subtle" Padding="8">
+            <Grid ColumnDefinitions="*,Auto">
+              <StackPanel>
+                <TextBlock Classes="sectionTitle" Text="Psets &amp; Quantities" />
+                <TextBlock Classes="caption" Text="{Binding PsetSummary}" />
+              </StackPanel>
+              <WrapPanel Grid.Column="1" VerticalAlignment="Center">
+                <Button Classes="ghost" Content="Common Pset" Command="{Binding AddCommonPsetCommand}" />
+                <Button Classes="ghost" Content="Base Qto" Command="{Binding AddBaseQtoCommand}" />
+              </WrapPanel>
+            </Grid>
+          </Border>
+
+          <ScrollViewer Grid.Row="1">
+            <ItemsControl ItemsSource="{Binding PropertySetTables}">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <StackPanel Spacing="8" />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Border Classes="surface" BorderThickness="1,1,1,1" Padding="0">
+                    <Grid RowDefinitions="Auto,Auto,*">
+                      <Border Background="#20271F" BorderBrush="#3A4035" BorderThickness="0,0,0,1" Padding="8">
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                          <Border Background="#2F7D68" Padding="7,3" CornerRadius="4" VerticalAlignment="Center">
+                            <TextBlock FontSize="{DynamicResource FontSizeCaption}"
+                                       FontWeight="SemiBold"
+                                       Text="{Binding Kind}" />
+                          </Border>
+                          <TextBlock Grid.Column="1"
+                                     FontWeight="SemiBold"
+                                     Text="{Binding Name}"
+                                     TextTrimming="CharacterEllipsis"
+                                     VerticalAlignment="Center" />
+                          <TextBlock Grid.Column="2"
+                                     Classes="caption"
+                                     Text="{Binding Meta}"
+                                     VerticalAlignment="Center" />
+                        </Grid>
+                      </Border>
+
+                      <Grid Grid.Row="1"
+                            Background="#1B1F1A"
+                            ColumnDefinitions="72,1.15*,0.9*,1.45*,Auto"
+                            MinHeight="28">
+                        <TextBlock Margin="8,5" Classes="caption" Text="STEP" />
+                        <TextBlock Grid.Column="1" Margin="8,5" Classes="caption" Text="Name" />
+                        <TextBlock Grid.Column="2" Margin="8,5" Classes="caption" Text="Typ" />
+                        <TextBlock Grid.Column="3" Margin="8,5" Classes="caption" Text="Wert" />
+                        <TextBlock Grid.Column="4" Margin="8,5" Classes="caption" Text="Aktion" />
+                      </Grid>
+
+                      <ItemsControl Grid.Row="2" ItemsSource="{Binding Rows}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate>
+                            <Border BorderBrush="#343A30" BorderThickness="0,1,0,0" Padding="0">
+                              <Grid ColumnDefinitions="72,1.15*,0.9*,1.45*,Auto" MinHeight="38">
+                                <TextBlock Margin="8,0"
+                                           Classes="caption"
+                                           Text="{Binding StepId}"
+                                           VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="1"
+                                           Margin="8,0"
+                                           Text="{Binding Name}"
+                                           TextTrimming="CharacterEllipsis"
+                                           VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="2"
+                                           Margin="8,0"
+                                           Classes="caption"
+                                           Text="{Binding Type}"
+                                           TextTrimming="CharacterEllipsis"
+                                           VerticalAlignment="Center" />
+                                <TextBox Grid.Column="3"
+                                         Margin="4"
+                                         MinHeight="28"
+                                         Text="{Binding ValueDraft}"
+                                         IsEnabled="{Binding CanEdit}" />
+                                <Button Grid.Column="4"
+                                        Classes="primary"
+                                        Margin="4"
+                                        Padding="10,4"
+                                        Content="Save"
+                                        Command="{Binding SaveCommand}"
+                                        IsEnabled="{Binding CanEdit}" />
+                              </Grid>
+                            </Border>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </Grid>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
         </Grid>
       </TabItem>
 

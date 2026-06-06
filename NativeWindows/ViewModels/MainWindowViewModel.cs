@@ -144,7 +144,7 @@ public sealed class MainWindowViewModel : ReactiveViewModel
     private readonly IFileDialogService fileDialogs;
     private readonly NativeUserPreferencesStore preferencesStore;
     private readonly RecentFileStore recentFileStore = new();
-    private readonly IIfcGeometryBackend geometryBackend = new NativeMemoryGeometryBackend();
+    private readonly IIfcGeometryBackend geometryBackend = new XbimGeometryBackend();
     private NativeDockFactory? dockFactory;
     private IRootDock? dockLayout;
     private IfcDocumentSessionViewModel? activeSession;
@@ -188,6 +188,7 @@ public sealed class MainWindowViewModel : ReactiveViewModel
         IncreaseTextScaleCommand = ReactiveCommand.Create(IncreaseTextScale);
         DecreaseTextScaleCommand = ReactiveCommand.Create(DecreaseTextScale);
         ResetTextScaleCommand = ReactiveCommand.Create(ResetTextScale);
+        OpenLogCommand = ReactiveCommand.Create(OpenLog);
 
         ResetDockLayout();
         RefreshRecentFiles();
@@ -238,6 +239,8 @@ public sealed class MainWindowViewModel : ReactiveViewModel
 
     public ReactiveCommand<Unit, Unit> ResetTextScaleCommand { get; }
 
+    public ReactiveCommand<Unit, Unit> OpenLogCommand { get; }
+
     public string WindowTitle => ActiveSession is null ? "IFCnative" : $"IFCnative - {ActiveSession.FileName}";
 
     public double TextScale
@@ -261,7 +264,13 @@ public sealed class MainWindowViewModel : ReactiveViewModel
     public string StatusText
     {
         get => statusText;
-        private set => this.RaiseAndSetIfChanged(ref statusText, value);
+        private set
+        {
+            if (SetProperty(ref statusText, value))
+            {
+                Console.SetCurrentStatus(value);
+            }
+        }
     }
 
     public string ActiveSchema
@@ -357,6 +366,12 @@ public sealed class MainWindowViewModel : ReactiveViewModel
     public void ResetTextScale()
     {
         TextScale = 1.0;
+    }
+
+    public void OpenLog()
+    {
+        Console.Add($"status: {StatusText}");
+        ActivateDockable("console");
     }
 
     public async Task OpenPathAsync(string path)
@@ -684,13 +699,11 @@ public sealed class MainWindowViewModel : ReactiveViewModel
         try
         {
             var progress = new Progress<string>(message => StatusText = message);
-            var loaded = await IfcFileLoader.ReadAsync(path, progress);
-            StatusText = $"Parsing {loaded.FileName}...";
-            var parsed = await Task.Run(() => IfcStepParser.Parse(loaded.Text, loaded.FileName));
+            var parsed = await Task.Run(() => XbimIfcDocumentService.OpenPath(path, progress));
             AddSession(parsed, Path.GetFullPath(path));
             recentFileStore.Add(path);
             RefreshRecentFiles();
-            Log($"file.open('{Path.GetFileName(path)}')");
+            Log($"xbim.open('{Path.GetFileName(path)}')");
         }
         catch (Exception exception)
         {
@@ -733,17 +746,28 @@ public sealed class MainWindowViewModel : ReactiveViewModel
             return;
         }
 
-        IfcFileLoader.WriteText(path, session.Document.ToStepText(), session.Document.FileName);
+        var exportedStep = await Task.Run(() => XbimIfcDocumentService.NormalizeForExport(session.Document));
+        IfcFileLoader.WriteText(path, exportedStep, session.Document.FileName);
         StatusText = $"Exported {Path.GetFileName(path)}. {validation.Summary}.";
-        Log($"file.export('{Path.GetFileName(path)}')");
+        Log($"xbim.export('{Path.GetFileName(path)}')");
     }
 
     private void LoadSample()
     {
-        var sample = IfcStepParser.CreateSample();
+        var nativeSample = IfcStepParser.CreateSample();
+        var sample = nativeSample;
+        try
+        {
+            sample = XbimIfcDocumentService.OpenText(nativeSample.ToStepText(), nativeSample.FileName);
+        }
+        catch (Exception exception)
+        {
+            nativeSample.Diagnostics.Warn($"xBIM sample import failed; using native fixture only: {exception.Message}");
+        }
+
         AddSession(sample, sourcePath: null);
-        StatusText = "Loaded native sample IFC.";
-        Log("file.sample()");
+        StatusText = sample.XbimStore is null ? "Loaded native sample IFC fixture." : "Loaded xBIM sample IFC.";
+        Log(sample.XbimStore is null ? "file.sample.native()" : "xbim.sample()");
     }
 
     private void AddSession(IfcDocument document, string? sourcePath)
@@ -763,10 +787,22 @@ public sealed class MainWindowViewModel : ReactiveViewModel
             return;
         }
 
-        session.DraftSession.Stage(session.Document, draftDocument);
-        session.SetDocument(draftDocument, resetDraft: false);
+        IfcDocument synchronizedDraft;
+        try
+        {
+            synchronizedDraft = XbimIfcDocumentService.SynchronizeDocument(draftDocument);
+        }
+        catch (Exception exception)
+        {
+            StatusText = $"xBIM rejected the draft: {exception.Message}";
+            Log($"xbim.draft.reject({selectedId})");
+            return;
+        }
+
+        session.DraftSession.Stage(session.Document, synchronizedDraft);
+        session.SetDocument(synchronizedDraft, resetDraft: false);
         StatusText = message;
-        Log($"draft.stage({selectedId})");
+        Log($"xbim.draft.stage({selectedId})");
         RefreshForActiveDocument(selectedId);
     }
 
@@ -819,6 +855,41 @@ public sealed class MainWindowViewModel : ReactiveViewModel
     private void Log(string line)
     {
         Console.Add(line);
+    }
+
+    private void ActivateDockable(string id)
+    {
+        if (DockLayout is null)
+        {
+            return;
+        }
+
+        if (ActivateDockable(DockLayout, id))
+        {
+            this.RaisePropertyChanged(nameof(DockLayout));
+        }
+    }
+
+    private static bool ActivateDockable(IDock dock, string id)
+    {
+        foreach (var dockable in dock.VisibleDockables ?? [])
+        {
+            if (string.Equals(dockable.Id, id, StringComparison.OrdinalIgnoreCase))
+            {
+                dock.ActiveDockable = dockable;
+                dock.FocusedDockable = dockable;
+                return true;
+            }
+
+            if (dockable is IDock childDock && ActivateDockable(childDock, id))
+            {
+                dock.ActiveDockable = dockable;
+                dock.FocusedDockable = dockable;
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static void Replace<T>(ObservableCollection<T> target, IEnumerable<T> values)
@@ -1010,13 +1081,15 @@ public sealed class TypesPanelViewModel(MainWindowViewModel owner) : ReactiveVie
 
 public sealed class ViewportPanelViewModel(MainWindowViewModel owner, IIfcGeometryBackend geometryBackend) : ReactiveViewModel
 {
-    private string title = "Native Viewport";
+    private string title = "Viewport";
     private string summary = "No model.";
     private IfcViewportItem? selectedItem;
 
     public ObservableCollection<IfcViewportItem> Items { get; } = [];
 
     public ObservableCollection<IfcPreviewMesh> Meshes { get; } = [];
+
+    public string BackendName => geometryBackend.Name;
 
     public string Title
     {
@@ -1044,7 +1117,7 @@ public sealed class ViewportPanelViewModel(MainWindowViewModel owner, IIfcGeomet
 
     public void SetDocument(IfcDocument document)
     {
-        Title = "Native Viewport";
+        Title = "Viewport";
         Summary = IfcNavigationProjector.GetDocumentViewportSummary(document);
         var items = geometryBackend.ProjectDocument(document);
         MainWindowViewModel.ReplaceItems(Items, items);
@@ -1099,6 +1172,7 @@ public sealed class InspectorPanelViewModel : ReactiveViewModel
     private string relationshipTargetIds = string.Empty;
     private string resourceName = "Native material";
     private string resourceIdentification = "NATIVE-REF";
+    private string psetSummary = "No Psets.";
 
     public InspectorPanelViewModel(MainWindowViewModel owner)
     {
@@ -1127,6 +1201,8 @@ public sealed class InspectorPanelViewModel : ReactiveViewModel
     public ObservableCollection<string> Representations { get; } = [];
 
     public ObservableCollection<IfcPropertyDetails> PropertySets { get; } = [];
+
+    public ObservableCollection<IfcPropertySetTableViewModel> PropertySetTables { get; } = [];
 
     public ObservableCollection<string> TypeAssignments { get; } = [];
 
@@ -1235,6 +1311,13 @@ public sealed class InspectorPanelViewModel : ReactiveViewModel
 
     public string ResourceIdentification { get => resourceIdentification; set => this.RaiseAndSetIfChanged(ref resourceIdentification, value); }
 
+    public string PsetSummary { get => psetSummary; private set => this.RaiseAndSetIfChanged(ref psetSummary, value); }
+
+    public void SavePropertyRow(IfcPropertyTableRowViewModel row)
+    {
+        owner.SaveProperty(row.ToPropertyDetails(), row.ValueDraft);
+    }
+
     public void SetSelection(IfcDocument document, IfcSelectionDetails details, bool bookmarked)
     {
         var entity = details.Entity;
@@ -1260,9 +1343,13 @@ public sealed class InspectorPanelViewModel : ReactiveViewModel
         MainWindowViewModel.ReplaceItems(Relationships, details.Relationships);
         MainWindowViewModel.ReplaceItems(Representations, details.Representations);
         MainWindowViewModel.ReplaceItems(PropertySets, details.PropertySets);
+        MainWindowViewModel.ReplaceItems(PropertySetTables, details.PropertySetTables.Select(table => new IfcPropertySetTableViewModel(this, table)));
         MainWindowViewModel.ReplaceItems(TypeAssignments, details.TypeAssignments);
         MainWindowViewModel.ReplaceItems(Resources, details.Resources);
         MainWindowViewModel.ReplaceItems(Units, details.Units);
+        PsetSummary = details.PropertySetTables.Count == 0
+            ? "No property or quantity sets linked."
+            : $"{details.PropertySetTables.Count:N0} Pset/Qto table(s), {details.PropertySetTables.Sum(table => table.Rows.Count):N0} value(s).";
 
         SelectedProperty = IfcPropertyDetails.Empty;
         SelectedRelationship = IfcRelationshipDetails.Empty;
@@ -1286,9 +1373,68 @@ public sealed class InspectorPanelViewModel : ReactiveViewModel
         MainWindowViewModel.ReplaceItems(Relationships, []);
         MainWindowViewModel.ReplaceItems(Representations, []);
         MainWindowViewModel.ReplaceItems(PropertySets, []);
+        MainWindowViewModel.ReplaceItems(PropertySetTables, []);
         MainWindowViewModel.ReplaceItems(TypeAssignments, []);
         MainWindowViewModel.ReplaceItems(Resources, []);
         MainWindowViewModel.ReplaceItems(Units, []);
+        PsetSummary = "No Psets.";
+    }
+}
+
+public sealed class IfcPropertySetTableViewModel
+{
+    public IfcPropertySetTableViewModel(InspectorPanelViewModel owner, IfcPropertySetTableDetails details)
+    {
+        Id = details.Id;
+        Kind = details.Kind;
+        Name = details.Name;
+        Meta = details.Meta;
+        Rows = new ObservableCollection<IfcPropertyTableRowViewModel>(
+            details.Rows.Select(row => new IfcPropertyTableRowViewModel(owner, row)));
+    }
+
+    public int Id { get; }
+
+    public string Kind { get; }
+
+    public string Name { get; }
+
+    public string Meta { get; }
+
+    public ObservableCollection<IfcPropertyTableRowViewModel> Rows { get; }
+}
+
+public sealed class IfcPropertyTableRowViewModel : ReactiveViewModel
+{
+    private readonly IfcPropertyTableRowDetails details;
+    private string valueDraft;
+
+    public IfcPropertyTableRowViewModel(InspectorPanelViewModel owner, IfcPropertyTableRowDetails details)
+    {
+        this.details = details;
+        valueDraft = details.Value;
+        SaveCommand = ReactiveCommand.Create(() => owner.SavePropertyRow(this));
+    }
+
+    public string StepId => details.StepId;
+
+    public string Name => details.Name;
+
+    public string Type => details.Type;
+
+    public bool CanEdit => details.CanEdit;
+
+    public string ValueDraft
+    {
+        get => valueDraft;
+        set => this.RaiseAndSetIfChanged(ref valueDraft, value);
+    }
+
+    public ReactiveCommand<Unit, Unit> SaveCommand { get; }
+
+    public IfcPropertyDetails ToPropertyDetails()
+    {
+        return details.ToPropertyDetails();
     }
 }
 
@@ -1545,7 +1691,22 @@ public sealed class NotesPanelViewModel : ReactiveViewModel
 
 public sealed class ConsolePanelViewModel : ReactiveViewModel
 {
+    private string currentStatus = "Ready.";
+    private string logText = string.Empty;
+
     public ObservableCollection<string> Lines { get; } = [];
+
+    public string CurrentStatus
+    {
+        get => currentStatus;
+        private set => this.RaiseAndSetIfChanged(ref currentStatus, value);
+    }
+
+    public string LogText
+    {
+        get => logText;
+        private set => this.RaiseAndSetIfChanged(ref logText, value);
+    }
 
     public void Add(string message)
     {
@@ -1554,5 +1715,12 @@ public sealed class ConsolePanelViewModel : ReactiveViewModel
         {
             Lines.RemoveAt(0);
         }
+
+        LogText = string.Join(Environment.NewLine, Lines);
+    }
+
+    public void SetCurrentStatus(string message)
+    {
+        CurrentStatus = message;
     }
 }

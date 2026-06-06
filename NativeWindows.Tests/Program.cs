@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using Dock.Model.Core;
 using IFCnative.NativeWindows.Models;
 using IFCnative.NativeWindows.Services;
 using IFCnative.NativeWindows.ViewModels;
@@ -14,6 +15,9 @@ internal sealed class NativeTestRunner
     public void RunAll()
     {
         Run("sample parser builds core indexes", SampleParserBuildsCoreIndexes);
+        Run("xBIM import feeds inspector psets relations placement and refs", XbimImportFeedsInspectorPsetsRelationsPlacementAndRefs);
+        Run("xBIM opens external IFC path when configured", XbimOpensExternalIfcPathWhenConfigured);
+        Run("UI drafts are synchronized through xBIM store", UiDraftsAreSynchronizedThroughXbimStore);
         Run("native memory model imports properties and geometry", NativeMemoryModelImportsPropertiesAndGeometry);
         Run("native memory geometry backend tessellates rectangle preview mesh", NativeMemoryGeometryBackendTessellatesRectanglePreviewMesh);
         Run("native memory geometry backend tessellates cylinder preview mesh", NativeMemoryGeometryBackendTessellatesCylinderPreviewMesh);
@@ -57,6 +61,7 @@ internal sealed class NativeTestRunner
         Run("placement and representation diagnostics can be repaired", PlacementAndRepresentationDiagnosticsCanBeRepaired);
         Run("diagnostics projector supports text and severity filters", DiagnosticsProjectorSupportsFilters);
         Run("relationship graph supports filter and depth", RelationshipGraphSupportsFilterAndDepth);
+        Run("status log command activates copyable console", StatusLogCommandActivatesCopyableConsole);
         Run("native window layout store persists sanitized layout", NativeWindowLayoutStorePersistsSanitizedLayout);
         Run("native user preferences persist text zoom", NativeUserPreferencesPersistTextZoom);
         Run("draft session gates export until apply/discard", DraftSessionGatesExport);
@@ -116,6 +121,85 @@ internal sealed class NativeTestRunner
         var backend = new NativeMemoryGeometryBackend();
         var selected = backend.ProjectSelection(document, 40);
         True(selected.Any(item => item.Label.Contains("extruded rectangle", StringComparison.OrdinalIgnoreCase)), "native memory backend should describe the product primitive");
+    }
+
+    private static void XbimImportFeedsInspectorPsetsRelationsPlacementAndRefs()
+    {
+        var source = IfcStepParser.CreateSample();
+        var document = XbimIfcDocumentService.OpenText(source.ToStepText(), source.FileName);
+
+        True(document.XbimStore is not null, "document should keep the xBIM store after import");
+        True(document.EntityById.TryGetValue(40, out var proxy), "xBIM import should expose the sample proxy");
+
+        var details = IfcSelectionProjector.Project(document, proxy!);
+
+        True(details.PropertySets.Any(item => item.Label.Contains("Pset_IFCnative", StringComparison.OrdinalIgnoreCase)), "inspector psets should be available after xBIM import");
+        True(details.PropertySets.Any(item => item.Label.Contains("ReviewStatus", StringComparison.OrdinalIgnoreCase)), "inspector property values should be available after xBIM import");
+        True(details.PropertySetTables.Any(table => table.Name == "Pset_IFCnative"
+            && table.Rows.Any(row => row.Name == "ReviewStatus" && row.CanEdit)), "inspector pset tables should expose editable property rows after xBIM import");
+        True(details.Relationships.Any(item => item.Label.Contains("IFCRELDEFINESBYPROPERTIES", StringComparison.OrdinalIgnoreCase)), "inspector relations should include property relations after xBIM import");
+        True(details.Relationships.Any(item => item.Label.Contains("IFCRELCONTAINEDINSPATIALSTRUCTURE", StringComparison.OrdinalIgnoreCase)), "inspector relations should include spatial containment after xBIM import");
+        True(details.Placement.CanEdit && details.Placement.X == "0" && details.Placement.Y == "0" && details.Placement.Z == "0", "inspector placement should be available after xBIM import");
+        True(details.IncomingReferences.Any(item => item.Contains("#53", StringComparison.OrdinalIgnoreCase)), "inspector refs should include incoming spatial relationship after xBIM import");
+    }
+
+    private static void XbimOpensExternalIfcPathWhenConfigured()
+    {
+        var path = Environment.GetEnvironmentVariable("IFCNATIVE_TEST_IFC_PATH");
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        {
+            return;
+        }
+
+        var document = XbimIfcDocumentService.OpenPath(path);
+
+        True(document.XbimStore is not null, "external IFC should keep the xBIM store after import");
+        True(document.Entities.Count > 0, "external IFC should expose STEP entities after xBIM import");
+        True(document.Schema.StartsWith("IFC", StringComparison.OrdinalIgnoreCase), "external IFC schema should be detected");
+    }
+
+    private static void UiDraftsAreSynchronizedThroughXbimStore()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"ifcnative-user-preferences-{Guid.NewGuid():N}.json");
+        try
+        {
+            var viewModel = new MainWindowViewModel(new EmptyFileDialogService(), new NativeUserPreferencesStore(path));
+            viewModel.SelectEntityById(40);
+
+            viewModel.AddCommonPropertySet();
+
+            var session = viewModel.ActiveSession;
+            True(session is not null, "sample session should be active");
+            True(session!.DraftSession.HasDraft, "common pset edit should stage a draft");
+            True(session.Document.XbimStore is not null, "staged UI draft should be backed by a synchronized xBIM store");
+            True(session.Document.PropertySetsByEntity.TryGetValue(40, out var propertySets)
+                && propertySets.Any(set => set.Name == "Pset_NativeCommon"), "staged UI draft should expose the new pset in inspector projections");
+
+            viewModel.ApplyDraft();
+
+            True(!session.DraftSession.HasDraft, "draft should be applied");
+            True(session.Document.XbimStore is not null, "applied document should keep the synchronized xBIM store");
+            True(IfcExportValidator.Validate(session.Document).CanExport, "applied xBIM-backed draft should validate for export");
+
+            var beforeIds = session.Document.EntityById.Keys.ToHashSet();
+            viewModel.SelectEntityById(30);
+            viewModel.CreateProduct("IFCBUILDINGELEMENTPROXY", "Tree Created Product", "1", "1", "1", "rectangle");
+
+            True(session.DraftSession.HasDraft, "tree product create should stage a draft");
+            True(session.Document.XbimStore is not null, "tree-created draft should be backed by a synchronized xBIM store");
+            var createdId = session.Document.EntityById.Keys.Except(beforeIds).OrderBy(id => id).FirstOrDefault();
+            True(createdId != 0, "tree product create should add an IFC entity");
+            True(session.Document.EntityById[createdId].DisplayName.Contains("Tree Created Product", StringComparison.OrdinalIgnoreCase), "tree-created product should be visible in projections");
+            True(session.Document.SpatialPathByEntity.TryGetValue(createdId, out var createdPath)
+                && createdPath.Contains("Tree Created Product", StringComparison.OrdinalIgnoreCase), "tree-created product should be indexed in the structure path");
+        }
+        finally
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
     }
 
     private static void NativeMemoryGeometryBackendTessellatesRectanglePreviewMesh()
@@ -275,7 +359,7 @@ internal sealed class NativeTestRunner
         True(selection is not null, "mesh selection should resolve from memory model");
         Equal(40, selection!.ProductSourceId, "selected mesh product id");
         Equal(140, selection.PrimitiveSourceId, "selected mesh primitive id");
-        True(selection.Status.Contains("native mesh #140", StringComparison.OrdinalIgnoreCase), "selection status should mention native mesh");
+        True(selection.Status.Contains("mesh #140", StringComparison.OrdinalIgnoreCase), "selection status should mention mesh");
 
         var missingProductMesh = mesh with { ProductSourceId = 999 };
         True(NativeViewportSelectionService.ResolveMeshSelection(document, missingProductMesh, backend.Status) is null, "unknown mesh product should not resolve");
@@ -976,6 +1060,50 @@ internal sealed class NativeTestRunner
         var filtered = IfcSelectionProjector.ProjectRelationshipGraph(document, proxy, "IFCPROPERTYSET", 2);
         True(filtered.Any(item => item.EntityId == 60), "filtered graph should keep matching property set neighbor");
         True(filtered.All(item => item.EntityId is not 30), "filtered graph should hide non-matching spatial neighbor");
+    }
+
+    private static void StatusLogCommandActivatesCopyableConsole()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"ifcnative-status-log-{Guid.NewGuid():N}.json");
+        try
+        {
+            var viewModel = new MainWindowViewModel(new EmptyFileDialogService(), new NativeUserPreferencesStore(path));
+            viewModel.OpenLog();
+
+            Equal(viewModel.StatusText, viewModel.Console.CurrentStatus, "console current status should mirror bottom status");
+            True(viewModel.Console.LogText.Contains("status:", StringComparison.OrdinalIgnoreCase), "console log should include clicked status text");
+            var reviewDock = FindDock(viewModel.DockLayout!, "review-tools");
+            True(reviewDock?.ActiveDockable?.Id == "console", "status click should activate the console dock");
+        }
+        finally
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+    }
+
+    private static IDock? FindDock(IDockable dockable, string id)
+    {
+        if (dockable is IDock dock)
+        {
+            if (string.Equals(dock.Id, id, StringComparison.OrdinalIgnoreCase))
+            {
+                return dock;
+            }
+
+            foreach (var child in dock.VisibleDockables ?? [])
+            {
+                var match = FindDock(child, id);
+                if (match is not null)
+                {
+                    return match;
+                }
+            }
+        }
+
+        return null;
     }
 
     private static void NativeWindowLayoutStorePersistsSanitizedLayout()

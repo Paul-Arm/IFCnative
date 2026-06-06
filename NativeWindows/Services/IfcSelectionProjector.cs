@@ -17,6 +17,7 @@ public static class IfcSelectionProjector
             GetPlacement(document, entity),
             GetRepresentations(document, entity).ToList(),
             GetPropertySets(document, entity).ToList(),
+            GetPropertySetTables(document, entity).ToList(),
             GetTypeAssignments(document, entity).ToList(),
             GetResources(document, entity).ToList(),
             document.Units.Count > 0 ? document.Units : ["No IFCUNITASSIGNMENT units indexed."]);
@@ -91,6 +92,30 @@ public static class IfcSelectionProjector
             {
                 yield return new IfcPropertyDetails(value.Id, $"  • {value.Label}", value.Value, IsEditablePropertyValue(value.Type));
             }
+        }
+    }
+
+    private static IEnumerable<IfcPropertySetTableDetails> GetPropertySetTables(IfcDocument document, IfcEntity entity)
+    {
+        if (!document.PropertySetsByEntity.TryGetValue(entity.Id, out var propertySets))
+        {
+            yield break;
+        }
+
+        foreach (var propertySet in propertySets.OrderBy(set => set.Kind).ThenBy(set => set.Name).ThenBy(set => set.Id))
+        {
+            yield return new IfcPropertySetTableDetails(
+                propertySet.Id,
+                propertySet.Kind,
+                propertySet.Name,
+                propertySet.Values
+                    .Select(value => new IfcPropertyTableRowDetails(
+                        value.Id,
+                        value.Name,
+                        value.Type,
+                        value.Value,
+                        IsEditablePropertyValue(value.Type)))
+                    .ToList());
         }
     }
 

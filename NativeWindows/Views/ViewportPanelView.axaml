@@ -9,7 +9,7 @@
           <TextBlock Classes="sectionTitle" Text="{Binding Title}" />
           <TextBlock Classes="caption" Text="{Binding Summary}" />
         </StackPanel>
-        <TextBlock Grid.Column="1" Classes="caption" Text="native mesh" VerticalAlignment="Center" />
+        <TextBlock Grid.Column="1" Classes="caption" Text="{Binding BackendName}" VerticalAlignment="Center" />
       </Grid>
     </Border>
 

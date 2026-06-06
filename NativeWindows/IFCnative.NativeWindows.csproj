@@ -15,6 +15,8 @@
     <PackageReference Include="Dock.Avalonia" Version="11.3.11.4" />
     <PackageReference Include="Dock.Avalonia.Themes.Fluent" Version="11.3.11.4" />
     <PackageReference Include="Dock.Model.Mvvm" Version="11.3.11.4" />
+    <PackageReference Include="Xbim.Essentials" Version="6.0.587" />
+    <PackageReference Include="Xbim.Geometry" Version="6.3.891-netcore" />
   </ItemGroup>
 
 </Project>
