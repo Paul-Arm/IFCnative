@@ -118,6 +118,49 @@ public static class XbimDocumentEditor
         }, affectsGeometry: true);
     }
 
+    public static IfcDocument UpdatePlacementTransform(
+        IfcDocument document,
+        int productId,
+        double moveDeltaWorldX,
+        double moveDeltaWorldY,
+        double moveDeltaWorldZ,
+        double rotateZRadians)
+    {
+        if (Math.Abs(moveDeltaWorldX) < 0.0000001
+            && Math.Abs(moveDeltaWorldY) < 0.0000001
+            && Math.Abs(moveDeltaWorldZ) < 0.0000001
+            && Math.Abs(rotateZRadians) < 0.0000001)
+        {
+            return document;
+        }
+
+        return Edit(document, "Update placement transform", store =>
+        {
+            var product = GetEntity(store, productId);
+            var placement = GetPropertyValue(product, "ObjectPlacement");
+            var relativePlacement = GetPropertyValue(placement, "RelativePlacement");
+            var location = GetPropertyValue(relativePlacement, "Location");
+            if (placement is null || relativePlacement is null || location is null)
+            {
+                return;
+            }
+
+            var current = ReadCoordinateList(GetPropertyValue(location, "Coordinates"));
+            var parentPlacement = GetPropertyValue(placement, "PlacementRelTo");
+            var localDelta = RotateWorldDeltaIntoParent(moveDeltaWorldX, moveDeltaWorldY, moveDeltaWorldZ, ReadPlacementYaw(parentPlacement));
+            SetCoordinateList(
+                GetPropertyValue(location, "Coordinates"),
+                current[0] + localDelta.X,
+                current[1] + localDelta.Y,
+                current[2] + localDelta.Z);
+
+            if (Math.Abs(rotateZRadians) >= 0.0000001)
+            {
+                SetAxis2PlacementZRotation(store, relativePlacement, NormalizeRadians(ReadAxisPlacementYaw(relativePlacement) + rotateZRadians));
+            }
+        }, affectsGeometry: true);
+    }
+
     public static IfcDocument UpdateSpatialParent(IfcDocument document, int childId, string parentIdText)
     {
         var parentId = ReadIds(parentIdText).FirstOrDefault();
@@ -430,24 +473,27 @@ public static class XbimDocumentEditor
 
     private static IfcDocument Edit(IfcDocument document, string transactionName, Action<IfcStore> apply, bool affectsGeometry = false)
     {
-        var store = XbimIfcDocumentService.EnsureStore(document);
-        using var transaction = store.BeginTransaction(transactionName);
-        apply(store);
-        transaction.Commit();
-
-        if (affectsGeometry)
+        return XbimIfcDocumentService.WithStoreAccess(document, () =>
         {
-            XbimIfcDocumentService.InvalidateGeometryContext(document);
-        }
+            var store = XbimIfcDocumentService.EnsureStore(document);
+            using var transaction = store.BeginTransaction(transactionName);
+            apply(store);
+            transaction.Commit();
 
-        var projected = XbimIfcDocumentService.ProjectStore(store, document.FileName);
-        if (!affectsGeometry && XbimIfcDocumentService.TryGetGeometryContext(document) is { } geometryContext)
-        {
-            projected.XbimGeometryContext = geometryContext;
-        }
+            if (affectsGeometry)
+            {
+                XbimIfcDocumentService.InvalidateGeometryContext(document);
+            }
 
-        projected.Diagnostics.Info($"xBIM transaction committed: {transactionName}.");
-        return projected;
+            var projected = XbimIfcDocumentService.ProjectStore(store, document.FileName);
+            if (!affectsGeometry && XbimIfcDocumentService.TryGetGeometryContext(document) is { } geometryContext)
+            {
+                projected.XbimGeometryContext = geometryContext;
+            }
+
+            projected.Diagnostics.Info($"xBIM transaction committed: {transactionName}.");
+            return projected;
+        });
     }
 
     private static IPersistEntity? GetEntity(IfcStore store, int entityId)
@@ -626,6 +672,97 @@ public static class XbimDocumentEditor
         var placement = GetPropertyValue(product, "ObjectPlacement");
         var relativePlacement = GetPropertyValue(placement, "RelativePlacement");
         return GetPropertyValue(relativePlacement, "Location") as IPersistEntity;
+    }
+
+    private static (double X, double Y, double Z) RotateWorldDeltaIntoParent(double x, double y, double z, double parentYawRadians)
+    {
+        if (Math.Abs(parentYawRadians) < 0.0000001)
+        {
+            return (x, y, z);
+        }
+
+        var inverseYaw = -parentYawRadians;
+        var cos = Math.Cos(inverseYaw);
+        var sin = Math.Sin(inverseYaw);
+        return (x * cos - y * sin, x * sin + y * cos, z);
+    }
+
+    private static double ReadPlacementYaw(object? placement)
+    {
+        var yaw = 0d;
+        var current = placement;
+        var seen = new HashSet<int>();
+        while (current is not null)
+        {
+            if (current is IPersistEntity entity && !seen.Add(entity.EntityLabel))
+            {
+                break;
+            }
+
+            yaw += ReadAxisPlacementYaw(GetPropertyValue(current, "RelativePlacement"));
+            current = GetPropertyValue(current, "PlacementRelTo");
+        }
+
+        return NormalizeRadians(yaw);
+    }
+
+    private static double ReadAxisPlacementYaw(object? axisPlacement)
+    {
+        var refDirection = GetPropertyValue(axisPlacement, "RefDirection");
+        var ratios = ReadCoordinateList(GetPropertyValue(refDirection, "DirectionRatios"));
+        var length = Math.Sqrt(ratios[0] * ratios[0] + ratios[1] * ratios[1]);
+        return length < 0.0000001
+            ? 0d
+            : Math.Atan2(ratios[1], ratios[0]);
+    }
+
+    private static void SetAxis2PlacementZRotation(IfcStore store, object axisPlacement, double yawRadians)
+    {
+        var axis = GetPropertyValue(axisPlacement, "Axis");
+        if (axis is not null)
+        {
+            SetCoordinateList(GetPropertyValue(axis, "DirectionRatios"), 0, 0, 1);
+        }
+        else
+        {
+            SetPropertyIfPresent(axisPlacement, "Axis", CreateDirection(store, 0, 0, 1));
+        }
+
+        var refDirection = GetPropertyValue(axisPlacement, "RefDirection");
+        var x = Math.Cos(yawRadians);
+        var y = Math.Sin(yawRadians);
+        if (refDirection is not null)
+        {
+            SetCoordinateList(GetPropertyValue(refDirection, "DirectionRatios"), x, y, 0);
+        }
+        else
+        {
+            SetPropertyIfPresent(axisPlacement, "RefDirection", CreateDirection(store, x, y, 0));
+        }
+    }
+
+    private static double[] ReadCoordinateList(object? coordinates)
+    {
+        var values = AsEnumerable(coordinates)
+            .Select(value => ParseDouble(value?.ToString() ?? string.Empty, 0))
+            .Take(3)
+            .ToList();
+        while (values.Count < 3)
+        {
+            values.Add(0);
+        }
+
+        return values.ToArray();
+    }
+
+    private static double NormalizeRadians(double radians)
+    {
+        var normalized = radians % (Math.PI * 2d);
+        return normalized <= -Math.PI
+            ? normalized + Math.PI * 2d
+            : normalized > Math.PI
+                ? normalized - Math.PI * 2d
+                : normalized;
     }
 
     private static Type ResolveIfcEntityType(IfcStore store, string ifcType)

@@ -3,9 +3,10 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
   <Grid RowDefinitions="Auto,*" Margin="8" RowSpacing="8">
     <Border Classes="surface" Padding="10">
-      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+      <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
         <TextBox Watermark="Filter diagnostics" Text="{Binding FilterText}" />
-        <Button Grid.Column="1" Classes="primary" Content="Repair" Command="{Binding RepairCommand}" />
+        <Button Grid.Column="1" Classes="primary" Content="Check" Command="{Binding CheckCommand}" />
+        <Button Grid.Column="2" Content="Repair" Command="{Binding RepairCommand}" IsEnabled="{Binding CanRepairSelected}" />
       </Grid>
     </Border>
 

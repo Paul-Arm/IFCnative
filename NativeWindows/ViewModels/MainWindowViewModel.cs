@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Reactive;
 using System.Threading;
@@ -175,6 +176,7 @@ public sealed class MainWindowViewModel : ReactiveViewModel
         Viewport = new ViewportPanelViewModel(this, geometryBackend);
         Viewport.AntiAliasing = currentPreferences.AntiAliasing;
         Viewport.HideSpaces = currentPreferences.HideSpaces;
+        Viewport.ShowFpsCounter = currentPreferences.ShowFpsCounter;
         Viewport.FieldOfView = currentPreferences.FieldOfView;
         Viewport.NearPlane = currentPreferences.NearPlane;
         Viewport.FarPlane = currentPreferences.FarPlane;
@@ -292,6 +294,15 @@ public sealed class MainWindowViewModel : ReactiveViewModel
         Viewport.HideSpaces = hide;
         StatusText = hide ? "IFC Spaces hidden." : "IFC Spaces visible.";
         Log($"ui.hidespaces({hide})");
+    }
+
+    public void UpdateShowFpsCounter(bool show)
+    {
+        currentPreferences = currentPreferences with { ShowFpsCounter = show };
+        preferencesStore.Save(currentPreferences);
+        Viewport.ShowFpsCounter = show;
+        StatusText = show ? "Viewport stats visible." : "Viewport stats hidden.";
+        Log($"ui.viewportstats({show})");
     }
 
     public void UpdateFieldOfView(double fov)
@@ -529,6 +540,26 @@ public sealed class MainWindowViewModel : ReactiveViewModel
         StageDraft(XbimDocumentEditor.UpdatePlacement(session.Document, selectedId, x, y, z), selectedId, $"Staged xBIM placement edit for #{selectedId}.");
     }
 
+    public bool CommitProductTransform(int productId, Vector3 moveDeltaWorld, float rotateZRadians)
+    {
+        var session = ActiveSession;
+        if (session is null || productId == 0)
+        {
+            return false;
+        }
+
+        return StageDraft(
+            XbimDocumentEditor.UpdatePlacementTransform(
+                session.Document,
+                productId,
+                moveDeltaWorld.X,
+                moveDeltaWorld.Y,
+                moveDeltaWorld.Z,
+                rotateZRadians),
+            productId,
+            $"Staged xBIM transform edit for #{productId}.");
+    }
+
     public void SaveSpatialParent(string parentId)
     {
         var session = ActiveSession;
@@ -660,6 +691,41 @@ public sealed class MainWindowViewModel : ReactiveViewModel
         StageDraft(XbimDocumentEditor.DeleteRelationship(session.Document, relationship.RelationshipId.Value), session.SelectedEntityId, $"Staged xBIM relationship delete for #{relationship.RelationshipId.Value}.");
     }
 
+    public async Task RunDiagnosticsAsync()
+    {
+        var session = ActiveSession;
+        if (session is null)
+        {
+            StatusText = "Open an IFC document before running diagnostics.";
+            return;
+        }
+
+        var document = session.Document;
+        IsBusy = true;
+        StatusText = $"Checking diagnostics for {document.FileName}...";
+        try
+        {
+            var result = await Task.Run(() => IfcDocumentDiagnostics.Run(document));
+            if (!ReferenceEquals(ActiveSession?.Document, document))
+            {
+                return;
+            }
+
+            Diagnostics.SetDocument(document);
+            StatusText = result.Summary;
+            Log($"diagnostics.check(errors:{result.Errors},warnings:{result.Warnings})");
+        }
+        catch (Exception exception)
+        {
+            StatusText = $"Diagnostics failed: {exception.Message}";
+            Log($"diagnostics.error('{exception.Message.Replace("'", string.Empty, StringComparison.Ordinal)}')");
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
     public void RepairDiagnostic(IfcDiagnosticDetails diagnostic)
     {
         var session = ActiveSession;
@@ -762,6 +828,7 @@ public sealed class MainWindowViewModel : ReactiveViewModel
 
         try
         {
+            Viewport.CancelRenderSceneLoad();
             var progress = new Progress<string>(message => StatusText = message);
             var parsed = await Task.Run(() => XbimIfcDocumentService.OpenPath(path, progress));
             AddSession(parsed, Path.GetFullPath(path));
@@ -833,13 +900,13 @@ public sealed class MainWindowViewModel : ReactiveViewModel
         SessionSummary = $"{Documents.Count:N0} {(Documents.Count == 1 ? "file" : "files")}";
     }
 
-    private void StageDraft(IfcDocument draftDocument, int selectedId, string message)
+    private bool StageDraft(IfcDocument draftDocument, int selectedId, string message)
     {
         var session = ActiveSession;
         if (session is null || ReferenceEquals(session.Document, draftDocument))
         {
             StatusText = "No editable IFC change was produced for the current selection.";
-            return;
+            return false;
         }
 
         IfcDocument synchronizedDraft;
@@ -853,7 +920,7 @@ public sealed class MainWindowViewModel : ReactiveViewModel
         {
             StatusText = $"xBIM rejected the edit: {exception.Message}";
             Log($"xbim.transaction.reject({selectedId})");
-            return;
+            return false;
         }
 
         session.SetDocument(synchronizedDraft, resetDraft: true);
@@ -861,6 +928,7 @@ public sealed class MainWindowViewModel : ReactiveViewModel
         StatusText = message.Replace("Staged", "Committed", StringComparison.OrdinalIgnoreCase);
         Log($"xbim.transaction.commit({selectedId})");
         RefreshForActiveDocument(selectedId);
+        return true;
     }
 
     private void RefreshForActiveDocument(int? preferredSelection = null, bool refreshViewport = true)
@@ -879,23 +947,23 @@ public sealed class MainWindowViewModel : ReactiveViewModel
         SessionSummary = $"{Documents.Count:N0} {(Documents.Count == 1 ? "file" : "files")}";
         session.Bookmarks.RemoveWhere(id => !document.EntityById.ContainsKey(id));
 
+        int? rememberedSelection = session.SelectedEntityId != 0 ? session.SelectedEntityId : null;
+        var selectedId = preferredSelection
+            ?? rememberedSelection
+            ?? document.SpatialRoots.FirstOrDefault()?.Entity.Id
+            ?? document.Entities.FirstOrDefault()?.Id;
+
         Structure.SetDocument(document, session.Bookmarks);
         Types.SetDocument(document);
         Diagnostics.SetDocument(document);
         Draft.SetSession(session);
         if (refreshViewport)
         {
-            Viewport.SetDocument(document);
+            Viewport.SetDocument(document, selectedId);
         }
 
         Graph.SetDocument(document);
         Builder.SetDocument(document);
-
-        int? rememberedSelection = session.SelectedEntityId != 0 ? session.SelectedEntityId : null;
-        var selectedId = preferredSelection
-            ?? rememberedSelection
-            ?? document.SpatialRoots.FirstOrDefault()?.Entity.Id
-            ?? document.Entities.FirstOrDefault()?.Id;
         if (selectedId is not null)
         {
             SelectEntityById(selectedId.Value, updateViewport: refreshViewport);
@@ -1030,7 +1098,7 @@ public sealed class StructurePanelViewModel(MainWindowViewModel owner) : Reactiv
 
         var path = new List<int>();
         bool found = false;
-        foreach (var root in currentRoots)
+        foreach (var root in document.SpatialRoots)
         {
             if (FindPath(root, entityId, path))
             {
@@ -1039,36 +1107,61 @@ public sealed class StructurePanelViewModel(MainWindowViewModel owner) : Reactiv
             }
         }
 
-        if (!found)
-        {
-            found = currentRoots.Any(root => root.Entity.Id == entityId);
-        }
-
         if (found)
         {
+            if (!string.IsNullOrWhiteSpace(searchText))
+            {
+                searchText = string.Empty;
+                this.RaisePropertyChanged(nameof(SearchText));
+                currentRoots = document.SpatialRoots;
+            }
+
             foreach (var ancestorId in path)
             {
                 expansionByEntityId[ancestorId] = true;
             }
 
-            if (path.Count > 0)
-            {
-                RebuildRows();
-            }
-
+            RebuildRows();
             var rowToSelect = Rows.FirstOrDefault(row => row.Node.Entity.Id == entityId);
             if (rowToSelect is not null)
             {
-                isSelectingProgrammatically = true;
-                try
-                {
-                    SelectedRow = rowToSelect;
-                }
-                finally
-                {
-                    isSelectingProgrammatically = false;
-                }
+                SelectRowProgrammatically(rowToSelect);
             }
+
+            return;
+        }
+
+        if (document.EntityById.TryGetValue(entityId, out var entity))
+        {
+            searchText = entityId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            this.RaisePropertyChanged(nameof(SearchText));
+            currentRoots = [new IfcTreeNode(entity, "match")];
+            RebuildRows();
+            var rowToSelect = Rows.FirstOrDefault(row => row.Node.Entity.Id == entityId);
+            if (rowToSelect is not null)
+            {
+                SelectRowProgrammatically(rowToSelect);
+            }
+        }
+    }
+
+    private void SelectRowProgrammatically(IfcFileTreeRowViewModel row)
+    {
+        isSelectingProgrammatically = true;
+        try
+        {
+            if (ReferenceEquals(selectedRow, row))
+            {
+                this.RaisePropertyChanged(nameof(SelectedRow));
+            }
+            else
+            {
+                SelectedRow = row;
+            }
+        }
+        finally
+        {
+            isSelectingProgrammatically = false;
         }
     }
 
@@ -1222,8 +1315,12 @@ public sealed class ViewportPanelViewModel(MainWindowViewModel owner, IIfcGeomet
     private IfcViewportItem? selectedItem;
     private IfcRenderScene renderScene = IfcRenderScene.Empty();
     private int selectedProductId;
+    private ViewportInteractionMode interactionMode = ViewportInteractionMode.Select;
+    private bool canTransformSelection;
     private AntiAliasingMode antiAliasing;
     private bool hideSpaces;
+    private bool showFpsCounter;
+    private string fpsText = "0 FPS";
     private double fieldOfView;
     private double nearPlane;
     private double farPlane;
@@ -1262,6 +1359,18 @@ public sealed class ViewportPanelViewModel(MainWindowViewModel owner, IIfcGeomet
         private set => this.RaiseAndSetIfChanged(ref selectedProductId, value);
     }
 
+    public ViewportInteractionMode InteractionMode
+    {
+        get => interactionMode;
+        set => this.RaiseAndSetIfChanged(ref interactionMode, value);
+    }
+
+    public bool CanTransformSelection
+    {
+        get => canTransformSelection;
+        private set => this.RaiseAndSetIfChanged(ref canTransformSelection, value);
+    }
+
     public AntiAliasingMode AntiAliasing
     {
         get => antiAliasing;
@@ -1272,6 +1381,18 @@ public sealed class ViewportPanelViewModel(MainWindowViewModel owner, IIfcGeomet
     {
         get => hideSpaces;
         set => this.RaiseAndSetIfChanged(ref hideSpaces, value);
+    }
+
+    public bool ShowFpsCounter
+    {
+        get => showFpsCounter;
+        set => this.RaiseAndSetIfChanged(ref showFpsCounter, value);
+    }
+
+    public string FpsText
+    {
+        get => fpsText;
+        set => this.RaiseAndSetIfChanged(ref fpsText, value);
     }
 
     public double FieldOfView
@@ -1304,14 +1425,18 @@ public sealed class ViewportPanelViewModel(MainWindowViewModel owner, IIfcGeomet
         }
     }
 
-    public void SetDocument(IfcDocument document)
+    public void SetDocument(IfcDocument document, int? selectedProductId = null)
     {
         Title = "Viewport";
         Summary = IfcNavigationProjector.GetDocumentViewportSummary(document);
         var items = geometryBackend.ProjectDocument(document);
         MainWindowViewModel.ReplaceItems(Items, items);
         Meshes.Clear();
-        SelectedProductId = 0;
+        var retainedSelection = selectedProductId is int id && document.EntityById.ContainsKey(id)
+            ? id
+            : 0;
+        SelectedProductId = retainedSelection;
+        CanTransformSelection = retainedSelection > 0 && document.PlacementsByEntity.ContainsKey(retainedSelection);
         var geometryContext = XbimIfcDocumentService.TryGetGeometryContext(document);
         if (!RenderScene.IsEmpty
             && document.XbimStore is not null
@@ -1333,6 +1458,7 @@ public sealed class ViewportPanelViewModel(MainWindowViewModel owner, IIfcGeomet
             ? $"Selected #{entity.Id}. {geometryBackend.Status}"
             : $"Selected #{entity.Id}. {RenderScene.Status}";
         SelectedProductId = entity.Id;
+        CanTransformSelection = document.PlacementsByEntity.ContainsKey(entity.Id);
         var items = geometryBackend.ProjectSelection(document, entity.Id);
         MainWindowViewModel.ReplaceItems(Items, items);
         Meshes.Clear();
@@ -1343,6 +1469,7 @@ public sealed class ViewportPanelViewModel(MainWindowViewModel owner, IIfcGeomet
         Title = typeCount.Type;
         Summary = IfcNavigationProjector.GetTypeViewportSummary(typeCount);
         SelectedProductId = 0;
+        CanTransformSelection = false;
         var items = document.EntitiesByType.TryGetValue(typeCount.Type, out var entities)
             ? entities.Take(120).Select(entity => new IfcViewportItem(entity.Id, $"#{entity.Id} {entity.DisplayName}"))
             : [];
@@ -1355,14 +1482,38 @@ public sealed class ViewportPanelViewModel(MainWindowViewModel owner, IIfcGeomet
         owner.SelectEntityById(productId, "viewport");
     }
 
-    private void BeginLoadRenderScene(IfcDocument document, IfcRenderSceneRequest request)
+    public void SetInteractionMode(ViewportInteractionMode mode)
+    {
+        InteractionMode = mode;
+    }
+
+    public bool CommitProductTransform(int productId, Vector3 moveDeltaWorld, float rotateZRadians)
+    {
+        CancelRenderSceneLoad();
+        return owner.CommitProductTransform(productId, moveDeltaWorld, rotateZRadians);
+    }
+
+    public void CancelRenderSceneLoad()
     {
         renderSceneCancellation?.Cancel();
+    }
+
+    private void BeginLoadRenderScene(IfcDocument document, IfcRenderSceneRequest request)
+    {
+        CancelRenderSceneLoad();
         renderSceneCancellation?.Dispose();
         renderSceneCancellation = new CancellationTokenSource();
         var token = renderSceneCancellation.Token;
         var version = Interlocked.Increment(ref renderSceneLoadVersion);
-        RenderScene = IfcRenderScene.Empty("Generating xBIM render scene...");
+        if (RenderScene.IsEmpty)
+        {
+            RenderScene = IfcRenderScene.Empty("Generating xBIM render scene...");
+        }
+        else
+        {
+            Summary = $"Generating xBIM render scene... keeping {RenderScene.Meshes.Count:N0} current mesh(es) visible.";
+        }
+
         var progress = new Progress<string>(message => Summary = message);
         _ = LoadRenderSceneAsync(document, request, token, version, progress);
     }
@@ -1812,6 +1963,7 @@ public sealed class DiagnosticsPanelViewModel : ReactiveViewModel
     public DiagnosticsPanelViewModel(MainWindowViewModel owner)
     {
         this.owner = owner;
+        CheckCommand = ReactiveCommand.CreateFromTask(owner.RunDiagnosticsAsync);
         RepairCommand = ReactiveCommand.Create(() =>
         {
             if (SelectedDiagnostic is not null)
@@ -1821,7 +1973,11 @@ public sealed class DiagnosticsPanelViewModel : ReactiveViewModel
         });
     }
 
+    public ReactiveCommand<Unit, Unit> CheckCommand { get; }
+
     public ReactiveCommand<Unit, Unit> RepairCommand { get; }
+
+    public bool CanRepairSelected => SelectedDiagnostic?.CanRepair == true;
 
     public string FilterText
     {
@@ -1844,6 +2000,8 @@ public sealed class DiagnosticsPanelViewModel : ReactiveViewModel
             {
                 owner.SelectEntityById(entityId, "diagnostic");
             }
+
+            this.RaisePropertyChanged(nameof(CanRepairSelected));
         }
     }
 
@@ -1855,9 +2013,24 @@ public sealed class DiagnosticsPanelViewModel : ReactiveViewModel
 
     private void Refresh()
     {
-        MainWindowViewModel.ReplaceItems(Items, document is null
-            ? []
-            : IfcDiagnosticsProjector.Project(document.Diagnostics.Messages, FilterText));
+        if (document is null)
+        {
+            MainWindowViewModel.ReplaceItems(Items, []);
+            return;
+        }
+
+        if (!document.Diagnostics.HasBeenChecked)
+        {
+            MainWindowViewModel.ReplaceItems(Items, [
+                new IfcDiagnosticDetails(
+                    "Info",
+                    "Diagnostics have not been checked yet.",
+                    "Click Check to validate model references, GlobalIds, containment, placements, and representations."),
+            ]);
+            return;
+        }
+
+        MainWindowViewModel.ReplaceItems(Items, IfcDiagnosticsProjector.Project(document.Diagnostics.CheckMessages, FilterText));
     }
 }
 

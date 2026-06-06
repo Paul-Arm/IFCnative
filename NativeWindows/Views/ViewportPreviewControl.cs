@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -20,6 +21,15 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
 
     public static readonly StyledProperty<int> SelectedProductIdProperty =
         AvaloniaProperty.Register<ViewportPreviewControl, int>(nameof(SelectedProductId));
+
+    public static readonly StyledProperty<ViewportInteractionMode> InteractionModeProperty =
+        AvaloniaProperty.Register<ViewportPreviewControl, ViewportInteractionMode>(nameof(InteractionMode), ViewportInteractionMode.Select);
+
+    public static readonly StyledProperty<bool> CanTransformSelectionProperty =
+        AvaloniaProperty.Register<ViewportPreviewControl, bool>(nameof(CanTransformSelection), false);
+
+    public static readonly StyledProperty<bool> ShowFpsCounterProperty =
+        AvaloniaProperty.Register<ViewportPreviewControl, bool>(nameof(ShowFpsCounter), false);
 
     public static readonly StyledProperty<AntiAliasingMode> AntiAliasingProperty =
         AvaloniaProperty.Register<ViewportPreviewControl, AntiAliasingMode>(nameof(AntiAliasing), AntiAliasingMode.None);
@@ -75,28 +85,77 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         Dolly,
     }
 
+    private enum GizmoHandle
+    {
+        None,
+        MoveX,
+        MoveY,
+        MoveZ,
+        RotateZ,
+    }
+
+    private sealed class GizmoDragState
+    {
+        public required int ProductId { get; init; }
+
+        public required GizmoHandle Handle { get; init; }
+
+        public required Vector3 Center { get; init; }
+
+        public required Vector3 Axis { get; init; }
+
+        public float StartAxisParameter { get; set; }
+
+        public float StartAngle { get; set; }
+
+        public Vector3 MoveDeltaWorld { get; set; }
+
+        public float RotateZRadians { get; set; }
+    }
+
     private SilkGL? glApi;
     private uint program;
     private uint vertexArray;
     private uint vertexBuffer;
     private uint indexBuffer;
+    private uint transparentIndexBuffer;
     private uint lineVertexArray;
     private uint lineVertexBuffer;
-    private int indexCount;
+    private uint gizmoVertexArray;
+    private uint gizmoVertexBuffer;
+    private int opaqueIndexCount;
+    private int transparentIndexCount;
     private int lineVertexCount;
     private bool buffersDirty = true;
     private bool renderQueued;
     private float[] vertices = [];
-    private uint[] indices = [];
+    private uint[] opaqueIndices = [];
+    private uint[] transparentIndices = [];
     private float[] lineVertices = [];
+    private List<TransparentMeshBatch> transparentMeshBatches = [];
     private NativeViewportCameraState camera = NativeViewportCameraController.DefaultState();
     private Point? lastPointer;
     private Point? clickStart;
     private Point? pendingPickPoint;
     private bool pointerMoved;
     private DragMode dragMode;
+    private GizmoDragState? gizmoDrag;
+    private Matrix4x4 previewTransform = Matrix4x4.Identity;
+    private Vector3 previewMoveDeltaWorld;
+    private float previewRotateZRadians;
+    private int previewProductId;
     private int renderLogCount;
     private bool suppressNextFraming;
+    private int fpsFrameCount;
+    private long fpsWindowStartTicks;
+    private long previousRenderStartTicks;
+    private double accumulatedFrameIntervalMs;
+    private double accumulatedCpuFrameMs;
+    private int fpsIntervalSampleCount;
+    private string lastFpsText = "0 FPS";
+    private int visibleMeshCount;
+    private int visibleTriangleCount;
+    private int visibleVertexCount;
 
     // MSAA FBO buffers
     private uint msaaFbo;
@@ -119,6 +178,10 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
 
     public event EventHandler<IfcProductPickedEventArgs>? ProductPicked;
 
+    public event EventHandler<IfcProductTransformCommittedEventArgs>? ProductTransformCommitted;
+
+    public event EventHandler<ViewportFpsUpdatedEventArgs>? FpsUpdated;
+
     public ViewportPreviewControl()
     {
         Focusable = true;
@@ -126,9 +189,12 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
 
     static ViewportPreviewControl()
     {
-        AffectsRender<ViewportPreviewControl>(SceneProperty, SelectedProductIdProperty, AntiAliasingProperty, HideSpacesProperty, FieldOfViewProperty, NearPlaneProperty, FarPlaneProperty);
+        AffectsRender<ViewportPreviewControl>(SceneProperty, SelectedProductIdProperty, InteractionModeProperty, CanTransformSelectionProperty, ShowFpsCounterProperty, AntiAliasingProperty, HideSpacesProperty, FieldOfViewProperty, NearPlaneProperty, FarPlaneProperty);
         SceneProperty.Changed.AddClassHandler<ViewportPreviewControl>((control, _) => control.OnSceneChanged());
         SelectedProductIdProperty.Changed.AddClassHandler<ViewportPreviewControl>((control, _) => control.OnSelectedProductChanged());
+        InteractionModeProperty.Changed.AddClassHandler<ViewportPreviewControl>((control, _) => control.OnInteractionModeChanged());
+        CanTransformSelectionProperty.Changed.AddClassHandler<ViewportPreviewControl>((control, _) => control.OnTransformAvailabilityChanged());
+        ShowFpsCounterProperty.Changed.AddClassHandler<ViewportPreviewControl>((control, _) => control.OnShowFpsCounterChanged());
         AntiAliasingProperty.Changed.AddClassHandler<ViewportPreviewControl>((control, _) => control.OnAntiAliasingChanged());
         HideSpacesProperty.Changed.AddClassHandler<ViewportPreviewControl>((control, _) => control.OnHideSpacesChanged());
         FieldOfViewProperty.Changed.AddClassHandler<ViewportPreviewControl>((control, _) => control.OnCameraPropertyChanged());
@@ -146,6 +212,24 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
     {
         get => GetValue(SelectedProductIdProperty);
         set => SetValue(SelectedProductIdProperty, value);
+    }
+
+    public ViewportInteractionMode InteractionMode
+    {
+        get => GetValue(InteractionModeProperty);
+        set => SetValue(InteractionModeProperty, value);
+    }
+
+    public bool CanTransformSelection
+    {
+        get => GetValue(CanTransformSelectionProperty);
+        set => SetValue(CanTransformSelectionProperty, value);
+    }
+
+    public bool ShowFpsCounter
+    {
+        get => GetValue(ShowFpsCounterProperty);
+        set => SetValue(ShowFpsCounterProperty, value);
     }
 
     public void FitCamera()
@@ -182,6 +266,11 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         SetCameraAngles(0, 0);
     }
 
+    public void ClearTransformPreview()
+    {
+        ResetGizmoPreview();
+    }
+
     protected override void OnOpenGlInit(GlInterface gl)
     {
         try
@@ -194,8 +283,11 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
             vertexArray = glApi.GenVertexArray();
             vertexBuffer = glApi.GenBuffer();
             indexBuffer = glApi.GenBuffer();
+            transparentIndexBuffer = glApi.GenBuffer();
             lineVertexArray = glApi.GenVertexArray();
             lineVertexBuffer = glApi.GenBuffer();
+            gizmoVertexArray = glApi.GenVertexArray();
+            gizmoVertexBuffer = glApi.GenBuffer();
 
             fxaaProgram = CreateProgram(glApi, FxaaVertexShaderSource, FxaaFragmentShaderSource);
             quadVao = glApi.GenVertexArray();
@@ -242,6 +334,11 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
                 glApi.DeleteBuffer(indexBuffer);
             }
 
+            if (transparentIndexBuffer != 0)
+            {
+                glApi.DeleteBuffer(transparentIndexBuffer);
+            }
+
             if (vertexBuffer != 0)
             {
                 glApi.DeleteBuffer(vertexBuffer);
@@ -260,6 +357,16 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
             if (lineVertexArray != 0)
             {
                 glApi.DeleteVertexArray(lineVertexArray);
+            }
+
+            if (gizmoVertexBuffer != 0)
+            {
+                glApi.DeleteBuffer(gizmoVertexBuffer);
+            }
+
+            if (gizmoVertexArray != 0)
+            {
+                glApi.DeleteVertexArray(gizmoVertexArray);
             }
 
             if (program != 0)
@@ -326,6 +433,13 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         {
             return;
         }
+
+        var renderStartTicks = Stopwatch.GetTimestamp();
+        var frameIntervalMs = previousRenderStartTicks == 0
+            ? 0d
+            : (renderStartTicks - previousRenderStartTicks) * 1000d / Stopwatch.Frequency;
+        previousRenderStartTicks = renderStartTicks;
+        var drawCalls = 0;
 
         if (buffersDirty)
         {
@@ -444,25 +558,54 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         glApi.UniformMatrix4(glApi.GetUniformLocation(program, "uMvp"), 1, false, matrix);
 
         glApi.Uniform1(glApi.GetUniformLocation(program, "uSelectedProductId"), SelectedProductId);
+        glApi.Uniform1(glApi.GetUniformLocation(program, "uPreviewProductId"), previewProductId);
+        var previewMatrix = previewTransform;
+        glApi.UniformMatrix4(glApi.GetUniformLocation(program, "uPreviewTransform"), 1, false, &previewMatrix.M11);
 
         if (lineVertexCount > 0)
         {
+            glApi.Disable(EnableCap.Blend);
+            glApi.DepthMask(true);
             glApi.BindVertexArray(lineVertexArray);
             glApi.LineWidth(1f);
             glApi.DrawArrays(PrimitiveType.Lines, 0, (uint)lineVertexCount);
+            drawCalls++;
         }
 
-        if (indexCount > 0)
+        if (opaqueIndexCount > 0)
         {
+            glApi.Disable(EnableCap.Blend);
+            glApi.DepthMask(true);
             glApi.BindVertexArray(vertexArray);
-            glApi.DrawElements(PrimitiveType.Triangles, (uint)indexCount, DrawElementsType.UnsignedInt, null);
+            glApi.BindBuffer(BufferTargetARB.ElementArrayBuffer, indexBuffer);
+            glApi.DrawElements(PrimitiveType.Triangles, (uint)opaqueIndexCount, DrawElementsType.UnsignedInt, null);
+            drawCalls++;
         }
+
+        if (transparentMeshBatches.Count > 0)
+        {
+            UpdateTransparentIndexBuffer(glApi, ToVector(camera.ToPose().Position));
+            if (transparentIndexCount > 0)
+            {
+                glApi.BindVertexArray(vertexArray);
+                glApi.BindBuffer(BufferTargetARB.ElementArrayBuffer, transparentIndexBuffer);
+                glApi.Enable(EnableCap.Blend);
+                glApi.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                glApi.DepthMask(false);
+                glApi.DrawElements(PrimitiveType.Triangles, (uint)transparentIndexCount, DrawElementsType.UnsignedInt, null);
+                glApi.DepthMask(true);
+                glApi.Disable(EnableCap.Blend);
+                drawCalls++;
+            }
+        }
+
+        drawCalls += DrawGizmo(glApi, viewProjection);
 
         glApi.BindVertexArray(0);
         if (renderLogCount < 8)
         {
             renderLogCount++;
-            LogViewport($"render {renderLogCount}: fb={fb} size={width}x{height} scene='{Scene?.Status}' vertices={vertices.Length / VertexStride} indices={indexCount} lines={lineVertexCount} glError={glApi.GetError()}");
+            LogViewport($"render {renderLogCount}: fb={fb} size={width}x{height} scene='{Scene?.Status}' vertices={vertices.Length / VertexStride} opaqueIndices={opaqueIndexCount} transparentIndices={transparentIndexCount} lines={lineVertexCount} glError={glApi.GetError()}");
         }
 
         if (msaaSamples > 0)
@@ -489,6 +632,7 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
             glApi.DrawArrays(PrimitiveType.Triangles, 0, 6);
             glApi.BindVertexArray(0);
             glApi.UseProgram(0);
+            drawCalls++;
         }
 
         if (pendingPickPoint is { } pickPoint)
@@ -501,6 +645,13 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
                 Dispatcher.UIThread.Post(() => ProductPicked?.Invoke(this, new IfcProductPickedEventArgs(pickedProductId)));
             }
         }
+
+        var cpuFrameMs = (Stopwatch.GetTimestamp() - renderStartTicks) * 1000d / Stopwatch.Frequency;
+        UpdateFpsCounter(frameIntervalMs, cpuFrameMs, drawCalls, aaMode, isFxaa);
+        if (ShowFpsCounter)
+        {
+            QueueRender();
+        }
     }
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
@@ -511,6 +662,17 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         lastPointer = point.Position;
         clickStart = point.Position;
         pointerMoved = false;
+        if (point.Properties.PointerUpdateKind == PointerUpdateKind.LeftButtonPressed
+            && e.KeyModifiers == KeyModifiers.None
+            && TryBeginGizmoDrag(point.Position))
+        {
+            dragMode = DragMode.None;
+            LogViewport($"OnPointerPressed: gizmo={gizmoDrag?.Handle}");
+            e.Pointer.Capture(this);
+            e.Handled = true;
+            return;
+        }
+
         dragMode = GetDragMode(point, e.KeyModifiers);
         LogViewport($"OnPointerPressed: button={point.Properties.PointerUpdateKind} Left={point.Properties.IsLeftButtonPressed} Middle={point.Properties.IsMiddleButtonPressed} Right={point.Properties.IsRightButtonPressed} dragMode={dragMode}");
         e.Pointer.Capture(this);
@@ -534,6 +696,14 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         if (Math.Abs(deltaX) + Math.Abs(deltaY) > 1)
         {
             pointerMoved = true;
+        }
+
+        if (gizmoDrag is not null)
+        {
+            UpdateGizmoDrag(current);
+            lastPointer = current;
+            e.Handled = true;
+            return;
         }
 
         camera = dragMode switch
@@ -564,6 +734,15 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
 
         var pointProperties = e.GetCurrentPoint(this).Properties;
         LogViewport($"OnPointerReleased: button={pointProperties.PointerUpdateKind} pointerMoved={pointerMoved} dragMode={dragMode}");
+        if (gizmoDrag is not null)
+        {
+            CommitGizmoDrag();
+            dragMode = DragMode.None;
+            clickStart = null;
+            e.Handled = true;
+            return;
+        }
+
         if (pointProperties.PointerUpdateKind == PointerUpdateKind.LeftButtonReleased && !pointerMoved && clickStart is not null)
         {
             pendingPickPoint = point;
@@ -591,6 +770,10 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         base.OnKeyDown(e);
         switch (e.Key)
         {
+            case Key.Escape when gizmoDrag is not null || previewProductId != 0:
+                CancelGizmoDrag();
+                e.Handled = true;
+                break;
             case Key.F:
                 FrameSelectedProduct();
                 e.Handled = true;
@@ -616,6 +799,7 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
 
     private void OnSceneChanged()
     {
+        ClearCommittedTransformPreview();
         buffersDirty = true;
         if (SelectedProductId > 0 && TryFrameProduct(SelectedProductId))
         {
@@ -627,6 +811,7 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
 
     private void OnSelectedProductChanged()
     {
+        CancelGizmoDrag();
         if (suppressNextFraming)
         {
             suppressNextFraming = false;
@@ -645,6 +830,38 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
     private void OnAntiAliasingChanged()
     {
         QueueRender();
+    }
+
+    private void OnInteractionModeChanged()
+    {
+        CancelGizmoDrag();
+        QueueRender();
+    }
+
+    private void OnTransformAvailabilityChanged()
+    {
+        if (!CanTransformSelection)
+        {
+            CancelGizmoDrag();
+        }
+
+        QueueRender();
+    }
+
+    private void OnShowFpsCounterChanged()
+    {
+        fpsFrameCount = 0;
+        fpsWindowStartTicks = Stopwatch.GetTimestamp();
+        previousRenderStartTicks = 0;
+        accumulatedFrameIntervalMs = 0d;
+        accumulatedCpuFrameMs = 0d;
+        fpsIntervalSampleCount = 0;
+        lastFpsText = "0 FPS";
+        FpsUpdated?.Invoke(this, new ViewportFpsUpdatedEventArgs(lastFpsText));
+        if (ShowFpsCounter)
+        {
+            QueueRender();
+        }
     }
 
     private void OnHideSpacesChanged()
@@ -713,6 +930,478 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         return !bounds.IsEmpty;
     }
 
+    private unsafe int DrawGizmo(SilkGL gl, Matrix4x4 viewProjection)
+    {
+        if (!TryGetGizmoMetrics(out var center, out var size))
+        {
+            return 0;
+        }
+
+        var values = BuildGizmoVertices(center, size);
+        if (values.Count == 0)
+        {
+            return 0;
+        }
+
+        BindArray(gl, gizmoVertexArray, gizmoVertexBuffer);
+        var gizmoVertices = values.ToArray();
+        fixed (float* pointer = gizmoVertices)
+        {
+            gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(gizmoVertices.Length * sizeof(float)), pointer, BufferUsageARB.DynamicDraw);
+        }
+
+        ConfigureAttributes(gl);
+        gl.Disable(EnableCap.DepthTest);
+        gl.Enable(EnableCap.Blend);
+        gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+        gl.DepthMask(false);
+        gl.LineWidth(3f);
+        gl.DrawArrays(PrimitiveType.Lines, 0, (uint)(gizmoVertices.Length / VertexStride));
+        gl.LineWidth(1f);
+        gl.DepthMask(true);
+        gl.Disable(EnableCap.Blend);
+        gl.Enable(EnableCap.DepthTest);
+        return 1;
+    }
+
+    private bool TryGetGizmoMetrics(out Vector3 center, out float size)
+    {
+        center = Vector3.Zero;
+        size = 1f;
+        if (!CanTransformSelection || InteractionMode == ViewportInteractionMode.Select)
+        {
+            return false;
+        }
+
+        if (!TryGetSelectedProductBounds(SelectedProductId, out var bounds))
+        {
+            return false;
+        }
+
+        center = ToVector(bounds.Center) + previewMoveDeltaWorld;
+        var objectScale = Math.Max(0.15d, bounds.Radius * 1.2d);
+        var cameraScale = Math.Max(0.15d, camera.Distance * 0.16d);
+        var sceneScale = Math.Max(0.4d, camera.SceneRadius * 0.35d);
+        size = (float)Math.Clamp(Math.Max(objectScale, cameraScale), 0.15d, sceneScale);
+        return true;
+    }
+
+    private List<float> BuildGizmoVertices(Vector3 center, float size)
+    {
+        var values = new List<float>();
+        var active = gizmoDrag?.Handle ?? GizmoHandle.None;
+
+        if (InteractionMode == ViewportInteractionMode.Move)
+        {
+            AddMoveHandle(values, center, Vector3.UnitX, size, active == GizmoHandle.MoveX, new IfcRenderColor(0.96f, 0.22f, 0.16f, 1f));
+            AddMoveHandle(values, center, Vector3.UnitY, size, active == GizmoHandle.MoveY, new IfcRenderColor(0.24f, 0.78f, 0.34f, 1f));
+            AddMoveHandle(values, center, Vector3.UnitZ, size, active == GizmoHandle.MoveZ, new IfcRenderColor(0.24f, 0.50f, 1.00f, 1f));
+        }
+        else if (InteractionMode == ViewportInteractionMode.Rotate)
+        {
+            var color = active == GizmoHandle.RotateZ
+                ? new IfcRenderColor(1.00f, 0.82f, 0.20f, 1f)
+                : new IfcRenderColor(0.28f, 0.72f, 1.00f, 0.96f);
+            AddRotationRing(values, center, size * 0.85f, color);
+        }
+
+        return values;
+    }
+
+    private static void AddMoveHandle(List<float> values, Vector3 center, Vector3 axis, float size, bool active, IfcRenderColor baseColor)
+    {
+        var color = active
+            ? new IfcRenderColor(1f, 0.84f, 0.20f, 1f)
+            : baseColor;
+        var end = center + axis * size;
+        AddLine(values, center, end, color);
+
+        var headLength = size * 0.16f;
+        var headWidth = size * 0.07f;
+        var side = Math.Abs(Vector3.Dot(axis, Vector3.UnitX)) > 0.9f
+            ? Vector3.UnitY
+            : Vector3.UnitX;
+        AddLine(values, end, end - axis * headLength + side * headWidth, color);
+        AddLine(values, end, end - axis * headLength - side * headWidth, color);
+        if (Math.Abs(Vector3.Dot(axis, Vector3.UnitZ)) > 0.9f)
+        {
+            AddLine(values, end, end - axis * headLength + Vector3.UnitY * headWidth, color);
+            AddLine(values, end, end - axis * headLength - Vector3.UnitY * headWidth, color);
+        }
+    }
+
+    private static void AddRotationRing(List<float> values, Vector3 center, float radius, IfcRenderColor color)
+    {
+        const int segments = 96;
+        var previous = center + new Vector3(radius, 0, 0);
+        for (var i = 1; i <= segments; i++)
+        {
+            var angle = i * MathF.Tau / segments;
+            var next = center + new Vector3(MathF.Cos(angle) * radius, MathF.Sin(angle) * radius, 0);
+            AddLine(values, previous, next, color);
+            previous = next;
+        }
+    }
+
+    private bool TryBeginGizmoDrag(Point point)
+    {
+        if (!TryHitGizmo(point, out var handle) || !TryGetGizmoMetrics(out var center, out _))
+        {
+            return false;
+        }
+
+        if (!TryCreateRay(point, out var rayOrigin, out var rayDirection))
+        {
+            return false;
+        }
+
+        var axis = HandleAxis(handle);
+        var state = new GizmoDragState
+        {
+            ProductId = SelectedProductId,
+            Handle = handle,
+            Center = center,
+            Axis = axis,
+        };
+
+        if (handle == GizmoHandle.RotateZ)
+        {
+            if (!TryIntersectPlane(rayOrigin, rayDirection, center, Vector3.UnitZ, out var hit))
+            {
+                return false;
+            }
+
+            state.StartAngle = MathF.Atan2(hit.Y - center.Y, hit.X - center.X);
+        }
+        else if (!TryClosestParameterOnAxis(rayOrigin, rayDirection, center, axis, out var parameter))
+        {
+            return false;
+        }
+        else
+        {
+            state.StartAxisParameter = parameter;
+        }
+
+        gizmoDrag = state;
+        previewProductId = SelectedProductId;
+        previewTransform = Matrix4x4.Identity;
+        previewMoveDeltaWorld = Vector3.Zero;
+        previewRotateZRadians = 0f;
+        QueueRender();
+        return true;
+    }
+
+    private void UpdateGizmoDrag(Point point)
+    {
+        if (gizmoDrag is null || !TryCreateRay(point, out var rayOrigin, out var rayDirection))
+        {
+            return;
+        }
+
+        if (gizmoDrag.Handle == GizmoHandle.RotateZ)
+        {
+            if (!TryIntersectPlane(rayOrigin, rayDirection, gizmoDrag.Center, Vector3.UnitZ, out var hit))
+            {
+                return;
+            }
+
+            var currentAngle = MathF.Atan2(hit.Y - gizmoDrag.Center.Y, hit.X - gizmoDrag.Center.X);
+            gizmoDrag.RotateZRadians = NormalizeRadians(currentAngle - gizmoDrag.StartAngle);
+            gizmoDrag.MoveDeltaWorld = Vector3.Zero;
+        }
+        else if (TryClosestParameterOnAxis(rayOrigin, rayDirection, gizmoDrag.Center, gizmoDrag.Axis, out var parameter))
+        {
+            gizmoDrag.MoveDeltaWorld = gizmoDrag.Axis * (parameter - gizmoDrag.StartAxisParameter);
+            gizmoDrag.RotateZRadians = 0f;
+        }
+
+        previewProductId = gizmoDrag.ProductId;
+        previewMoveDeltaWorld = gizmoDrag.MoveDeltaWorld;
+        previewRotateZRadians = gizmoDrag.RotateZRadians;
+        previewTransform = CreatePreviewTransform(gizmoDrag.Center, previewMoveDeltaWorld, previewRotateZRadians);
+        QueueRender();
+    }
+
+    private void CommitGizmoDrag()
+    {
+        if (gizmoDrag is { } state)
+        {
+            var shouldCommit = state.MoveDeltaWorld.LengthSquared() > 0.0000001f || Math.Abs(state.RotateZRadians) > 0.0000001f;
+            var productId = state.ProductId;
+            var moveDelta = state.MoveDeltaWorld;
+            var rotateZ = state.RotateZRadians;
+            gizmoDrag = null;
+            if (shouldCommit)
+            {
+                previewProductId = productId;
+                previewMoveDeltaWorld = moveDelta;
+                previewRotateZRadians = rotateZ;
+                previewTransform = CreatePreviewTransform(state.Center, moveDelta, rotateZ);
+                QueueRender();
+                Dispatcher.UIThread.Post(() => ProductTransformCommitted?.Invoke(this, new IfcProductTransformCommittedEventArgs(productId, moveDelta, rotateZ)));
+            }
+            else
+            {
+                ResetGizmoPreview();
+            }
+
+            return;
+        }
+
+        ResetGizmoPreview();
+    }
+
+    private void CancelGizmoDrag()
+    {
+        if (gizmoDrag is null && previewProductId == 0)
+        {
+            return;
+        }
+
+        ResetGizmoPreview();
+    }
+
+    private void ResetGizmoPreview()
+    {
+        gizmoDrag = null;
+        previewProductId = 0;
+        previewMoveDeltaWorld = Vector3.Zero;
+        previewRotateZRadians = 0f;
+        previewTransform = Matrix4x4.Identity;
+        QueueRender();
+    }
+
+    private void ClearCommittedTransformPreview()
+    {
+        if (gizmoDrag is not null || previewProductId == 0)
+        {
+            return;
+        }
+
+        previewProductId = 0;
+        previewMoveDeltaWorld = Vector3.Zero;
+        previewRotateZRadians = 0f;
+        previewTransform = Matrix4x4.Identity;
+    }
+
+    private bool TryHitGizmo(Point point, out GizmoHandle handle)
+    {
+        handle = GizmoHandle.None;
+        if (!TryGetGizmoMetrics(out var center, out var size))
+        {
+            return false;
+        }
+
+        var width = Math.Max(1d, Bounds.Width);
+        var height = Math.Max(1d, Bounds.Height);
+        var viewProjection = CreateViewProjection(width, height);
+        var bestDistance = 12d;
+
+        if (InteractionMode == ViewportInteractionMode.Move)
+        {
+            TryAxisHit(GizmoHandle.MoveX, center, Vector3.UnitX, size, point, viewProjection, width, height, ref bestDistance, ref handle);
+            TryAxisHit(GizmoHandle.MoveY, center, Vector3.UnitY, size, point, viewProjection, width, height, ref bestDistance, ref handle);
+            TryAxisHit(GizmoHandle.MoveZ, center, Vector3.UnitZ, size, point, viewProjection, width, height, ref bestDistance, ref handle);
+        }
+        else if (InteractionMode == ViewportInteractionMode.Rotate)
+        {
+            TryRingHit(center, size * 0.85f, point, viewProjection, width, height, ref bestDistance, ref handle);
+        }
+
+        return handle != GizmoHandle.None;
+    }
+
+    private static void TryAxisHit(
+        GizmoHandle candidate,
+        Vector3 center,
+        Vector3 axis,
+        float size,
+        Point point,
+        Matrix4x4 viewProjection,
+        double width,
+        double height,
+        ref double bestDistance,
+        ref GizmoHandle handle)
+    {
+        if (!TryProjectPoint(center, viewProjection, width, height, out var start)
+            || !TryProjectPoint(center + axis * size, viewProjection, width, height, out var end))
+        {
+            return;
+        }
+
+        var distance = DistanceToSegment(point, start, end);
+        if (distance < bestDistance)
+        {
+            bestDistance = distance;
+            handle = candidate;
+        }
+    }
+
+    private static void TryRingHit(
+        Vector3 center,
+        float radius,
+        Point point,
+        Matrix4x4 viewProjection,
+        double width,
+        double height,
+        ref double bestDistance,
+        ref GizmoHandle handle)
+    {
+        const int segments = 64;
+        var previous = center + new Vector3(radius, 0, 0);
+        if (!TryProjectPoint(previous, viewProjection, width, height, out var previousScreen))
+        {
+            return;
+        }
+
+        for (var i = 1; i <= segments; i++)
+        {
+            var angle = i * MathF.Tau / segments;
+            var next = center + new Vector3(MathF.Cos(angle) * radius, MathF.Sin(angle) * radius, 0);
+            if (TryProjectPoint(next, viewProjection, width, height, out var nextScreen))
+            {
+                var distance = DistanceToSegment(point, previousScreen, nextScreen);
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    handle = GizmoHandle.RotateZ;
+                }
+
+                previousScreen = nextScreen;
+            }
+        }
+    }
+
+    private bool TryCreateRay(Point point, out Vector3 origin, out Vector3 direction)
+    {
+        origin = Vector3.Zero;
+        direction = Vector3.UnitZ;
+        var width = Math.Max(1d, Bounds.Width);
+        var height = Math.Max(1d, Bounds.Height);
+        var ndcX = (float)((2d * point.X / width) - 1d);
+        var ndcY = (float)(1d - (2d * point.Y / height));
+        var viewProjection = CreateViewProjection(width, height);
+        if (!Matrix4x4.Invert(viewProjection, out var inverse))
+        {
+            return false;
+        }
+
+        var near = Unproject(new Vector3(ndcX, ndcY, 0f), inverse);
+        var far = Unproject(new Vector3(ndcX, ndcY, 1f), inverse);
+        var rayDirection = far - near;
+        if (rayDirection.LengthSquared() < 0.0000001f)
+        {
+            return false;
+        }
+
+        origin = near;
+        direction = Vector3.Normalize(rayDirection);
+        return true;
+    }
+
+    private static bool TryClosestParameterOnAxis(Vector3 rayOrigin, Vector3 rayDirection, Vector3 axisOrigin, Vector3 axisDirection, out float parameter)
+    {
+        parameter = 0f;
+        if (axisDirection.LengthSquared() < 0.0000001f)
+        {
+            return false;
+        }
+
+        var axis = Vector3.Normalize(axisDirection);
+        var ray = Vector3.Normalize(rayDirection);
+        var w0 = rayOrigin - axisOrigin;
+        var a = Vector3.Dot(ray, ray);
+        var b = Vector3.Dot(ray, axis);
+        var c = Vector3.Dot(axis, axis);
+        var d = Vector3.Dot(ray, w0);
+        var e = Vector3.Dot(axis, w0);
+        var denominator = a * c - b * b;
+        parameter = Math.Abs(denominator) < 0.000001f
+            ? e
+            : (a * e - b * d) / denominator;
+        return !float.IsNaN(parameter) && !float.IsInfinity(parameter);
+    }
+
+    private static bool TryIntersectPlane(Vector3 rayOrigin, Vector3 rayDirection, Vector3 planePoint, Vector3 planeNormal, out Vector3 hit)
+    {
+        hit = Vector3.Zero;
+        var denominator = Vector3.Dot(rayDirection, planeNormal);
+        if (Math.Abs(denominator) < 0.000001f)
+        {
+            return false;
+        }
+
+        var distance = Vector3.Dot(planePoint - rayOrigin, planeNormal) / denominator;
+        if (distance < 0)
+        {
+            return false;
+        }
+
+        hit = rayOrigin + rayDirection * distance;
+        return true;
+    }
+
+    private static Matrix4x4 CreatePreviewTransform(Vector3 center, Vector3 moveDelta, float rotateZRadians)
+    {
+        if (Math.Abs(rotateZRadians) > 0.0000001f)
+        {
+            return Matrix4x4.CreateTranslation(-center)
+                * Matrix4x4.CreateRotationZ(rotateZRadians)
+                * Matrix4x4.CreateTranslation(center);
+        }
+
+        return moveDelta.LengthSquared() > 0.0000001f
+            ? Matrix4x4.CreateTranslation(moveDelta)
+            : Matrix4x4.Identity;
+    }
+
+    private static Vector3 HandleAxis(GizmoHandle handle)
+    {
+        return handle switch
+        {
+            GizmoHandle.MoveX => Vector3.UnitX,
+            GizmoHandle.MoveY => Vector3.UnitY,
+            GizmoHandle.MoveZ => Vector3.UnitZ,
+            _ => Vector3.UnitZ,
+        };
+    }
+
+    private static bool TryProjectPoint(Vector3 world, Matrix4x4 viewProjection, double width, double height, out Point screen)
+    {
+        screen = default;
+        var clip = Vector4.Transform(new Vector4(world, 1f), viewProjection);
+        if (Math.Abs(clip.W) < 0.000001f)
+        {
+            return false;
+        }
+
+        var ndcX = clip.X / clip.W;
+        var ndcY = clip.Y / clip.W;
+        if (float.IsNaN(ndcX) || float.IsNaN(ndcY) || float.IsInfinity(ndcX) || float.IsInfinity(ndcY))
+        {
+            return false;
+        }
+
+        screen = new Point((ndcX + 1f) * 0.5f * width, (1f - ndcY) * 0.5f * height);
+        return true;
+    }
+
+    private static double DistanceToSegment(Point point, Point start, Point end)
+    {
+        var dx = end.X - start.X;
+        var dy = end.Y - start.Y;
+        var lengthSquared = dx * dx + dy * dy;
+        if (lengthSquared <= 0.000001d)
+        {
+            return Math.Sqrt(Math.Pow(point.X - start.X, 2) + Math.Pow(point.Y - start.Y, 2));
+        }
+
+        var t = Math.Clamp(((point.X - start.X) * dx + (point.Y - start.Y) * dy) / lengthSquared, 0d, 1d);
+        var x = start.X + t * dx;
+        var y = start.Y + t * dy;
+        return Math.Sqrt(Math.Pow(point.X - x, 2) + Math.Pow(point.Y - y, 2));
+    }
+
     public bool HitTest(Point point)
     {
         return new Rect(Bounds.Size).Contains(point);
@@ -769,22 +1458,109 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         });
     }
 
+    private void UpdateFpsCounter(
+        double frameIntervalMs,
+        double cpuFrameMs,
+        int drawCalls,
+        AntiAliasingMode aaMode,
+        bool isFxaa)
+    {
+        if (!ShowFpsCounter)
+        {
+            return;
+        }
+
+        var now = Stopwatch.GetTimestamp();
+        if (fpsWindowStartTicks == 0)
+        {
+            fpsWindowStartTicks = now;
+        }
+
+        fpsFrameCount++;
+        if (frameIntervalMs > 0d)
+        {
+            accumulatedFrameIntervalMs += frameIntervalMs;
+            fpsIntervalSampleCount++;
+        }
+
+        accumulatedCpuFrameMs += cpuFrameMs;
+        var elapsedSeconds = (now - fpsWindowStartTicks) / (double)Stopwatch.Frequency;
+        if (elapsedSeconds < 0.5)
+        {
+            return;
+        }
+
+        var averageIntervalMs = fpsIntervalSampleCount > 0
+            ? accumulatedFrameIntervalMs / fpsIntervalSampleCount
+            : elapsedSeconds * 1000d / Math.Max(1, fpsFrameCount);
+        var averageCpuMs = accumulatedCpuFrameMs / Math.Max(1, fpsFrameCount);
+        var fps = fpsFrameCount / elapsedSeconds;
+        var nextText = FormatViewportStats(
+            fps,
+            averageIntervalMs,
+            averageCpuMs,
+            drawCalls,
+            aaMode,
+            isFxaa);
+        fpsFrameCount = 0;
+        fpsWindowStartTicks = now;
+        accumulatedFrameIntervalMs = 0d;
+        accumulatedCpuFrameMs = 0d;
+        fpsIntervalSampleCount = 0;
+        if (string.Equals(nextText, lastFpsText, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        lastFpsText = nextText;
+        Dispatcher.UIThread.Post(() => FpsUpdated?.Invoke(this, new ViewportFpsUpdatedEventArgs(nextText)));
+    }
+
+    private string FormatViewportStats(
+        double fps,
+        double frameIntervalMs,
+        double cpuFrameMs,
+        int drawCalls,
+        AntiAliasingMode aaMode,
+        bool isFxaa)
+    {
+        var scene = Scene;
+        var instanceCount = scene?.ShapeInstanceCount ?? 0;
+        var aaLabel = isFxaa ? "FXAA" : aaMode.ToString();
+        return string.Join(
+            Environment.NewLine,
+            $"{fps:0} FPS  interval {frameIntervalMs:0.0} ms",
+            $"CPU {cpuFrameMs:0.0} ms  draws {drawCalls:N0}",
+            $"meshes {visibleMeshCount:N0}  tris {visibleTriangleCount:N0}",
+            $"verts {visibleVertexCount:N0}  inst {instanceCount:N0}",
+            $"loop continuous  AA {aaLabel}");
+    }
+
     private void BuildBuffers()
     {
         var scene = Scene;
         if (scene is null || scene.IsEmpty)
         {
             vertices = [];
-            indices = [];
+            opaqueIndices = [];
+            transparentIndices = [];
             lineVertices = [];
-            indexCount = 0;
+            transparentMeshBatches = [];
+            opaqueIndexCount = 0;
+            transparentIndexCount = 0;
             lineVertexCount = 0;
+            visibleMeshCount = 0;
+            visibleTriangleCount = 0;
+            visibleVertexCount = 0;
             return;
         }
 
         var hideSpaces = HideSpaces;
         var vertexValues = new List<float>();
-        var indexValues = new List<uint>();
+        var opaqueIndexValues = new List<uint>();
+        var batches = new List<TransparentMeshBatch>();
+        var meshCount = 0;
+        var triangleCount = 0;
         foreach (var mesh in scene.Meshes.Where(mesh => mesh.IsRenderable))
         {
             if (hideSpaces && mesh.IsSpace)
@@ -792,26 +1568,42 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
                 continue;
             }
 
+            meshCount++;
             var baseIndex = (uint)(vertexValues.Count / VertexStride);
             foreach (var vertex in mesh.Vertices)
             {
                 AddVertex(vertexValues, vertex, mesh.Color, mesh.ProductId);
             }
 
+            var meshIndexValues = IsTransparent(mesh)
+                ? new List<uint>(mesh.Indices.Count)
+                : opaqueIndexValues;
             foreach (var index in mesh.Indices)
             {
                 if (index >= 0 && index < mesh.Vertices.Count)
                 {
-                    indexValues.Add(baseIndex + (uint)index);
+                    meshIndexValues.Add(baseIndex + (uint)index);
                 }
+            }
+
+            triangleCount += meshIndexValues.Count / 3;
+            if (meshIndexValues != opaqueIndexValues && meshIndexValues.Count > 0)
+            {
+                batches.Add(new TransparentMeshBatch(MeshCenter(mesh), meshIndexValues.ToArray()));
             }
         }
 
         vertices = vertexValues.ToArray();
-        indices = indexValues.ToArray();
-        indexCount = indices.Length;
+        opaqueIndices = opaqueIndexValues.ToArray();
+        transparentMeshBatches = batches;
+        transparentIndices = [];
+        opaqueIndexCount = opaqueIndices.Length;
+        transparentIndexCount = 0;
         lineVertices = BuildGridAndAxes(scene).ToArray();
         lineVertexCount = lineVertices.Length / VertexStride;
+        visibleMeshCount = meshCount;
+        visibleTriangleCount = triangleCount;
+        visibleVertexCount = vertices.Length / VertexStride;
     }
 
     private unsafe void UploadBuffers(SilkGL gl)
@@ -823,9 +1615,9 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         }
 
         gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, indexBuffer);
-        fixed (uint* indexPointer = indices)
+        fixed (uint* indexPointer = opaqueIndices)
         {
-            gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint)(indices.Length * sizeof(uint)), indexPointer, BufferUsageARB.StaticDraw);
+            gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint)(opaqueIndices.Length * sizeof(uint)), indexPointer, BufferUsageARB.StaticDraw);
         }
 
         ConfigureAttributes(gl);
@@ -838,6 +1630,44 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
 
         ConfigureAttributes(gl);
         gl.BindVertexArray(0);
+    }
+
+    private unsafe void UpdateTransparentIndexBuffer(SilkGL gl, Vector3 cameraPosition)
+    {
+        var totalIndexCount = 0;
+        foreach (var batch in transparentMeshBatches)
+        {
+            totalIndexCount += batch.Indices.Length;
+        }
+
+        if (totalIndexCount == 0)
+        {
+            transparentIndexCount = 0;
+            return;
+        }
+
+        transparentMeshBatches.Sort((left, right) =>
+            Vector3.DistanceSquared(right.Center, cameraPosition)
+                .CompareTo(Vector3.DistanceSquared(left.Center, cameraPosition)));
+
+        if (transparentIndices.Length != totalIndexCount)
+        {
+            transparentIndices = new uint[totalIndexCount];
+        }
+
+        var offset = 0;
+        foreach (var batch in transparentMeshBatches)
+        {
+            Array.Copy(batch.Indices, 0, transparentIndices, offset, batch.Indices.Length);
+            offset += batch.Indices.Length;
+        }
+
+        transparentIndexCount = totalIndexCount;
+        gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, transparentIndexBuffer);
+        fixed (uint* indexPointer = transparentIndices)
+        {
+            gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint)(transparentIndices.Length * sizeof(uint)), indexPointer, BufferUsageARB.DynamicDraw);
+        }
     }
 
     private static void BindArray(SilkGL gl, uint array, uint buffer)
@@ -872,6 +1702,23 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         values.Add(color.B);
         values.Add(color.A);
         values.Add(productId);
+    }
+
+    private static bool IsTransparent(IfcRenderMesh mesh)
+    {
+        return mesh.Color.A < 0.99f;
+    }
+
+    private static Vector3 MeshCenter(IfcRenderMesh mesh)
+    {
+        var bounds = IfcRenderBounds.Empty;
+        foreach (var vertex in mesh.Vertices)
+        {
+            bounds = bounds.Include(vertex.X, vertex.Y, vertex.Z);
+        }
+
+        var center = bounds.Center;
+        return new Vector3((float)center.X, (float)center.Y, (float)center.Z);
     }
 
     private static IEnumerable<float> BuildGridAndAxes(IfcRenderScene scene)
@@ -911,6 +1758,11 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
     {
         AddVertex(values, new IfcRenderVertex(x1, y1, z1, 0, 0, 1), color, 0);
         AddVertex(values, new IfcRenderVertex(x2, y2, z2, 0, 0, 1), color, 0);
+    }
+
+    private static void AddLine(List<float> values, Vector3 start, Vector3 end, IfcRenderColor color)
+    {
+        AddLine(values, start.X, start.Y, start.Z, end.X, end.Y, end.Z, color);
     }
 
     private static double NiceStep(double value)
@@ -1072,6 +1924,16 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         return degrees * MathF.PI / 180f;
     }
 
+    private static float NormalizeRadians(float radians)
+    {
+        var normalized = radians % MathF.Tau;
+        return normalized <= -MathF.PI
+            ? normalized + MathF.Tau
+            : normalized > MathF.PI
+                ? normalized - MathF.Tau
+                : normalized;
+    }
+
     private static uint CreateProgram(SilkGL gl)
     {
         var vertexShader = CompileShader(gl, ShaderType.VertexShader, VertexShaderSource);
@@ -1143,6 +2005,8 @@ attribute vec4 aColor;
 attribute float aProductId;
 
 uniform mat4 uMvp;
+uniform mat4 uPreviewTransform;
+uniform int uPreviewProductId;
 
 varying vec3 vNormal;
 varying vec4 vColor;
@@ -1150,7 +2014,13 @@ varying float vProductId;
 
 void main()
 {
-    gl_Position = uMvp * vec4(aPosition, 1.0);
+    vec4 worldPosition = vec4(aPosition, 1.0);
+    if (uPreviewProductId > 0 && abs(aProductId - float(uPreviewProductId)) < 0.5)
+    {
+        worldPosition = uPreviewTransform * worldPosition;
+    }
+
+    gl_Position = uMvp * worldPosition;
     vNormal = aNormal;
     vColor = aColor;
     vProductId = aProductId;
@@ -1275,9 +2145,25 @@ void main()
 }
 """;
 
+    private sealed record TransparentMeshBatch(Vector3 Center, uint[] Indices);
+
 }
 
 public sealed class IfcProductPickedEventArgs(int productId) : EventArgs
 {
     public int ProductId { get; } = productId;
+}
+
+public sealed class IfcProductTransformCommittedEventArgs(int productId, Vector3 moveDeltaWorld, float rotateZRadians) : EventArgs
+{
+    public int ProductId { get; } = productId;
+
+    public Vector3 MoveDeltaWorld { get; } = moveDeltaWorld;
+
+    public float RotateZRadians { get; } = rotateZRadians;
+}
+
+public sealed class ViewportFpsUpdatedEventArgs(string text) : EventArgs
+{
+    public string Text { get; } = text;
 }

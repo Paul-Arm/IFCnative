@@ -20,6 +20,8 @@ internal sealed class NativeTestRunner
         Run("xBIM geometry backend projects sample meshes", XbimGeometryBackendProjectsSampleMeshes);
         Run("xBIM GeometryStore builds finite render scene", XbimGeometryStoreBuildsFiniteRenderScene);
         Run("viewport selection highlights without scene rebuild", ViewportSelectionHighlightsWithoutSceneRebuild);
+        Run("structure tree reveals viewport selection through filters", StructureTreeRevealsViewportSelectionThroughFilters);
+        Run("spatial tree nests hosted element relationships", SpatialTreeNestsHostedElementRelationships);
         Run("xBIM geometry dirty handling preserves pset edits only", XbimGeometryDirtyHandlingPreservesPsetEditsOnly);
         Run("product id picking color roundtrips", ProductIdPickingColorRoundtrips);
         Run("viewport camera supports blender style frame pan and dolly", ViewportCameraSupportsBlenderStyleFramePanAndDolly);
@@ -89,7 +91,18 @@ internal sealed class NativeTestRunner
         Equal(-2d, placement.Y, "placement Y should update");
         Equal(3d, placement.Z, "placement Z should update");
 
-        var withBody = XbimDocumentEditor.AssignBodyRepresentation(placed, 40, "5", "2.5", "3", "rectangle");
+        var transformed = XbimDocumentEditor.UpdatePlacementTransform(placed, 40, 0.75, 1.5, -1, Math.PI / 2d);
+        var transformedPlacement = transformed.PlacementsByEntity[40];
+        Equal(2d, Math.Round(transformedPlacement.X, 6), "transform should move placement X");
+        Equal(-0.5d, Math.Round(transformedPlacement.Y, 6), "transform should move placement Y");
+        Equal(2d, Math.Round(transformedPlacement.Z, 6), "transform should move placement Z");
+        True(XbimIfcDocumentService.TryGetGeometryContext(transformed) is null, "transform edit should invalidate geometry context");
+
+        var exportedTransform = XbimIfcDocumentService.NormalizeForExport(transformed);
+        True(exportedTransform.Contains("IFCDIRECTION((0.,1.", StringComparison.OrdinalIgnoreCase)
+            || exportedTransform.Contains("IFCDIRECTION((6.123", StringComparison.OrdinalIgnoreCase), "transform should write a Z ref direction");
+
+        var withBody = XbimDocumentEditor.AssignBodyRepresentation(transformed, 40, "5", "2.5", "3", "rectangle");
         True(withBody.RepresentationsByEntity.TryGetValue(40, out var representation)
             && representation.GeometryItemIds.Count > 0, "body assignment should create xBIM representation items");
     }
@@ -198,6 +211,76 @@ internal sealed class NativeTestRunner
             Equal(40, viewport.SelectedProductId, "selection should set highlighted product id");
             Equal(1, backend.SceneBuilds, "selection highlight should not rebuild geometry");
         });
+    }
+
+    private static void StructureTreeRevealsViewportSelectionThroughFilters()
+    {
+        WithTempDirectory(temp =>
+        {
+            var document = Sample();
+            var owner = new MainWindowViewModel(
+                new TestFileDialogs(),
+                new NativeUserPreferencesStore(Path.Combine(temp, "preferences.json")),
+                loadSample: false);
+
+            owner.Structure.SetDocument(document, bookmarkedEntityIds: []);
+            owner.Structure.SearchText = "does-not-match-anything";
+            Equal(0, owner.Structure.Rows.Count, "search should hide the sample product before reveal");
+
+            owner.Structure.SelectEntity(40);
+            Equal(string.Empty, owner.Structure.SearchText, "viewport reveal should clear a filter hiding the selected tree path");
+            Equal(40, owner.Structure.SelectedRow?.Node.Entity.Id ?? 0, "viewport reveal should select the product row");
+            True(owner.Structure.Rows.Any(row => row.Node.Entity.Id == 40), "revealed product should be visible in the structure rows");
+
+            owner.Structure.SelectEntity(60);
+            Equal("60", owner.Structure.SearchText, "uncontained reveal should switch to exact id search fallback");
+            Equal(60, owner.Structure.SelectedRow?.Node.Entity.Id ?? 0, "uncontained reveal should select the fallback row");
+        });
+    }
+
+    private static void SpatialTreeNestsHostedElementRelationships()
+    {
+        var document = IfcStepParser.Parse("""
+ISO-10303-21;
+HEADER;
+FILE_SCHEMA(('IFC4'));
+ENDSEC;
+DATA;
+#1= IFCPROJECT('project-guid',$,'Project',$,$,$,$,$,$);
+#2= IFCSITE('site-guid',$,'Site',$,$,$,$,$,$,$,$,$,$,$);
+#3= IFCBUILDING('building-guid',$,'Building',$,$,$,$,$,$,$,$,$);
+#4= IFCBUILDINGSTOREY('storey-guid',$,'Storey',$,$,$,$,$,$);
+#10= IFCRELAGGREGATES('agg-project',$,$,$,#1,(#2));
+#11= IFCRELAGGREGATES('agg-site',$,$,$,#2,(#3));
+#12= IFCRELAGGREGATES('agg-building',$,$,$,#3,(#4));
+#100= IFCWALLSTANDARDCASE('wall-guid',$,'Wall A',$,$,$,$,$,$);
+#200= IFCOPENINGELEMENT('opening-guid',$,'Opening A',$,$,$,$,$);
+#300= IFCWINDOW('window-guid',$,'Window A',$,$,$,$,$,$,1.,1.,$,$,$);
+#500= IFCBUILDINGELEMENTPROXY('nested-guid',$,'Nested Part',$,$,$,$,$,$);
+#600= IFCPROJECTIONELEMENT('projection-guid',$,'Projection A',$,$,$,$,$);
+#400= IFCRELCONTAINEDINSPATIALSTRUCTURE('contains',$,$,$,(#100,#300,#500),#4);
+#410= IFCRELVOIDSELEMENT('voids',$,$,$,#100,#200);
+#420= IFCRELFILLSELEMENT('fills',$,$,$,#200,#300);
+#430= IFCRELNESTS('nests',$,$,$,#100,(#500));
+#440= IFCRELPROJECTSELEMENT('projects',$,$,$,#100,#600);
+ENDSEC;
+END-ISO-10303-21;
+""", "hosted-window.ifc");
+
+        var storey = FindTreeNode(document.SpatialRoots, 4);
+        True(storey is not null, "storey should be visible in spatial tree");
+        True(storey!.Children.Any(child => child.Entity.Id == 100), "wall should stay under storey");
+        True(!storey.Children.Any(child => child.Entity.Id == 300), "hosted window should not remain a storey sibling");
+        True(!storey.Children.Any(child => child.Entity.Id == 500), "nested part should not remain a storey sibling");
+
+        var wall = FindTreeNode(document.SpatialRoots, 100);
+        True(wall is not null, "wall node should be visible");
+        True(wall!.Children.Any(child => child.Entity.Id == 300 && child.Relation == "fills"), "window should be nested under host wall");
+        True(wall.Children.Any(child => child.Entity.Id == 500 && child.Relation == "nest"), "nested part should be nested under host wall");
+        True(wall.Children.Any(child => child.Entity.Id == 600 && child.Relation == "projects"), "projection feature should be nested under host wall");
+        True(document.SpatialPathByEntity[300].Contains("Wall A", StringComparison.OrdinalIgnoreCase), "window spatial path should include host wall");
+        True(document.SpatialPathByEntity[500].Contains("Wall A", StringComparison.OrdinalIgnoreCase), "nested part spatial path should include host wall");
+        True(document.SpatialPathByEntity[600].Contains("Wall A", StringComparison.OrdinalIgnoreCase), "projection feature spatial path should include host wall");
     }
 
     private static void XbimGeometryDirtyHandlingPreservesPsetEditsOnly()
@@ -346,12 +429,16 @@ internal sealed class NativeTestRunner
         {
             var document = XbimDocumentEditor.AddProduct(Sample(), 30, "IFCBUILDINGELEMENTPROXY", "No Body Yet");
             var productId = document.EntityById.Values.Single(entity => entity.Name == "No Body Yet").Id;
-            var diagnostic = IfcDiagnosticsProjector.Project(document.Diagnostics.Messages)
-                .Single(item => item.EntityId == productId && item.CanRepairRepresentation);
-            var owner = new MainWindowViewModel(new TestFileDialogs(), new NativeUserPreferencesStore(Path.Combine(temp, "preferences.json")))
+            True(!document.Diagnostics.HasBeenChecked, "diagnostics should not run automatically after edits");
+
+            var owner = new MainWindowViewModel(new TestFileDialogs(), new NativeUserPreferencesStore(Path.Combine(temp, "preferences.json")), loadSample: false)
             {
                 ActiveSession = new IfcDocumentSessionViewModel(document, null),
             };
+            True(owner.Diagnostics.Items.Single().Message.Contains("not been checked", StringComparison.OrdinalIgnoreCase), "diagnostics panel should wait for an explicit check");
+
+            owner.RunDiagnosticsAsync().GetAwaiter().GetResult();
+            var diagnostic = owner.Diagnostics.Items.Single(item => item.EntityId == productId && item.CanRepairRepresentation);
             owner.SelectEntityById(productId);
             owner.RepairDiagnostic(diagnostic);
 
@@ -384,8 +471,10 @@ internal sealed class NativeTestRunner
             Equal(900d, layout.InspectorPaneWidth, "inspector pane width should be clamped");
 
             var preferencesStore = new NativeUserPreferencesStore(Path.Combine(temp, "preferences.json"));
-            preferencesStore.Save(new NativeUserPreferences(TextScale: 20));
-            Equal(1.8d, preferencesStore.Load().TextScale, "text scale should be clamped");
+            preferencesStore.Save(new NativeUserPreferences(TextScale: 20, ShowFpsCounter: true));
+            var preferences = preferencesStore.Load();
+            Equal(1.8d, preferences.TextScale, "text scale should be clamped");
+            True(preferences.ShowFpsCounter, "FPS counter preference should persist");
         });
     }
 
@@ -405,6 +494,24 @@ internal sealed class NativeTestRunner
             .PropertySets
             .Where(property => property.EntityId is not null)
             .ToList();
+    }
+
+    private static IfcTreeNode? FindTreeNode(IEnumerable<IfcTreeNode> nodes, int entityId)
+    {
+        foreach (var node in nodes)
+        {
+            if (node.Entity.Id == entityId)
+            {
+                return node;
+            }
+
+            if (FindTreeNode(node.Children, entityId) is { } child)
+            {
+                return child;
+            }
+        }
+
+        return null;
     }
 
     private static void WithTempDirectory(Action<string> action)

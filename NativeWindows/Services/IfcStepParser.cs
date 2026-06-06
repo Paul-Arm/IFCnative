@@ -7,7 +7,7 @@ namespace IFCnative.NativeWindows.Services;
 
 public static partial class IfcStepParser
 {
-    public static IfcDocument Parse(string text, string fileName)
+    public static IfcDocument Parse(string text, string fileName, bool runDiagnostics = true)
     {
         var document = new IfcDocument
         {
@@ -64,7 +64,11 @@ public static partial class IfcStepParser
         BuildPlacementIndex(document);
         BuildRepresentationIndex(document);
         BuildSpatialTree(document);
-        ValidateDocument(document);
+        if (runDiagnostics)
+        {
+            IfcDocumentDiagnostics.Run(document);
+        }
+
         document.Diagnostics.Info($"Loaded {document.Entities.Count:N0} STEP entities.");
         document.Diagnostics.Info($"Indexed {document.RelationshipById.Count:N0} IFC relationships.");
         document.Diagnostics.Info($"Indexed {document.PropertySetById.Count:N0} property/quantity sets.");
@@ -805,21 +809,20 @@ public static partial class IfcStepParser
     private static void BuildSpatialTree(IfcDocument document)
     {
         var childrenByParent = new Dictionary<int, List<(int ChildId, string Relation)>>();
+        var parentByChild = new Dictionary<int, int>();
         var childIds = new HashSet<int>();
-
-        foreach (var rel in document.Entities.Where(entity => entity.Type == "IFCRELAGGREGATES"))
-        {
-            var parent = StepArgumentReader.ReadReferences(rel.Arguments.ElementAtOrDefault(4) ?? string.Empty).FirstOrDefault();
-            var children = StepArgumentReader.ReadReferences(rel.Arguments.ElementAtOrDefault(5) ?? string.Empty);
-            AddChildren(childrenByParent, childIds, parent, children, "aggregate");
-        }
 
         foreach (var rel in document.Entities.Where(entity => entity.Type == "IFCRELCONTAINEDINSPATIALSTRUCTURE"))
         {
             var parent = StepArgumentReader.ReadReferences(rel.Arguments.ElementAtOrDefault(5) ?? string.Empty).FirstOrDefault();
             var children = StepArgumentReader.ReadReferences(rel.Arguments.ElementAtOrDefault(4) ?? string.Empty);
-            AddChildren(childrenByParent, childIds, parent, children, "contains");
+            AddChildren(childrenByParent, parentByChild, childIds, parent, children, "contains");
         }
+
+        ReparentRelationshipChildren(document, childrenByParent, parentByChild, childIds, "IFCRELAGGREGATES", "aggregate");
+        ReparentRelationshipChildren(document, childrenByParent, parentByChild, childIds, "IFCRELNESTS", "nest");
+        AddHostedElementChildren(document, childrenByParent, parentByChild, childIds);
+        ReparentRelationshipChildren(document, childrenByParent, parentByChild, childIds, "IFCRELPROJECTSELEMENT", "projects");
 
         var roots = document.Entities
             .Where(entity => (entity.Type is "IFCPROJECT" or "IFCPROJECTLIBRARY") || IsSpatial(entity.Type))
@@ -835,6 +838,7 @@ public static partial class IfcStepParser
 
     private static void AddChildren(
         Dictionary<int, List<(int ChildId, string Relation)>> childrenByParent,
+        Dictionary<int, int> parentByChild,
         HashSet<int> childIds,
         int parent,
         IEnumerable<int> children,
@@ -853,9 +857,109 @@ public static partial class IfcStepParser
 
         foreach (var child in children)
         {
+            if (child == 0 || child == parent)
+            {
+                continue;
+            }
+
+            if (bucket.Any(existing => existing.ChildId == child))
+            {
+                continue;
+            }
+
             bucket.Add((child, relation));
+            parentByChild[child] = parent;
             childIds.Add(child);
         }
+    }
+
+    private static void AddHostedElementChildren(
+        IfcDocument document,
+        Dictionary<int, List<(int ChildId, string Relation)>> childrenByParent,
+        Dictionary<int, int> parentByChild,
+        HashSet<int> childIds)
+    {
+        var hostByOpening = new Dictionary<int, int>();
+        foreach (var relationship in document.RelationshipById.Values.Where(relationship => relationship.Type == "IFCRELVOIDSELEMENT"))
+        {
+            var hostId = relationship.SourceIds.FirstOrDefault();
+            if (hostId == 0 || !document.EntityById.ContainsKey(hostId) || !childIds.Contains(hostId))
+            {
+                continue;
+            }
+
+            foreach (var openingId in relationship.TargetIds.Where(document.EntityById.ContainsKey))
+            {
+                hostByOpening.TryAdd(openingId, hostId);
+            }
+        }
+
+        foreach (var relationship in document.RelationshipById.Values.Where(relationship => relationship.Type == "IFCRELFILLSELEMENT"))
+        {
+            var openingId = relationship.SourceIds.FirstOrDefault();
+            if (openingId == 0 || !hostByOpening.TryGetValue(openingId, out var hostId))
+            {
+                continue;
+            }
+
+            foreach (var fillingId in relationship.TargetIds.Where(document.EntityById.ContainsKey))
+            {
+                ReparentChild(childrenByParent, parentByChild, childIds, hostId, fillingId, "fills");
+            }
+        }
+    }
+
+    private static void ReparentRelationshipChildren(
+        IfcDocument document,
+        Dictionary<int, List<(int ChildId, string Relation)>> childrenByParent,
+        Dictionary<int, int> parentByChild,
+        HashSet<int> childIds,
+        string relationshipType,
+        string relation)
+    {
+        foreach (var relationship in document.RelationshipById.Values.Where(relationship => relationship.Type == relationshipType))
+        {
+            var parentId = relationship.SourceIds.FirstOrDefault();
+            if (parentId == 0 || !CanAttachTreeParent(document, parentId, childIds))
+            {
+                continue;
+            }
+
+            foreach (var childId in relationship.TargetIds.Where(document.EntityById.ContainsKey))
+            {
+                ReparentChild(childrenByParent, parentByChild, childIds, parentId, childId, relation);
+            }
+        }
+    }
+
+    private static void ReparentChild(
+        Dictionary<int, List<(int ChildId, string Relation)>> childrenByParent,
+        Dictionary<int, int> parentByChild,
+        HashSet<int> childIds,
+        int parent,
+        int child,
+        string relation)
+    {
+        if (parent == 0 || child == 0 || parent == child)
+        {
+            return;
+        }
+
+        if (parentByChild.TryGetValue(child, out var previousParent)
+            && childrenByParent.TryGetValue(previousParent, out var previousBucket))
+        {
+            previousBucket.RemoveAll(existing => existing.ChildId == child);
+        }
+
+        AddChildren(childrenByParent, parentByChild, childIds, parent, [child], relation);
+    }
+
+    private static bool CanAttachTreeParent(IfcDocument document, int parentId, HashSet<int> childIds)
+    {
+        return document.EntityById.TryGetValue(parentId, out var entity)
+            && (childIds.Contains(parentId)
+                || entity.Type is "IFCPROJECT" or "IFCPROJECTLIBRARY"
+                || IsSpatial(entity.Type));
     }
 
     private static IfcTreeNode BuildNode(

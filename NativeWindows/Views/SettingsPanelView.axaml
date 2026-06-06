@@ -33,6 +33,8 @@
       <TextBlock Classes="caption" Margin="2,4,0,0" Text="Viewport Options" />
       <CheckBox Content="Hide IFC Spaces (IfcSpace)"
                 IsChecked="{Binding HideSpaces}" />
+      <CheckBox Content="Show Viewport Stats"
+                IsChecked="{Binding ShowFpsCounter}" />
 
       <TextBlock Classes="caption" Margin="2,4,0,0" Text="Field of View" />
       <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">

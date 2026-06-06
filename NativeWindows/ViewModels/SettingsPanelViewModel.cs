@@ -10,6 +10,7 @@ public sealed class SettingsPanelViewModel : ReactiveViewModel
     private readonly MainWindowViewModel owner;
     private AntiAliasingMode selectedAntiAliasing;
     private bool hideSpaces;
+    private bool showFpsCounter;
     private double fieldOfView;
     private double nearPlane;
     private double farPlane;
@@ -19,6 +20,7 @@ public sealed class SettingsPanelViewModel : ReactiveViewModel
         this.owner = owner;
         selectedAntiAliasing = owner.CurrentPreferences.AntiAliasing;
         hideSpaces = owner.CurrentPreferences.HideSpaces;
+        showFpsCounter = owner.CurrentPreferences.ShowFpsCounter;
         fieldOfView = owner.CurrentPreferences.FieldOfView;
         nearPlane = owner.CurrentPreferences.NearPlane;
         farPlane = owner.CurrentPreferences.FarPlane;
@@ -60,6 +62,18 @@ public sealed class SettingsPanelViewModel : ReactiveViewModel
             if (SetProperty(ref hideSpaces, value))
             {
                 owner.UpdateHideSpaces(value);
+            }
+        }
+    }
+
+    public bool ShowFpsCounter
+    {
+        get => showFpsCounter;
+        set
+        {
+            if (SetProperty(ref showFpsCounter, value))
+            {
+                owner.UpdateShowFpsCounter(value);
             }
         }
     }
@@ -112,6 +126,7 @@ public sealed class SettingsPanelViewModel : ReactiveViewModel
     {
         SelectedAntiAliasing = preferences.AntiAliasing;
         HideSpaces = preferences.HideSpaces;
+        ShowFpsCounter = preferences.ShowFpsCounter;
         FieldOfView = preferences.FieldOfView;
         NearPlane = preferences.NearPlane;
         FarPlane = preferences.FarPlane;

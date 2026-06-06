@@ -1,6 +1,8 @@
 using Avalonia.Controls;
 using Avalonia.ReactiveUI;
 using Avalonia.Interactivity;
+using Avalonia.Threading;
+using IFCnative.NativeWindows.Models;
 using IFCnative.NativeWindows.ViewModels;
 
 namespace IFCnative.NativeWindows.Views;
@@ -36,8 +38,9 @@ public partial class StructurePanelView : ReactiveUserControl<StructurePanelView
         {
             if (DataContext is StructurePanelViewModel viewModel && viewModel.SelectedRow is { } selectedRow)
             {
-                var listBox = this.FindControl<ListBox>("TreeListBox");
-                listBox?.ScrollIntoView(selectedRow);
+                Dispatcher.UIThread.Post(
+                    () => this.FindControl<ListBox>("TreeListBox")?.ScrollIntoView(selectedRow),
+                    DispatcherPriority.Background);
             }
         }
     }
@@ -57,6 +60,49 @@ public partial class ViewportPanelView : ReactiveUserControl<ViewportPanelViewMo
         if (DataContext is ViewportPanelViewModel viewModel)
         {
             viewModel.SelectProduct(e.ProductId);
+        }
+    }
+
+    private void OnViewportProductTransformCommitted(object? sender, IfcProductTransformCommittedEventArgs e)
+    {
+        if (DataContext is ViewportPanelViewModel viewModel)
+        {
+            if (!viewModel.CommitProductTransform(e.ProductId, e.MoveDeltaWorld, e.RotateZRadians))
+            {
+                ViewportCanvas.ClearTransformPreview();
+            }
+        }
+    }
+
+    private void OnViewportFpsUpdated(object? sender, ViewportFpsUpdatedEventArgs e)
+    {
+        if (DataContext is ViewportPanelViewModel viewModel)
+        {
+            viewModel.FpsText = e.Text;
+        }
+    }
+
+    private void OnViewportSelectMode(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is ViewportPanelViewModel viewModel)
+        {
+            viewModel.SetInteractionMode(ViewportInteractionMode.Select);
+        }
+    }
+
+    private void OnViewportMoveMode(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is ViewportPanelViewModel viewModel)
+        {
+            viewModel.SetInteractionMode(ViewportInteractionMode.Move);
+        }
+    }
+
+    private void OnViewportRotateMode(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is ViewportPanelViewModel viewModel)
+        {
+            viewModel.SetInteractionMode(ViewportInteractionMode.Rotate);
         }
     }
 

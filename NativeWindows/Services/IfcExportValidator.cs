@@ -30,6 +30,7 @@ public static class IfcExportValidator
 
             var normalizedStep = XbimIfcDocumentService.NormalizeForExport(document);
             var reparsed = XbimIfcDocumentService.OpenText(normalizedStep, document.FileName);
+            IfcDocumentDiagnostics.Run(reparsed);
             var errors = reparsed.Diagnostics.Messages
                 .Where(message => message.StartsWith("Error:", StringComparison.OrdinalIgnoreCase))
                 .ToList();

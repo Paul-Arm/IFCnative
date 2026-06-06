@@ -13,7 +13,10 @@ namespace IFCnative.NativeWindows.Services;
 public static class XbimIfcDocumentService
 {
     private static readonly Lock ConfigurationLock = new();
+    private static readonly SemaphoreSlim StoreAccessSemaphore = new(1, 1);
     private static readonly XbimEditorCredentials EditorCredentials = CreateEditorCredentials();
+    [ThreadStatic]
+    private static int storeAccessDepth;
     private static readonly Regex FileSchemaRegex = new(
         @"FILE_SCHEMA\s*\(\s*\((?<schemas>.*?)\)\s*\)",
         RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
@@ -29,23 +32,29 @@ public static class XbimIfcDocumentService
 
     public static IfcDocument OpenPath(string path, IProgress<string>? progress = null)
     {
-        ConfigureXbim();
-        progress?.Report($"Opening {Path.GetFileName(path)} with xBIM...");
-        var store = IfcStore.Open(
-            path,
-            EditorCredentials,
-            ifcDatabaseSizeThreshHold: null,
-            progDelegate: null,
-            accessMode: XbimDBAccess.ReadWrite);
-        return ProjectStore(store, Path.GetFileName(path), progress);
+        return WithToolkitAccess(() =>
+        {
+            ConfigureXbim();
+            progress?.Report($"Opening {Path.GetFileName(path)} with xBIM...");
+            var store = IfcStore.Open(
+                path,
+                EditorCredentials,
+                ifcDatabaseSizeThreshHold: null,
+                progDelegate: null,
+                accessMode: XbimDBAccess.ReadWrite);
+            return ProjectStoreCore(store, Path.GetFileName(path), progress);
+        });
     }
 
     public static IfcDocument OpenText(string stepText, string fileName, IProgress<string>? progress = null)
     {
-        ConfigureXbim();
-        progress?.Report($"Opening {fileName} with xBIM...");
-        var store = OpenStoreFromText(stepText, fileName);
-        return ProjectStore(store, fileName, progress);
+        return WithToolkitAccess(() =>
+        {
+            ConfigureXbim();
+            progress?.Report($"Opening {fileName} with xBIM...");
+            var store = OpenStoreFromText(stepText, fileName);
+            return ProjectStoreCore(store, fileName, progress);
+        });
     }
 
     public static IfcDocument CreateSample(IProgress<string>? progress = null)
@@ -90,6 +99,34 @@ public static class XbimIfcDocumentService
         return document.XbimGeometryContext is not null;
     }
 
+    public static T WithStoreAccess<T>(IfcDocument document, Func<T> action, CancellationToken cancellationToken = default)
+    {
+        _ = document;
+        return WithToolkitAccess(action, cancellationToken);
+    }
+
+    private static T WithToolkitAccess<T>(Func<T> action, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (storeAccessDepth > 0)
+        {
+            return action();
+        }
+
+        StoreAccessSemaphore.Wait(cancellationToken);
+        try
+        {
+            storeAccessDepth++;
+            cancellationToken.ThrowIfCancellationRequested();
+            return action();
+        }
+        finally
+        {
+            storeAccessDepth--;
+            StoreAccessSemaphore.Release();
+        }
+    }
+
     public static void InvalidateGeometryContext(IfcDocument document)
     {
         document.XbimGeometryContext = null;
@@ -98,20 +135,31 @@ public static class XbimIfcDocumentService
 
     public static string NormalizeForExport(IfcDocument document)
     {
-        var store = EnsureStore(document);
-        return SaveStoreAsIfcText(store);
+        return WithStoreAccess(document, () =>
+        {
+            var store = EnsureStore(document);
+            return SaveStoreAsIfcText(store);
+        });
     }
 
     public static IfcDocument SynchronizeDocument(IfcDocument document, IProgress<string>? progress = null)
     {
-        progress?.Report($"Synchronizing {document.FileName} with xBIM...");
-        var store = OpenStoreFromText(IfcStepWriter.Serialize(document), document.FileName);
-        var synchronized = ProjectStore(store, document.FileName, progress);
-        synchronized.Diagnostics.Info("xBIM synchronized the editable store.");
-        return synchronized;
+        return WithToolkitAccess(() =>
+        {
+            progress?.Report($"Synchronizing {document.FileName} with xBIM...");
+            var store = OpenStoreFromText(IfcStepWriter.Serialize(document), document.FileName);
+            var synchronized = ProjectStoreCore(store, document.FileName, progress);
+            synchronized.Diagnostics.Info("xBIM synchronized the editable store.");
+            return synchronized;
+        });
     }
 
     public static IfcDocument ProjectStore(IfcStore store, string fileName, IProgress<string>? progress = null)
+    {
+        return WithToolkitAccess(() => ProjectStoreCore(store, fileName, progress));
+    }
+
+    private static IfcDocument ProjectStoreCore(IfcStore store, string fileName, IProgress<string>? progress = null)
     {
         progress?.Report("Projecting IFC from xBIM...");
         var document = XbimDocumentProjector.Project(store, fileName);
