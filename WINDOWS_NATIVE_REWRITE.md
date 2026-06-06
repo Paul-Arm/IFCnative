@@ -9,7 +9,7 @@ Important constraint from Paul: the native app is a separate/additional folder/p
 ## Technical direction
 
 - **Project layout:** keep the existing Web/React app intact; build the Windows-native app as a separate project folder (`NativeWindows/` for now, unless later moved/renamed).
-- **UI shell:** C#/.NET WPF (`net9.0-windows`) for a fast native desktop shell, docking-style panels, file dialogs, keyboard workflows, and incremental UI virtualization.
+- **UI shell:** C#/.NET Avalonia + ReactiveUI (`net9.0-windows`) with Dock.Avalonia for a fast native desktop shell, docking-style panels, file dialogs, keyboard workflows, and incremental UI virtualization.
 - **IFC document core:** C# services first, designed around streaming/indexed STEP parsing so large files do not require expensive full UI materialization. STEP/IFC text is an import/export boundary; live native editor state is moving to an own in-memory IFC model for objects, properties, placements, relationships, and geometry.
 - **Geometry pipeline:** isolate behind service interfaces. Prefer a genuinely native Windows renderer/backend when a solid option exists (for example HelixToolkit/SharpDX/DirectX plus IfcOpenShell or a native C++/Rust mesh worker). Treat the existing WASM/web-ifc renderer path as a compatibility/fallback option for the Web app, not the target for the Windows-native app.
 - **Editing model:** draft-first changes with diff/review before export; never blindly overwrite opened IFC.
@@ -36,7 +36,7 @@ Important constraint from Paul: the native app is a separate/additional folder/p
 
 ### Existing native Windows project
 
-- `NativeWindows/IFCnative.NativeWindows.csproj` targets `net9.0-windows` with WPF enabled.
+- `NativeWindows/IFCnative.NativeWindows.csproj` targets `net9.0-windows` with Avalonia, ReactiveUI, and Dock.Avalonia enabled.
 - `NativeWindows.Tests/` contains a lightweight native service test runner for parser/index/edit/diff/draft behavior; execution is now verified on a Windows/.NET 9 environment.
 - Current C# shell code already includes:
   - Open IFC/STEP/ifcZIP file dialog.
@@ -52,10 +52,11 @@ Important constraint from Paul: the native app is a separate/additional folder/p
   - Spatial containment tree.
   - Entity search.
   - Entity inspector for id/type/GlobalId/name/description/raw arguments.
-  - Basic entity edit/export by reparsing serialized STEP text.
+  - Entity editing staged through the native memory-model draft/export path.
   - Type count list.
-  - Native memory-model geometry backend and first WPF `Viewport3D` mesh preview using tessellated rectangle/bounding-box and cylinder extrusion primitives from memory-model placement/body dimensions, relative placement chains, axis/ref-direction rotations, and local solid/profile offsets, with fit/orbit/pan/zoom camera state plus mesh-to-inspector selection.
-- Previous XAML/build gap is resolved; the native WPF project builds on Windows/.NET 9.
+  - Native memory-model geometry backend and first Avalonia mesh preview that projects tessellated rectangle/bounding-box and cylinder extrusion primitives from memory-model placement/body dimensions, relative placement chains, axis/ref-direction rotations, and local solid/profile offsets.
+  - Avalonia/ReactiveUI/Dock.Avalonia shell with model, viewport, inspector, graph, diagnostics, builder, recent-file, notes, and console panels.
+- Previous XAML/build gap is resolved; the native Avalonia project builds on Windows/.NET 9.
 
 ## Current function/capability checklist
 
@@ -101,7 +102,7 @@ Status legend: `[x] current`, `[~] partial`, `[ ] planned/native rewrite target`
 - [~] TypeScript draft mutation helpers for elements, relationships, properties, quantities, resources, types, units, placement, and body representations.
 - [ ] Native draft transaction model.
 - [ ] Apply/discard review UI.
-- [~] Undo/redo or named changesets. Applied native drafts now create named undo/redo checkpoints in `IfcDraftSession`; the WPF Draft tab can label a changeset, shows next undo/redo names, and lists recent checkpoint summaries.
+- [~] Undo/redo or named changesets. Applied native drafts now create named undo/redo checkpoints in `IfcDraftSession`; the Avalonia Draft panel can label a changeset, shows next undo/redo names, and lists recent checkpoint summaries.
 - [~] Safe targeted serializer preserving formatting/order where practical. Native STEP export now keeps parsed DATA entity order and preserves untouched entity source text/formatting, edited/new entities serialize canonically, and STEP writer/id allocation helpers are centralized in `IfcStepWriter`.
 
 ### Spatial/products/relationships
@@ -127,11 +128,11 @@ Status legend: `[x] current`, `[~] partial`, `[ ] planned/native rewrite target`
 - [x] Web app has `web-ifc` geometry streaming/indexing.
 - [~] TypeScript native document supports simple rectangle/cylinder body generation and placement updates; C# services now cover assigning rectangle/cylinder swept-solid representations to existing products.
 - [~] C# native project has viewport placeholders and product representation indexing.
-- [~] Native 3D viewport implementation. A geometry backend abstraction now feeds first-pass native memory-model mesh tessellation for rectangle/bounding-box and cylinder extrusions, including relative placement chains, axis/ref-direction rotations, and local solid/profile offsets, and the WPF shell renders those meshes through `MeshGeometry3D` with fit/orbit/pan/zoom camera state and native mesh picking back to memory-model product ids; matching existing extruded body dimensions and assigned rectangle/cylinder body representations can be edited through the memory model. Full IFC mesh extraction, curved/swept/boolean geometry coverage, streaming/chunking, richer picking/highlighting, and mature native rendering remain pending.
+- [~] Native viewport implementation. A geometry backend abstraction now feeds first-pass native memory-model mesh tessellation for rectangle/bounding-box and cylinder extrusions, including relative placement chains, axis/ref-direction rotations, and local solid/profile offsets, and the Avalonia shell renders a first mesh-projection preview from those meshes; matching existing extruded body dimensions and assigned rectangle/cylinder body representations can be edited through the memory model. Full IFC mesh extraction, curved/swept/boolean geometry coverage, streaming/chunking, richer picking/highlighting, and mature native 3D rendering remain pending.
 - [ ] Efficient large-model mesh streaming/chunking.
-- [~] Selection sync between tree/graph/viewport. Tree/graph selections now update the geometry preview list, and WPF viewport clicks on rendered native preview meshes resolve through memory-model product ids back to the inspector; hover/highlight/multi-select remains pending.
+- [~] Selection sync between tree/graph/viewport. Tree/graph selections now update the geometry preview list in the Avalonia shell; hover/highlight/multi-select and robust native 3D picking remain pending.
 - [~] Product placement index and numeric placement editor; transform controls still pending.
-- [~] Body presets: native service and WPF UI can stage rectangle/cylinder swept-solid body representations for existing selected products, create new contained product presets under spatial parents, and create first-pass opening voids/filling elements with body geometry through memory-model object/placement/relation/geometry drafts and export gating.
+- [~] Body presets: native service and Avalonia UI can stage rectangle/cylinder swept-solid body representations for existing selected products, create new contained product presets under spatial parents, and create first-pass opening voids/filling elements with body geometry through memory-model object/placement/relation/geometry drafts and export gating.
 
 ### Diff/review/export
 
@@ -155,13 +156,13 @@ Status legend: `[x] current`, `[~] partial`, `[ ] planned/native rewrite target`
 
 1. [x] Clone/fetch repo and create rewrite branch.
 2. [x] Create this inventory/tracking document.
-3. [x] Make native WPF project structurally complete and buildable by adding missing XAML and project defaults. XAML is present and Windows/.NET 9 build verification passes.
-4. [~] Split native shell into UI + services + view models so large lists can be virtualized and tested. Selection/inspector projection, navigation/type/search/bookmark projection, placement editor projection, entity-edit draft creation, draft-session state, and persisted native window-layout state have moved out of `MainWindow` into service/view-model classes; command wiring still needs further extraction.
+3. [x] Make native project structurally complete and buildable. The shell has moved from WPF XAML to Avalonia AXAML with ReactiveUI view models, Dock.Avalonia layout, and Windows/.NET 9 build verification.
+4. [~] Split native shell into UI + services + view models so large lists can be virtualized and tested. Selection/inspector projection, navigation/type/search/bookmark projection, placement editor projection, entity-edit draft creation, draft-session state, multi-session workspace state, and dock-panel state now live in ReactiveUI view models; command wiring still needs further extraction.
 5. [x] Port TypeScript native document editor capabilities to C# services around a native memory model: first-pass relationship model/indexing, property/resource/type/unit/placement/representation read indexes, native in-memory model for objects/properties/geometry/relationships, memory-model property/placement/body/relationship/spatial/resource/diagnostic/raw-entity edit paths, numeric placement edit helper, existing/new-product body helpers, centralized STEP writer/id allocation helpers, and first malformed/duplicate-entity parser recovery are done. Broader non-editor parity and performance work remains.
 6. [~] Implement draft transaction model and native diff summary. Entity/placement and broader editor operations now stage drafts with apply/discard; applied drafts now support named undo/redo checkpoints, while richer persisted changeset metadata remains pending.
 7. [~] Add large-file parser/index strategy with progress and cancellation. Async sequential file loading with cancel/progress is done; parser/index streaming still pending.
 8. [~] Implement native relationship/spatial/property editor panels. Editable Psets/Qto raw values, common Pset/base Qto template creation, simple material/classification/document/library assignment, common relationship endpoint source/target draft edits, common relationship creation, selected relationship deletion, first-pass element connect/disconnect workflows, first-pass spatial reparent draft editing, spatial-parent product creation presets, spatial detach/delete-link workflows, and first-pass opening/void/fill creation are in place; richer typed forms/cascade workflows remain pending.
-9. [~] Implement geometry backend abstraction and first viewport. `IIfcGeometryBackend` plus a native memory-model backend now drives the native viewport panel; the WPF shell renders first-pass native `MeshGeometry3D` output from memory-model rectangle/bounding-box and cylinder extrusion tessellation with relative placement, axis/ref-direction, and local offset transforms, fit/orbit/pan/zoom camera control, and click selection back to memory-model products. A full IFC mesh backend with broader shape operators, streaming/chunking, richer picking, and mature native rendering (prefer HelixToolkit/SharpDX/DirectX + IfcOpenShell/native worker over WASM if feasible) remains pending.
+9. [~] Implement geometry backend abstraction and first viewport. `IIfcGeometryBackend` plus a native memory-model backend now drives the native viewport panel; the Avalonia shell renders a first native mesh-projection preview from memory-model rectangle/bounding-box and cylinder extrusion tessellation with relative placement, axis/ref-direction, and local offset transforms. A full IFC mesh backend with broader shape operators, streaming/chunking, richer picking, and mature native rendering remains pending.
 10. [x] Add native test project for parser/index/edit/diff services. A lightweight `NativeWindows.Tests` runner covers sample parsing/indexes, entity/property/relationship/spatial/placement edits, diff summaries, draft export gating, and native memory-model import.
 11. [x] Run Windows build/tests on a Windows-capable environment. Verified on Windows/.NET 9 on 2026-06-04.
 
@@ -243,3 +244,4 @@ Status legend: `[x] current`, `[~] partial`, `[ ] planned/native rewrite target`
 - 2026-06-04 23:32 Europe/Berlin: added first-pass native viewport mesh picking. Rendered WPF `GeometryModel3D` instances are mapped back to `IfcPreviewMesh` records from the memory geometry backend, click-without-drag resolves selected product ids through `NativeViewportSelectionService`, and viewport selection updates the inspector without refitting the current camera. Native tests now cover memory-model mesh-hit resolution. `dotnet build NativeWindows\IFCnative.NativeWindows.csproj` and `dotnet run --project NativeWindows.Tests\IFCnative.NativeWindows.Tests.csproj` pass on Windows/.NET 9 with 44 native service tests.
 - 2026-06-04 23:39 Europe/Berlin: strengthened native memory geometry transforms. `IfcGeometryPrimitive` and `IfcGeometryProfile` now store local position coordinates, `NativeGeometryTransformService` resolves relative product placement chains plus solid/profile local offsets before tessellation, and `IfcMemoryModelExporter` preserves those local geometry point coordinates at export. Native tests now cover relative placement plus local offset mesh bounds and export survival. `dotnet build NativeWindows\IFCnative.NativeWindows.csproj` and `dotnet run --project NativeWindows.Tests\IFCnative.NativeWindows.Tests.csproj` pass on Windows/.NET 9 with 45 native service tests.
 - 2026-06-04 23:47 Europe/Berlin: added axis/ref-direction transforms to native memory geometry. Product placements, solid placements, and 2D profile placements now import direction vectors/source ids into `IfcMemoryModel`; `NativeGeometryTransformService` composes placement bases instead of only summing translations; preview meshes are generated in local coordinates and transformed into world coordinates; and export preserves placement/solid/profile direction references and vector values. Native tests now cover a 90-degree `IFCAXIS2PLACEMENT3D` rotation plus export preservation. `dotnet build NativeWindows\IFCnative.NativeWindows.csproj` and `dotnet run --project NativeWindows.Tests\IFCnative.NativeWindows.Tests.csproj` pass on Windows/.NET 9 with 46 native service tests.
+- 2026-06-06 Europe/Berlin: converted the native shell from WPF to Avalonia/ReactiveUI, added a Dock.Avalonia code-first workspace with model, viewport, inspector, graph, diagnostics, draft, builder, recent-file, notes, and console panels, added Avalonia storage-provider file dialogs, and replaced WPF window code with ReactiveUI view models. `dotnet build NativeWindows\IFCnative.NativeWindows.csproj` and `dotnet run --project NativeWindows.Tests\IFCnative.NativeWindows.Tests.csproj` pass on Windows/.NET 9 with 47 native service tests.

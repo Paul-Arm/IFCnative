@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using IFCnative.NativeWindows.Models;
 using IFCnative.NativeWindows.Services;
+using IFCnative.NativeWindows.ViewModels;
 
 var tests = new NativeTestRunner();
 tests.RunAll();
@@ -57,6 +58,7 @@ internal sealed class NativeTestRunner
         Run("diagnostics projector supports text and severity filters", DiagnosticsProjectorSupportsFilters);
         Run("relationship graph supports filter and depth", RelationshipGraphSupportsFilterAndDepth);
         Run("native window layout store persists sanitized layout", NativeWindowLayoutStorePersistsSanitizedLayout);
+        Run("native user preferences persist text zoom", NativeUserPreferencesPersistTextZoom);
         Run("draft session gates export until apply/discard", DraftSessionGatesExport);
         Run("draft session supports applied undo redo history", DraftSessionSupportsUndoRedoHistory);
     }
@@ -1004,6 +1006,39 @@ internal sealed class NativeTestRunner
         }
     }
 
+    private static void NativeUserPreferencesPersistTextZoom()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"ifcnative-user-preferences-{Guid.NewGuid():N}.json");
+        try
+        {
+            var store = new NativeUserPreferencesStore(path);
+            var viewModel = new MainWindowViewModel(new EmptyFileDialogService(), store);
+
+            Equal(1.0d, viewModel.TextScale, "default text zoom");
+            viewModel.IncreaseTextScale();
+            Equal(1.1d, viewModel.TextScale, "increased text zoom");
+            Equal(1.1d, store.Load().TextScale, "increased text zoom should persist");
+
+            viewModel.DecreaseTextScale();
+            viewModel.DecreaseTextScale();
+            Equal(0.9d, viewModel.TextScale, "decreased text zoom");
+            Equal(0.9d, store.Load().TextScale, "decreased text zoom should persist");
+
+            viewModel.ResetTextScale();
+            Equal(1.0d, store.Load().TextScale, "reset text zoom should persist");
+
+            store.Save(new NativeUserPreferences(10));
+            Equal(1.8d, store.Load().TextScale, "text zoom should be clamped");
+        }
+        finally
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+    }
+
     private static void DraftSessionGatesExport()
     {
         var saved = IfcStepParser.CreateSample();
@@ -1071,6 +1106,19 @@ internal sealed class NativeTestRunner
         if (!EqualityComparer<T>.Default.Equals(expected, actual))
         {
             throw new InvalidOperationException($"{message}: expected {expected}, got {actual}");
+        }
+    }
+
+    private sealed class EmptyFileDialogService : IFileDialogService
+    {
+        public Task<IReadOnlyList<string>> OpenIfcFilesAsync(bool allowMultiple, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
+        }
+
+        public Task<string?> SaveIfcFileAsync(string suggestedFileName, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<string?>(null);
         }
     }
 

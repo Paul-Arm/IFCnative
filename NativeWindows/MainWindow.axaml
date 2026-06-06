@@ -1,0 +1,57 @@
+<Window x:Class="IFCnative.NativeWindows.MainWindow"
+        x:Name="Root"
+        xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:dock="clr-namespace:Dock.Avalonia.Controls;assembly=Dock.Avalonia"
+        Title="{Binding WindowTitle}"
+        Width="1440"
+        Height="900"
+        MinWidth="1100"
+        MinHeight="720">
+  <Grid RowDefinitions="Auto,*,Auto">
+    <Menu Grid.Row="0"
+          Classes="nativeTopMenu">
+      <MenuItem Header="_File">
+        <MenuItem Header="_Open IFC..." Command="{Binding OpenIfcCommand}" InputGesture="Ctrl+O" />
+        <MenuItem Header="_Add IFC..." Command="{Binding AddIfcCommand}" InputGesture="Ctrl+Shift+O" />
+        <MenuItem Header="Open _Sample" Command="{Binding LoadSampleCommand}" />
+        <MenuItem x:Name="RecentFilesMenu" Header="_Recent Files" />
+        <Separator />
+        <MenuItem Header="_Export..." Command="{Binding ExportIfcCommand}" InputGesture="Ctrl+Shift+S" />
+        <Separator />
+        <MenuItem Header="E_xit" Click="ExitMenuItem_Click" />
+      </MenuItem>
+      <MenuItem x:Name="DocumentsMenu" Header="_Documents" />
+      <MenuItem Header="_Workspace">
+        <MenuItem Header="_IFC Editing" Command="{Binding SelectWorkspaceCommand}" CommandParameter="edit" />
+        <MenuItem Header="_Review" Command="{Binding SelectWorkspaceCommand}" CommandParameter="review" />
+        <MenuItem Header="_Graph + Builder" Command="{Binding SelectWorkspaceCommand}" CommandParameter="graph-builder" />
+        <Separator />
+        <MenuItem Header="_Reset Layout" Command="{Binding ResetLayoutCommand}" />
+      </MenuItem>
+      <MenuItem Header="_View">
+        <MenuItem Header="Zoom _In" Command="{Binding IncreaseTextScaleCommand}" InputGesture="Ctrl++" />
+        <MenuItem Header="Zoom _Out" Command="{Binding DecreaseTextScaleCommand}" InputGesture="Ctrl+-" />
+        <MenuItem Header="_Reset Zoom" Command="{Binding ResetTextScaleCommand}" InputGesture="Ctrl+0" />
+        <Separator />
+        <MenuItem Header="{Binding TextScalePercent}" IsEnabled="False" />
+      </MenuItem>
+    </Menu>
+
+    <dock:DockControl x:Name="WorkspaceDock" Grid.Row="1" />
+
+    <Border Grid.Row="2"
+            Background="#20231E"
+            BorderBrush="#343A30"
+            BorderThickness="0,1,0,0"
+            Padding="10,6">
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+        <TextBlock Classes="caption" Text="{Binding StatusText}" />
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12">
+          <TextBlock Classes="caption" Text="{Binding ActiveSchema}" />
+          <TextBlock Classes="caption" Text="{Binding ActiveEntityCount}" />
+        </StackPanel>
+      </Grid>
+    </Border>
+  </Grid>
+</Window>

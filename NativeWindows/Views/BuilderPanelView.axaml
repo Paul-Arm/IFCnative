@@ -1,0 +1,30 @@
+<UserControl x:Class="IFCnative.NativeWindows.Views.BuilderPanelView"
+             xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <ScrollViewer>
+    <StackPanel Margin="8" Spacing="8">
+      <Border Classes="surface" Padding="10">
+        <StackPanel>
+          <TextBlock Classes="sectionTitle" Text="Body Builder" />
+          <TextBlock Classes="caption" Text="{Binding SelectedLabel}" />
+        </StackPanel>
+      </Border>
+
+      <TextBox Watermark="IFC type" Text="{Binding ProductType}" />
+      <TextBox Watermark="Name" Text="{Binding ProductName}" />
+
+      <Grid ColumnDefinitions="*,*,*" ColumnSpacing="8">
+        <TextBox Watermark="Width" Text="{Binding Width}" />
+        <TextBox Grid.Column="1" Watermark="Depth" Text="{Binding Depth}" />
+        <TextBox Grid.Column="2" Watermark="Height" Text="{Binding Height}" />
+      </Grid>
+
+      <ComboBox ItemsSource="{Binding Profiles}" SelectedItem="{Binding Profile}" />
+
+      <StackPanel Orientation="Horizontal" Spacing="6">
+        <Button Classes="primary" Content="Create child" Command="{Binding CreateProductCommand}" />
+        <Button Classes="ghost" Content="Assign body" Command="{Binding AssignBodyCommand}" />
+      </StackPanel>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

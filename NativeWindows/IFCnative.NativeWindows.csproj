@@ -5,7 +5,16 @@
     <TargetFramework>net9.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <UseWPF>true</UseWPF>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.11" />
+    <PackageReference Include="Avalonia.ReactiveUI" Version="11.3.9" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.11" />
+    <PackageReference Include="Dock.Avalonia" Version="11.3.11.4" />
+    <PackageReference Include="Dock.Avalonia.Themes.Fluent" Version="11.3.11.4" />
+    <PackageReference Include="Dock.Model.Mvvm" Version="11.3.11.4" />
+  </ItemGroup>
 
 </Project>

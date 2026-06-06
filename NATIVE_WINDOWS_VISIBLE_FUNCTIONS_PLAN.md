@@ -14,15 +14,15 @@ Important constraints:
 ## Current branch / push status
 
 - Branch: `codex/native-ifc-memory-model`
-- Worktree: `O:\Code\native\IFCnative-native-rewrite`
+- Worktree: `O:\Code\native\IFCnative`
 - Last pushed clean status seen: not pushed from this worktree yet.
 - Web verification has been passing:
   - `npm run test:ifc`
   - `npm run lint`
   - `npm run build`
-- Native `.NET/WPF` build/test execution is now verified on Windows/.NET 9:
+- Native `.NET/Avalonia` build/test execution is now verified on Windows/.NET 9:
   - `dotnet build NativeWindows\IFCnative.NativeWindows.csproj`
-  - `dotnet run --project NativeWindows.Tests\IFCnative.NativeWindows.Tests.csproj` (46 tests as of 2026-06-04 23:47 Europe/Berlin)
+  - `dotnet run --project NativeWindows.Tests\IFCnative.NativeWindows.Tests.csproj` (47 tests as of 2026-06-06 Europe/Berlin)
 
 ## Functions that currently exist in the native app
 
@@ -37,6 +37,10 @@ Important constraints:
 - Persist window/pane layout state.
 - Restore pane visibility, pane widths, and window size.
 - Auto-reopen last available IFC workspace on startup.
+- Avalonia/ReactiveUI native shell.
+- Dock.Avalonia workspace with model, viewport, inspector, graph, diagnostics, draft, builder, recent-file, notes, and console panels.
+- Workspace presets for inspect, edit, graph, validation, and builder workflows.
+- Multiple loaded IFC document sessions in the native shell.
 
 ### Inspection/navigation
 
@@ -108,10 +112,10 @@ Important constraints:
 - Geometry backend abstraction (`IIfcGeometryBackend`).
 - Native memory-model geometry backend.
 - STEP-reference viewport preview backend remains available as fallback/debug code.
-- First WPF `Viewport3D` preview now renders native `IfcPreviewMesh` output from memory-model rectangle/bounding-box and cylinder extrusion tessellation.
+- First Avalonia viewport preview now renders a native mesh-projection view from memory-model rectangle/bounding-box and cylinder extrusion tessellation.
 - Preview camera is fitted from mesh bounds.
-- Viewport camera now supports native fit/orbit/pan/zoom state over the current preview meshes.
-- Viewport clicks on rendered native preview meshes resolve through memory-model product ids and select the corresponding inspector entity.
+- Viewport projection controls and mesh statistics are available in the Avalonia viewport panel.
+- Tree/graph/inspector selections keep the viewport mesh list in sync.
 - Sample IFC expanded with visible placement/body representation geometry.
 
 ### Validation/repair
@@ -136,8 +140,8 @@ These are the important gaps Paul is reacting to:
 1. **3D viewer is not a real IFC mesh viewer yet**
    - Current viewport now has first-pass native mesh tessellation for simple memory-model primitives, but not full IFC geometry extraction.
    - Placement transforms now include relative placements, local solid/profile offsets, and axis/ref-direction rotations for supported primitive previews.
-   - Camera fit/orbit/pan/zoom exists, but rendering is still WPF `Viewport3D` preview-level rather than a mature renderer.
-   - Click selection exists for preview meshes, but hover/highlight, multi-select, isolation, and full mesh picking are still pending.
+   - The previous WPF `Viewport3D` preview has been replaced by a first Avalonia mesh-projection preview while the app moves to Avalonia/ReactiveUI.
+   - Hover/highlight, multi-select, isolation, camera controls, and full mesh picking are still pending in the Avalonia viewport.
    - Need real IFC mesh extraction/tessellation and richer native rendering.
    - Prefer native renderer/backend over WASM.
 
@@ -146,9 +150,9 @@ These are the important gaps Paul is reacting to:
    - Relationship hubs, edge labels, and click-to-edit relationship selection now exist.
    - Still needs a real layout algorithm, edge routing, expansion UX, maybe minimap/zoom controls.
 
-3. **Window management/docking is still incomplete**
-   - Menu and pane toggles exist, but this is not full docking/window management.
-   - Need a mature docking library if possible.
+3. **Window management/docking needs polish**
+   - Dock.Avalonia is now integrated with a code-first workspace layout.
+   - Persisted/restorable Dock.Avalonia layout, richer panel menus, and refined dock chrome/theme states are still pending.
 
 4. **Editor panels are still too raw**
    - Property editor still has raw-ish value editing.
@@ -162,7 +166,7 @@ These are the important gaps Paul is reacting to:
    - But true streaming parser/lazy indexes/mesh chunking/cancellation across indexing and tessellation are still pending.
 
 6. **Native build verification is no longer pending**
-   - Windows/.NET 9 build and `NativeWindows.Tests` now pass.
+   - Windows/.NET 9 Avalonia build and `NativeWindows.Tests` now pass.
    - Keep this gate in the loop while replacing STEP-entity editor state with the in-memory model.
 
 ## New priority order
@@ -196,26 +200,26 @@ Preferred direction:
 Deliverables:
 
 - Load/display actual product meshes from sample IFC.
-- Orbit/pan/zoom camera. First-pass tested WPF camera state exists for preview meshes; carry it forward into the mature renderer.
+- Orbit/pan/zoom camera. First-pass tested camera state exists for preview meshes; carry it forward into the mature Avalonia/native renderer.
 - Selection sync with inspector/spatial tree.
 - First-pass viewport click selection to inspector exists for preview meshes; carry this into the mature renderer with highlighting and robust picking.
-- Fit selection / reset camera actually affects viewport. First-pass fit now updates the WPF preview camera; richer camera commands remain pending for the mature renderer.
+- Fit selection / reset camera actually affects viewport. First-pass fit state exists in the native camera service; richer Avalonia viewport camera commands remain pending for the mature renderer.
 - Type/category visibility toggles if practical.
 - Clear error state when geometry backend cannot tessellate.
 
-### Priority 2 — Real docking/window management
+### Priority 2 — Polish Dock.Avalonia window management
 
 Goal: make NativeWindows feel like a serious desktop editor.
 
 Recommended libraries/options:
 
-- AvalonDock / Xceed AvalonDock, or another maintained WPF docking solution.
+- Continue with Dock.Avalonia as the selected docking library.
 
 Deliverables:
 
-- Dockable panels for Model, Viewport, Inspector, Graph, Diagnostics.
+- Dockable panels for Model, Viewport, Inspector, Graph, Diagnostics. First Dock.Avalonia layout exists.
 - Close/open panels via menu.
-- Persist/restore layout.
+- Persist/restore Dock.Avalonia layout.
 - Reset layout.
 - Avoid unreadable theme states in dock chrome.
 
@@ -226,7 +230,7 @@ Goal: replace graph preview with a usable IFC relationship graph.
 Recommended libraries/options:
 
 - GraphX / GraphShape / QuickGraph-style stack if compatible.
-- Otherwise a stronger WPF Canvas graph with layout, edge routing, pan/zoom, and interaction.
+- Otherwise a stronger Avalonia Canvas graph with layout, edge routing, pan/zoom, and interaction.
 
 Deliverables:
 
@@ -269,9 +273,9 @@ Deliverables:
 Use this for the next separate session/subagent:
 
 ```text
-In O:\Code\native\IFCnative-native-rewrite on branch codex/native-ifc-memory-model, continue the native rewrite. Do not delete or replace the Web/React app.
+In O:\Code\native\IFCnative on branch codex/native-ifc-memory-model, continue the native rewrite. Do not delete or replace the Web/React app.
 
-Read NATIVE_WINDOWS_VISIBLE_FUNCTIONS_PLAN.md and WINDOWS_NATIVE_REWRITE.md first. The native app now has IfcMemoryModel, IfcMemoryModelEditor, and IfcMemoryModelExporter. Property value edits, Pset/Qto template creation, simple material/classification/document/library assignments, placement edits, matching existing extruded body-dimension edits, existing-product body representation assignment, product/opening/filling preset creation, diagnostic repairs, raw entity editing, relationship create/edit/delete, element connect/disconnect, and spatial reparent/detach mutate memory first and patch STEP only at the draft/export boundary; `IfcDocumentEditor` no longer reparses serialized IFC as live editor state. The memory geometry backend now exposes `IfcPreviewMesh` and tessellates simple rectangle/bounding-box/cylinder extrusions for the WPF viewport, resolves relative placement chains, axis/ref-direction rotations, and local solid/profile offsets, the preview camera has tested fit/orbit/pan/zoom state, and click selection resolves preview meshes back to memory-model product ids, but full IFC mesh extraction/rendering is still missing. Prioritize a real native 3D viewer/backend using native libraries if feasible (HelixToolkit/SharpDX/DirectX + IfcOpenShell/native worker preferred; WASM/web-ifc only fallback), then continue docking/graph/performance work.
+Read NATIVE_WINDOWS_VISIBLE_FUNCTIONS_PLAN.md and WINDOWS_NATIVE_REWRITE.md first. The native app now uses Avalonia/ReactiveUI with a Dock.Avalonia workspace and has IfcMemoryModel, IfcMemoryModelEditor, and IfcMemoryModelExporter. Property value edits, Pset/Qto template creation, simple material/classification/document/library assignments, placement edits, matching existing extruded body-dimension edits, existing-product body representation assignment, product/opening/filling preset creation, diagnostic repairs, raw entity editing, relationship create/edit/delete, element connect/disconnect, and spatial reparent/detach mutate memory first and patch STEP only at the draft/export boundary; `IfcDocumentEditor` no longer reparses serialized IFC as live editor state. The memory geometry backend exposes `IfcPreviewMesh` and tessellates simple rectangle/bounding-box/cylinder extrusions with relative placement chains, axis/ref-direction rotations, and local solid/profile offsets; the Avalonia viewport currently renders a first mesh-projection preview, but full IFC mesh extraction/rendering, mature camera controls, and robust picking are still missing. Prioritize a real native 3D viewer/backend using native libraries if feasible, then continue Dock.Avalonia polish, graph, and performance work.
 
 Run dotnet build NativeWindows\IFCnative.NativeWindows.csproj, dotnet run --project NativeWindows.Tests\IFCnative.NativeWindows.Tests.csproj, git diff --check, npm run test:ifc, npm run lint, and npm run build. Update WINDOWS_NATIVE_REWRITE.md and this plan with results.
 ```

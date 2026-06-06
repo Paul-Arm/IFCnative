@@ -1,0 +1,30 @@
+<UserControl x:Class="IFCnative.NativeWindows.Views.GraphPanelView"
+             xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Grid RowDefinitions="Auto,*" Margin="8" RowSpacing="8">
+    <Border Classes="surface" Padding="10">
+      <Grid ColumnDefinitions="*,90" ColumnSpacing="8">
+        <TextBox Watermark="Filter graph" Text="{Binding FilterText}" />
+        <NumericUpDown Grid.Column="1"
+                       Minimum="1"
+                       Maximum="2"
+                       Increment="1"
+                       FormatString="Depth 0"
+                       Value="{Binding Depth}" />
+      </Grid>
+    </Border>
+
+    <ListBox Grid.Row="1"
+             Classes="compact"
+             ItemsSource="{Binding Items}"
+             SelectedItem="{Binding SelectedItem}">
+      <ListBox.ItemTemplate>
+        <DataTemplate>
+          <Border Classes="subtle" Margin="0,0,0,4" Padding="8,5">
+            <TextBlock Text="{Binding Label}" />
+          </Border>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+  </Grid>
+</UserControl>

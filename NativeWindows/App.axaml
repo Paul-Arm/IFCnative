@@ -1,0 +1,92 @@
+<Application x:Class="IFCnative.NativeWindows.App"
+             xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:dockThemes="clr-namespace:Dock.Avalonia.Themes.Fluent;assembly=Dock.Avalonia.Themes.Fluent"
+             xmlns:local="using:IFCnative.NativeWindows"
+             RequestedThemeVariant="Dark">
+  <Application.DataTemplates>
+    <local:ViewLocator />
+  </Application.DataTemplates>
+
+  <Application.Styles>
+    <FluentTheme />
+    <dockThemes:DockFluentTheme />
+
+    <Style Selector="Window">
+      <Setter Property="FontFamily" Value="Segoe UI, Inter, Arial" />
+      <Setter Property="Background" Value="#181A17" />
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeBody}" />
+    </Style>
+    <Style Selector="TextBlock">
+      <Setter Property="Foreground" Value="#E8EAE4" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style Selector="TextBlock.muted">
+      <Setter Property="Foreground" Value="#A4AA9F" />
+    </Style>
+    <Style Selector="TextBlock.caption">
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeCaption}" />
+      <Setter Property="Foreground" Value="#A4AA9F" />
+    </Style>
+    <Style Selector="TextBlock.sectionTitle">
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeSection}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Border.surface">
+      <Setter Property="Background" Value="#22251F" />
+      <Setter Property="BorderBrush" Value="#3A4035" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="6" />
+    </Style>
+    <Style Selector="Border.subtle">
+      <Setter Property="Background" Value="#1D201B" />
+      <Setter Property="BorderBrush" Value="#343A30" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="6" />
+    </Style>
+    <Style Selector="Button">
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeBody}" />
+      <Setter Property="MinHeight" Value="30" />
+      <Setter Property="Padding" Value="12,5" />
+    </Style>
+    <Style Selector="Button.primary">
+      <Setter Property="Background" Value="#2F7D68" />
+      <Setter Property="Foreground" Value="White" />
+    </Style>
+    <Style Selector="Button.danger">
+      <Setter Property="Background" Value="#8A3A35" />
+      <Setter Property="Foreground" Value="White" />
+    </Style>
+    <Style Selector="Button.ghost">
+      <Setter Property="Background" Value="#2A2F28" />
+      <Setter Property="Foreground" Value="#E8EAE4" />
+    </Style>
+    <Style Selector="Menu.nativeTopMenu">
+      <Setter Property="Background" Value="#191D18" />
+      <Setter Property="BorderBrush" Value="#343A30" />
+      <Setter Property="BorderThickness" Value="0,0,0,1" />
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeBody}" />
+    </Style>
+    <Style Selector="Menu.nativeTopMenu MenuItem">
+      <Setter Property="Foreground" Value="#E8EAE4" />
+      <Setter Property="MinHeight" Value="26" />
+    </Style>
+    <Style Selector="TextBox, ComboBox">
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeBody}" />
+      <Setter Property="MinHeight" Value="30" />
+    </Style>
+    <Style Selector="ListBox.compact ListBoxItem">
+      <Setter Property="Padding" Value="6,4" />
+      <Setter Property="MinHeight" Value="26" />
+    </Style>
+    <Style Selector="ListBox.fileTree">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="ListBox.fileTree ListBoxItem">
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="MinHeight" Value="24" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    </Style>
+  </Application.Styles>
+</Application>

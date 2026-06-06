@@ -15,6 +15,10 @@ public sealed class IfcTreeNode
     public List<IfcTreeNode> Children { get; } = [];
 
     public string Label => $"{Entity.DisplayName}  ({Entity.TypeName()})";
+
+    public string DisplayName => Entity.DisplayName;
+
+    public string TypeLabel => Entity.TypeName();
 }
 
 public static class IfcEntityDisplayExtensions
