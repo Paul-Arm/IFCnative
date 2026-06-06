@@ -39,6 +39,33 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         set => SetValue(HideSpacesProperty, value);
     }
 
+    public static readonly StyledProperty<double> FieldOfViewProperty =
+        AvaloniaProperty.Register<ViewportPreviewControl, double>(nameof(FieldOfView), 45.0);
+
+    public double FieldOfView
+    {
+        get => GetValue(FieldOfViewProperty);
+        set => SetValue(FieldOfViewProperty, value);
+    }
+
+    public static readonly StyledProperty<double> NearPlaneProperty =
+        AvaloniaProperty.Register<ViewportPreviewControl, double>(nameof(NearPlane), 0.01);
+
+    public double NearPlane
+    {
+        get => GetValue(NearPlaneProperty);
+        set => SetValue(NearPlaneProperty, value);
+    }
+
+    public static readonly StyledProperty<double> FarPlaneProperty =
+        AvaloniaProperty.Register<ViewportPreviewControl, double>(nameof(FarPlane), 1000.0);
+
+    public double FarPlane
+    {
+        get => GetValue(FarPlaneProperty);
+        set => SetValue(FarPlaneProperty, value);
+    }
+
     private const int VertexStride = 11;
     private enum DragMode
     {
@@ -99,11 +126,14 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
 
     static ViewportPreviewControl()
     {
-        AffectsRender<ViewportPreviewControl>(SceneProperty, SelectedProductIdProperty, AntiAliasingProperty, HideSpacesProperty);
+        AffectsRender<ViewportPreviewControl>(SceneProperty, SelectedProductIdProperty, AntiAliasingProperty, HideSpacesProperty, FieldOfViewProperty, NearPlaneProperty, FarPlaneProperty);
         SceneProperty.Changed.AddClassHandler<ViewportPreviewControl>((control, _) => control.OnSceneChanged());
         SelectedProductIdProperty.Changed.AddClassHandler<ViewportPreviewControl>((control, _) => control.OnSelectedProductChanged());
         AntiAliasingProperty.Changed.AddClassHandler<ViewportPreviewControl>((control, _) => control.OnAntiAliasingChanged());
         HideSpacesProperty.Changed.AddClassHandler<ViewportPreviewControl>((control, _) => control.OnHideSpacesChanged());
+        FieldOfViewProperty.Changed.AddClassHandler<ViewportPreviewControl>((control, _) => control.OnCameraPropertyChanged());
+        NearPlaneProperty.Changed.AddClassHandler<ViewportPreviewControl>((control, _) => control.OnCameraPropertyChanged());
+        FarPlaneProperty.Changed.AddClassHandler<ViewportPreviewControl>((control, _) => control.OnCameraPropertyChanged());
     }
 
     public IfcRenderScene? Scene
@@ -623,6 +653,11 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         QueueRender();
     }
 
+    private void OnCameraPropertyChanged()
+    {
+        QueueRender();
+    }
+
     private void SetCameraAngles(double yawDegrees, double pitchDegrees)
     {
         var framed = TryGetSelectedProductBounds(SelectedProductId, out var selectedBounds)
@@ -899,6 +934,12 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
 
     private Matrix4x4 CreateViewProjection(double width, double height)
     {
+        camera = camera with
+        {
+            FieldOfViewDegrees = FieldOfView,
+            NearPlane = NearPlane,
+            FarPlane = FarPlane
+        };
         var pose = camera.ToPose();
         var position = ToVector(pose.Position);
         var target = position + ToVector(pose.LookDirection);
