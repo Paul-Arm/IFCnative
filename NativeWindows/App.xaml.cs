@@ -15,7 +15,15 @@ public partial class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            desktop.MainWindow = new MainWindow();
+            var startupFiles = (desktop.Args ?? [])
+                .Where(File.Exists)
+                .ToList();
+            var mainWindow = new MainWindow(loadSample: startupFiles.Count == 0);
+            desktop.MainWindow = mainWindow;
+            foreach (var path in startupFiles)
+            {
+                _ = mainWindow.ViewModel?.OpenPathAsync(path);
+            }
         }
 
         base.OnFrameworkInitializationCompleted();

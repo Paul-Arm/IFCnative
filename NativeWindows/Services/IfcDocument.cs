@@ -42,8 +42,6 @@ public sealed class IfcDocument
 
     public Dictionary<int, string> SpatialPathByEntity { get; } = [];
 
-    public IfcMemoryModel MemoryModel { get; internal set; } = IfcMemoryModel.Empty;
-
     public IfcDiagnostics Diagnostics { get; } = new();
 
     public IfcStore? XbimStore { get; internal set; }
@@ -54,7 +52,9 @@ public sealed class IfcDocument
 
     public string ToStepText()
     {
-        return IfcStepWriter.Serialize(this);
+        return XbimStore is not null
+            ? XbimIfcDocumentService.NormalizeForExport(this)
+            : IfcStepWriter.Serialize(this);
     }
 }
 

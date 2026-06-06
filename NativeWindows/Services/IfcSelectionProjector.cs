@@ -168,7 +168,7 @@ public static class IfcSelectionProjector
                 relationship.Label,
                 string.Join(", ", relationship.SourceIds.Select(id => $"#{id}")),
                 string.Join(", ", relationship.TargetIds.Select(id => $"#{id}")),
-                IfcDocumentEditor.CanUpdateRelationshipEndpoints(relationship.Type));
+                XbimDocumentEditor.CanUpdateRelationshipEndpoints(relationship.Type));
         }
     }
 

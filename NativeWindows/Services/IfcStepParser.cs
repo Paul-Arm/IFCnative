@@ -65,13 +65,11 @@ public static partial class IfcStepParser
         BuildRepresentationIndex(document);
         BuildSpatialTree(document);
         ValidateDocument(document);
-        document.MemoryModel = IfcMemoryModelBuilder.Build(document);
         document.Diagnostics.Info($"Loaded {document.Entities.Count:N0} STEP entities.");
         document.Diagnostics.Info($"Indexed {document.RelationshipById.Count:N0} IFC relationships.");
         document.Diagnostics.Info($"Indexed {document.PropertySetById.Count:N0} property/quantity sets.");
         document.Diagnostics.Info($"Indexed {document.PlacementsByEntity.Count:N0} product placements.");
         document.Diagnostics.Info($"Indexed {document.RepresentationsByEntity.Count:N0} product representations.");
-        document.Diagnostics.Info($"Built native in-memory IFC model: {document.MemoryModel.Objects.Count:N0} objects, {document.MemoryModel.PropertyValueCount:N0} property values, {document.MemoryModel.GeometryPrimitiveCount:N0} geometry primitives.");
         document.Diagnostics.Info($"Detected schema: {document.Schema}.");
 
         return document;
@@ -927,8 +925,8 @@ DATA;
 #52= IFCRELAGGREGATES('1AggBuildingLevel000000',$,'Building Level',$,#20,(#30));
 #53= IFCRELCONTAINEDINSPATIALSTRUCTURE('1ContLevelProxy0000000',$,'Level Contains Proxy',$,(#40),#30);
 #60= IFCPROPERTYSET('1PsetProxy000000000000',$,'Pset_IFCnative',$,(#61,#62));
-#61= IFCPROPERTYSINGLEVALUE('ReviewStatus',$,'Native editable shell',$);
-#62= IFCPROPERTYSINGLEVALUE('Source',$,'Generated sample',$);
+#61= IFCPROPERTYSINGLEVALUE('ReviewStatus',$,IFCLABEL('Native editable shell'),$);
+#62= IFCPROPERTYSINGLEVALUE('Source',$,IFCLABEL('Generated sample'),$);
 #63= IFCRELDEFINESBYPROPERTIES('1RelPsetProxy00000000',$,'Proxy Properties',$,(#40),#60);
 #100= IFCLOCALPLACEMENT($,#101);
 #101= IFCAXIS2PLACEMENT3D(#102,$,$);

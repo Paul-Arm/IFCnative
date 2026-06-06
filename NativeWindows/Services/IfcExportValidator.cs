@@ -67,7 +67,7 @@ public static class IfcExportValidator
     {
         var errors = new List<string>();
 
-        if (string.IsNullOrWhiteSpace(document.HeaderText))
+        if (document.XbimStore is null && string.IsNullOrWhiteSpace(document.HeaderText))
         {
             errors.Add("Error: HEADER section is missing.");
         }

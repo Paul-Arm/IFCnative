@@ -64,6 +64,32 @@ public static class NativeViewportCameraController
         return new NativeViewportCameraState(target, Math.Max(4, radius * 3.2), DefaultYawDegrees, DefaultPitchDegrees, radius);
     }
 
+    public static NativeViewportCameraState FitScene(IfcRenderScene scene)
+    {
+        if (scene.IsEmpty)
+        {
+            return DefaultState();
+        }
+
+        return FitBounds(scene.Bounds, DefaultYawDegrees, DefaultPitchDegrees);
+    }
+
+    public static NativeViewportCameraState FitBounds(IfcRenderBounds bounds, double yawDegrees, double pitchDegrees)
+    {
+        if (bounds.IsEmpty)
+        {
+            return DefaultState();
+        }
+
+        var radius = bounds.Radius;
+        return new NativeViewportCameraState(
+            bounds.Center,
+            Math.Max(0.25, radius * 3.2),
+            NormalizeDegrees(yawDegrees),
+            Math.Clamp(pitchDegrees, -80, 80),
+            Math.Max(0.1, radius));
+    }
+
     public static NativeViewportCameraState DefaultState()
     {
         return new NativeViewportCameraState(new IfcPreviewVertex(0, 0, 0.45), 8, DefaultYawDegrees, DefaultPitchDegrees, 1);
@@ -85,6 +111,12 @@ public static class NativeViewportCameraController
         return state with { Distance = ClampDistance(state, distance) };
     }
 
+    public static NativeViewportCameraState Dolly(NativeViewportCameraState state, double deltaPixels)
+    {
+        var distance = state.Distance * Math.Pow(1.01, deltaPixels);
+        return state with { Distance = ClampDistance(state, distance) };
+    }
+
     public static NativeViewportCameraState Pan(NativeViewportCameraState state, double deltaX, double deltaY, double viewportWidth, double viewportHeight)
     {
         var pose = state.ToPose();
@@ -96,8 +128,8 @@ public static class NativeViewportCameraController
         }
 
         var up = Normalize(Cross(right, look));
-        var viewportScale = Math.Max(1, Math.Min(Math.Max(1, viewportWidth), Math.Max(1, viewportHeight)) / 600);
-        var worldPerPixel = state.Distance * 0.0018 / viewportScale;
+        var visibleHeight = 2d * state.Distance * Math.Tan(DegreesToRadians(state.FieldOfViewDegrees) / 2d);
+        var worldPerPixel = visibleHeight / Math.Max(1, viewportHeight);
         var offset = Add(Scale(right, -deltaX * worldPerPixel), Scale(up, deltaY * worldPerPixel));
         return state with { Target = Add(state.Target, offset) };
     }

@@ -10,9 +10,14 @@ namespace IFCnative.NativeWindows;
 public partial class MainWindow : ReactiveWindow<MainWindowViewModel>
 {
     public MainWindow()
+        : this(loadSample: true)
+    {
+    }
+
+    public MainWindow(bool loadSample)
     {
         InitializeComponent();
-        ViewModel = new MainWindowViewModel(new AvaloniaFileDialogService(this));
+        ViewModel = new MainWindowViewModel(new AvaloniaFileDialogService(this), loadSample: loadSample);
         DataContext = ViewModel;
         KeyDown += OnKeyDown;
         ViewModel.Documents.CollectionChanged += Documents_CollectionChanged;

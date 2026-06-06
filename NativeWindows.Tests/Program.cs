@@ -1,12 +1,11 @@
-using System.IO.Compression;
-using Dock.Model.Core;
 using IFCnative.NativeWindows.Models;
 using IFCnative.NativeWindows.Services;
 using IFCnative.NativeWindows.ViewModels;
 
+XbimIfcDocumentService.ConfigureToolkit();
 var tests = new NativeTestRunner();
 tests.RunAll();
-Console.WriteLine($"Native service tests passed: {tests.Passed}");
+Console.WriteLine($"xBIM native app tests passed: {tests.Passed}");
 
 internal sealed class NativeTestRunner
 {
@@ -14,58 +13,25 @@ internal sealed class NativeTestRunner
 
     public void RunAll()
     {
-        Run("sample parser builds core indexes", SampleParserBuildsCoreIndexes);
-        Run("xBIM import feeds inspector psets relations placement and refs", XbimImportFeedsInspectorPsetsRelationsPlacementAndRefs);
-        Run("xBIM opens external IFC path when configured", XbimOpensExternalIfcPathWhenConfigured);
-        Run("UI drafts are synchronized through xBIM store", UiDraftsAreSynchronizedThroughXbimStore);
-        Run("native memory model imports properties and geometry", NativeMemoryModelImportsPropertiesAndGeometry);
-        Run("native memory geometry backend tessellates rectangle preview mesh", NativeMemoryGeometryBackendTessellatesRectanglePreviewMesh);
-        Run("native memory geometry backend tessellates cylinder preview mesh", NativeMemoryGeometryBackendTessellatesCylinderPreviewMesh);
-        Run("native memory geometry resolves relative placement and local offsets", NativeMemoryGeometryResolvesRelativePlacementAndLocalOffsets);
-        Run("native memory geometry applies axis ref direction rotations", NativeMemoryGeometryAppliesAxisRefDirectionRotations);
-        Run("native memory geometry expands mapped item previews without rewriting mapped STEP", NativeMemoryGeometryExpandsMappedItemPreviewsWithoutRewritingMappedStep);
-        Run("native viewport camera fits and moves preview meshes", NativeViewportCameraFitsAndMovesPreviewMeshes);
-        Run("native viewport selection resolves mesh hits from memory model", NativeViewportSelectionResolvesMeshHitsFromMemoryModel);
-        Run("native memory edits patch export without reparsing live state", NativeMemoryEditsPatchExportWithoutReparsingLiveState);
-        Run("IFC file loader reads ifcZIP archives", IfcFileLoaderReadsIfcZipArchives);
-        Run("IFC file loader writes ifcZIP archives", IfcFileLoaderWritesIfcZipArchives);
-        Run("STEP export preserves parsed entity order", StepExportPreservesParsedEntityOrder);
-        Run("STEP writer exposes canonical entity helpers", StepWriterExposesCanonicalEntityHelpers);
-        Run("STEP export preserves untouched entity text", StepExportPreservesUntouchedEntityText);
-        Run("parser recovers after malformed entity arguments", ParserRecoversAfterMalformedEntityArguments);
-        Run("parser recovers valid entity missing semicolon", ParserRecoversValidEntityMissingSemicolon);
-        Run("parser keeps first entity when STEP ids duplicate", ParserKeepsFirstEntityWhenStepIdsDuplicate);
-        Run("parser recovers after entity missing type", ParserRecoversAfterEntityMissingType);
-        Run("parser recovers after unterminated string", ParserRecoversAfterUnterminatedString);
-        Run("parser repairs unexpected text before entity terminator", ParserRepairsUnexpectedTextBeforeEntityTerminator);
-        Run("entity/property/relationship edits create targeted diffs", EditsCreateTargetedDiffs);
-        Run("spatial reparent updates containment parent", SpatialReparentUpdatesContainmentParent);
-        Run("spatial detach removes containment link", SpatialDetachRemovesContainmentLink);
-        Run("relationship create adds indexed link", RelationshipCreateAddsIndexedLink);
-        Run("relationship delete removes selected link", RelationshipDeleteRemovesSelectedLink);
-        Run("element connection create indexes connected endpoints", ElementConnectionCreateIndexesConnectedEndpoints);
-        Run("element disconnect removes connection relationship", ElementDisconnectRemovesConnectionRelationship);
-        Run("placement edit updates Cartesian point", PlacementEditUpdatesCartesianPoint);
-        Run("product preset creates contained placed body", ProductPresetCreatesContainedPlacedBody);
-        Run("opening void preset creates void relationship and body", OpeningVoidPresetCreatesVoidRelationshipAndBody);
-        Run("opening filling preset creates fill relationship and body", OpeningFillingPresetCreatesFillRelationshipAndBody);
-        Run("property templates create indexed pset and qto", PropertyTemplatesCreateIndexedPsetAndQto);
-        Run("resource assignments create indexed references", ResourceAssignmentsCreateIndexedReferences);
-        Run("body assignment creates swept solid representation", BodyAssignmentCreatesSweptSolidRepresentation);
-        Run("body assignment can be staged as draft", BodyAssignmentCanBeStagedAsDraft);
-        Run("export validation reparses document before save", ExportValidationReparsesDocumentBeforeSave);
-        Run("missing relationship reference diagnostics can be repaired", MissingRelationshipReferenceDiagnosticsCanBeRepaired);
-        Run("duplicate GlobalId diagnostics can be repaired", DuplicateGlobalIdDiagnosticsCanBeRepaired);
-        Run("missing GlobalId diagnostics can be repaired", MissingGlobalIdDiagnosticsCanBeRepaired);
-        Run("spatial containment diagnostics can be repaired", SpatialContainmentDiagnosticsCanBeRepaired);
-        Run("placement and representation diagnostics can be repaired", PlacementAndRepresentationDiagnosticsCanBeRepaired);
-        Run("diagnostics projector supports text and severity filters", DiagnosticsProjectorSupportsFilters);
+        Run("xBIM sample projects tree inspector psets relations placement and refs", XbimSampleProjectsTreeInspectorPsetsRelationsPlacementAndRefs);
+        Run("xBIM editor updates entity property and placement", XbimEditorUpdatesEntityPropertyAndPlacement);
+        Run("xBIM editor creates psets quantities resources and products", XbimEditorCreatesPsetsQuantitiesResourcesAndProducts);
+        Run("xBIM editor updates spatial parents and relationships", XbimEditorUpdatesSpatialParentsAndRelationships);
+        Run("xBIM geometry backend projects sample meshes", XbimGeometryBackendProjectsSampleMeshes);
+        Run("xBIM GeometryStore builds finite render scene", XbimGeometryStoreBuildsFiniteRenderScene);
+        Run("viewport selection highlights without scene rebuild", ViewportSelectionHighlightsWithoutSceneRebuild);
+        Run("xBIM geometry dirty handling preserves pset edits only", XbimGeometryDirtyHandlingPreservesPsetEditsOnly);
+        Run("product id picking color roundtrips", ProductIdPickingColorRoundtrips);
+        Run("viewport camera supports blender style frame pan and dolly", ViewportCameraSupportsBlenderStyleFramePanAndDolly);
+        Run("xBIM export validation roundtrips the store", XbimExportValidationRoundtripsStore);
+        Run("IFC file loader reads and writes ifcZIP archives", IfcFileLoaderReadsAndWritesIfcZipArchives);
+        Run("xBIM editor commits directly to the in-memory store", XbimEditorCommitsDirectlyToInMemoryStore);
+        Run("main window commits inspector edits through xBIM", MainWindowCommitsInspectorEditsThroughXbim);
         Run("relationship graph supports filter and depth", RelationshipGraphSupportsFilterAndDepth);
+        Run("diagnostics projector supports text and severity filters", DiagnosticsProjectorSupportsFilters);
+        Run("main window commits diagnostic repairs through xBIM", MainWindowCommitsDiagnosticRepairsThroughXbim);
         Run("status log command activates copyable console", StatusLogCommandActivatesCopyableConsole);
-        Run("native window layout store persists sanitized layout", NativeWindowLayoutStorePersistsSanitizedLayout);
-        Run("native user preferences persist text zoom", NativeUserPreferencesPersistTextZoom);
-        Run("draft session gates export until apply/discard", DraftSessionGatesExport);
-        Run("draft session supports applied undo redo history", DraftSessionSupportsUndoRedoHistory);
+        Run("native stores persist sanitized settings", NativeStoresPersistSanitizedSettings);
     }
 
     private void Run(string name, Action test)
@@ -82,1143 +48,383 @@ internal sealed class NativeTestRunner
         }
     }
 
-    private static void SampleParserBuildsCoreIndexes()
+    private static void XbimSampleProjectsTreeInspectorPsetsRelationsPlacementAndRefs()
     {
-        var document = IfcStepParser.CreateSample();
+        var document = Sample();
 
-        Equal("IFC4X3_ADD2", document.Schema, "schema");
-        True(document.EntityById.ContainsKey(40), "sample proxy missing");
-        True(document.RelationshipById.ContainsKey(53), "containment relationship missing");
-        True(document.PropertySetsByEntity.TryGetValue(40, out var propertySets) && propertySets.Count == 1, "proxy property set not indexed");
-        True(document.SpatialPathByEntity.TryGetValue(40, out var path) && path.Contains("Sample Inspection Block"), "spatial path not indexed");
-        True(document.Diagnostics.Messages.Any(message => message.Contains("Loaded") && message.Contains("STEP entities")), "load diagnostic missing");
-    }
-
-    private static void NativeMemoryModelImportsPropertiesAndGeometry()
-    {
-        var document = IfcStepParser.CreateSample();
-        var model = document.MemoryModel;
-
-        Equal("IFC4X3_ADD2", model.Schema, "memory model schema");
-        True(model.ObjectsBySourceId.TryGetValue(40, out var product), "memory model product missing");
-        True(product!.IsPhysicalProduct, "sample proxy should be a native physical product");
-        True(product.PropertySets.Any(set => set.Name == "Pset_IFCnative"), "native product property set missing");
-
-        var reviewStatus = product.PropertySets
-            .SelectMany(set => set.Values)
-            .Single(value => value.Name == "ReviewStatus");
-        Equal(IfcPropertyValueKind.String, reviewStatus.Value.Kind, "review status should be a native string value");
-        Equal("Native editable shell", reviewStatus.Value.Text, "review status native value");
-
-        True(product.Geometry is not null, "native product geometry missing");
-        var primitive = product.Geometry!.Primitives.Single(value => value.Kind == "ExtrudedAreaSolid");
-        Equal("Rectangle", primitive.Profile?.Kind, "native geometry profile kind");
-        Equal(2.6d, Math.Round(primitive.SizeX ?? 0, 1), "native rectangle width");
-        Equal(1.4d, Math.Round(primitive.SizeY ?? 0, 1), "native rectangle depth");
-        Equal(2.4d, Math.Round(primitive.SizeZ ?? 0, 1), "native extrusion depth");
-        True(product.Placement is not null && product.Placement.X == 0 && product.Placement.Y == 0 && product.Placement.Z == 0, "native placement missing");
-
-        var backend = new NativeMemoryGeometryBackend();
-        var selected = backend.ProjectSelection(document, 40);
-        True(selected.Any(item => item.Label.Contains("extruded rectangle", StringComparison.OrdinalIgnoreCase)), "native memory backend should describe the product primitive");
-    }
-
-    private static void XbimImportFeedsInspectorPsetsRelationsPlacementAndRefs()
-    {
-        var source = IfcStepParser.CreateSample();
-        var document = XbimIfcDocumentService.OpenText(source.ToStepText(), source.FileName);
-
-        True(document.XbimStore is not null, "document should keep the xBIM store after import");
-        True(document.EntityById.TryGetValue(40, out var proxy), "xBIM import should expose the sample proxy");
+        True(document.XbimStore is not null, "sample should keep the xBIM store");
+        Equal("IFC4X3", document.Schema, "sample schema");
+        True(document.EntityById.TryGetValue(40, out var proxy), "sample proxy missing");
+        True(document.SpatialRoots.Count == 1, "sample spatial tree should have one project root");
+        True(document.EntitiesByType.TryGetValue("IFCBUILDINGELEMENTPROXY", out var proxies) && proxies.Count == 1, "proxy type count missing");
 
         var details = IfcSelectionProjector.Project(document, proxy!);
-
-        True(details.PropertySets.Any(item => item.Label.Contains("Pset_IFCnative", StringComparison.OrdinalIgnoreCase)), "inspector psets should be available after xBIM import");
-        True(details.PropertySets.Any(item => item.Label.Contains("ReviewStatus", StringComparison.OrdinalIgnoreCase)), "inspector property values should be available after xBIM import");
+        True(details.SpatialPath.Contains("Sample Inspection Block", StringComparison.OrdinalIgnoreCase), "spatial path should include selected product");
         True(details.PropertySetTables.Any(table => table.Name == "Pset_IFCnative"
-            && table.Rows.Any(row => row.Name == "ReviewStatus" && row.CanEdit)), "inspector pset tables should expose editable property rows after xBIM import");
-        True(details.Relationships.Any(item => item.Label.Contains("IFCRELDEFINESBYPROPERTIES", StringComparison.OrdinalIgnoreCase)), "inspector relations should include property relations after xBIM import");
-        True(details.Relationships.Any(item => item.Label.Contains("IFCRELCONTAINEDINSPATIALSTRUCTURE", StringComparison.OrdinalIgnoreCase)), "inspector relations should include spatial containment after xBIM import");
-        True(details.Placement.CanEdit && details.Placement.X == "0" && details.Placement.Y == "0" && details.Placement.Z == "0", "inspector placement should be available after xBIM import");
-        True(details.IncomingReferences.Any(item => item.Contains("#53", StringComparison.OrdinalIgnoreCase)), "inspector refs should include incoming spatial relationship after xBIM import");
+            && table.Rows.Any(row => row.Name == "ReviewStatus" && row.CanEdit)), "pset table should expose editable ReviewStatus");
+        True(details.PropertySets.Any(item => item.Label.Contains("Native editable shell", StringComparison.OrdinalIgnoreCase)), "flat pset list should include property value");
+        True(details.Relationships.Any(item => item.Label.Contains("IFCRELDEFINESBYPROPERTIES", StringComparison.OrdinalIgnoreCase)), "property relationship missing");
+        True(details.Relationships.Any(item => item.Label.Contains("IFCRELCONTAINEDINSPATIALSTRUCTURE", StringComparison.OrdinalIgnoreCase)), "spatial relationship missing");
+        True(details.IncomingReferences.Any(item => item.Contains("#53", StringComparison.OrdinalIgnoreCase)), "incoming refs should include spatial relationship");
+        True(details.Placement.CanEdit && details.Placement.X == "0" && details.Placement.Y == "0" && details.Placement.Z == "0", "placement should be editable");
+        True(details.Representations.Any(item => item.Contains("Product shape", StringComparison.OrdinalIgnoreCase)), "representation summary missing");
     }
 
-    private static void XbimOpensExternalIfcPathWhenConfigured()
+    private static void XbimEditorUpdatesEntityPropertyAndPlacement()
     {
-        var path = Environment.GetEnvironmentVariable("IFCNATIVE_TEST_IFC_PATH");
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
-        {
-            return;
-        }
+        var document = Sample();
+        var propertyId = ReviewStatusPropertyId(document);
 
-        var document = XbimIfcDocumentService.OpenPath(path);
+        var renamed = XbimDocumentEditor.UpdateEntity(document, 40, "Renamed xBIM Proxy", "Edited through xBIM");
+        Equal("Renamed xBIM Proxy", renamed.EntityById[40].Name, "entity name should update");
+        Equal("Edited through xBIM", renamed.EntityById[40].Description, "entity description should update");
 
-        True(document.XbimStore is not null, "external IFC should keep the xBIM store after import");
-        True(document.Entities.Count > 0, "external IFC should expose STEP entities after xBIM import");
-        True(document.Schema.StartsWith("IFC", StringComparison.OrdinalIgnoreCase), "external IFC schema should be detected");
+        var propertyEdited = XbimDocumentEditor.UpdatePropertyValue(renamed, propertyId, "'Reviewed'");
+        var reviewStatus = PropertyRows(propertyEdited, 40).Single(row => row.Label.Contains("ReviewStatus", StringComparison.OrdinalIgnoreCase));
+        Equal("Reviewed", reviewStatus.Value, "property value should update");
+
+        var placed = XbimDocumentEditor.UpdatePlacement(propertyEdited, 40, "1.25", "-2", "3");
+        var placement = placed.PlacementsByEntity[40];
+        Equal(1.25d, placement.X, "placement X should update");
+        Equal(-2d, placement.Y, "placement Y should update");
+        Equal(3d, placement.Z, "placement Z should update");
+
+        var withBody = XbimDocumentEditor.AssignBodyRepresentation(placed, 40, "5", "2.5", "3", "rectangle");
+        True(withBody.RepresentationsByEntity.TryGetValue(40, out var representation)
+            && representation.GeometryItemIds.Count > 0, "body assignment should create xBIM representation items");
     }
 
-    private static void UiDraftsAreSynchronizedThroughXbimStore()
+    private static void XbimEditorCreatesPsetsQuantitiesResourcesAndProducts()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"ifcnative-user-preferences-{Guid.NewGuid():N}.json");
-        try
-        {
-            var viewModel = new MainWindowViewModel(new EmptyFileDialogService(), new NativeUserPreferencesStore(path));
-            viewModel.SelectEntityById(40);
-
-            viewModel.AddCommonPropertySet();
-
-            var session = viewModel.ActiveSession;
-            True(session is not null, "sample session should be active");
-            True(session!.DraftSession.HasDraft, "common pset edit should stage a draft");
-            True(session.Document.XbimStore is not null, "staged UI draft should be backed by a synchronized xBIM store");
-            True(session.Document.PropertySetsByEntity.TryGetValue(40, out var propertySets)
-                && propertySets.Any(set => set.Name == "Pset_NativeCommon"), "staged UI draft should expose the new pset in inspector projections");
-
-            viewModel.ApplyDraft();
-
-            True(!session.DraftSession.HasDraft, "draft should be applied");
-            True(session.Document.XbimStore is not null, "applied document should keep the synchronized xBIM store");
-            True(IfcExportValidator.Validate(session.Document).CanExport, "applied xBIM-backed draft should validate for export");
-
-            var beforeIds = session.Document.EntityById.Keys.ToHashSet();
-            viewModel.SelectEntityById(30);
-            viewModel.CreateProduct("IFCBUILDINGELEMENTPROXY", "Tree Created Product", "1", "1", "1", "rectangle");
-
-            True(session.DraftSession.HasDraft, "tree product create should stage a draft");
-            True(session.Document.XbimStore is not null, "tree-created draft should be backed by a synchronized xBIM store");
-            var createdId = session.Document.EntityById.Keys.Except(beforeIds).OrderBy(id => id).FirstOrDefault();
-            True(createdId != 0, "tree product create should add an IFC entity");
-            True(session.Document.EntityById[createdId].DisplayName.Contains("Tree Created Product", StringComparison.OrdinalIgnoreCase), "tree-created product should be visible in projections");
-            True(session.Document.SpatialPathByEntity.TryGetValue(createdId, out var createdPath)
-                && createdPath.Contains("Tree Created Product", StringComparison.OrdinalIgnoreCase), "tree-created product should be indexed in the structure path");
-        }
-        finally
-        {
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-        }
-    }
-
-    private static void NativeMemoryGeometryBackendTessellatesRectanglePreviewMesh()
-    {
-        var document = IfcStepParser.CreateSample();
-        var backend = new NativeMemoryGeometryBackend();
-
-        var meshes = backend.BuildPreviewMeshes(document, backend.ProjectSelection(document, 40));
-        var mesh = meshes.Single(value => value.ProductSourceId == 40 && value.PrimitiveSourceId == 140);
-
-        Equal(8, mesh.Vertices.Count, "rectangle mesh vertex count");
-        Equal(36, mesh.TriangleIndices.Count, "rectangle mesh index count");
-        Equal(2.6d, Math.Round(mesh.Vertices.Max(vertex => vertex.X) - mesh.Vertices.Min(vertex => vertex.X), 1), "rectangle mesh width");
-        Equal(1.4d, Math.Round(mesh.Vertices.Max(vertex => vertex.Y) - mesh.Vertices.Min(vertex => vertex.Y), 1), "rectangle mesh depth");
-        Equal(2.4d, Math.Round(mesh.Vertices.Max(vertex => vertex.Z) - mesh.Vertices.Min(vertex => vertex.Z), 1), "rectangle mesh height");
-    }
-
-    private static void NativeMemoryGeometryBackendTessellatesCylinderPreviewMesh()
-    {
-        var document = IfcStepParser.CreateSample();
-        var cylinder = IfcDocumentEditor.AssignBodyRepresentation(document, 40, "2", "2", "4", "cylinder");
-        var backend = new NativeMemoryGeometryBackend();
-
-        var mesh = backend.BuildPreviewMeshes(cylinder, backend.ProjectSelection(cylinder, 40)).Single(value => value.ProductSourceId == 40);
-
-        Equal(66, mesh.Vertices.Count, "cylinder mesh vertex count");
-        Equal(384, mesh.TriangleIndices.Count, "cylinder mesh index count");
-        Equal(2d, Math.Round(mesh.Vertices.Max(vertex => vertex.X) - mesh.Vertices.Min(vertex => vertex.X), 3), "cylinder mesh diameter");
-        Equal(4d, Math.Round(mesh.Vertices.Max(vertex => vertex.Z) - mesh.Vertices.Min(vertex => vertex.Z), 3), "cylinder mesh height");
-    }
-
-    private static void NativeMemoryGeometryResolvesRelativePlacementAndLocalOffsets()
-    {
-        var document = IfcStepParser.Parse(RelativeGeometryFixture, "relative-geometry.ifc");
-        var product = document.MemoryModel.ObjectsBySourceId[40];
-        var primitive = product.Geometry!.Primitives.Single(value => value.Kind == "ExtrudedAreaSolid");
-
-        Equal(0.5d, primitive.PositionX, "solid local x");
-        Equal(0.25d, primitive.PositionY, "solid local y");
-        Equal(0.5d, primitive.PositionZ, "solid local z");
-        Equal(0.2d, primitive.Profile!.PositionX, "profile local x");
-        Equal(0.1d, primitive.Profile.PositionY, "profile local y");
-
-        var backend = new NativeMemoryGeometryBackend();
-        var mesh = backend.BuildPreviewMeshes(document, backend.ProjectSelection(document, 40)).Single(value => value.ProductSourceId == 40);
-
-        Equal(11.2d, Math.Round(mesh.Vertices.Min(vertex => vertex.X), 3), "relative mesh min x");
-        Equal(12.2d, Math.Round(mesh.Vertices.Max(vertex => vertex.X), 3), "relative mesh max x");
-        Equal(21.85d, Math.Round(mesh.Vertices.Min(vertex => vertex.Y), 3), "relative mesh min y");
-        Equal(22.85d, Math.Round(mesh.Vertices.Max(vertex => vertex.Y), 3), "relative mesh max y");
-        Equal(3.5d, Math.Round(mesh.Vertices.Min(vertex => vertex.Z), 3), "relative mesh min z");
-        Equal(5.5d, Math.Round(mesh.Vertices.Max(vertex => vertex.Z), 3), "relative mesh max z");
-
-        var patched = IfcMemoryModelExporter.ApplyToDocument(document, document.MemoryModel);
-        Equal("(0.5,0.25,0.5)", patched.EntityById[91].Arguments[0], "solid local point should survive export");
-        Equal("(0.2,0.1)", patched.EntityById[96].Arguments[0], "profile local point should survive export");
-    }
-
-    private static void NativeMemoryGeometryAppliesAxisRefDirectionRotations()
-    {
-        var document = IfcStepParser.Parse(RotatedPlacementFixture, "rotated-placement.ifc");
-        var placement = document.MemoryModel.ObjectsBySourceId[40].Placement!;
-
-        Equal(0d, placement.RefDirection.X, "placement ref direction x");
-        Equal(1d, placement.RefDirection.Y, "placement ref direction y");
-        Equal(0d, placement.Axis.X, "placement axis x");
-        Equal(0d, placement.Axis.Y, "placement axis y");
-        Equal(1d, placement.Axis.Z, "placement axis z");
-
-        var backend = new NativeMemoryGeometryBackend();
-        var mesh = backend.BuildPreviewMeshes(document, backend.ProjectSelection(document, 40)).Single(value => value.ProductSourceId == 40);
-
-        Equal(1d, Math.Round(mesh.Vertices.Max(vertex => vertex.X) - mesh.Vertices.Min(vertex => vertex.X), 3), "rotated mesh world width");
-        Equal(2d, Math.Round(mesh.Vertices.Max(vertex => vertex.Y) - mesh.Vertices.Min(vertex => vertex.Y), 3), "rotated mesh world depth");
-        Equal(-0.5d, Math.Round(mesh.Vertices.Min(vertex => vertex.X), 3), "rotated mesh min x");
-        Equal(1d, Math.Round(mesh.Vertices.Max(vertex => vertex.Y), 3), "rotated mesh max y");
-
-        var patched = IfcMemoryModelExporter.ApplyToDocument(document, document.MemoryModel);
-        Equal("#73", patched.EntityById[71].Arguments[1], "placement axis direction reference should survive export");
-        Equal("#74", patched.EntityById[71].Arguments[2], "placement ref direction reference should survive export");
-        Equal("(0.,1.,0.)", patched.EntityById[74].Arguments[0], "placement ref direction vector should survive export");
-    }
-
-    private static void NativeMemoryGeometryExpandsMappedItemPreviewsWithoutRewritingMappedStep()
-    {
-        var document = IfcStepParser.Parse(MappedGeometryFixture, "mapped-geometry.ifc");
-        var geometry = document.MemoryModel.ProductGeometryByProductId[40];
-        var primitive = geometry.Primitives.Single();
-
-        Equal(90, primitive.SourceId, "mapped preview source id");
-        Equal(90, primitive.MappedItemSourceId, "mapped item source id");
-        Equal(120, primitive.MappedGeometrySourceId, "mapped source geometry id");
-        Equal(5d, primitive.MappingX, "mapping origin x");
-        Equal(6d, primitive.MappingY, "mapping origin y");
-        Equal(2d, primitive.MappingScale, "mapping scale");
-        Equal(0d, primitive.MappingRefDirection.X, "mapping x axis x");
-        Equal(1d, primitive.MappingRefDirection.Y, "mapping x axis y");
-
-        var backend = new NativeMemoryGeometryBackend();
-        var mesh = backend.BuildPreviewMeshes(document, backend.ProjectSelection(document, 40)).Single(value => value.ProductSourceId == 40);
-
-        Equal(4d, Math.Round(mesh.Vertices.Min(vertex => vertex.X), 3), "mapped mesh min x");
-        Equal(6d, Math.Round(mesh.Vertices.Max(vertex => vertex.X), 3), "mapped mesh max x");
-        Equal(4d, Math.Round(mesh.Vertices.Min(vertex => vertex.Y), 3), "mapped mesh min y");
-        Equal(8d, Math.Round(mesh.Vertices.Max(vertex => vertex.Y), 3), "mapped mesh max y");
-        Equal(0d, Math.Round(mesh.Vertices.Min(vertex => vertex.Z), 3), "mapped mesh min z");
-        Equal(2d, Math.Round(mesh.Vertices.Max(vertex => vertex.Z), 3), "mapped mesh max z");
-
-        var resized = IfcMemoryModelEditor.UpdateExtrudedBodyDimensions(document.MemoryModel, 40, "5", "5", "5");
-        Equal(2d, resized.ProductGeometryByProductId[40].Primitives.Single().SizeX ?? 0, "mapped body should not be resized as direct solid");
-
-        var patched = IfcMemoryModelExporter.ApplyToDocument(document, document.MemoryModel);
-        Equal("IFCMAPPEDITEM", patched.EntityById[90].Type, "mapped item should remain mapped STEP");
-        Equal("#100", patched.EntityById[90].Arguments[0], "mapped item representation map should survive export");
-        Equal("#110", patched.EntityById[90].Arguments[1], "mapped item transform should survive export");
-    }
-
-    private static void NativeViewportCameraFitsAndMovesPreviewMeshes()
-    {
-        var document = IfcStepParser.CreateSample();
-        var backend = new NativeMemoryGeometryBackend();
-        var meshes = backend.BuildPreviewMeshes(document, backend.ProjectSelection(document, 40));
-
-        var camera = NativeViewportCameraController.FitMeshes(meshes);
-        Equal(0d, Math.Round(camera.Target.X, 3), "fit target x");
-        Equal(0d, Math.Round(camera.Target.Y, 3), "fit target y");
-        Equal(1.2d, Math.Round(camera.Target.Z, 1), "fit target z");
-        True(camera.Distance > camera.SceneRadius, "camera should sit outside fitted scene bounds");
-
-        var pose = camera.ToPose();
-        var resolvedTarget = NativeViewportCameraController.Add(pose.Position, pose.LookDirection);
-        Equal(0d, Math.Round(resolvedTarget.X, 3), "camera pose should look at target x");
-        Equal(0d, Math.Round(resolvedTarget.Y, 3), "camera pose should look at target y");
-        Equal(1.2d, Math.Round(resolvedTarget.Z, 1), "camera pose should look at target z");
-
-        var orbited = NativeViewportCameraController.Orbit(camera, 100, -1000);
-        True(orbited.YawDegrees != camera.YawDegrees, "orbit should change yaw");
-        Equal(-80d, orbited.PitchDegrees, "orbit should clamp pitch");
-
-        var zoomedIn = NativeViewportCameraController.Zoom(camera, 120);
-        var zoomedOut = NativeViewportCameraController.Zoom(camera, -120);
-        True(zoomedIn.Distance < camera.Distance, "positive wheel delta should zoom in");
-        True(zoomedOut.Distance > camera.Distance, "negative wheel delta should zoom out");
-
-        var panned = NativeViewportCameraController.Pan(camera, 80, -40, 800, 600);
-        True(panned.Target != camera.Target, "pan should move the camera target");
-    }
-
-    private static void NativeViewportSelectionResolvesMeshHitsFromMemoryModel()
-    {
-        var document = IfcStepParser.CreateSample();
-        var backend = new NativeMemoryGeometryBackend();
-        var mesh = backend.BuildPreviewMeshes(document, backend.ProjectSelection(document, 40)).Single(value => value.ProductSourceId == 40);
-
-        var selection = NativeViewportSelectionService.ResolveMeshSelection(document, mesh, backend.Status);
-
-        True(selection is not null, "mesh selection should resolve from memory model");
-        Equal(40, selection!.ProductSourceId, "selected mesh product id");
-        Equal(140, selection.PrimitiveSourceId, "selected mesh primitive id");
-        True(selection.Status.Contains("mesh #140", StringComparison.OrdinalIgnoreCase), "selection status should mention mesh");
-
-        var missingProductMesh = mesh with { ProductSourceId = 999 };
-        True(NativeViewportSelectionService.ResolveMeshSelection(document, missingProductMesh, backend.Status) is null, "unknown mesh product should not resolve");
-    }
-
-    private static void NativeMemoryEditsPatchExportWithoutReparsingLiveState()
-    {
-        var document = IfcStepParser.CreateSample();
-        var originalStepText = document.ToStepText();
-
-        var memoryEdited = IfcMemoryModelEditor.UpdatePropertyValue(document.MemoryModel, 61, "IFCLABEL('Reviewed')");
-        True(!ReferenceEquals(document.MemoryModel, memoryEdited), "memory property edit should return a draft memory model");
-        Equal("Native editable shell", document.MemoryModel.PropertySetsByObjectId[40][0].Values[0].Value.Text, "imported memory model should stay unchanged");
-        Equal("Reviewed", memoryEdited.PropertySetsByObjectId[40][0].Values[0].Value.Text, "memory property value should update without document reparse");
-        Equal(originalStepText, document.ToStepText(), "memory-only edit should not mutate imported STEP text");
-
-        var propertyPatched = IfcMemoryModelExporter.ApplyToDocument(document, memoryEdited);
-        Equal("IFCLABEL('Reviewed')", propertyPatched.EntityById[61].Arguments[2], "export patch should write edited property value");
-        Equal("Reviewed", propertyPatched.MemoryModel.PropertySetsByObjectId[40][0].Values[0].Value.Text, "patched document should carry edited memory model");
-        Equal("'Native editable shell'", document.EntityById[61].Arguments[2], "source import entity should remain unchanged");
-
-        var placed = IfcDocumentEditor.UpdatePlacement(document, 40, "1.25", "-2", "3");
-        Equal("(1.25,-2.,3.)", placed.EntityById[102].Arguments[0], "memory placement edit should patch export point");
-        True(placed.MemoryModel.ObjectsBySourceId[40].Placement is { X: 1.25, Y: -2, Z: 3 }, "memory placement should update");
-        Equal("(0.,0.,0.)", document.EntityById[102].Arguments[0], "source import placement should remain unchanged");
-
-        var resized = IfcDocumentEditor.UpdateBodyDimensions(document, 40, "5", "2.5", "3");
-        Equal("3.", resized.EntityById[140].Arguments[3], "memory geometry edit should patch extrusion depth");
-        Equal("5.", resized.EntityById[150].Arguments[3], "memory geometry edit should patch rectangle width");
-        Equal("2.5", resized.EntityById[150].Arguments[4], "memory geometry edit should patch rectangle depth");
-        var primitive = resized.MemoryModel.ProductGeometryByProductId[40].Primitives.Single(value => value.Kind == "ExtrudedAreaSolid");
-        Equal(5d, primitive.SizeX ?? 0, "memory geometry width should update");
-        Equal(2.5d, primitive.SizeY ?? 0, "memory geometry depth should update");
-        Equal(3d, primitive.SizeZ ?? 0, "memory geometry height should update");
-        Equal("2.4", document.EntityById[140].Arguments[3], "source import geometry should remain unchanged");
-
-        var removedRelationModel = IfcMemoryModelEditor.RemoveRelation(document.MemoryModel, 63);
-        True(!removedRelationModel.Relations.Any(relation => relation.SourceId == 63), "memory relation delete should remove the relation");
-        True(!removedRelationModel.PropertySetsByObjectId.ContainsKey(40), "memory relation delete should remove projected property assignment");
-        Equal(originalStepText, document.ToStepText(), "memory relation delete should not mutate imported STEP text");
-        var removedRelationDocument = IfcMemoryModelExporter.ApplyToDocument(document, removedRelationModel);
-        True(!removedRelationDocument.RelationshipById.ContainsKey(63), "relation export patch should remove relationship index row");
-        True(!removedRelationDocument.PropertySetsByEntity.ContainsKey(40), "relation export patch should remove projected property set");
-        True(!removedRelationDocument.ToStepText().Contains("#63=", StringComparison.Ordinal), "relation export patch should remove STEP relationship row");
-
-        var newRelationshipId = IfcStepWriter.NextEntityId(document);
-        var addedRelationModel = IfcMemoryModelEditor.AddRelation(document.MemoryModel, newRelationshipId, "IFCRELDEFINESBYPROPERTIES", "Memory property relation", [60], [40]);
-        True(addedRelationModel.Relations.Any(relation => relation.SourceId == newRelationshipId), "memory relation create should add the relation");
-        var addedRelationDocument = IfcMemoryModelExporter.ApplyToDocument(document, addedRelationModel);
-        True(addedRelationDocument.RelationshipById.ContainsKey(newRelationshipId), "relation export patch should index created relationship");
-        Equal("(#40)", addedRelationDocument.EntityById[newRelationshipId].Arguments[4], "created relationship related objects argument");
-        Equal("#60", addedRelationDocument.EntityById[newRelationshipId].Arguments[5], "created relationship property definition argument");
-
-        var movedSpatialModel = IfcMemoryModelEditor.UpdateRelationEndpoints(document.MemoryModel, 53, [20], [40]);
-        var movedSpatialDocument = IfcMemoryModelExporter.ApplyToDocument(document, movedSpatialModel);
-        Equal("#20", movedSpatialDocument.EntityById[53].Arguments[5], "memory spatial edit should patch containment parent");
-        True(movedSpatialDocument.SpatialPathByEntity.TryGetValue(40, out var movedPath) && movedPath.Contains("Sample Building") && !movedPath.Contains("Level 0"), "memory spatial edit should refresh spatial path");
-        Equal("#30", document.EntityById[53].Arguments[5], "source import spatial relationship should remain unchanged");
-    }
-
-    private static void IfcFileLoaderReadsIfcZipArchives()
-    {
-        var tempPath = Path.Combine(Path.GetTempPath(), $"ifcnative-test-{Guid.NewGuid():N}.ifczip");
-        try
-        {
-            using (var archive = ZipFile.Open(tempPath, ZipArchiveMode.Create))
-            {
-                var ignored = archive.CreateEntry("notes.txt");
-                using (var ignoredWriter = new StreamWriter(ignored.Open()))
-                {
-                    ignoredWriter.Write("not an IFC file");
-                }
-
-                var entry = archive.CreateEntry("models/zipped-sample.ifc");
-                using var writer = new StreamWriter(entry.Open());
-                writer.Write(UnorderedFixture);
-            }
-
-            var loaded = IfcFileLoader.ReadAsync(tempPath).GetAwaiter().GetResult();
-            Equal("zipped-sample.ifc", loaded.FileName, "ifcZIP entry filename");
-            True(loaded.Text.Contains("IFCPROJECT", StringComparison.Ordinal), "ifcZIP text should contain IFC content");
-
-            var document = IfcStepParser.Parse(loaded.Text, loaded.FileName);
-            Equal("IFC4X3_ADD2", document.Schema, "ifcZIP parsed schema");
-        }
-        finally
-        {
-            if (File.Exists(tempPath))
-            {
-                File.Delete(tempPath);
-            }
-        }
-    }
-
-    private static void IfcFileLoaderWritesIfcZipArchives()
-    {
-        var tempPath = Path.Combine(Path.GetTempPath(), $"ifcnative-export-{Guid.NewGuid():N}.ifczip");
-        try
-        {
-            IfcFileLoader.WriteText(tempPath, UnorderedFixture, "source-model.step");
-
-            using var archive = ZipFile.OpenRead(tempPath);
-            Equal(1, archive.Entries.Count, "ifcZIP should contain one IFC entry");
-            Equal("source-model.ifc", archive.Entries[0].Name, "ifcZIP export entry filename");
-
-            using var reader = new StreamReader(archive.Entries[0].Open());
-            var exported = reader.ReadToEnd();
-            True(exported.Contains("IFCPROJECT", StringComparison.Ordinal), "ifcZIP export should contain STEP text");
-        }
-        finally
-        {
-            if (File.Exists(tempPath))
-            {
-                File.Delete(tempPath);
-            }
-        }
-    }
-
-    private static void StepExportPreservesParsedEntityOrder()
-    {
-        var document = IfcStepParser.Parse(UnorderedFixture, "unordered-fixture.ifc");
-        var exported = NormalizeNewlines(document.ToStepText());
-
-        True(exported.IndexOf("#40=", StringComparison.Ordinal) < exported.IndexOf("#1=", StringComparison.Ordinal), "export should preserve original #40 before #1 order");
-
-        var edited = IfcDocumentEditor.UpdateEntity(document, 1, "Edited Project", string.Empty, string.Join(",", document.EntityById[1].Arguments));
-        var editedExport = NormalizeNewlines(edited.ToStepText());
-
-        True(editedExport.IndexOf("#40=", StringComparison.Ordinal) < editedExport.IndexOf("#1=", StringComparison.Ordinal), "edited export should preserve original entity order");
-
-        var expanded = IfcDocumentEditor.AddCommonPropertySet(document, 40);
-        var expandedExport = expanded.ToStepText();
-        var newPropertySetId = expanded.Entities.Max(entity => entity.Id);
-
-        True(expandedExport.IndexOf("#20=", StringComparison.Ordinal) < expandedExport.IndexOf($"#{newPropertySetId}=", StringComparison.Ordinal), "newly created entities should append after original rows");
-    }
-
-    private static void StepWriterExposesCanonicalEntityHelpers()
-    {
-        var document = IfcStepParser.Parse(UnorderedFixture, "unordered-fixture.ifc");
-        var entity = document.EntityById[1];
-
-        Equal(41, IfcStepWriter.NextEntityId(document), "next STEP id should follow highest parsed id");
-        Equal(entity.ToStepLine(), IfcStepWriter.SerializeEntity(entity), "entity model should delegate to writer helper");
-
-        entity.Name = "Writer Canonical Name";
-        Equal("#1= IFCPROJECT('2XQ2f8a9b2ff4l$IFCnative',$,'Writer Canonical Name',$,$,$,$,$,$);", IfcStepWriter.SerializeEntity(entity), "edited entity should serialize canonically");
-    }
-
-    private static void StepExportPreservesUntouchedEntityText()
-    {
-        var document = IfcStepParser.Parse(FormattedEntityFixture, "formatted-entity.ifc");
-        var exported = NormalizeNewlines(document.ToStepText());
-
-        True(exported.Contains("#40 =\n  IFCBUILDINGELEMENTPROXY", StringComparison.Ordinal), "untouched multiline entity formatting should be preserved");
-
-        var edited = IfcDocumentEditor.UpdateEntity(document, 1, "Edited Project", string.Empty, string.Join(",", document.EntityById[1].Arguments));
-        var editedExport = NormalizeNewlines(edited.ToStepText());
-
-        True(editedExport.Contains("#40 =\n  IFCBUILDINGELEMENTPROXY", StringComparison.Ordinal), "unrelated entity formatting should survive targeted edits");
-        True(editedExport.Contains("#1= IFCPROJECT", StringComparison.Ordinal), "edited entity should be serialized canonically");
-    }
-
-    private static void ParserRecoversAfterMalformedEntityArguments()
-    {
-        var document = IfcStepParser.Parse(MalformedEntityFixture, "malformed-entity.ifc");
-
-        True(document.Diagnostics.Messages.Any(message => message.Contains("Skipped #40") && message.Contains("unterminated argument list")), "unterminated entity diagnostic missing");
-        True(!document.EntityById.ContainsKey(40), "malformed entity should be skipped");
-        True(document.EntityById.TryGetValue(41, out var recovered) && recovered.Name == "Recovered Proxy", "parser should recover following valid entity");
-        Equal(2, document.Entities.Count, "parser should preserve valid entities around malformed row");
-    }
-
-    private static void ParserRecoversValidEntityMissingSemicolon()
-    {
-        var document = IfcStepParser.Parse(MissingSemicolonFixture, "missing-semicolon.ifc");
-
-        True(document.Diagnostics.Messages.Any(message => message.Contains("Parsed #40") && message.Contains("missing terminating ';'", StringComparison.OrdinalIgnoreCase)), "missing semicolon diagnostic missing");
-        True(document.EntityById.TryGetValue(40, out var missingTerminator) && missingTerminator.Name == "Missing Semicolon Proxy", "entity before missing semicolon should still parse");
-        True(document.EntityById.TryGetValue(41, out var recovered) && recovered.Name == "Recovered After Missing Semicolon", "parser should recover following entity after missing semicolon");
-        Equal(3, document.Entities.Count, "parser should keep valid entities around missing semicolon");
-
-        var exported = document.ToStepText();
-        True(exported.Contains("#40= IFCBUILDINGELEMENTPROXY", StringComparison.Ordinal), "missing-semicolon entity should export canonically");
-        True(exported.Contains("#40= IFCBUILDINGELEMENTPROXY('1Proxy8a9b2ff4l$IFCnative',$,'Missing Semicolon Proxy',$,$,$,$,$,$);", StringComparison.Ordinal), "export should repair the missing semicolon");
-    }
-
-    private static void ParserKeepsFirstEntityWhenStepIdsDuplicate()
-    {
-        var document = IfcStepParser.Parse(DuplicateStepIdFixture, "duplicate-step-id.ifc");
-
-        True(document.Diagnostics.Messages.Any(message => message.Contains("duplicate STEP entity #41", StringComparison.OrdinalIgnoreCase)), "duplicate STEP id diagnostic missing");
-        True(document.EntityById.TryGetValue(41, out var duplicate) && duplicate.Name == "First Proxy", "first parsed duplicate id should be kept");
-        True(document.EntityById.TryGetValue(42, out var recovered) && recovered.Name == "Recovered After Duplicate", "parser should continue after duplicate STEP id");
-        Equal(3, document.Entities.Count, "duplicate row should be skipped without dropping following valid entities");
-
-        var exported = document.ToStepText();
-        Equal(exported.IndexOf("#41=", StringComparison.Ordinal), exported.LastIndexOf("#41=", StringComparison.Ordinal), "export should contain only one #41 row");
-    }
-
-    private static void ParserRecoversAfterEntityMissingType()
-    {
-        var document = IfcStepParser.Parse(MissingEntityTypeFixture, "missing-entity-type.ifc");
-
-        True(document.Diagnostics.Messages.Any(message => message.Contains("Skipped #40") && message.Contains("missing entity type")), "missing entity type diagnostic missing");
-        True(!document.EntityById.ContainsKey(40), "entity with missing type should be skipped");
-        True(document.EntityById.TryGetValue(41, out var recovered) && recovered.Name == "Recovered After Missing Type", "parser should recover following valid entity after missing type");
-        Equal(2, document.Entities.Count, "parser should skip malformed row without dropping surrounding entities");
-    }
-
-    private static void ParserRecoversAfterUnterminatedString()
-    {
-        var document = IfcStepParser.Parse(UnterminatedStringFixture, "unterminated-string.ifc");
-
-        True(document.Diagnostics.Messages.Any(message => message.Contains("Skipped #40") && message.Contains("unterminated argument list")), "unterminated string diagnostic missing");
-        True(!document.EntityById.ContainsKey(40), "entity with unterminated string should be skipped");
-        True(document.EntityById.TryGetValue(41, out var recovered) && recovered.Name == "Recovered After Unterminated String", "parser should recover following valid entity after unterminated string");
-        Equal(2, document.Entities.Count, "parser should skip unterminated string row without swallowing following entities");
-    }
-
-    private static void ParserRepairsUnexpectedTextBeforeEntityTerminator()
-    {
-        var document = IfcStepParser.Parse(UnexpectedTrailingTextFixture, "unexpected-trailing-text.ifc");
-
-        True(document.Diagnostics.Messages.Any(message => message.Contains("Parsed #40") && message.Contains("unexpected text", StringComparison.OrdinalIgnoreCase)), "unexpected trailing text diagnostic missing");
-        True(document.EntityById.TryGetValue(40, out var repaired) && repaired.Name == "Trailing Junk Proxy", "entity with trailing junk should still parse");
-        True(document.EntityById.TryGetValue(41, out var recovered) && recovered.Name == "Recovered After Trailing Junk", "parser should recover following valid entity after trailing junk");
-        Equal(3, document.Entities.Count, "parser should keep valid entities around trailing junk");
-
-        var exported = document.ToStepText();
-        True(exported.Contains("#40= IFCBUILDINGELEMENTPROXY('1Proxy8a9b2ff4l$IFCnative',$,'Trailing Junk Proxy',$,$,$,$,$,$);", StringComparison.Ordinal), "export should omit unexpected trailing text and serialize canonically");
-        True(!exported.Contains("BROKEN_TRAILING_TOKEN", StringComparison.Ordinal), "export should not preserve unexpected trailing text");
-    }
-
-    private static void EditsCreateTargetedDiffs()
-    {
-        var document = IfcStepParser.CreateSample();
-
-        var renamed = IfcDocumentEditor.UpdateEntity(document, 40, "Renamed Proxy", "Edited description", string.Join(",", document.EntityById[40].Arguments));
-        Equal("Renamed Proxy", renamed.EntityById[40].Name, "entity name edit");
-        Equal("Sample Inspection Block", document.EntityById[40].Name, "source import should not gain raw entity edit");
-        True(renamed.MemoryModel.ObjectsBySourceId[40].HasRawArgumentOverride, "raw entity edit should be stored as memory override");
-        Equal("Renamed Proxy", renamed.MemoryModel.ObjectsBySourceId[40].Name, "raw entity memory override should store edited name");
-        True(IfcDiffService.Summarize(document, renamed).Any(line => line.Contains("#40") && line.Contains("arg 3")), "entity diff did not include #40 arg change");
-
-        var propertyEdited = IfcDocumentEditor.UpdatePropertyValue(document, 61, "'Reviewed'");
-        Equal("'Reviewed'", propertyEdited.EntityById[61].Arguments[2], "property value edit");
-
-        var relationshipEdited = IfcDocumentEditor.UpdateRelationshipEndpoints(document, 63, "#60", "#40");
-        Equal("(#40)", relationshipEdited.EntityById[63].Arguments[4], "relationship related objects edit");
-        Equal("#60", relationshipEdited.EntityById[63].Arguments[5], "relationship relating property definition edit");
-    }
-
-    private static void SpatialReparentUpdatesContainmentParent()
-    {
-        var document = IfcStepParser.CreateSample();
-
-        var moved = IfcDocumentEditor.UpdateSpatialParent(document, 40, "#20");
-
-        Equal("#20", moved.EntityById[53].Arguments[5], "containment parent edit");
-        True(moved.SpatialPathByEntity.TryGetValue(40, out var path) && path.Contains("Sample Building") && !path.Contains("Level 0"), "spatial path did not refresh after reparent");
-    }
-
-    private static void SpatialDetachRemovesContainmentLink()
-    {
-        var document = IfcStepParser.CreateSample();
-
-        var detached = IfcDocumentEditor.RemoveFromSpatialParent(document, 40);
-
-        True(!detached.RelationshipById.ContainsKey(53), "empty containment relationship should be removed");
-        True(!detached.SpatialPathByEntity.ContainsKey(40), "detached product should no longer have a spatial path");
-        True(IfcDiffService.Summarize(document, detached).Any(line => line.Contains("- #53 IFCRELCONTAINEDINSPATIALSTRUCTURE")), "detach diff should show removed containment relationship");
-    }
-
-    private static void RelationshipDeleteRemovesSelectedLink()
-    {
-        var document = IfcStepParser.CreateSample();
-
-        var deleted = IfcDocumentEditor.RemoveRelationship(document, 63);
-
-        True(!deleted.RelationshipById.ContainsKey(63), "relationship should be removed from relationship index");
-        True(!deleted.PropertySetsByEntity.ContainsKey(40), "property assignment should no longer project to related object");
-        True(IfcDiffService.Summarize(document, deleted).Any(line => line.Contains("- #63 IFCRELDEFINESBYPROPERTIES")), "delete diff should show removed relationship");
-    }
-
-    private static void RelationshipCreateAddsIndexedLink()
-    {
-        var document = IfcStepParser.CreateSample();
-
-        var created = IfcDocumentEditor.AddRelationship(document, "IFCRELDEFINESBYPROPERTIES", "#60", "#40", "Assign native properties");
-        var relationship = created.RelationshipById.Values.OrderByDescending(relationship => relationship.Id).FirstOrDefault(relationship => relationship.Type == "IFCRELDEFINESBYPROPERTIES");
-
-        True(relationship is not null, "relationship should be added to relationship index");
-        True(relationship!.SourceIds.Contains(60), "created relationship should index source id");
-        True(relationship.TargetIds.Contains(40), "created relationship should index target id");
-        Equal("Assign native properties", created.EntityById[relationship.Id].Name, "created relationship name");
-        True(IfcDiffService.Summarize(document, created).Any(line => line.Contains("+ #") && line.Contains("IFCRELDEFINESBYPROPERTIES")), "create diff should show added relationship");
-    }
-
-    private static void ElementConnectionCreateIndexesConnectedEndpoints()
-    {
-        var document = IfcStepParser.Parse(ConnectionFixture, "connection-fixture.ifc");
-
-        var connected = IfcDocumentEditor.AddElementConnection(document, 40, "#41", "Native connection");
-        var relationship = connected.RelationshipById.Values.OrderByDescending(relationship => relationship.Id).FirstOrDefault(relationship => relationship.Type == "IFCRELCONNECTSELEMENTS");
-
-        True(relationship is not null, "connection relationship should be added");
-        Equal(40, relationship!.SourceIds.Single(), "connection source endpoint");
-        Equal(41, relationship.TargetIds.Single(), "connection target endpoint");
-        Equal("$", connected.EntityById[relationship.Id].Arguments[4], "connection geometry should remain unset");
-        Equal("#40", connected.EntityById[relationship.Id].Arguments[5], "relating element argument");
-        Equal("#41", connected.EntityById[relationship.Id].Arguments[6], "related element argument");
-    }
-
-    private static void ElementDisconnectRemovesConnectionRelationship()
-    {
-        var document = IfcStepParser.Parse(ConnectionFixture, "connection-fixture.ifc");
-        var connected = IfcDocumentEditor.AddElementConnection(document, 40, "#41", "Native connection");
-
-        var disconnected = IfcDocumentEditor.RemoveElementConnections(connected, 40, "#41");
-
-        True(!disconnected.RelationshipById.Values.Any(relationship => relationship.Type == "IFCRELCONNECTSELEMENTS"), "connection relationship should be removed");
-        True(IfcDiffService.Summarize(connected, disconnected).Any(line => line.Contains("- #") && line.Contains("IFCRELCONNECTSELEMENTS")), "disconnect diff should show removed connection");
-    }
-
-    private static void PlacementEditUpdatesCartesianPoint()
-    {
-        var document = IfcStepParser.Parse(PlacementFixture, "placement-fixture.ifc");
-
-        var edited = IfcDocumentEditor.UpdatePlacement(document, 40, "1.25", "-2", "3");
-
-        Equal("(1.25,-2.,3.)", edited.EntityById[72].Arguments[0], "placement point edit");
-        True(edited.PlacementsByEntity.TryGetValue(40, out var placement) && placement.X == 1.25 && placement.Y == -2 && placement.Z == 3, "placement index did not refresh");
-    }
-
-    private static void OpeningVoidPresetCreatesVoidRelationshipAndBody()
-    {
-        var document = IfcStepParser.CreateSample();
-
-        var edited = IfcDocumentEditor.AddOpeningVoidWithBodyRepresentation(document, 40, "Native Opening", "1.2", "0.2", "2.1", "rectangle");
-        var opening = edited.Entities.FirstOrDefault(entity => entity.Type == "IFCOPENINGELEMENT" && entity.Name == "Native Opening");
-
-        True(opening is not null, "opening element not created");
-        True(!document.EntityById.Values.Any(entity => entity.Type == "IFCOPENINGELEMENT"), "source import should not gain the staged opening");
-        True(edited.MemoryModel.ObjectsBySourceId.TryGetValue(opening!.Id, out var memoryOpening)
-            && memoryOpening.IfcClass == "IFCOPENINGELEMENT"
-            && memoryOpening.Name == "Native Opening"
-            && memoryOpening.PredefinedType == ".OPENING.", "opening should be stored in memory model");
-        True(edited.MemoryModel.Relations.Any(relationship => relationship.IfcClass == "IFCRELVOIDSELEMENT"
-            && relationship.SourceObjectIds.Contains(40)
-            && relationship.TargetObjectIds.Contains(opening.Id)), "void relationship should be stored in memory model");
-        True(edited.RelationshipById.Values.Any(relationship => relationship.Type == "IFCRELVOIDSELEMENT"
-            && relationship.SourceIds.Contains(40)
-            && relationship.TargetIds.Contains(opening!.Id)), "void relationship not indexed");
-        True(edited.PlacementsByEntity.ContainsKey(opening!.Id), "opening placement not indexed");
-        True(edited.RepresentationsByEntity.TryGetValue(opening.Id, out var representation), "opening body representation not indexed");
-        True(edited.MemoryModel.ProductGeometryByProductId.ContainsKey(opening.Id), "opening geometry should be stored in memory model");
-        var solid = edited.EntityById[representation!.GeometryItemIds[0]];
-        Equal("IFCEXTRUDEDAREASOLID", solid.Type, "opening body solid type");
-        Equal("2.1", solid.Arguments[3], "opening body height");
-        True(IfcDiffService.Summarize(document, edited).Any(line => line.Contains("IFCRELVOIDSELEMENT")), "opening diff should show void relationship");
-    }
-
-    private static void OpeningFillingPresetCreatesFillRelationshipAndBody()
-    {
-        var document = IfcStepParser.CreateSample();
-        var withOpening = IfcDocumentEditor.AddOpeningVoidWithBodyRepresentation(document, 40, "Native Opening", "1.2", "0.2", "2.1", "rectangle");
-        var opening = withOpening.Entities.First(entity => entity.Type == "IFCOPENINGELEMENT" && entity.Name == "Native Opening");
-
-        var edited = IfcDocumentEditor.AddFillingElementWithBodyRepresentation(withOpening, opening.Id, "IFCDOOR", "Native Door", "1", "0.12", "2", "rectangle");
-        var filling = edited.Entities.FirstOrDefault(entity => entity.Type == "IFCDOOR" && entity.Name == "Native Door");
-
-        True(filling is not null, "filling element not created");
-        True(!withOpening.EntityById.Values.Any(entity => entity.Type == "IFCDOOR" && entity.Name == "Native Door"), "source opening draft should not gain the staged filling");
-        True(edited.MemoryModel.ObjectsBySourceId.TryGetValue(filling!.Id, out var memoryFilling)
-            && memoryFilling.IfcClass == "IFCDOOR"
-            && memoryFilling.Name == "Native Door", "filling should be stored in memory model");
-        True(edited.MemoryModel.Relations.Any(relationship => relationship.IfcClass == "IFCRELFILLSELEMENT"
-            && relationship.SourceObjectIds.Contains(opening.Id)
-            && relationship.TargetObjectIds.Contains(filling.Id)), "fill relationship should be stored in memory model");
-        True(edited.RelationshipById.Values.Any(relationship => relationship.Type == "IFCRELFILLSELEMENT"
-            && relationship.SourceIds.Contains(opening.Id)
-            && relationship.TargetIds.Contains(filling!.Id)), "fill relationship not indexed");
-        True(edited.PlacementsByEntity.TryGetValue(filling!.Id, out var placement) && placement.RelativeToId == edited.PlacementsByEntity[opening.Id].PlacementId, "filling placement should be relative to opening");
-        True(edited.RepresentationsByEntity.TryGetValue(filling.Id, out var representation), "filling body representation not indexed");
-        True(edited.MemoryModel.ProductGeometryByProductId.ContainsKey(filling.Id), "filling geometry should be stored in memory model");
-        var solid = edited.EntityById[representation!.GeometryItemIds[0]];
-        Equal("IFCEXTRUDEDAREASOLID", solid.Type, "filling body solid type");
-        Equal("2.", solid.Arguments[3], "filling body height");
-        True(IfcDiffService.Summarize(withOpening, edited).Any(line => line.Contains("IFCRELFILLSELEMENT")), "filling diff should show fill relationship");
-    }
-
-    private static void BodyAssignmentCreatesSweptSolidRepresentation()
-    {
-        var document = IfcStepParser.CreateSample();
-
-        var assigned = IfcDocumentEditor.AssignBodyRepresentation(document, 40, "5", "2.5", "3", "rectangle");
-
-        True(assigned.RepresentationsByEntity.TryGetValue(40, out var representation), "body representation was not indexed for product");
-        Equal("#110", document.EntityById[40].Arguments[6], "source import representation should remain unchanged");
-        True(assigned.MemoryModel.ProductGeometryByProductId.TryGetValue(40, out var memoryGeometry), "assigned body should be stored in memory model");
-        Equal(representation!.ProductDefinitionShapeId, memoryGeometry!.ProductDefinitionShapeSourceId, "memory geometry should own the assigned product definition shape");
-        var memoryPrimitive = memoryGeometry.Primitives.Single(primitive => primitive.Kind == "ExtrudedAreaSolid");
-        Equal(5.0, memoryPrimitive.SizeX ?? 0, "memory body width");
-        Equal(2.5, memoryPrimitive.SizeY ?? 0, "memory body depth");
-        Equal(3.0, memoryPrimitive.SizeZ ?? 0, "memory body height");
-        True(representation!.GeometryItemIds.Count == 1, "body representation should contain one solid item");
-        var solid = assigned.EntityById[representation.GeometryItemIds[0]];
-        Equal("IFCEXTRUDEDAREASOLID", solid.Type, "assigned body solid type");
-        Equal("3.", solid.Arguments[3], "assigned body height");
-        var profileId = int.Parse(solid.Arguments[0].TrimStart('#'));
-        var profile = assigned.EntityById[profileId];
-        Equal("IFCRECTANGLEPROFILEDEF", profile.Type, "assigned body profile type");
-        Equal("5.", profile.Arguments[3], "assigned body width");
-        Equal("2.5", profile.Arguments[4], "assigned body depth");
-        True(IfcDiffService.Summarize(document, assigned).Any(line => line.Contains("IFCPRODUCTDEFINITIONSHAPE") || line.Contains("IFCEXTRUDEDAREASOLID")), "body assignment diff missing geometry additions");
-
-        var cylinder = IfcDocumentEditor.AssignBodyRepresentation(document, 40, "2", "2", "4", "cylinder");
-        var cylinderSolid = cylinder.EntityById[cylinder.RepresentationsByEntity[40].GeometryItemIds[0]];
-        var cylinderProfileId = int.Parse(cylinderSolid.Arguments[0].TrimStart('#'));
-        Equal("IFCCIRCLEPROFILEDEF", cylinder.EntityById[cylinderProfileId].Type, "assigned cylinder profile type");
-        Equal("1.", cylinder.EntityById[cylinderProfileId].Arguments[3], "assigned cylinder radius");
-    }
-
-    private static void PropertyTemplatesCreateIndexedPsetAndQto()
-    {
-        var document = IfcStepParser.CreateSample();
-
-        var withPset = IfcDocumentEditor.AddCommonPropertySet(document, 40, "Native Ref", "Reviewed");
-        var pset = withPset.PropertySetsByEntity[40].FirstOrDefault(set => set.Name == "Pset_NativeCommon");
-
-        True(pset is not null, "common pset not assigned to product");
-        True(pset!.Values.Any(value => value.Name == "Reference" && value.Value.Contains("Native Ref")), "reference property not indexed");
-        True(pset.Values.Any(value => value.Name == "Status" && value.Value.Contains("Reviewed")), "status property not indexed");
-        True(!document.PropertySetsByEntity[40].Any(set => set.Name == "Pset_NativeCommon"), "source import should not gain the staged pset");
-        True(withPset.MemoryModel.PropertySetsByObjectId[40].Any(set => set.Name == "Pset_NativeCommon"), "common pset should be stored in memory model");
-        True(withPset.ToStepText().Contains("IFCPROPERTYSET", StringComparison.Ordinal), "common pset should be exported as STEP only in patched draft");
-        True(withPset.RelationshipById.Values.Any(relationship => relationship.Type == "IFCRELDEFINESBYPROPERTIES"
-            && relationship.SourceIds.Contains(pset.Id)
-            && relationship.TargetIds.Contains(40)), "common pset assignment relationship not indexed");
-
-        var withQto = IfcDocumentEditor.AddBaseQuantitySet(document, 40, "3", "4.5", "6");
-        var qto = withQto.PropertySetsByEntity[40].FirstOrDefault(set => set.Name == "Qto_NativeBaseQuantities");
-
-        True(qto is not null, "base qto not assigned to product");
-        True(qto!.Values.Any(value => value.Type == "IFCQUANTITYLENGTH" && value.Value == "3."), "length quantity not indexed");
-        True(qto.Values.Any(value => value.Type == "IFCQUANTITYAREA" && value.Value == "4.5"), "area quantity not indexed");
-        True(qto.Values.Any(value => value.Type == "IFCQUANTITYVOLUME" && value.Value == "6."), "volume quantity not indexed");
-        True(!document.PropertySetsByEntity[40].Any(set => set.Name == "Qto_NativeBaseQuantities"), "source import should not gain the staged qto");
-        True(withQto.MemoryModel.PropertySetsByObjectId[40].Any(set => set.Name == "Qto_NativeBaseQuantities"), "base qto should be stored in memory model");
-        True(IfcDiffService.Summarize(document, withQto).Any(line => line.Contains("IFCELEMENTQUANTITY")), "qto diff should show quantity set addition");
-    }
-
-    private static void ResourceAssignmentsCreateIndexedReferences()
-    {
-        var document = IfcStepParser.CreateSample();
-
-        var assigned = IfcDocumentEditor.AddSimpleMaterialAssignment(document, 40, "Native Concrete");
-        var material = assigned.Entities.FirstOrDefault(entity => entity.Type == "IFCMATERIAL" && entity.Arguments.FirstOrDefault() == "'Native Concrete'");
-
-        True(material is not null, "material not created");
-        True(assigned.ResourcesByEntity.TryGetValue(40, out var materialResources) && materialResources.Any(resource => resource.Contains("Native Concrete")), "material resource not indexed for product");
-        True(!document.ResourcesByEntity.TryGetValue(40, out var sourceResources) || !sourceResources.Any(resource => resource.Contains("Native Concrete")), "source import should not gain the staged material");
-        True(assigned.MemoryModel.ResourcesByObjectId.TryGetValue(40, out var memoryResources)
-            && memoryResources.Any(resource => resource.IfcClass == "IFCMATERIAL" && resource.Name == "Native Concrete"), "material should be stored in memory model");
-        True(assigned.RelationshipById.Values.Any(relationship => relationship.Type == "IFCRELASSOCIATESMATERIAL"
-            && relationship.SourceIds.Contains(material!.Id)
-            && relationship.TargetIds.Contains(40)), "material assignment relationship not indexed");
-
-        assigned = IfcDocumentEditor.AddSimpleClassificationAssignment(assigned, 40, "Native Class", "NATIVE-42");
-        var classification = assigned.Entities.FirstOrDefault(entity => entity.Type == "IFCCLASSIFICATIONREFERENCE" && entity.Arguments.Contains("'Native Class'"));
-
-        True(classification is not null, "classification reference not created");
-        True(assigned.ResourcesByEntity[40].Any(resource => resource.Contains("Native Class")), "classification resource not indexed for product");
-        True(assigned.MemoryModel.ResourcesByObjectId[40].Any(resource => resource.IfcClass == "IFCCLASSIFICATIONREFERENCE"
-            && resource.Name == "Native Class"
-            && resource.Identification == "NATIVE-42"), "classification should be stored in memory model");
-        True(assigned.RelationshipById.Values.Any(relationship => relationship.Type == "IFCRELASSOCIATESCLASSIFICATION"
-            && relationship.SourceIds.Contains(classification!.Id)
-            && relationship.TargetIds.Contains(40)), "classification assignment relationship not indexed");
-
-        assigned = IfcDocumentEditor.AddSimpleDocumentAssignment(assigned, 40, "Native Manual", "DOC-1");
-        var documentReference = assigned.Entities.FirstOrDefault(entity => entity.Type == "IFCDOCUMENTREFERENCE" && entity.Arguments.Contains("'Native Manual'"));
-
-        True(documentReference is not null, "document reference not created");
-        True(assigned.ResourcesByEntity[40].Any(resource => resource.Contains("Native Manual")), "document resource not indexed for product");
-        True(assigned.MemoryModel.ResourcesByObjectId[40].Any(resource => resource.IfcClass == "IFCDOCUMENTREFERENCE"
-            && resource.Name == "Native Manual"
-            && resource.Identification == "DOC-1"), "document reference should be stored in memory model");
-        True(assigned.RelationshipById.Values.Any(relationship => relationship.Type == "IFCRELASSOCIATESDOCUMENT"
-            && relationship.SourceIds.Contains(documentReference!.Id)
-            && relationship.TargetIds.Contains(40)), "document assignment relationship not indexed");
-
-        assigned = IfcDocumentEditor.AddSimpleLibraryAssignment(assigned, 40, "Native Library Item", "LIB-1");
-        var libraryReference = assigned.Entities.FirstOrDefault(entity => entity.Type == "IFCLIBRARYREFERENCE" && entity.Arguments.Contains("'Native Library Item'"));
-
-        True(libraryReference is not null, "library reference not created");
-        True(assigned.ResourcesByEntity[40].Any(resource => resource.Contains("Native Library Item")), "library resource not indexed for product");
-        True(assigned.MemoryModel.ResourcesByObjectId[40].Any(resource => resource.IfcClass == "IFCLIBRARYREFERENCE"
-            && resource.Name == "Native Library Item"
-            && resource.Identification == "LIB-1"), "library reference should be stored in memory model");
-        True(assigned.RelationshipById.Values.Any(relationship => relationship.Type == "IFCRELASSOCIATESLIBRARY"
-            && relationship.SourceIds.Contains(libraryReference!.Id)
-            && relationship.TargetIds.Contains(40)), "library assignment relationship not indexed");
-        True(IfcDiffService.Summarize(document, assigned).Any(line => line.Contains("IFCRELASSOCIATESLIBRARY")), "resource diff should show final assignment relationship");
-    }
-
-    private static void ProductPresetCreatesContainedPlacedBody()
-    {
-        var document = IfcStepParser.CreateSample();
-
-        var edited = IfcDocumentEditor.AddProductWithBodyRepresentation(document, 30, "IFCBUILDINGELEMENTPROXY", "Native Child", "2", "1", "3", "rectangle");
-        var product = edited.Entities.FirstOrDefault(entity => entity.Type == "IFCBUILDINGELEMENTPROXY" && entity.Name == "Native Child");
-
-        True(product is not null, "new product not created");
-        True(!document.EntityById.Values.Any(entity => entity.Type == "IFCBUILDINGELEMENTPROXY" && entity.Name == "Native Child"), "source import should not gain the staged product");
-        True(edited.MemoryModel.ObjectsBySourceId.TryGetValue(product!.Id, out var memoryProduct)
-            && memoryProduct.IfcClass == "IFCBUILDINGELEMENTPROXY"
-            && memoryProduct.Name == "Native Child", "new product should be stored in memory model");
-        True(edited.MemoryModel.Relations.Any(relationship => relationship.IfcClass == "IFCRELCONTAINEDINSPATIALSTRUCTURE"
-            && relationship.SourceObjectIds.Contains(30)
-            && relationship.TargetObjectIds.Contains(product.Id)), "new containment should be stored in memory model");
-        True(edited.PlacementsByEntity.ContainsKey(product!.Id), "new product placement not indexed");
-        True(edited.RepresentationsByEntity.TryGetValue(product.Id, out var representation), "new product body representation not indexed");
-        True(edited.MemoryModel.ProductGeometryByProductId.ContainsKey(product.Id), "new product geometry should be stored in memory model");
-        True(edited.RelationshipById.Values.Any(relationship => relationship.Type == "IFCRELCONTAINEDINSPATIALSTRUCTURE"
+        var document = Sample();
+
+        var withPset = XbimDocumentEditor.AddCommonPropertySet(document, 40, "XBIM-REF", "Reviewed");
+        True(withPset.PropertySetsByEntity[40].Any(set => set.Name == "Pset_NativeCommon"
+            && set.Values.Any(value => value.Name == "Reference" && value.Value == "XBIM-REF")), "common pset should be projected from xBIM");
+
+        var withQto = XbimDocumentEditor.AddBaseQuantitySet(withPset, 40, "3", "4.5", "6");
+        True(withQto.PropertySetsByEntity[40].Any(set => set.Name == "Qto_NativeBaseQuantities"
+            && set.Values.Any(value => value.Type == "IFCQUANTITYLENGTH" && value.Value == "6")), "base qto should be projected from xBIM");
+
+        var withMaterial = XbimDocumentEditor.AddResource(withQto, 40, "material", "xBIM Concrete", "MAT-1");
+        True(withMaterial.ResourcesByEntity.TryGetValue(40, out var resources)
+            && resources.Any(resource => resource.Contains("MATERIAL", StringComparison.OrdinalIgnoreCase)), "material resource should be indexed");
+
+        var beforeIds = withMaterial.EntityById.Keys.ToHashSet();
+        var withProduct = XbimDocumentEditor.AddProductWithBodyRepresentation(withMaterial, 30, "IFCBUILDINGELEMENTPROXY", "xBIM Child", "2", "1", "3", "rectangle");
+        var productId = withProduct.EntityById.Keys.Except(beforeIds).OrderBy(id => id).First(id => withProduct.EntityById[id].Type == "IFCBUILDINGELEMENTPROXY");
+        True(withProduct.EntityById[productId].Name == "xBIM Child", "new product should be named");
+        True(withProduct.RelationshipById.Values.Any(relationship => relationship.Type == "IFCRELCONTAINEDINSPATIALSTRUCTURE"
             && relationship.SourceIds.Contains(30)
-            && relationship.TargetIds.Contains(product.Id)), "new product containment relationship not indexed");
-        True(edited.SpatialPathByEntity.TryGetValue(product.Id, out var path) && path.Contains("Level 0") && path.Contains("Native Child"), "new product spatial path not indexed");
-
-        var solid = edited.EntityById[representation!.GeometryItemIds[0]];
-        Equal("IFCEXTRUDEDAREASOLID", solid.Type, "new product body solid type");
-        Equal("3.", solid.Arguments[3], "new product body height");
+            && relationship.TargetIds.Contains(productId)), "new product should be spatially contained");
+        True(withProduct.RepresentationsByEntity.ContainsKey(productId), "new product should have xBIM body representation");
+        True(withProduct.SpatialPathByEntity.TryGetValue(productId, out var path)
+            && path.Contains("xBIM Child", StringComparison.OrdinalIgnoreCase), "new product should appear in spatial tree");
     }
 
-    private static void BodyAssignmentCanBeStagedAsDraft()
+    private static void XbimEditorUpdatesSpatialParentsAndRelationships()
     {
-        var saved = IfcStepParser.CreateSample();
-        var draft = IfcDocumentEditor.AssignBodyRepresentation(saved, 40, "4", "2", "3", "rectangle");
-        var session = new IfcDraftSession();
+        var document = Sample();
 
-        session.Reset(saved);
-        session.Stage(saved, draft);
+        var moved = XbimDocumentEditor.UpdateSpatialParent(document, 40, "#20");
+        var movedSpatial = IfcSelectionProjector.Project(moved, moved.EntityById[40]).Spatial;
+        Equal("#20", movedSpatial.ParentId, "spatial parent should move to building");
 
-        True(session.HasDraft, "body draft not staged");
-        True(!session.CanExport, "body draft should block export");
-        True(session.Summarize().Any(line => line.Contains("IFCPRODUCTDEFINITIONSHAPE") || line.Contains("IFCEXTRUDEDAREASOLID")), "body draft summary missing geometry additions");
+        var detached = XbimDocumentEditor.RemoveFromSpatialParent(moved, 40);
+        var detachedSpatial = IfcSelectionProjector.Project(detached, detached.EntityById[40]).Spatial;
+        True(!detachedSpatial.CanEdit, "detached product should have no primary spatial relation");
+
+        var beforeIds = document.RelationshipById.Keys.ToHashSet();
+        var added = XbimDocumentEditor.AddRelationship(document, "IFCRELDEFINESBYPROPERTIES", "#60", "#40", "xBIM pset link");
+        var relationshipId = added.RelationshipById.Keys.Except(beforeIds).Single();
+        True(added.RelationshipById[relationshipId].SourceIds.Contains(60), "created relationship should keep source pset");
+        True(added.RelationshipById[relationshipId].TargetIds.Contains(40), "created relationship should keep target product");
+
+        var deleted = XbimDocumentEditor.DeleteRelationship(added, relationshipId);
+        True(!deleted.RelationshipById.ContainsKey(relationshipId), "relationship should delete through xBIM transaction");
     }
 
-    private static void ExportValidationReparsesDocumentBeforeSave()
+    private static void XbimGeometryBackendProjectsSampleMeshes()
     {
-        var valid = IfcExportValidator.Validate(IfcStepParser.CreateSample());
-        True(valid.CanExport, "sample export should validate");
-        True(valid.EntityCount > 0, "validation should report reparsed entity count");
+        var document = Sample();
+        var backend = new XbimGeometryBackend();
+        var validation = backend.ValidateDocument(document);
+        True(validation.Errors.Count == 0, string.Join(Environment.NewLine, validation.Errors));
 
-        var invalid = IfcExportValidator.Validate(new IfcDocument { FileName = "invalid.ifc" });
-        True(!invalid.CanExport, "invalid export should be blocked");
-        True(invalid.Errors.Any(error => error.Contains("HEADER section is missing", StringComparison.OrdinalIgnoreCase)), "validation should surface parser errors");
-
-        var geometryInvalid = IfcExportValidator.Validate(IfcStepParser.Parse(MissingGeometryFixture, "missing-geometry.ifc"), new StepReferenceGeometryBackend());
-        True(!geometryInvalid.CanExport, "missing geometry references should be blocked by geometry backend validation");
-        True(geometryInvalid.Errors.Any(error => error.Contains("missing geometry item #999", StringComparison.OrdinalIgnoreCase)), "geometry validation should surface missing item references");
+        var items = backend.ProjectSelection(document, 40);
+        var meshes = backend.BuildPreviewMeshes(document, items);
+        True(items.Any(item => item.Label.Contains("xBIM shape", StringComparison.OrdinalIgnoreCase)), "selection should list xBIM shape instances");
+        True(meshes.Any(mesh => mesh.IsRenderable), "xBIM geometry backend should build renderable meshes");
     }
 
-    private static void DiagnosticsProjectorSupportsFilters()
+    private static void XbimGeometryStoreBuildsFiniteRenderScene()
     {
-        var messages = new[]
+        var document = Sample();
+        var backend = new XbimGeometryBackend();
+        var scene = backend.BuildRenderSceneAsync(document, IfcRenderSceneRequest.FullModel).GetAwaiter().GetResult();
+
+        True(!scene.IsEmpty, "render scene should contain geometry");
+        True(scene.Meshes.Any(mesh => mesh.ProductId == 40), "scene should contain sample product #40");
+        True(scene.TriangleCount > 0, "scene should contain triangles");
+        True(IsFinite(scene.Bounds.MinX) && IsFinite(scene.Bounds.MaxX), "scene bounds should be finite");
+
+        var mesh = scene.Meshes.First(mesh => mesh.ProductId == 40 && mesh.IsRenderable);
+        True(mesh.Indices.All(index => index >= 0 && index < mesh.Vertices.Count), "mesh indices should address vertices");
+        True(mesh.Vertices.All(vertex =>
+            IsFinite(vertex.X)
+            && IsFinite(vertex.Y)
+            && IsFinite(vertex.Z)
+            && IsFinite(vertex.NormalX)
+            && IsFinite(vertex.NormalY)
+            && IsFinite(vertex.NormalZ)), "mesh vertices and normals should be finite");
+
+        var selectedScene = backend.BuildRenderSceneAsync(document, IfcRenderSceneRequest.ForProduct(40)).GetAwaiter().GetResult();
+        True(!selectedScene.IsEmpty && selectedScene.Meshes.All(value => value.ProductId == 40), "product scene should use ShapeInstancesOfEntity filtering");
+    }
+
+    private static void ViewportSelectionHighlightsWithoutSceneRebuild()
+    {
+        WithTempDirectory(temp =>
         {
-            "Info: Loaded 3 STEP entities.",
-            "Warning: #40 has no ObjectPlacement.",
-            "Error: #80 references missing entity #999.",
-        };
+            var document = Sample();
+            var backend = new CountingGeometryBackend();
+            var owner = new MainWindowViewModel(new TestFileDialogs(), new NativeUserPreferencesStore(Path.Combine(temp, "preferences.json")));
+            var viewport = new ViewportPanelViewModel(owner, backend);
 
-        var errors = IfcDiagnosticsProjector.Project(messages, "error");
-        Equal(1, errors.Count, "severity filter should return only errors");
-        Equal("Error", errors[0].Severity, "severity filter result");
+            viewport.SetDocument(document);
+            Equal(1, backend.SceneBuilds, "document load should request one render scene");
+            viewport.SetSelection(document, document.EntityById[40]);
 
-        var placement = IfcDiagnosticsProjector.Project(messages, "placement");
-        Equal(1, placement.Count, "message/suggestion filter should return placement warning");
-        Equal("Warning", placement[0].Severity, "placement filter result");
-        Equal(40, placement[0].EntityId, "diagnostic navigation target should parse first STEP id");
-        True(placement[0].CanNavigate, "diagnostic row with STEP id should be navigable");
-
-        var empty = IfcDiagnosticsProjector.Project(messages, "not-present");
-        Equal(1, empty.Count, "empty filter should show a single placeholder");
-        True(empty[0].Message.Contains("No diagnostics match", StringComparison.OrdinalIgnoreCase), "empty filter placeholder missing");
+            Equal(40, viewport.SelectedProductId, "selection should set highlighted product id");
+            Equal(1, backend.SceneBuilds, "selection highlight should not rebuild geometry");
+        });
     }
 
-    private static void DuplicateGlobalIdDiagnosticsCanBeRepaired()
+    private static void XbimGeometryDirtyHandlingPreservesPsetEditsOnly()
     {
-        var document = IfcStepParser.Parse(DuplicateGlobalIdFixture, "duplicate-globalid.ifc");
-        var duplicateDiagnostic = IfcDiagnosticsProjector.Project(document.Diagnostics.Messages, "Duplicate GlobalId").Single();
+        var document = Sample();
+        var backend = new XbimGeometryBackend();
+        _ = backend.BuildRenderSceneAsync(document, IfcRenderSceneRequest.FullModel).GetAwaiter().GetResult();
+        var context = XbimIfcDocumentService.TryGetGeometryContext(document);
+        True(context is not null, "render scene build should create an xBIM geometry context");
 
-        True(duplicateDiagnostic.CanRepair, "duplicate GlobalId diagnostic should expose a repair action");
-        Equal(40, duplicateDiagnostic.EntityId, "duplicate GlobalId diagnostic should navigate to first duplicate entity");
+        var withPset = XbimDocumentEditor.AddCommonPropertySet(document, 40, "NO-GEOM", "Reviewed");
+        True(ReferenceEquals(context, XbimIfcDocumentService.TryGetGeometryContext(withPset)), "pset edit should preserve geometry context");
 
-        var repaired = IfcDocumentEditor.RegenerateDuplicateGlobalIds(document, duplicateDiagnostic.Message);
-
-        Equal("DUPLICATE-GLOBALID", repaired.EntityById[40].GlobalId, "first duplicate GlobalId should remain stable");
-        True(repaired.EntityById[41].GlobalId != "DUPLICATE-GLOBALID", "second duplicate GlobalId should be regenerated");
-        Equal("DUPLICATE-GLOBALID", document.EntityById[41].GlobalId, "source import should not gain regenerated duplicate GlobalId");
-        Equal(repaired.EntityById[41].GlobalId, repaired.MemoryModel.ObjectsBySourceId[41].GlobalId, "regenerated duplicate GlobalId should be stored in memory model");
-        True(!repaired.Diagnostics.Messages.Any(message => message.Contains("Duplicate GlobalId", StringComparison.OrdinalIgnoreCase)), "duplicate GlobalId warning should clear after repair");
-        True(IfcDiffService.Summarize(document, repaired).Any(line => line.Contains("#41") && line.Contains("arg 1")), "repair diff should show the regenerated GlobalId argument");
+        var moved = XbimDocumentEditor.UpdatePlacement(withPset, 40, "2", "0", "0");
+        True(XbimIfcDocumentService.TryGetGeometryContext(moved) is null, "placement edit should invalidate geometry context");
     }
 
-    private static void MissingGlobalIdDiagnosticsCanBeRepaired()
+    private static void ProductIdPickingColorRoundtrips()
     {
-        var fixture = MissingRelationshipReferenceFixture.Replace(
-            "#40= IFCBUILDINGELEMENTPROXY('0Proxy8a9b2ff4l$IFCnative'",
-            "#40= IFCBUILDINGELEMENTPROXY($",
-            StringComparison.Ordinal);
-        var document = IfcStepParser.Parse(fixture, "missing-globalid.ifc");
-        var missingGlobalIdDiagnostic = IfcDiagnosticsProjector.Project(document.Diagnostics.Messages, "has no GlobalId").Single();
-
-        True(missingGlobalIdDiagnostic.CanRepair, "missing GlobalId diagnostic should expose a repair action");
-        True(missingGlobalIdDiagnostic.CanRepairMissingGlobalId, "missing GlobalId diagnostic should expose missing-GlobalId repair kind");
-        Equal(40, missingGlobalIdDiagnostic.EntityId, "missing GlobalId diagnostic should navigate to affected entity");
-
-        var repaired = IfcDocumentEditor.GenerateMissingGlobalIdFromDiagnostic(document, missingGlobalIdDiagnostic.Message);
-
-        True(!string.IsNullOrWhiteSpace(repaired.EntityById[40].GlobalId), "repair should generate a GlobalId");
-        Equal(string.Empty, document.EntityById[40].GlobalId, "source import should not gain generated missing GlobalId");
-        Equal(repaired.EntityById[40].GlobalId, repaired.MemoryModel.ObjectsBySourceId[40].GlobalId, "generated missing GlobalId should be stored in memory model");
-        True(!repaired.Diagnostics.Messages.Any(message => message.Contains("has no GlobalId", StringComparison.OrdinalIgnoreCase)), "missing GlobalId warning should clear after repair");
-        True(IfcDiffService.Summarize(document, repaired).Any(line => line.Contains("#40") && line.Contains("arg 1")), "repair diff should show generated GlobalId argument");
+        var ids = new[] { 0, 1, 40, 65_535, 1_048_576, 0x00FFFFFE };
+        foreach (var id in ids)
+        {
+            var color = IfcRenderPicking.EncodeProductId(id);
+            var decoded = IfcRenderPicking.DecodeProductId(
+                (byte)Math.Round(color.R * 255),
+                (byte)Math.Round(color.G * 255),
+                (byte)Math.Round(color.B * 255));
+            Equal(id, decoded, $"product id {id} should roundtrip through RGB picking color");
+        }
     }
 
-    private static void MissingRelationshipReferenceDiagnosticsCanBeRepaired()
+    private static void ViewportCameraSupportsBlenderStyleFramePanAndDolly()
     {
-        var document = IfcStepParser.Parse(MissingRelationshipReferenceFixture, "missing-relationship-reference.ifc");
-        var missingDiagnostic = IfcDiagnosticsProjector.Project(document.Diagnostics.Messages, "references missing entity").Single();
+        var bounds = IfcRenderBounds.Empty
+            .Include(-2, -1, 0)
+            .Include(4, 3, 5);
+        var framed = NativeViewportCameraController.FitBounds(bounds, -30, 20);
 
-        True(missingDiagnostic.CanRepair, "missing reference diagnostic should expose a repair action");
-        True(missingDiagnostic.CanRepairMissingReference, "missing reference diagnostic should expose missing-reference repair kind");
-        Equal(53, missingDiagnostic.EntityId, "missing reference diagnostic should navigate to relationship");
+        Equal(1d, Math.Round(framed.Target.X, 6), "framed camera should target bounds center X");
+        Equal(1d, Math.Round(framed.Target.Y, 6), "framed camera should target bounds center Y");
+        Equal(2.5d, Math.Round(framed.Target.Z, 6), "framed camera should target bounds center Z");
+        True(framed.Distance > framed.SceneRadius, "framed camera should stand away from the object");
 
-        var repaired = IfcDocumentEditor.RemoveMissingRelationshipReferences(document, missingDiagnostic.Message);
+        var panned = NativeViewportCameraController.Pan(framed, 40, -20, 1200, 800);
+        True(panned.Target != framed.Target, "pan should move the camera target");
+        Equal(framed.Distance, panned.Distance, "pan should preserve camera distance");
 
-        Equal("(#40)", repaired.EntityById[53].Arguments[4], "repair should remove dangling related object from relationship list");
-        Equal("(#40,#999)", document.EntityById[53].Arguments[4], "source import should not lose dangling relationship reference");
-        True(repaired.MemoryModel.Relations.First(relationship => relationship.SourceId == 53).TargetObjectIds.SequenceEqual([40]), "missing relationship reference should be removed from memory relation");
-        True(!repaired.Diagnostics.Messages.Any(message => message.Contains("references missing entity", StringComparison.OrdinalIgnoreCase)), "missing reference warning should clear after repair");
-        True(IfcDiffService.Summarize(document, repaired).Any(line => line.Contains("#53") && line.Contains("arg 5")), "repair diff should show edited relationship endpoint list");
+        var closer = NativeViewportCameraController.Dolly(framed, -80);
+        var farther = NativeViewportCameraController.Dolly(framed, 80);
+        True(closer.Distance < framed.Distance, "negative dolly should move closer");
+        True(farther.Distance > framed.Distance, "positive dolly should move farther");
     }
 
-    private static void SpatialContainmentDiagnosticsCanBeRepaired()
+    private static void XbimExportValidationRoundtripsStore()
     {
-        var document = IfcStepParser.Parse(MultipleContainmentFixture, "multiple-containment.ifc");
-        var containmentDiagnostic = IfcDiagnosticsProjector.Project(document.Diagnostics.Messages, "multiple primary spatial containment").Single();
+        var document = XbimDocumentEditor.UpdateEntity(Sample(), 40, "Exported xBIM Proxy", string.Empty);
+        var validation = IfcExportValidator.Validate(document, new XbimGeometryBackend());
+        True(validation.CanExport, string.Join(Environment.NewLine, validation.Errors));
 
-        True(containmentDiagnostic.CanRepair, "multiple containment diagnostic should expose a repair action");
-        True(containmentDiagnostic.CanRepairSpatialContainment, "multiple containment diagnostic should expose spatial containment repair kind");
-        Equal(40, containmentDiagnostic.EntityId, "multiple containment diagnostic should navigate to affected product");
+        var exportedStep = XbimIfcDocumentService.NormalizeForExport(document);
+        True(exportedStep.Contains("IFCBUILDINGELEMENTPROXY", StringComparison.OrdinalIgnoreCase), "export should contain product");
+        True(exportedStep.Contains("Exported xBIM Proxy", StringComparison.OrdinalIgnoreCase), "export should contain edited name");
 
-        var repaired = IfcDocumentEditor.KeepFirstPrimarySpatialContainment(document, containmentDiagnostic.Message);
-
-        True(repaired.RelationshipById.ContainsKey(53), "first containment relationship should be preserved");
-        True(!repaired.RelationshipById.ContainsKey(54), "duplicate empty containment relationship should be removed");
-        True(document.RelationshipById.ContainsKey(54), "source import should keep duplicate containment relationship");
-        True(!repaired.MemoryModel.Relations.Any(relationship => relationship.SourceId == 54), "duplicate containment relationship should be removed from memory model");
-        True(!repaired.Diagnostics.Messages.Any(message => message.Contains("multiple primary spatial containment", StringComparison.OrdinalIgnoreCase)), "multiple containment warning should clear after repair");
-        True(IfcDiffService.Summarize(document, repaired).Any(line => line.StartsWith("- #54", StringComparison.Ordinal)), "repair diff should show removed duplicate containment relationship");
+        var reopened = XbimIfcDocumentService.OpenText(exportedStep, "roundtrip.ifc");
+        Equal("Exported xBIM Proxy", reopened.EntityById[40].Name, "roundtrip should keep edited name");
     }
 
-    private static void PlacementAndRepresentationDiagnosticsCanBeRepaired()
+    private static void IfcFileLoaderReadsAndWritesIfcZipArchives()
     {
-        var document = IfcStepParser.Parse(MissingRelationshipReferenceFixture, "missing-placement-representation.ifc");
-        var placementDiagnostic = IfcDiagnosticsProjector.Project(document.Diagnostics.Messages, "has no ObjectPlacement").Single();
-        var representationDiagnostic = IfcDiagnosticsProjector.Project(document.Diagnostics.Messages, "has no Representation").Single();
+        WithTempDirectory(temp =>
+        {
+            var document = Sample();
+            var step = XbimIfcDocumentService.NormalizeForExport(document);
+            var path = Path.Combine(temp, "model.ifczip");
 
-        True(placementDiagnostic.CanRepair, "missing placement diagnostic should expose a repair action");
-        True(placementDiagnostic.CanRepairPlacement, "missing placement diagnostic should expose placement repair kind");
-        True(representationDiagnostic.CanRepair, "missing representation diagnostic should expose a repair action");
-        True(representationDiagnostic.CanRepairRepresentation, "missing representation diagnostic should expose representation repair kind");
+            IfcFileLoader.WriteText(path, step, document.FileName);
+            var loaded = IfcFileLoader.ReadAsync(path).GetAwaiter().GetResult();
 
-        var withPlacement = IfcDocumentEditor.AssignDefaultPlacementFromDiagnostic(document, placementDiagnostic.Message);
-        True(withPlacement.PlacementsByEntity.ContainsKey(40), "placement repair should index the generated placement");
-        True(!document.PlacementsByEntity.ContainsKey(40), "source import should not gain default placement");
-        True(withPlacement.MemoryModel.ObjectsBySourceId[40].Placement is not null, "default placement should be stored in memory model");
-        True(!withPlacement.Diagnostics.Messages.Any(message => message.Contains("#40 IFCBUILDINGELEMENTPROXY has no ObjectPlacement", StringComparison.OrdinalIgnoreCase)), "missing placement warning should clear after repair");
-        True(IfcDiffService.Summarize(document, withPlacement).Any(line => line.Contains("#40") && line.Contains("arg 6")), "placement repair diff should show edited ObjectPlacement argument");
+            True(loaded.FileName.EndsWith(".ifc", StringComparison.OrdinalIgnoreCase), "ifcZIP entry should expose an IFC file name");
+            True(loaded.Text.Contains("ISO-10303-21", StringComparison.OrdinalIgnoreCase), "ifcZIP should contain STEP text");
+        });
+    }
 
-        var withRepresentation = IfcDocumentEditor.AssignDefaultRepresentationFromDiagnostic(document, representationDiagnostic.Message);
-        True(withRepresentation.RepresentationsByEntity.ContainsKey(40), "representation repair should index the generated body representation");
-        True(!withRepresentation.Diagnostics.Messages.Any(message => message.Contains("#40 IFCBUILDINGELEMENTPROXY has no Representation", StringComparison.OrdinalIgnoreCase)), "missing representation warning should clear after repair");
-        True(IfcDiffService.Summarize(document, withRepresentation).Any(line => line.Contains("#40") && line.Contains("arg 7")), "representation repair diff should show edited Representation argument");
+    private static void XbimEditorCommitsDirectlyToInMemoryStore()
+    {
+        var document = Sample();
+        var store = document.XbimStore;
+        var edited = XbimDocumentEditor.UpdateEntity(document, 40, "Committed xBIM Proxy", string.Empty);
+
+        True(store is not null && ReferenceEquals(store, edited.XbimStore), "edit should keep the same xBIM store instance");
+        Equal("Committed xBIM Proxy", edited.EntityById[40].Name, "projection should reflect committed transaction");
+
+        var exportedStep = XbimIfcDocumentService.NormalizeForExport(edited);
+        True(exportedStep.Contains("Committed xBIM Proxy", StringComparison.OrdinalIgnoreCase), "committed xBIM transaction should export");
+    }
+
+    private static void MainWindowCommitsInspectorEditsThroughXbim()
+    {
+        WithTempDirectory(temp =>
+        {
+            var preferences = new NativeUserPreferencesStore(Path.Combine(temp, "preferences.json"));
+            var owner = new MainWindowViewModel(new TestFileDialogs(), preferences);
+            owner.SelectEntityById(40);
+            owner.AddCommonPropertySet();
+
+            True(owner.ActiveSession?.DraftSession.HasDraft == false, "inspector pset command should commit without pending draft");
+            True(owner.ActiveSession?.IsDirty == true, "committed xBIM edit should mark the session modified");
+            True(owner.ActiveSession!.Document.XbimStore is not null, "committed document should be xBIM-backed");
+            True(owner.ActiveSession.Document.PropertySetsByEntity[40].Any(set => set.Name == "Pset_NativeCommon"), "committed pset should be visible in inspector projection");
+
+            owner.OpenLog();
+            True(owner.Console.LogText.Contains("status:", StringComparison.OrdinalIgnoreCase), "log panel should contain copyable status text");
+        });
     }
 
     private static void RelationshipGraphSupportsFilterAndDepth()
     {
-        var document = IfcStepParser.CreateSample();
-        var proxy = document.EntityById[40];
+        var document = Sample();
+        var entity = document.EntityById[40];
 
-        var depthTwo = IfcSelectionProjector.ProjectRelationshipGraph(document, proxy, null, 2);
-        True(depthTwo.Any(item => item.EntityId == 20 && item.Depth == 2), "depth-two graph should include parent building through the storey");
+        var all = IfcSelectionProjector.ProjectRelationshipGraph(document, entity, null, 2);
+        True(all.Any(item => item.EntityId == 30), "relationship graph should include spatial parent");
 
-        var filtered = IfcSelectionProjector.ProjectRelationshipGraph(document, proxy, "IFCPROPERTYSET", 2);
-        True(filtered.Any(item => item.EntityId == 60), "filtered graph should keep matching property set neighbor");
-        True(filtered.All(item => item.EntityId is not 30), "filtered graph should hide non-matching spatial neighbor");
+        var filtered = IfcSelectionProjector.ProjectRelationshipGraph(document, entity, "Pset", 2);
+        True(filtered.Any(item => item.Label.Contains("IFCRELDEFINESBYPROPERTIES", StringComparison.OrdinalIgnoreCase)), "filtered graph should include pset relation");
+    }
+
+    private static void DiagnosticsProjectorSupportsFilters()
+    {
+        var diagnostics = IfcDiagnosticsProjector.Project([
+            "Info: Loaded xBIM document.",
+            "Warning: #40 IFCBUILDINGELEMENTPROXY has no Representation.",
+            "Error: Relationship #53 IFCRELCONTAINEDINSPATIALSTRUCTURE references missing entity #999.",
+        ], "missing");
+
+        Equal("Error", diagnostics[0].Severity, "error should sort first");
+        True(diagnostics[0].CanRepairMissingReference, "missing reference diagnostic should be repairable");
+
+        var empty = IfcDiagnosticsProjector.Project(["Info: ok"], "no-match");
+        True(empty.Single().Message.Contains("No diagnostics match", StringComparison.OrdinalIgnoreCase), "empty filter result should explain itself");
+    }
+
+    private static void MainWindowCommitsDiagnosticRepairsThroughXbim()
+    {
+        WithTempDirectory(temp =>
+        {
+            var document = XbimDocumentEditor.AddProduct(Sample(), 30, "IFCBUILDINGELEMENTPROXY", "No Body Yet");
+            var productId = document.EntityById.Values.Single(entity => entity.Name == "No Body Yet").Id;
+            var diagnostic = IfcDiagnosticsProjector.Project(document.Diagnostics.Messages)
+                .Single(item => item.EntityId == productId && item.CanRepairRepresentation);
+            var owner = new MainWindowViewModel(new TestFileDialogs(), new NativeUserPreferencesStore(Path.Combine(temp, "preferences.json")))
+            {
+                ActiveSession = new IfcDocumentSessionViewModel(document, null),
+            };
+            owner.SelectEntityById(productId);
+            owner.RepairDiagnostic(diagnostic);
+
+            True(!owner.ActiveSession!.DraftSession.HasDraft, "diagnostic repair should commit without pending draft");
+            True(owner.ActiveSession.IsDirty, "diagnostic repair should mark the session modified");
+            True(owner.ActiveSession.Document.RepresentationsByEntity.ContainsKey(productId), "representation repair should add xBIM body");
+        });
     }
 
     private static void StatusLogCommandActivatesCopyableConsole()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"ifcnative-status-log-{Guid.NewGuid():N}.json");
+        WithTempDirectory(temp =>
+        {
+            var owner = new MainWindowViewModel(new TestFileDialogs(), new NativeUserPreferencesStore(Path.Combine(temp, "preferences.json")));
+            owner.OpenLog();
+            True(owner.Console.LogText.Contains("status:", StringComparison.OrdinalIgnoreCase), "console should receive current status line");
+        });
+    }
+
+    private static void NativeStoresPersistSanitizedSettings()
+    {
+        WithTempDirectory(temp =>
+        {
+            var layoutStore = new NativeWindowLayoutStore(Path.Combine(temp, "layout.json"));
+            layoutStore.Save(new NativeWindowLayout(WindowWidth: 10, WindowHeight: double.NaN, ModelPaneWidth: 1, InspectorPaneWidth: 9999));
+            var layout = layoutStore.Load();
+            Equal(1100d, layout.WindowWidth, "layout width should be clamped");
+            Equal(900d, layout.WindowHeight, "layout height should fall back");
+            Equal(260d, layout.ModelPaneWidth, "model pane width should be clamped");
+            Equal(900d, layout.InspectorPaneWidth, "inspector pane width should be clamped");
+
+            var preferencesStore = new NativeUserPreferencesStore(Path.Combine(temp, "preferences.json"));
+            preferencesStore.Save(new NativeUserPreferences(TextScale: 20));
+            Equal(1.8d, preferencesStore.Load().TextScale, "text scale should be clamped");
+        });
+    }
+
+    private static IfcDocument Sample()
+    {
+        return XbimIfcDocumentService.CreateSample();
+    }
+
+    private static int ReviewStatusPropertyId(IfcDocument document)
+    {
+        return PropertyRows(document, 40).Single(row => row.Label.Contains("ReviewStatus", StringComparison.OrdinalIgnoreCase)).EntityId!.Value;
+    }
+
+    private static IReadOnlyList<IfcPropertyDetails> PropertyRows(IfcDocument document, int entityId)
+    {
+        return IfcSelectionProjector.Project(document, document.EntityById[entityId])
+            .PropertySets
+            .Where(property => property.EntityId is not null)
+            .ToList();
+    }
+
+    private static void WithTempDirectory(Action<string> action)
+    {
+        var temp = Path.Combine(Path.GetTempPath(), "ifcnative-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temp);
         try
         {
-            var viewModel = new MainWindowViewModel(new EmptyFileDialogService(), new NativeUserPreferencesStore(path));
-            viewModel.OpenLog();
-
-            Equal(viewModel.StatusText, viewModel.Console.CurrentStatus, "console current status should mirror bottom status");
-            True(viewModel.Console.LogText.Contains("status:", StringComparison.OrdinalIgnoreCase), "console log should include clicked status text");
-            var reviewDock = FindDock(viewModel.DockLayout!, "review-tools");
-            True(reviewDock?.ActiveDockable?.Id == "console", "status click should activate the console dock");
+            action(temp);
         }
         finally
         {
-            if (File.Exists(path))
+            var tempRoot = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "ifcnative-tests")).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                + Path.DirectorySeparatorChar;
+            var resolved = Path.GetFullPath(temp);
+            if (resolved.StartsWith(tempRoot, StringComparison.OrdinalIgnoreCase))
             {
-                File.Delete(path);
+                Directory.Delete(resolved, recursive: true);
             }
         }
-    }
-
-    private static IDock? FindDock(IDockable dockable, string id)
-    {
-        if (dockable is IDock dock)
-        {
-            if (string.Equals(dock.Id, id, StringComparison.OrdinalIgnoreCase))
-            {
-                return dock;
-            }
-
-            foreach (var child in dock.VisibleDockables ?? [])
-            {
-                var match = FindDock(child, id);
-                if (match is not null)
-                {
-                    return match;
-                }
-            }
-        }
-
-        return null;
-    }
-
-    private static void NativeWindowLayoutStorePersistsSanitizedLayout()
-    {
-        var path = Path.Combine(Path.GetTempPath(), $"ifcnative-layout-{Guid.NewGuid():N}.json");
-        try
-        {
-            var store = new NativeWindowLayoutStore(path);
-            var lastIfcPath = Path.Combine(Path.GetTempPath(), "model.ifc");
-            store.Save(new(false, false, false, 40, 40, 10, 10, lastIfcPath));
-            var loaded = store.Load();
-
-            True(!loaded.ShowModelPane, "model pane visibility should persist");
-            True(loaded.ShowViewportPane, "viewport pane should be forced visible when all panes were hidden");
-            True(!loaded.ShowInspectorPane, "inspector pane visibility should persist");
-            Equal(260d, loaded.ModelPaneWidth, "model width should be clamped to minimum");
-            Equal(320d, loaded.InspectorPaneWidth, "inspector width should be clamped to minimum");
-            Equal(1100d, loaded.WindowWidth, "window width should be clamped to minimum");
-            Equal(700d, loaded.WindowHeight, "window height should be clamped to minimum");
-            Equal(Path.GetFullPath(lastIfcPath), loaded.LastOpenedIfcPath, "last opened IFC path should persist as a full path");
-        }
-        finally
-        {
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-        }
-    }
-
-    private static void NativeUserPreferencesPersistTextZoom()
-    {
-        var path = Path.Combine(Path.GetTempPath(), $"ifcnative-user-preferences-{Guid.NewGuid():N}.json");
-        try
-        {
-            var store = new NativeUserPreferencesStore(path);
-            var viewModel = new MainWindowViewModel(new EmptyFileDialogService(), store);
-
-            Equal(1.0d, viewModel.TextScale, "default text zoom");
-            viewModel.IncreaseTextScale();
-            Equal(1.1d, viewModel.TextScale, "increased text zoom");
-            Equal(1.1d, store.Load().TextScale, "increased text zoom should persist");
-
-            viewModel.DecreaseTextScale();
-            viewModel.DecreaseTextScale();
-            Equal(0.9d, viewModel.TextScale, "decreased text zoom");
-            Equal(0.9d, store.Load().TextScale, "decreased text zoom should persist");
-
-            viewModel.ResetTextScale();
-            Equal(1.0d, store.Load().TextScale, "reset text zoom should persist");
-
-            store.Save(new NativeUserPreferences(10));
-            Equal(1.8d, store.Load().TextScale, "text zoom should be clamped");
-        }
-        finally
-        {
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-        }
-    }
-
-    private static void DraftSessionGatesExport()
-    {
-        var saved = IfcStepParser.CreateSample();
-        var draft = IfcDocumentEditor.UpdateEntity(saved, 40, "Draft Proxy", string.Empty, string.Join(",", saved.EntityById[40].Arguments));
-        var session = new IfcDraftSession();
-
-        session.Reset(saved);
-        True(session.CanExport, "fresh document should export");
-
-        session.Stage(saved, draft);
-        True(session.HasDraft, "draft not staged");
-        True(!session.CanExport, "export should be blocked while draft is pending");
-        True(session.Summarize().Any(line => line.Contains("#40")), "draft summary missing edited entity");
-
-        var applied = session.Apply();
-        True(applied is not null && applied.EntityById[40].Name == "Draft Proxy", "draft not applied");
-        True(session.CanExport, "export should be enabled after apply");
-    }
-
-    private static void DraftSessionSupportsUndoRedoHistory()
-    {
-        var saved = IfcStepParser.CreateSample();
-        var firstDraft = IfcDocumentEditor.UpdateEntity(saved, 40, "First Draft Proxy", string.Empty, string.Join(",", saved.EntityById[40].Arguments));
-        var session = new IfcDraftSession();
-
-        session.Reset(saved);
-        session.Stage(saved, firstDraft);
-        var firstApplied = session.Apply("Rename proxy");
-
-        True(firstApplied is not null && firstApplied.EntityById[40].Name == "First Draft Proxy", "first draft not applied");
-        True(session.CanUndo, "applied draft should create undo checkpoint");
-        True(!session.CanRedo, "redo should be empty after new apply");
-        Equal("Rename proxy", session.NextUndoName, "named changeset should label next undo");
-        True(session.GetHistoryLines().Any(line => line.Contains("Rename proxy")), "history lines should include named changeset");
-
-        var undone = session.Undo();
-        True(undone is not null && undone.EntityById[40].Name == "Sample Inspection Block", "undo should restore original document");
-        True(!session.CanUndo, "undo stack should be empty after returning to original");
-        True(session.CanRedo, "undo should create redo checkpoint");
-        Equal("Rename proxy", session.NextRedoName, "named changeset should label next redo");
-        True(session.Summarize().Any(line => line.Contains("redo checkpoint")), "history summary should mention redo checkpoint");
-        True(session.Summarize().Any(line => line.Contains("Rename proxy")), "history summary should include next redo changeset name");
-
-        var redone = session.Redo();
-        True(redone is not null && redone.EntityById[40].Name == "First Draft Proxy", "redo should restore applied draft");
-        True(session.CanUndo, "redo should restore undo checkpoint");
-
-        var secondDraft = IfcDocumentEditor.UpdateEntity(redone!, 40, "Second Draft Proxy", string.Empty, string.Join(",", redone!.EntityById[40].Arguments));
-        session.Stage(redone, secondDraft);
-        session.Apply("Rename proxy again");
-        Equal("Rename proxy again", session.NextUndoName, "latest named changeset should be first undo");
-        True(!session.CanRedo, "new apply should clear redo history");
     }
 
     private static void True(bool condition, string message)
@@ -1237,11 +443,55 @@ internal sealed class NativeTestRunner
         }
     }
 
-    private sealed class EmptyFileDialogService : IFileDialogService
+    private static bool IsFinite(float value)
+    {
+        return !float.IsNaN(value) && !float.IsInfinity(value);
+    }
+
+    private sealed class CountingGeometryBackend : IIfcGeometryBackend
+    {
+        public int SceneBuilds { get; private set; }
+
+        public string Name => "counting geometry";
+
+        public string Status => "counting";
+
+        public IfcGeometryValidationResult ValidateDocument(IfcDocument document)
+        {
+            return new IfcGeometryValidationResult(Name, [], []);
+        }
+
+        public IReadOnlyList<IfcViewportItem> ProjectDocument(IfcDocument document, int limit = 250)
+        {
+            return [new IfcViewportItem(40, "sample")];
+        }
+
+        public IReadOnlyList<IfcViewportItem> ProjectSelection(IfcDocument document, int entityId, int limit = 80)
+        {
+            return [new IfcViewportItem(entityId, $"selected #{entityId}")];
+        }
+
+        public IReadOnlyList<IfcPreviewMesh> BuildPreviewMeshes(IfcDocument document, IReadOnlyList<IfcViewportItem> items, int limit = 48)
+        {
+            return [];
+        }
+
+        public Task<IfcRenderScene> BuildRenderSceneAsync(
+            IfcDocument document,
+            IfcRenderSceneRequest request,
+            CancellationToken cancellationToken = default,
+            IProgress<string>? progress = null)
+        {
+            SceneBuilds++;
+            return Task.FromResult(IfcRenderScene.Empty("counted"));
+        }
+    }
+
+    private sealed class TestFileDialogs : IFileDialogService
     {
         public Task<IReadOnlyList<string>> OpenIfcFilesAsync(bool allowMultiple, CancellationToken cancellationToken = default)
         {
-            return Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
+            return Task.FromResult<IReadOnlyList<string>>([]);
         }
 
         public Task<string?> SaveIfcFileAsync(string suggestedFileName, CancellationToken cancellationToken = default)
@@ -1249,335 +499,4 @@ internal sealed class NativeTestRunner
             return Task.FromResult<string?>(null);
         }
     }
-
-    private static string NormalizeNewlines(string value)
-    {
-        return value.Replace("\r\n", "\n", StringComparison.Ordinal).Replace("\r", "\n", StringComparison.Ordinal);
-    }
-
-    private const string UnorderedFixture = """
-ISO-10303-21;
-HEADER;
-FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');
-FILE_NAME('unordered-fixture.ifc','2026-05-24T00:00:00',('IFCnative'),('IFCnative'),'IFCnative Native Windows','IFCnative','');
-FILE_SCHEMA(('IFC4X3_ADD2'));
-ENDSEC;
-DATA;
-#40= IFCBUILDINGELEMENTPROXY('0Proxy8a9b2ff4l$IFCnative',$,'Sample Inspection Block',$,$,$,$,$,$);
-#1= IFCPROJECT('2XQ2f8a9b2ff4l$IFCnative',$,'IFCnative Native Sample',$,$,$,$,$,$);
-#20= IFCBUILDING('0Build8a9b2ff4l$IFCnative',$,'Sample Building',$,$,$,$,$,$);
-ENDSEC;
-END-ISO-10303-21;
-""";
-
-    private const string FormattedEntityFixture = """
-ISO-10303-21;
-HEADER;
-FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');
-FILE_NAME('formatted-entity.ifc','2026-05-24T00:00:00',('IFCnative'),('IFCnative'),'IFCnative Native Windows','IFCnative','');
-FILE_SCHEMA(('IFC4X3_ADD2'));
-ENDSEC;
-DATA;
-#1= IFCPROJECT('2XQ2f8a9b2ff4l$IFCnative',$,'IFCnative Native Sample',$,$,$,$,$,$);
-#40 =
-  IFCBUILDINGELEMENTPROXY('0Proxy8a9b2ff4l$IFCnative',$,'Sample Inspection Block',$,$,$,$,$,$);
-ENDSEC;
-END-ISO-10303-21;
-""";
-
-    private const string MalformedEntityFixture = """
-ISO-10303-21;
-HEADER;
-FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');
-FILE_NAME('malformed-entity.ifc','2026-05-24T00:00:00',('IFCnative'),('IFCnative'),'IFCnative Native Windows','IFCnative','');
-FILE_SCHEMA(('IFC4X3_ADD2'));
-ENDSEC;
-DATA;
-#1= IFCPROJECT('2XQ2f8a9b2ff4l$IFCnative',$,'IFCnative Native Sample',$,$,$,$,$,$);
-#40= IFCBUILDINGELEMENTPROXY('0Proxy8a9b2ff4l$IFCnative',$,'Broken Proxy',$,$,$,$,$,$;
-#41= IFCBUILDINGELEMENTPROXY('1Proxy8a9b2ff4l$IFCnative',$,'Recovered Proxy',$,$,$,$,$,$);
-ENDSEC;
-END-ISO-10303-21;
-""";
-
-    private const string MissingSemicolonFixture = """
-ISO-10303-21;
-HEADER;
-FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');
-FILE_NAME('missing-semicolon.ifc','2026-05-24T00:00:00',('IFCnative'),('IFCnative'),'IFCnative Native Windows','IFCnative','');
-FILE_SCHEMA(('IFC4X3_ADD2'));
-ENDSEC;
-DATA;
-#1= IFCPROJECT('2XQ2f8a9b2ff4l$IFCnative',$,'IFCnative Native Sample',$,$,$,$,$,$);
-#40= IFCBUILDINGELEMENTPROXY('1Proxy8a9b2ff4l$IFCnative',$,'Missing Semicolon Proxy',$,$,$,$,$,$)
-#41= IFCBUILDINGELEMENTPROXY('2Proxy8a9b2ff4l$IFCnative',$,'Recovered After Missing Semicolon',$,$,$,$,$,$);
-ENDSEC;
-END-ISO-10303-21;
-""";
-
-    private const string DuplicateStepIdFixture = """
-ISO-10303-21;
-HEADER;
-FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');
-FILE_NAME('duplicate-step-id.ifc','2026-05-24T00:00:00',('IFCnative'),('IFCnative'),'IFCnative Native Windows','IFCnative','');
-FILE_SCHEMA(('IFC4X3_ADD2'));
-ENDSEC;
-DATA;
-#1= IFCPROJECT('2XQ2f8a9b2ff4l$IFCnative',$,'IFCnative Native Sample',$,$,$,$,$,$);
-#41= IFCBUILDINGELEMENTPROXY('1Proxy8a9b2ff4l$IFCnative',$,'First Proxy',$,$,$,$,$,$);
-#41= IFCBUILDINGELEMENTPROXY('2Proxy8a9b2ff4l$IFCnative',$,'Second Proxy',$,$,$,$,$,$);
-#42= IFCBUILDINGELEMENTPROXY('3Proxy8a9b2ff4l$IFCnative',$,'Recovered After Duplicate',$,$,$,$,$,$);
-ENDSEC;
-END-ISO-10303-21;
-""";
-
-    private const string MissingEntityTypeFixture = """
-ISO-10303-21;
-HEADER;
-FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');
-FILE_NAME('missing-entity-type.ifc','2026-05-24T00:00:00',('IFCnative'),('IFCnative'),'IFCnative Native Windows','IFCnative','');
-FILE_SCHEMA(('IFC4X3_ADD2'));
-ENDSEC;
-DATA;
-#1= IFCPROJECT('2XQ2f8a9b2ff4l$IFCnative',$,'IFCnative Native Sample',$,$,$,$,$,$);
-#40= ('1Proxy8a9b2ff4l$IFCnative',$,'Missing Entity Type',$,$,$,$,$,$);
-#41= IFCBUILDINGELEMENTPROXY('2Proxy8a9b2ff4l$IFCnative',$,'Recovered After Missing Type',$,$,$,$,$,$);
-ENDSEC;
-END-ISO-10303-21;
-""";
-
-    private const string UnterminatedStringFixture = """
-ISO-10303-21;
-HEADER;
-FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');
-FILE_NAME('unterminated-string.ifc','2026-05-24T00:00:00',('IFCnative'),('IFCnative'),'IFCnative Native Windows','IFCnative','');
-FILE_SCHEMA(('IFC4X3_ADD2'));
-ENDSEC;
-DATA;
-#1= IFCPROJECT('2XQ2f8a9b2ff4l$IFCnative',$,'IFCnative Native Sample',$,$,$,$,$,$);
-#40= IFCBUILDINGELEMENTPROXY('1Proxy8a9b2ff4l$IFCnative',$,'Unterminated Proxy,$,$,$,$,$,$);
-#41= IFCBUILDINGELEMENTPROXY('2Proxy8a9b2ff4l$IFCnative',$,'Recovered After Unterminated String',$,$,$,$,$,$);
-ENDSEC;
-END-ISO-10303-21;
-""";
-
-    private const string UnexpectedTrailingTextFixture = """
-ISO-10303-21;
-HEADER;
-FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');
-FILE_NAME('unexpected-trailing-text.ifc','2026-05-24T00:00:00',('IFCnative'),('IFCnative'),'IFCnative Native Windows','IFCnative','');
-FILE_SCHEMA(('IFC4X3_ADD2'));
-ENDSEC;
-DATA;
-#1= IFCPROJECT('2XQ2f8a9b2ff4l$IFCnative',$,'IFCnative Native Sample',$,$,$,$,$,$);
-#40= IFCBUILDINGELEMENTPROXY('1Proxy8a9b2ff4l$IFCnative',$,'Trailing Junk Proxy',$,$,$,$,$,$) BROKEN_TRAILING_TOKEN;
-#41= IFCBUILDINGELEMENTPROXY('2Proxy8a9b2ff4l$IFCnative',$,'Recovered After Trailing Junk',$,$,$,$,$,$);
-ENDSEC;
-END-ISO-10303-21;
-""";
-
-    private const string PlacementFixture = """
-ISO-10303-21;
-HEADER;
-FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');
-FILE_NAME('placement-fixture.ifc','2026-05-24T00:00:00',('IFCnative'),('IFCnative'),'IFCnative Native Windows','IFCnative','');
-FILE_SCHEMA(('IFC4X3_ADD2'));
-ENDSEC;
-DATA;
-#1= IFCPROJECT('2XQ2f8a9b2ff4l$IFCnative',$,'IFCnative Native Sample',$,$,$,$,$,$);
-#30= IFCBUILDINGSTOREY('0Level8a9b2ff4l$IFCnative',$,'Level 0',$,$,$,$,$,$);
-#40= IFCBUILDINGELEMENTPROXY('0Proxy8a9b2ff4l$IFCnative',$,'Placed Proxy',$,$,#70,#80,$,$);
-#53= IFCRELCONTAINEDINSPATIALSTRUCTURE('1ContLevelProxy0000000',$,'Level Contains Proxy',$,(#40),#30);
-#70= IFCLOCALPLACEMENT($,#71);
-#71= IFCAXIS2PLACEMENT3D(#72,$,$);
-#72= IFCCARTESIANPOINT((0.,0.,0.));
-#80= IFCPRODUCTDEFINITIONSHAPE($,$,(#81));
-#81= IFCSHAPEREPRESENTATION($,'Body','SweptSolid',(#82));
-#82= IFCEXTRUDEDAREASOLID(#83,$,#84,1.);
-#83= IFCRECTANGLEPROFILEDEF(.AREA.,$,$,1.,1.);
-#84= IFCDIRECTION((0.,0.,1.));
-ENDSEC;
-END-ISO-10303-21;
-""";
-
-    private const string RelativeGeometryFixture = """
-ISO-10303-21;
-HEADER;
-FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');
-FILE_NAME('relative-geometry.ifc','2026-05-24T00:00:00',('IFCnative'),('IFCnative'),'IFCnative Native Windows','IFCnative','');
-FILE_SCHEMA(('IFC4X3_ADD2'));
-ENDSEC;
-DATA;
-#1= IFCPROJECT('2XQ2f8a9b2ff4l$IFCnative',$,'IFCnative Native Sample',$,$,$,$,$,$);
-#30= IFCBUILDINGSTOREY('0Level8a9b2ff4l$IFCnative',$,'Offset Level',$,$,#60,$,$,$);
-#40= IFCBUILDINGELEMENTPROXY('0Proxy8a9b2ff4l$IFCnative',$,'Offset Proxy',$,$,#70,#80,$,$);
-#53= IFCRELCONTAINEDINSPATIALSTRUCTURE('1ContLevelProxy0000000',$,'Level Contains Proxy',$,(#40),#30);
-#60= IFCLOCALPLACEMENT($,#61);
-#61= IFCAXIS2PLACEMENT3D(#62,$,$);
-#62= IFCCARTESIANPOINT((10.,20.,0.));
-#70= IFCLOCALPLACEMENT(#60,#71);
-#71= IFCAXIS2PLACEMENT3D(#72,$,$);
-#72= IFCCARTESIANPOINT((1.,2.,3.));
-#80= IFCPRODUCTDEFINITIONSHAPE($,$,(#81));
-#81= IFCSHAPEREPRESENTATION($,'Body','SweptSolid',(#82));
-#82= IFCEXTRUDEDAREASOLID(#83,#90,#84,2.);
-#83= IFCRECTANGLEPROFILEDEF(.AREA.,'Offset profile',#95,1.,1.);
-#84= IFCDIRECTION((0.,0.,1.));
-#90= IFCAXIS2PLACEMENT3D(#91,$,$);
-#91= IFCCARTESIANPOINT((0.5,0.25,0.5));
-#95= IFCAXIS2PLACEMENT2D(#96,$);
-#96= IFCCARTESIANPOINT((0.2,0.1));
-ENDSEC;
-END-ISO-10303-21;
-""";
-
-    private const string RotatedPlacementFixture = """
-ISO-10303-21;
-HEADER;
-FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');
-FILE_NAME('rotated-placement.ifc','2026-05-24T00:00:00',('IFCnative'),('IFCnative'),'IFCnative Native Windows','IFCnative','');
-FILE_SCHEMA(('IFC4X3_ADD2'));
-ENDSEC;
-DATA;
-#1= IFCPROJECT('2XQ2f8a9b2ff4l$IFCnative',$,'IFCnative Native Sample',$,$,$,$,$,$);
-#30= IFCBUILDINGSTOREY('0Level8a9b2ff4l$IFCnative',$,'Rotated Level',$,$,$,$,$,$);
-#40= IFCBUILDINGELEMENTPROXY('0Proxy8a9b2ff4l$IFCnative',$,'Rotated Proxy',$,$,#70,#80,$,$);
-#53= IFCRELCONTAINEDINSPATIALSTRUCTURE('1ContLevelProxy0000000',$,'Level Contains Proxy',$,(#40),#30);
-#70= IFCLOCALPLACEMENT($,#71);
-#71= IFCAXIS2PLACEMENT3D(#72,#73,#74);
-#72= IFCCARTESIANPOINT((0.,0.,0.));
-#73= IFCDIRECTION((0.,0.,1.));
-#74= IFCDIRECTION((0.,1.,0.));
-#80= IFCPRODUCTDEFINITIONSHAPE($,$,(#81));
-#81= IFCSHAPEREPRESENTATION($,'Body','SweptSolid',(#82));
-#82= IFCEXTRUDEDAREASOLID(#83,$,#84,1.);
-#83= IFCRECTANGLEPROFILEDEF(.AREA.,$,$,2.,1.);
-#84= IFCDIRECTION((0.,0.,1.));
-ENDSEC;
-END-ISO-10303-21;
-""";
-
-    private const string MappedGeometryFixture = """
-ISO-10303-21;
-HEADER;
-FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');
-FILE_NAME('mapped-geometry.ifc','2026-05-24T00:00:00',('IFCnative'),('IFCnative'),'IFCnative Native Windows','IFCnative','');
-FILE_SCHEMA(('IFC4X3_ADD2'));
-ENDSEC;
-DATA;
-#1= IFCPROJECT('2XQ2f8a9b2ff4l$IFCnative',$,'IFCnative Native Sample',$,$,$,$,$,$);
-#30= IFCBUILDINGSTOREY('0Level8a9b2ff4l$IFCnative',$,'Mapped Level',$,$,$,$,$,$);
-#40= IFCBUILDINGELEMENTPROXY('0Proxy8a9b2ff4l$IFCnative',$,'Mapped Proxy',$,$,#70,#80,$,$);
-#53= IFCRELCONTAINEDINSPATIALSTRUCTURE('1ContLevelProxy0000000',$,'Level Contains Proxy',$,(#40),#30);
-#70= IFCLOCALPLACEMENT($,#71);
-#71= IFCAXIS2PLACEMENT3D(#72,$,$);
-#72= IFCCARTESIANPOINT((0.,0.,0.));
-#80= IFCPRODUCTDEFINITIONSHAPE($,$,(#81));
-#81= IFCSHAPEREPRESENTATION($,'Body','MappedRepresentation',(#90));
-#90= IFCMAPPEDITEM(#100,#110);
-#100= IFCREPRESENTATIONMAP(#101,#102);
-#101= IFCAXIS2PLACEMENT3D(#103,$,$);
-#102= IFCSHAPEREPRESENTATION($,'Body','SweptSolid',(#120));
-#103= IFCCARTESIANPOINT((0.,0.,0.));
-#110= IFCCARTESIANTRANSFORMATIONOPERATOR3D(#111,$,#112,2.,$);
-#111= IFCDIRECTION((0.,1.,0.));
-#112= IFCCARTESIANPOINT((5.,6.,0.));
-#120= IFCEXTRUDEDAREASOLID(#121,$,#122,1.);
-#121= IFCRECTANGLEPROFILEDEF(.AREA.,'Mapped profile',$,2.,1.);
-#122= IFCDIRECTION((0.,0.,1.));
-ENDSEC;
-END-ISO-10303-21;
-""";
-
-    private const string MissingGeometryFixture = """
-ISO-10303-21;
-HEADER;
-FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');
-FILE_NAME('missing-geometry.ifc','2026-05-24T00:00:00',('IFCnative'),('IFCnative'),'IFCnative Native Windows','IFCnative','');
-FILE_SCHEMA(('IFC4X3_ADD2'));
-ENDSEC;
-DATA;
-#1= IFCPROJECT('2XQ2f8a9b2ff4l$IFCnative',$,'IFCnative Native Sample',$,$,$,$,$,$);
-#40= IFCBUILDINGELEMENTPROXY('0Proxy8a9b2ff4l$IFCnative',$,'Sample Inspection Block',$,$,$,#70,$,$);
-#70= IFCPRODUCTDEFINITIONSHAPE($,$,(#71));
-#71= IFCSHAPEREPRESENTATION($,'Body','SweptSolid',(#999));
-ENDSEC;
-END-ISO-10303-21;
-""";
-
-    private const string ConnectionFixture = """
-ISO-10303-21;
-HEADER;
-FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');
-FILE_NAME('connection-fixture.ifc','2026-05-24T00:00:00',('IFCnative'),('IFCnative'),'IFCnative Native Windows','IFCnative','');
-FILE_SCHEMA(('IFC4X3_ADD2'));
-ENDSEC;
-DATA;
-#1= IFCPROJECT('2XQ2f8a9b2ff4l$IFCnative',$,'IFCnative Native Sample',$,$,$,$,$,$);
-#30= IFCBUILDINGSTOREY('0Level8a9b2ff4l$IFCnative',$,'Level 0',$,$,$,$,$,$);
-#40= IFCBUILDINGELEMENTPROXY('0Proxy8a9b2ff4l$IFCnative',$,'Connected A',$,$,#70,#80,$,$);
-#41= IFCBUILDINGELEMENTPROXY('1Proxy8a9b2ff4l$IFCnative',$,'Connected B',$,$,#71,#81,$,$);
-#53= IFCRELCONTAINEDINSPATIALSTRUCTURE('1ContLevelProxy0000000',$,'Level Contains Proxy',$,(#40,#41),#30);
-#70= IFCLOCALPLACEMENT($,#72);
-#71= IFCLOCALPLACEMENT($,#73);
-#72= IFCAXIS2PLACEMENT3D(#74,$,$);
-#73= IFCAXIS2PLACEMENT3D(#75,$,$);
-#74= IFCCARTESIANPOINT((0.,0.,0.));
-#75= IFCCARTESIANPOINT((1.,0.,0.));
-#80= IFCPRODUCTDEFINITIONSHAPE($,$,());
-#81= IFCPRODUCTDEFINITIONSHAPE($,$,());
-ENDSEC;
-END-ISO-10303-21;
-""";
-
-    private const string DuplicateGlobalIdFixture = """
-ISO-10303-21;
-HEADER;
-FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');
-FILE_NAME('duplicate-globalid.ifc','2026-05-24T00:00:00',('IFCnative'),('IFCnative'),'IFCnative Native Windows','IFCnative','');
-FILE_SCHEMA(('IFC4X3_ADD2'));
-ENDSEC;
-DATA;
-#1= IFCPROJECT('2XQ2f8a9b2ff4l$IFCnative',$,'IFCnative Native Sample',$,$,$,$,$,$);
-#40= IFCBUILDINGELEMENTPROXY('DUPLICATE-GLOBALID',$,'Duplicate A',$,$,$,$,$,$);
-#41= IFCBUILDINGELEMENTPROXY('DUPLICATE-GLOBALID',$,'Duplicate B',$,$,$,$,$,$);
-ENDSEC;
-END-ISO-10303-21;
-""";
-
-    private const string MultipleContainmentFixture = """
-ISO-10303-21;
-HEADER;
-FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');
-FILE_NAME('multiple-containment.ifc','2026-05-24T00:00:00',('IFCnative'),('IFCnative'),'IFCnative Native Windows','IFCnative','');
-FILE_SCHEMA(('IFC4X3_ADD2'));
-ENDSEC;
-DATA;
-#1= IFCPROJECT('2XQ2f8a9b2ff4l$IFCnative',$,'IFCnative Native Sample',$,$,$,$,$,$);
-#20= IFCBUILDING('2Building000000000000000',$,'Building A',$,$,$,$,$,$,$,$,$,$);
-#30= IFCBUILDINGSTOREY('2Storey0000000000000000',$,'Storey A',$,$,$,$,$,$,$);
-#31= IFCBUILDINGSTOREY('2Storey0000000000000001',$,'Storey B',$,$,$,$,$,$,$);
-#40= IFCBUILDINGELEMENTPROXY('2Proxy00000000000000000',$,'Duplicate containment proxy',$,$,$,$,$,$);
-#52= IFCRELAGGREGATES('1AggLevel00000000000000',$,'Building aggregates storeys',$,#20,(#30,#31));
-#53= IFCRELCONTAINEDINSPATIALSTRUCTURE('1ContLevelProxy0000000',$,'Storey A Contains Proxy',$,(#40),#30);
-#54= IFCRELCONTAINEDINSPATIALSTRUCTURE('1ContLevelProxy0000001',$,'Storey B Also Contains Proxy',$,(#40),#31);
-ENDSEC;
-END-ISO-10303-21;
-""";
-
-    private const string MissingRelationshipReferenceFixture = """
-ISO-10303-21;
-HEADER;
-FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');
-FILE_NAME('missing-relationship-reference.ifc','2026-05-24T00:00:00',('IFCnative'),('IFCnative'),'IFCnative Native Windows','IFCnative','');
-FILE_SCHEMA(('IFC4X3_ADD2'));
-ENDSEC;
-DATA;
-#1= IFCPROJECT('2XQ2f8a9b2ff4l$IFCnative',$,'IFCnative Native Sample',$,$,$,$,$,$);
-#30= IFCBUILDINGSTOREY('0Level8a9b2ff4l$IFCnative',$,'Level 0',$,$,$,$,$,$);
-#40= IFCBUILDINGELEMENTPROXY('0Proxy8a9b2ff4l$IFCnative',$,'Referenced Proxy',$,$,$,$,$,$);
-#53= IFCRELCONTAINEDINSPATIALSTRUCTURE('1ContLevelProxy0000000',$,'Level Contains Proxy',$,(#40,#999),#30);
-ENDSEC;
-END-ISO-10303-21;
-""";
 }

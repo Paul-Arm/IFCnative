@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.ReactiveUI;
+using Avalonia.Win32;
 using IFCnative.NativeWindows.Services;
 
 namespace IFCnative.NativeWindows;
@@ -18,6 +19,7 @@ internal static class Program
         return AppBuilder
             .Configure<App>()
             .UsePlatformDetect()
+            .With(new Win32PlatformOptions { RenderingMode = [Win32RenderingMode.Wgl] })
             .LogToTrace()
             .UseReactiveUI();
     }

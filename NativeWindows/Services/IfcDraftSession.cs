@@ -96,7 +96,7 @@ public sealed class IfcDraftSession
             return IfcDiffService.Summarize(SavedDocument, PendingDocument);
         }
 
-        var historySummary = new List<string> { "No pending draft." };
+        var historySummary = new List<string> { "No pending draft. xBIM edits commit immediately in memory; export writes IFC STEP." };
         if (CanUndo || CanRedo)
         {
             historySummary.Add($"History: {undoStack.Count:N0} undo / {redoStack.Count:N0} redo checkpoint(s).");

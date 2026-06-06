@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Runtime.CompilerServices;
 using System.Reactive;
+using System.Threading;
 using Avalonia.Media;
 using Dock.Model.Controls;
 using Dock.Model.Core;
@@ -122,7 +123,7 @@ public sealed class IfcDocumentSessionViewModel : ReactiveViewModel
 
     public string Schema => Document.Schema;
 
-    public string Meta => $"{Schema} / {Document.Entities.Count:N0} entities{(IsDirty ? " / draft" : string.Empty)}";
+    public string Meta => $"{Schema} / {Document.Entities.Count:N0} entities{(IsDirty ? " / modified" : string.Empty)}";
 
     public void SetDocument(IfcDocument nextDocument, bool resetDraft)
     {
@@ -156,7 +157,7 @@ public sealed class MainWindowViewModel : ReactiveViewModel
     private bool isBusy;
     private double textScale = 1.0;
 
-    public MainWindowViewModel(IFileDialogService fileDialogs, NativeUserPreferencesStore? preferencesStore = null)
+    public MainWindowViewModel(IFileDialogService fileDialogs, NativeUserPreferencesStore? preferencesStore = null, bool loadSample = true)
     {
         this.fileDialogs = fileDialogs;
         this.preferencesStore = preferencesStore ?? new NativeUserPreferencesStore();
@@ -192,7 +193,10 @@ public sealed class MainWindowViewModel : ReactiveViewModel
 
         ResetDockLayout();
         RefreshRecentFiles();
-        LoadSample();
+        if (loadSample)
+        {
+            LoadSample();
+        }
     }
 
     public ObservableCollection<WorkspacePreset> Workspaces { get; } = [];
@@ -379,7 +383,7 @@ public sealed class MainWindowViewModel : ReactiveViewModel
         await OpenPathAsync(path, setBusy: true);
     }
 
-    public void SelectEntityById(int entityId, string source = "selection")
+    public void SelectEntityById(int entityId, string source = "selection", bool updateViewport = true)
     {
         var session = ActiveSession;
         var document = session?.Document;
@@ -391,7 +395,11 @@ public sealed class MainWindowViewModel : ReactiveViewModel
         session.SelectedEntityId = entity.Id;
         var details = IfcSelectionProjector.Project(document, entity);
         Inspector.SetSelection(document, details, session.Bookmarks.Contains(entity.Id));
-        Viewport.SetSelection(document, entity);
+        if (updateViewport)
+        {
+            Viewport.SetSelection(document, entity);
+        }
+
         Graph.SetSelection(document, entity);
         Builder.SetSelection(document, entity);
         StatusText = $"{source}: #{entity.Id} {entity.TypeName()} {entity.DisplayName}";
@@ -441,9 +449,9 @@ public sealed class MainWindowViewModel : ReactiveViewModel
         }
 
         StageDraft(
-            IfcDocumentEditor.UpdateEntity(session.Document, selectedId, name, description, rawArguments),
+            XbimDocumentEditor.UpdateEntity(session.Document, selectedId, name, description),
             selectedId,
-            $"Staged entity edit for #{selectedId}.");
+            $"Staged xBIM entity edit for #{selectedId}.");
     }
 
     public void SavePlacement(string x, string y, string z)
@@ -455,7 +463,7 @@ public sealed class MainWindowViewModel : ReactiveViewModel
             return;
         }
 
-        StageDraft(IfcDocumentEditor.UpdatePlacement(session.Document, selectedId, x, y, z), selectedId, $"Staged placement edit for #{selectedId}.");
+        StageDraft(XbimDocumentEditor.UpdatePlacement(session.Document, selectedId, x, y, z), selectedId, $"Staged xBIM placement edit for #{selectedId}.");
     }
 
     public void SaveSpatialParent(string parentId)
@@ -467,7 +475,7 @@ public sealed class MainWindowViewModel : ReactiveViewModel
             return;
         }
 
-        StageDraft(IfcDocumentEditor.UpdateSpatialParent(session.Document, selectedId, parentId), selectedId, $"Staged spatial parent edit for #{selectedId}.");
+        StageDraft(XbimDocumentEditor.UpdateSpatialParent(session.Document, selectedId, parentId), selectedId, $"Staged xBIM spatial parent edit for #{selectedId}.");
     }
 
     public void DetachSpatialParent()
@@ -479,7 +487,7 @@ public sealed class MainWindowViewModel : ReactiveViewModel
             return;
         }
 
-        StageDraft(IfcDocumentEditor.RemoveFromSpatialParent(session.Document, selectedId), selectedId, $"Staged spatial detach for #{selectedId}.");
+        StageDraft(XbimDocumentEditor.RemoveFromSpatialParent(session.Document, selectedId), selectedId, $"Staged xBIM spatial detach for #{selectedId}.");
     }
 
     public void SaveProperty(IfcPropertyDetails property, string value)
@@ -490,7 +498,7 @@ public sealed class MainWindowViewModel : ReactiveViewModel
             return;
         }
 
-        StageDraft(IfcDocumentEditor.UpdatePropertyValue(session.Document, property.EntityId.Value, value), session.SelectedEntityId, $"Staged property edit for #{property.EntityId.Value}.");
+        StageDraft(XbimDocumentEditor.UpdatePropertyValue(session.Document, property.EntityId.Value, value), session.SelectedEntityId, $"Staged xBIM property edit for #{property.EntityId.Value}.");
     }
 
     public void AddCommonPropertySet()
@@ -502,7 +510,7 @@ public sealed class MainWindowViewModel : ReactiveViewModel
             return;
         }
 
-        StageDraft(IfcDocumentEditor.AddCommonPropertySet(session.Document, selectedId, entity.DisplayName, "New"), selectedId, $"Staged common Pset for #{selectedId}.");
+        StageDraft(XbimDocumentEditor.AddCommonPropertySet(session.Document, selectedId, entity.DisplayName, "New"), selectedId, $"Staged xBIM common Pset for #{selectedId}.");
     }
 
     public void AddBaseQuantitySet(string width, string depth, string height)
@@ -514,7 +522,7 @@ public sealed class MainWindowViewModel : ReactiveViewModel
             return;
         }
 
-        StageDraft(IfcDocumentEditor.AddBaseQuantitySet(session.Document, selectedId, height, width, depth), selectedId, $"Staged base Qto for #{selectedId}.");
+        StageDraft(XbimDocumentEditor.AddBaseQuantitySet(session.Document, selectedId, width, depth, height), selectedId, $"Staged xBIM base Qto for #{selectedId}.");
     }
 
     public void AddResource(string kind, string name, string identification)
@@ -526,14 +534,7 @@ public sealed class MainWindowViewModel : ReactiveViewModel
             return;
         }
 
-        var draft = kind switch
-        {
-            "classification" => IfcDocumentEditor.AddSimpleClassificationAssignment(session.Document, selectedId, name, identification),
-            "document" => IfcDocumentEditor.AddSimpleDocumentAssignment(session.Document, selectedId, name, identification),
-            "library" => IfcDocumentEditor.AddSimpleLibraryAssignment(session.Document, selectedId, name, identification),
-            _ => IfcDocumentEditor.AddSimpleMaterialAssignment(session.Document, selectedId, name),
-        };
-        StageDraft(draft, selectedId, $"Staged {kind} assignment for #{selectedId}.");
+        StageDraft(XbimDocumentEditor.AddResource(session.Document, selectedId, kind, name, identification), selectedId, $"Staged xBIM {kind} assignment for #{selectedId}.");
     }
 
     public void AssignBody(string width, string depth, string height, string profile)
@@ -545,7 +546,7 @@ public sealed class MainWindowViewModel : ReactiveViewModel
             return;
         }
 
-        StageDraft(IfcDocumentEditor.AssignBodyRepresentation(session.Document, selectedId, width, depth, height, profile), selectedId, $"Staged {profile} body for #{selectedId}.");
+        StageDraft(XbimDocumentEditor.AssignBodyRepresentation(session.Document, selectedId, width, depth, height, profile), selectedId, $"Staged xBIM body representation for #{selectedId}.");
     }
 
     public void CreateProduct(string type, string name, string width, string depth, string height, string profile)
@@ -558,9 +559,9 @@ public sealed class MainWindowViewModel : ReactiveViewModel
         }
 
         var before = session.Document.EntityById.Keys.ToHashSet();
-        var draft = IfcDocumentEditor.AddProductWithBodyRepresentation(session.Document, selectedId, type, name, width, depth, height, profile);
+        var draft = XbimDocumentEditor.AddProductWithBodyRepresentation(session.Document, selectedId, type, name, width, depth, height, profile);
         var newId = draft.EntityById.Keys.Except(before).OrderBy(id => id).FirstOrDefault();
-        StageDraft(draft, newId == 0 ? selectedId : newId, $"Staged new {profile} product under #{selectedId}.");
+        StageDraft(draft, newId == 0 ? selectedId : newId, $"Staged new xBIM product under #{selectedId}.");
     }
 
     public void AddRelationship(string relationshipType, string sourceIds, string targetIds, string name)
@@ -571,7 +572,7 @@ public sealed class MainWindowViewModel : ReactiveViewModel
             return;
         }
 
-        StageDraft(IfcDocumentEditor.AddRelationship(session.Document, relationshipType, sourceIds, targetIds, name), session.SelectedEntityId, "Staged relationship create.");
+        StageDraft(XbimDocumentEditor.AddRelationship(session.Document, relationshipType, sourceIds, targetIds, name), session.SelectedEntityId, "Staged xBIM relationship create.");
     }
 
     public void SaveRelationship(IfcRelationshipDetails relationship, string sourceIds, string targetIds)
@@ -582,7 +583,7 @@ public sealed class MainWindowViewModel : ReactiveViewModel
             return;
         }
 
-        StageDraft(IfcDocumentEditor.UpdateRelationshipEndpoints(session.Document, relationship.RelationshipId.Value, sourceIds, targetIds), session.SelectedEntityId, $"Staged relationship edit for #{relationship.RelationshipId.Value}.");
+        StageDraft(XbimDocumentEditor.UpdateRelationshipEndpoints(session.Document, relationship.RelationshipId.Value, sourceIds, targetIds), session.SelectedEntityId, $"Staged xBIM relationship edit for #{relationship.RelationshipId.Value}.");
     }
 
     public void DeleteRelationship(IfcRelationshipDetails relationship)
@@ -593,7 +594,7 @@ public sealed class MainWindowViewModel : ReactiveViewModel
             return;
         }
 
-        StageDraft(IfcDocumentEditor.RemoveRelationship(session.Document, relationship.RelationshipId.Value), session.SelectedEntityId, $"Staged relationship delete for #{relationship.RelationshipId.Value}.");
+        StageDraft(XbimDocumentEditor.DeleteRelationship(session.Document, relationship.RelationshipId.Value), session.SelectedEntityId, $"Staged xBIM relationship delete for #{relationship.RelationshipId.Value}.");
     }
 
     public void RepairDiagnostic(IfcDiagnosticDetails diagnostic)
@@ -604,19 +605,19 @@ public sealed class MainWindowViewModel : ReactiveViewModel
             return;
         }
 
-        var document = session.Document;
-        var draft = diagnostic.CanRepairSpatialContainment
-            ? IfcDocumentEditor.KeepFirstPrimarySpatialContainment(document, diagnostic.Message)
-            : diagnostic.CanRepairMissingReference
-                ? IfcDocumentEditor.RemoveMissingRelationshipReferences(document, diagnostic.Message)
-                : diagnostic.CanRepairMissingGlobalId
-                    ? IfcDocumentEditor.GenerateMissingGlobalIdFromDiagnostic(document, diagnostic.Message)
-                    : diagnostic.CanRepairPlacement
-                        ? IfcDocumentEditor.AssignDefaultPlacementFromDiagnostic(document, diagnostic.Message)
-                        : diagnostic.CanRepairRepresentation
-                            ? IfcDocumentEditor.AssignDefaultRepresentationFromDiagnostic(document, diagnostic.Message)
-                            : IfcDocumentEditor.RegenerateDuplicateGlobalIds(document, diagnostic.Message);
-        StageDraft(draft, diagnostic.EntityId ?? session.SelectedEntityId, diagnostic.RepairLabel);
+        var entityId = diagnostic.EntityId ?? session.SelectedEntityId;
+        var draft = diagnostic switch
+        {
+            { CanRepairDuplicateGlobalId: true } => XbimDocumentEditor.RegenerateDuplicateGlobalIds(session.Document, diagnostic.Message),
+            { CanRepairMissingGlobalId: true } when entityId != 0 => XbimDocumentEditor.GenerateMissingGlobalId(session.Document, entityId),
+            { CanRepairSpatialContainment: true } when entityId != 0 => XbimDocumentEditor.KeepFirstPrimarySpatialContainment(session.Document, entityId),
+            { CanRepairMissingReference: true } => XbimDocumentEditor.RemoveRelationshipFromMissingReferenceDiagnostic(session.Document, diagnostic.Message),
+            { CanRepairPlacement: true } when entityId != 0 => XbimDocumentEditor.AssignDefaultPlacement(session.Document, entityId),
+            { CanRepairRepresentation: true } when entityId != 0 => XbimDocumentEditor.AssignDefaultBodyRepresentation(session.Document, entityId),
+            _ => session.Document,
+        };
+
+        StageDraft(draft, entityId, $"Staged xBIM diagnostic repair for #{entityId}.");
     }
 
     public void ApplyDraft()
@@ -748,26 +749,17 @@ public sealed class MainWindowViewModel : ReactiveViewModel
 
         var exportedStep = await Task.Run(() => XbimIfcDocumentService.NormalizeForExport(session.Document));
         IfcFileLoader.WriteText(path, exportedStep, session.Document.FileName);
+        session.IsDirty = false;
         StatusText = $"Exported {Path.GetFileName(path)}. {validation.Summary}.";
         Log($"xbim.export('{Path.GetFileName(path)}')");
     }
 
     private void LoadSample()
     {
-        var nativeSample = IfcStepParser.CreateSample();
-        var sample = nativeSample;
-        try
-        {
-            sample = XbimIfcDocumentService.OpenText(nativeSample.ToStepText(), nativeSample.FileName);
-        }
-        catch (Exception exception)
-        {
-            nativeSample.Diagnostics.Warn($"xBIM sample import failed; using native fixture only: {exception.Message}");
-        }
-
+        var sample = XbimIfcDocumentService.CreateSample();
         AddSession(sample, sourcePath: null);
-        StatusText = sample.XbimStore is null ? "Loaded native sample IFC fixture." : "Loaded xBIM sample IFC.";
-        Log(sample.XbimStore is null ? "file.sample.native()" : "xbim.sample()");
+        StatusText = "Loaded xBIM sample IFC.";
+        Log("xbim.sample()");
     }
 
     private void AddSession(IfcDocument document, string? sourcePath)
@@ -790,23 +782,25 @@ public sealed class MainWindowViewModel : ReactiveViewModel
         IfcDocument synchronizedDraft;
         try
         {
-            synchronizedDraft = XbimIfcDocumentService.SynchronizeDocument(draftDocument);
+            synchronizedDraft = draftDocument.XbimStore is not null
+                ? draftDocument
+                : XbimIfcDocumentService.SynchronizeDocument(draftDocument);
         }
         catch (Exception exception)
         {
-            StatusText = $"xBIM rejected the draft: {exception.Message}";
-            Log($"xbim.draft.reject({selectedId})");
+            StatusText = $"xBIM rejected the edit: {exception.Message}";
+            Log($"xbim.transaction.reject({selectedId})");
             return;
         }
 
-        session.DraftSession.Stage(session.Document, synchronizedDraft);
-        session.SetDocument(synchronizedDraft, resetDraft: false);
-        StatusText = message;
-        Log($"xbim.draft.stage({selectedId})");
+        session.SetDocument(synchronizedDraft, resetDraft: true);
+        session.IsDirty = true;
+        StatusText = message.Replace("Staged", "Committed", StringComparison.OrdinalIgnoreCase);
+        Log($"xbim.transaction.commit({selectedId})");
         RefreshForActiveDocument(selectedId);
     }
 
-    private void RefreshForActiveDocument(int? preferredSelection = null)
+    private void RefreshForActiveDocument(int? preferredSelection = null, bool refreshViewport = true)
     {
         var session = ActiveSession;
         if (session is null)
@@ -826,7 +820,11 @@ public sealed class MainWindowViewModel : ReactiveViewModel
         Types.SetDocument(document);
         Diagnostics.SetDocument(document);
         Draft.SetSession(session);
-        Viewport.SetDocument(document);
+        if (refreshViewport)
+        {
+            Viewport.SetDocument(document);
+        }
+
         Graph.SetDocument(document);
         Builder.SetDocument(document);
 
@@ -837,7 +835,7 @@ public sealed class MainWindowViewModel : ReactiveViewModel
             ?? document.Entities.FirstOrDefault()?.Id;
         if (selectedId is not null)
         {
-            SelectEntityById(selectedId.Value);
+            SelectEntityById(selectedId.Value, updateViewport: refreshViewport);
         }
         else
         {
@@ -1084,6 +1082,12 @@ public sealed class ViewportPanelViewModel(MainWindowViewModel owner, IIfcGeomet
     private string title = "Viewport";
     private string summary = "No model.";
     private IfcViewportItem? selectedItem;
+    private IfcRenderScene renderScene = IfcRenderScene.Empty();
+    private int selectedProductId;
+    private CancellationTokenSource? renderSceneCancellation;
+    private long renderSceneLoadVersion;
+    private object? lastRenderStore;
+    private object? lastGeometryContext;
 
     public ObservableCollection<IfcViewportItem> Items { get; } = [];
 
@@ -1101,6 +1105,18 @@ public sealed class ViewportPanelViewModel(MainWindowViewModel owner, IIfcGeomet
     {
         get => summary;
         private set => this.RaiseAndSetIfChanged(ref summary, value);
+    }
+
+    public IfcRenderScene RenderScene
+    {
+        get => renderScene;
+        private set => this.RaiseAndSetIfChanged(ref renderScene, value);
+    }
+
+    public int SelectedProductId
+    {
+        get => selectedProductId;
+        private set => this.RaiseAndSetIfChanged(ref selectedProductId, value);
     }
 
     public IfcViewportItem? SelectedItem
@@ -1121,27 +1137,94 @@ public sealed class ViewportPanelViewModel(MainWindowViewModel owner, IIfcGeomet
         Summary = IfcNavigationProjector.GetDocumentViewportSummary(document);
         var items = geometryBackend.ProjectDocument(document);
         MainWindowViewModel.ReplaceItems(Items, items);
-        MainWindowViewModel.ReplaceItems(Meshes, geometryBackend.BuildPreviewMeshes(document, items));
+        Meshes.Clear();
+        SelectedProductId = 0;
+        var geometryContext = XbimIfcDocumentService.TryGetGeometryContext(document);
+        if (!RenderScene.IsEmpty
+            && document.XbimStore is not null
+            && geometryContext is not null
+            && ReferenceEquals(document.XbimStore, lastRenderStore)
+            && ReferenceEquals(geometryContext, lastGeometryContext))
+        {
+            Summary = RenderScene.Status;
+            return;
+        }
+
+        BeginLoadRenderScene(document, IfcRenderSceneRequest.FullModel);
     }
 
     public void SetSelection(IfcDocument document, IfcEntity entity)
     {
         Title = entity.DisplayName;
-        Summary = $"Selected #{entity.Id}. {geometryBackend.Status}";
+        Summary = RenderScene.IsEmpty
+            ? $"Selected #{entity.Id}. {geometryBackend.Status}"
+            : $"Selected #{entity.Id}. {RenderScene.Status}";
+        SelectedProductId = entity.Id;
         var items = geometryBackend.ProjectSelection(document, entity.Id);
         MainWindowViewModel.ReplaceItems(Items, items);
-        MainWindowViewModel.ReplaceItems(Meshes, geometryBackend.BuildPreviewMeshes(document, items));
+        Meshes.Clear();
     }
 
     public void SetType(IfcDocument document, IfcTypeCount typeCount)
     {
         Title = typeCount.Type;
         Summary = IfcNavigationProjector.GetTypeViewportSummary(typeCount);
+        SelectedProductId = 0;
         var items = document.EntitiesByType.TryGetValue(typeCount.Type, out var entities)
             ? entities.Take(120).Select(entity => new IfcViewportItem(entity.Id, $"#{entity.Id} {entity.DisplayName}"))
             : [];
         MainWindowViewModel.ReplaceItems(Items, items);
-        MainWindowViewModel.ReplaceItems(Meshes, geometryBackend.BuildPreviewMeshes(document, Items.ToList()));
+        Meshes.Clear();
+    }
+
+    public void SelectProduct(int productId)
+    {
+        owner.SelectEntityById(productId, "viewport");
+    }
+
+    private void BeginLoadRenderScene(IfcDocument document, IfcRenderSceneRequest request)
+    {
+        renderSceneCancellation?.Cancel();
+        renderSceneCancellation?.Dispose();
+        renderSceneCancellation = new CancellationTokenSource();
+        var token = renderSceneCancellation.Token;
+        var version = Interlocked.Increment(ref renderSceneLoadVersion);
+        RenderScene = IfcRenderScene.Empty("Generating xBIM render scene...");
+        var progress = new Progress<string>(message => Summary = message);
+        _ = LoadRenderSceneAsync(document, request, token, version, progress);
+    }
+
+    private async Task LoadRenderSceneAsync(
+        IfcDocument document,
+        IfcRenderSceneRequest request,
+        CancellationToken cancellationToken,
+        long version,
+        IProgress<string> progress)
+    {
+        try
+        {
+            var scene = await geometryBackend.BuildRenderSceneAsync(document, request, cancellationToken, progress);
+            if (cancellationToken.IsCancellationRequested || version != renderSceneLoadVersion)
+            {
+                return;
+            }
+
+            RenderScene = scene;
+            lastRenderStore = document.XbimStore;
+            lastGeometryContext = XbimIfcDocumentService.TryGetGeometryContext(document);
+            Summary = scene.Status;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            if (!cancellationToken.IsCancellationRequested && version == renderSceneLoadVersion)
+            {
+                RenderScene = IfcRenderScene.Empty($"xBIM render scene failed: {exception.Message}");
+                Summary = $"xBIM render scene failed: {exception.Message}";
+            }
+        }
     }
 }
 

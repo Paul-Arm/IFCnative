@@ -15,6 +15,12 @@ public interface IIfcGeometryBackend
     IReadOnlyList<IfcViewportItem> ProjectSelection(IfcDocument document, int entityId, int limit = 80);
 
     IReadOnlyList<IfcPreviewMesh> BuildPreviewMeshes(IfcDocument document, IReadOnlyList<IfcViewportItem> items, int limit = 48);
+
+    Task<IfcRenderScene> BuildRenderSceneAsync(
+        IfcDocument document,
+        IfcRenderSceneRequest request,
+        CancellationToken cancellationToken = default,
+        IProgress<string>? progress = null);
 }
 
 public sealed record IfcGeometryValidationResult(string BackendName, IReadOnlyList<string> Errors, IReadOnlyList<string> Warnings)
@@ -37,4 +43,14 @@ public sealed record IfcPreviewMesh(
     IReadOnlyList<int> TriangleIndices)
 {
     public bool IsRenderable => Vertices.Count > 0 && TriangleIndices.Count > 0;
+}
+
+public sealed record IfcRenderSceneRequest(int? ProductId = null, int? Limit = null)
+{
+    public static IfcRenderSceneRequest FullModel { get; } = new();
+
+    public static IfcRenderSceneRequest ForProduct(int productId)
+    {
+        return new IfcRenderSceneRequest(productId);
+    }
 }
