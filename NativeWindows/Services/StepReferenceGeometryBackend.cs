@@ -133,6 +133,11 @@ public sealed class StepReferenceGeometryBackend : IIfcGeometryBackend
         return items;
     }
 
+    public IReadOnlyList<IfcPreviewMesh> BuildPreviewMeshes(IfcDocument document, IReadOnlyList<IfcViewportItem> items, int limit = 48)
+    {
+        return [];
+    }
+
     private static string DescribeProduct(IfcDocument document, IfcRepresentationSummary summary)
     {
         var productLabel = document.EntityById.TryGetValue(summary.ProductId, out var product)

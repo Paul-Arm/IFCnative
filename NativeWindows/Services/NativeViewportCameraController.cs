@@ -1,0 +1,186 @@
+namespace IFCnative.NativeWindows.Services;
+
+public sealed record NativeViewportCameraState(
+    IfcPreviewVertex Target,
+    double Distance,
+    double YawDegrees,
+    double PitchDegrees,
+    double SceneRadius,
+    double FieldOfViewDegrees = 45)
+{
+    public NativeViewportCameraPose ToPose()
+    {
+        var direction = NativeViewportCameraController.DirectionFromYawPitch(YawDegrees, PitchDegrees);
+        var position = NativeViewportCameraController.Add(Target, NativeViewportCameraController.Scale(direction, Distance));
+        return new NativeViewportCameraPose(
+            position,
+            NativeViewportCameraController.Scale(direction, -Distance),
+            NativeViewportCameraController.UnitZ,
+            FieldOfViewDegrees,
+            0.01,
+            Math.Max(1000, Distance * 12));
+    }
+}
+
+public sealed record NativeViewportCameraPose(
+    IfcPreviewVertex Position,
+    IfcPreviewVertex LookDirection,
+    IfcPreviewVertex UpDirection,
+    double FieldOfViewDegrees,
+    double NearPlaneDistance,
+    double FarPlaneDistance);
+
+public static class NativeViewportCameraController
+{
+    public static IfcPreviewVertex UnitZ { get; } = new(0, 0, 1);
+
+    public static NativeViewportCameraState FitMeshes(IReadOnlyList<IfcPreviewMesh> meshes)
+    {
+        var vertices = meshes
+            .SelectMany(mesh => mesh.Vertices)
+            .Where(IsFinite)
+            .ToList();
+        if (vertices.Count == 0)
+        {
+            return DefaultState();
+        }
+
+        var minX = vertices.Min(vertex => vertex.X);
+        var maxX = vertices.Max(vertex => vertex.X);
+        var minY = vertices.Min(vertex => vertex.Y);
+        var maxY = vertices.Max(vertex => vertex.Y);
+        var minZ = vertices.Min(vertex => vertex.Z);
+        var maxZ = vertices.Max(vertex => vertex.Z);
+        var target = new IfcPreviewVertex((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2);
+        var radius = Math.Sqrt(
+            Math.Pow(maxX - minX, 2) +
+            Math.Pow(maxY - minY, 2) +
+            Math.Pow(maxZ - minZ, 2)) / 2;
+        if (!IsPositiveFinite(radius))
+        {
+            radius = 0.5;
+        }
+
+        return new NativeViewportCameraState(target, Math.Max(4, radius * 3.2), DefaultYawDegrees, DefaultPitchDegrees, radius);
+    }
+
+    public static NativeViewportCameraState DefaultState()
+    {
+        return new NativeViewportCameraState(new IfcPreviewVertex(0, 0, 0.45), 8, DefaultYawDegrees, DefaultPitchDegrees, 1);
+    }
+
+    public static NativeViewportCameraState Orbit(NativeViewportCameraState state, double deltaX, double deltaY)
+    {
+        return state with
+        {
+            YawDegrees = NormalizeDegrees(state.YawDegrees + deltaX * 0.35),
+            PitchDegrees = Math.Clamp(state.PitchDegrees + deltaY * 0.25, -80, 80),
+        };
+    }
+
+    public static NativeViewportCameraState Zoom(NativeViewportCameraState state, int wheelDelta)
+    {
+        var notches = wheelDelta / 120.0;
+        var distance = state.Distance * Math.Pow(0.85, notches);
+        return state with { Distance = ClampDistance(state, distance) };
+    }
+
+    public static NativeViewportCameraState Pan(NativeViewportCameraState state, double deltaX, double deltaY, double viewportWidth, double viewportHeight)
+    {
+        var pose = state.ToPose();
+        var look = Normalize(pose.LookDirection);
+        var right = Normalize(Cross(look, UnitZ));
+        if (!IsFinite(right) || Length(right) == 0)
+        {
+            right = new IfcPreviewVertex(1, 0, 0);
+        }
+
+        var up = Normalize(Cross(right, look));
+        var viewportScale = Math.Max(1, Math.Min(Math.Max(1, viewportWidth), Math.Max(1, viewportHeight)) / 600);
+        var worldPerPixel = state.Distance * 0.0018 / viewportScale;
+        var offset = Add(Scale(right, -deltaX * worldPerPixel), Scale(up, deltaY * worldPerPixel));
+        return state with { Target = Add(state.Target, offset) };
+    }
+
+    public static IfcPreviewVertex DirectionFromYawPitch(double yawDegrees, double pitchDegrees)
+    {
+        var yaw = DegreesToRadians(yawDegrees);
+        var pitch = DegreesToRadians(pitchDegrees);
+        var horizontal = Math.Cos(pitch);
+        return Normalize(new IfcPreviewVertex(
+            horizontal * Math.Cos(yaw),
+            horizontal * Math.Sin(yaw),
+            Math.Sin(pitch)));
+    }
+
+    public static IfcPreviewVertex Add(IfcPreviewVertex left, IfcPreviewVertex right)
+    {
+        return new IfcPreviewVertex(left.X + right.X, left.Y + right.Y, left.Z + right.Z);
+    }
+
+    public static IfcPreviewVertex Scale(IfcPreviewVertex vertex, double factor)
+    {
+        return new IfcPreviewVertex(vertex.X * factor, vertex.Y * factor, vertex.Z * factor);
+    }
+
+    private const double DefaultYawDegrees = -51.633;
+    private const double DefaultPitchDegrees = 25.2;
+
+    private static double ClampDistance(NativeViewportCameraState state, double distance)
+    {
+        var min = Math.Max(0.1, state.SceneRadius * 0.2);
+        var max = Math.Max(1000, state.SceneRadius * 80);
+        return Math.Clamp(distance, min, max);
+    }
+
+    private static double NormalizeDegrees(double degrees)
+    {
+        var normalized = degrees % 360;
+        return normalized < -180
+            ? normalized + 360
+            : normalized > 180
+                ? normalized - 360
+                : normalized;
+    }
+
+    private static IfcPreviewVertex Cross(IfcPreviewVertex left, IfcPreviewVertex right)
+    {
+        return new IfcPreviewVertex(
+            left.Y * right.Z - left.Z * right.Y,
+            left.Z * right.X - left.X * right.Z,
+            left.X * right.Y - left.Y * right.X);
+    }
+
+    private static IfcPreviewVertex Normalize(IfcPreviewVertex vertex)
+    {
+        var length = Length(vertex);
+        return length > 0 && !double.IsNaN(length) && !double.IsInfinity(length)
+            ? new IfcPreviewVertex(vertex.X / length, vertex.Y / length, vertex.Z / length)
+            : new IfcPreviewVertex(0, 0, 0);
+    }
+
+    private static double Length(IfcPreviewVertex vertex)
+    {
+        return Math.Sqrt(vertex.X * vertex.X + vertex.Y * vertex.Y + vertex.Z * vertex.Z);
+    }
+
+    private static double DegreesToRadians(double degrees)
+    {
+        return degrees * Math.PI / 180;
+    }
+
+    private static bool IsPositiveFinite(double value)
+    {
+        return value > 0 && !double.IsNaN(value) && !double.IsInfinity(value);
+    }
+
+    private static bool IsFinite(IfcPreviewVertex vertex)
+    {
+        return IsFinite(vertex.X) && IsFinite(vertex.Y) && IsFinite(vertex.Z);
+    }
+
+    private static bool IsFinite(double value)
+    {
+        return !double.IsNaN(value) && !double.IsInfinity(value);
+    }
+}

@@ -9,6 +9,7 @@ using IFCnative.NativeWindows.Models;
 using IFCnative.NativeWindows.Services;
 using IFCnative.NativeWindows.ViewModels;
 using Microsoft.Win32;
+using IOPath = System.IO.Path;
 
 namespace IFCnative.NativeWindows;
 
@@ -23,6 +24,8 @@ public partial class MainWindow : Window
         "Done: typed entity index",
         "Done: relationship index",
         "Done: property/resource/type/unit indexes",
+        "Done: native in-memory IFC model for objects, properties, placements, and geometry",
+        "Done: native geometry transforms for relative placements, axis/ref directions, and local solid/profile offsets",
         "Done: product placement index/editor",
         "Done: product representation index",
         "Done: rectangle/cylinder body preset draft workflows",
@@ -30,7 +33,7 @@ public partial class MainWindow : Window
         "Done: opening filling draft workflow with body presets",
         "Done: common Pset/base Qto template draft workflows",
         "Done: simple material assignment draft workflow",
-        "Done: geometry backend abstraction and STEP-reference viewport preview",
+        "Done: geometry backend abstraction and native memory-model mesh viewport with fit/orbit/pan/zoom camera and mesh picking",
         "Done: cancellable async IFC/ifcZIP file loading",
         "Done: duplicate GlobalId and containment diagnostics",
         "Done: grouped diagnostics with repair suggestions",
@@ -44,7 +47,7 @@ public partial class MainWindow : Window
         "Done: entity inspector",
         "Done: basic entity editing/export",
         "Done: centralized STEP writer helpers",
-        "Next: native mesh/tessellation backend",
+        "Next: full native IFC mesh extraction/streaming renderer",
         "Next: richer psets/quantities normalization",
         "Unsupported: IDS/MVD validation",
         "Unsupported: ifcXML",
@@ -59,12 +62,19 @@ public partial class MainWindow : Window
     private readonly RecentFileStore recentFileStore = new();
     private readonly NativeWindowLayoutStore layoutStore = new();
     private readonly IfcDraftSession draftSession = new();
-    private readonly IIfcGeometryBackend geometryBackend = new StepReferenceGeometryBackend();
+    private readonly IIfcGeometryBackend geometryBackend = new NativeMemoryGeometryBackend();
     private readonly HashSet<int> bookmarkedEntityIds = [];
     private readonly ScaleTransform graphScale = new(1, 1);
     private readonly TranslateTransform graphTranslate = new(0, 0);
     private IReadOnlyList<IfcRelationshipGraphItem> currentGraphItems = Array.Empty<IfcRelationshipGraphItem>();
+    private IReadOnlyList<IfcPreviewMesh> currentViewportMeshes = Array.Empty<IfcPreviewMesh>();
+    private readonly Dictionary<GeometryModel3D, IfcPreviewMesh> viewportMeshByModel = new();
+    private NativeViewportCameraState? viewportCameraState;
     private Point? graphDragStart;
+    private Point? viewportDragStart;
+    private Point? viewportDragOrigin;
+    private ViewportDragMode viewportDragMode = ViewportDragMode.None;
+    private bool viewportDragMoved;
     private string? activeDocumentPath;
     private bool updatingUi;
 
@@ -193,11 +203,11 @@ public partial class MainWindow : Window
 
         if (!File.Exists(lastOpenedPath))
         {
-            StatusText.Text = $"Last opened IFC is missing: {Path.GetFileName(lastOpenedPath)}. Loaded sample instead.";
+            StatusText.Text = $"Last opened IFC is missing: {IOPath.GetFileName(lastOpenedPath)}. Loaded sample instead.";
             return;
         }
 
-        StatusText.Text = $"Restoring last IFC workspace: {Path.GetFileName(lastOpenedPath)}…";
+        StatusText.Text = $"Restoring last IFC workspace: {IOPath.GetFileName(lastOpenedPath)}…";
         await OpenIfcFileAsync(lastOpenedPath);
     }
 
@@ -229,7 +239,7 @@ public partial class MainWindow : Window
             var loaded = await IfcFileLoader.ReadAsync(path, progress, openCancellation.Token);
             StatusText.Text = $"Parsing {loaded.FileName}…";
             var parsed = await Task.Run(() => IfcStepParser.Parse(loaded.Text, loaded.FileName), openCancellation.Token);
-            activeDocumentPath = Path.GetFullPath(path);
+            activeDocumentPath = IOPath.GetFullPath(path);
             LoadDocument(parsed);
             recentFileStore.Add(path);
             RefreshRecentFiles();
@@ -310,7 +320,7 @@ public partial class MainWindow : Window
 
         IfcFileLoader.WriteText(dialog.FileName, document.ToStepText(), document.FileName);
         var warningSuffix = validation.Warnings.Count == 0 ? string.Empty : $" with {validation.Warnings.Count:N0} warning(s)";
-        StatusText.Text = $"Exported {Path.GetFileName(dialog.FileName)} after validation{warningSuffix}.";
+        StatusText.Text = $"Exported {IOPath.GetFileName(dialog.FileName)} after validation{warningSuffix}.";
     }
 
     private void SaveEdit_Click(object sender, RoutedEventArgs e)
@@ -649,10 +659,24 @@ public partial class MainWindow : Window
         }
 
         var selectedId = selectedEntity.Id;
-        StageDraft(
-            IfcDocumentEditor.AssignBodyRepresentation(document, selectedId, BodyWidthBox.Text, BodyDepthBox.Text, BodyHeightBox.Text, profile),
-            selectedId,
-            $"Staged {profile} body representation for #{selectedId}");
+        var draft = CanResizeExistingMemoryBody(document, selectedId, profile)
+            ? IfcDocumentEditor.UpdateBodyDimensions(document, selectedId, BodyWidthBox.Text, BodyDepthBox.Text, BodyHeightBox.Text)
+            : IfcDocumentEditor.AssignBodyRepresentation(document, selectedId, BodyWidthBox.Text, BodyDepthBox.Text, BodyHeightBox.Text, profile);
+        var action = CanResizeExistingMemoryBody(document, selectedId, profile) ? "body dimension edit" : "body representation";
+        StageDraft(draft, selectedId, $"Staged {profile} {action} for #{selectedId}");
+    }
+
+    private static bool CanResizeExistingMemoryBody(IfcDocument document, int productId, string profile)
+    {
+        if (!document.MemoryModel.ProductGeometryByProductId.TryGetValue(productId, out var geometry))
+        {
+            return false;
+        }
+
+        var expectedProfile = profile.Equals("cylinder", StringComparison.OrdinalIgnoreCase) ? "Circle" : "Rectangle";
+        return geometry.Primitives.Any(primitive => primitive.Kind == "ExtrudedAreaSolid"
+            && primitive.MappedItemSourceId == 0
+            && primitive.Profile?.Kind.Equals(expectedProfile, StringComparison.OrdinalIgnoreCase) == true);
     }
 
     private static bool CanAssignBodyRepresentation(IfcDocument document, IfcEntity entity)
@@ -1036,9 +1060,10 @@ public partial class MainWindow : Window
 
     private void FitViewport_Click(object sender, RoutedEventArgs e)
     {
+        FitViewportCameraToCurrentMeshes();
         ViewportInfo.Text = selectedEntity is null
-            ? "Viewport reset to native overview."
-            : $"Fit selection #{selectedEntity.Id} ({selectedEntity.TypeName()}).";
+            ? "Viewport fitted to native overview."
+            : $"Viewport fitted to selection #{selectedEntity.Id} ({selectedEntity.TypeName()}).";
     }
 
     private void ResetViewport_Click(object sender, RoutedEventArgs e)
@@ -1048,38 +1073,209 @@ public partial class MainWindow : Window
             ViewportTitle.Text = "Native Viewport";
             var viewportItems = geometryBackend.ProjectDocument(document);
             ViewportGeometryList.ItemsSource = viewportItems;
-            RenderNativeViewport(viewportItems);
+            RenderNativeViewport(viewportItems, resetCamera: true);
         }
 
         ViewportInfo.Text = "Native geometry preview reset.";
     }
 
-    private void RenderNativeViewport(IReadOnlyList<IfcViewportItem> items)
+    private void RenderNativeViewport(IReadOnlyList<IfcViewportItem> items, bool resetCamera = true)
     {
         NativeViewport3D.Children.Clear();
-        NativeViewport3D.Camera = new PerspectiveCamera(new Point3D(7, -9, 6), new Vector3D(-7, 9, -6), new Vector3D(0, 0, 1), 45);
+        viewportMeshByModel.Clear();
 
         var group = new Model3DGroup();
         group.Children.Add(new AmbientLight(Color.FromRgb(90, 110, 140)));
         group.Children.Add(new DirectionalLight(Colors.White, new Vector3D(-0.8, 1.0, -1.2)));
 
-        var visibleItems = items.Where(item => item.EntityId is not null).Take(24).ToList();
-        if (visibleItems.Count == 0)
+        var previewMeshes = document is null
+            ? new List<IfcPreviewMesh>()
+            : geometryBackend.BuildPreviewMeshes(document, items)
+                .Where(mesh => mesh.IsRenderable)
+                .ToList();
+        currentViewportMeshes = previewMeshes;
+        if (previewMeshes.Count == 0)
         {
-            visibleItems.Add(new IfcViewportItem(null, "Generated sample preview volume"));
+            viewportCameraState = NativeViewportCameraController.DefaultState();
+            ApplyViewportCameraState();
+            group.Children.Add(CreateBox(new Point3D(0, 0, 0.45), 1.15, 1.15, 0.9, Color.FromRgb(59, 130, 246)));
+            NativeViewport3D.Children.Add(new ModelVisual3D { Content = group });
+            return;
         }
 
-        var columns = Math.Max(1, (int)Math.Ceiling(Math.Sqrt(visibleItems.Count)));
-        for (var index = 0; index < visibleItems.Count; index++)
+        if (resetCamera || viewportCameraState is null)
         {
-            var row = index / columns;
-            var column = index % columns;
-            var center = new Point3D((column - (columns - 1) / 2.0) * 1.7, row * 1.7, 0.45);
-            var height = 0.7 + (index % 4) * 0.18;
-            group.Children.Add(CreateBox(center, 1.15, 1.15, height, index == 0 ? Color.FromRgb(59, 130, 246) : Color.FromRgb(34, 197, 94)));
+            viewportCameraState = NativeViewportCameraController.FitMeshes(previewMeshes);
+        }
+
+        ApplyViewportCameraState();
+        for (var index = 0; index < previewMeshes.Count; index++)
+        {
+            var meshModel = CreateMeshModel(previewMeshes[index], PreviewColor(index));
+            viewportMeshByModel[meshModel] = previewMeshes[index];
+            group.Children.Add(meshModel);
         }
 
         NativeViewport3D.Children.Add(new ModelVisual3D { Content = group });
+    }
+
+    private void FitViewportCameraToCurrentMeshes()
+    {
+        viewportCameraState = currentViewportMeshes.Count == 0
+            ? NativeViewportCameraController.DefaultState()
+            : NativeViewportCameraController.FitMeshes(currentViewportMeshes);
+        ApplyViewportCameraState();
+    }
+
+    private static GeometryModel3D CreateMeshModel(IfcPreviewMesh mesh, Color color)
+    {
+        var points = new Point3DCollection(mesh.Vertices.Select(vertex => new Point3D(vertex.X, vertex.Y, vertex.Z)));
+        var indices = new Int32Collection(mesh.TriangleIndices);
+        return new GeometryModel3D(
+            new MeshGeometry3D { Positions = points, TriangleIndices = indices },
+            new DiffuseMaterial(new SolidColorBrush(color)))
+        {
+            BackMaterial = new DiffuseMaterial(new SolidColorBrush(Color.FromRgb(15, 23, 42))),
+        };
+    }
+
+    private void ApplyViewportCameraState()
+    {
+        viewportCameraState ??= NativeViewportCameraController.DefaultState();
+        var pose = viewportCameraState.ToPose();
+        NativeViewport3D.Camera = new PerspectiveCamera(
+            ToPoint3D(pose.Position),
+            ToVector3D(pose.LookDirection),
+            ToVector3D(pose.UpDirection),
+            pose.FieldOfViewDegrees)
+        {
+            NearPlaneDistance = pose.NearPlaneDistance,
+            FarPlaneDistance = pose.FarPlaneDistance,
+        };
+    }
+
+    private void NativeViewport3D_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        BeginViewportDrag(e, ViewportDragMode.Orbit);
+    }
+
+    private void NativeViewport3D_MouseRightButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        BeginViewportDrag(e, ViewportDragMode.Pan);
+    }
+
+    private void BeginViewportDrag(MouseButtonEventArgs e, ViewportDragMode mode)
+    {
+        var position = e.GetPosition(NativeViewport3D);
+        viewportDragStart = position;
+        viewportDragOrigin = position;
+        viewportDragMode = mode;
+        viewportDragMoved = false;
+        NativeViewport3D.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void NativeViewport3D_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (viewportDragStart is null || viewportCameraState is null)
+        {
+            return;
+        }
+
+        var position = e.GetPosition(NativeViewport3D);
+        var delta = position - viewportDragStart.Value;
+        viewportDragMoved = viewportDragMoved || delta.Length > 1;
+        viewportCameraState = viewportDragMode == ViewportDragMode.Pan
+            ? NativeViewportCameraController.Pan(viewportCameraState, delta.X, delta.Y, NativeViewport3D.ActualWidth, NativeViewport3D.ActualHeight)
+            : NativeViewportCameraController.Orbit(viewportCameraState, delta.X, delta.Y);
+        viewportDragStart = position;
+        ApplyViewportCameraState();
+        e.Handled = true;
+    }
+
+    private void NativeViewport3D_MouseButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        var releasePoint = e.GetPosition(NativeViewport3D);
+        var clickPoint = viewportDragOrigin ?? e.GetPosition(NativeViewport3D);
+        var shouldPick = viewportDragMode == ViewportDragMode.Orbit && !viewportDragMoved && (releasePoint - clickPoint).Length <= 3;
+        viewportDragStart = null;
+        viewportDragOrigin = null;
+        viewportDragMode = ViewportDragMode.None;
+        viewportDragMoved = false;
+        NativeViewport3D.ReleaseMouseCapture();
+        if (shouldPick)
+        {
+            TrySelectViewportMesh(clickPoint);
+        }
+
+        e.Handled = true;
+    }
+
+    private void NativeViewport3D_MouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        viewportCameraState ??= currentViewportMeshes.Count == 0
+            ? NativeViewportCameraController.DefaultState()
+            : NativeViewportCameraController.FitMeshes(currentViewportMeshes);
+        viewportCameraState = NativeViewportCameraController.Zoom(viewportCameraState, e.Delta);
+        ApplyViewportCameraState();
+        e.Handled = true;
+    }
+
+    private static Point3D ToPoint3D(IfcPreviewVertex vertex)
+    {
+        return new Point3D(vertex.X, vertex.Y, vertex.Z);
+    }
+
+    private static Vector3D ToVector3D(IfcPreviewVertex vertex)
+    {
+        return new Vector3D(vertex.X, vertex.Y, vertex.Z);
+    }
+
+    private void TrySelectViewportMesh(Point point)
+    {
+        if (document is null)
+        {
+            return;
+        }
+
+        var hit = VisualTreeHelper.HitTest(NativeViewport3D, point);
+        if (hit is not RayHitTestResult rayHit || rayHit.ModelHit is not GeometryModel3D geometryModel)
+        {
+            return;
+        }
+
+        if (!viewportMeshByModel.TryGetValue(geometryModel, out var mesh))
+        {
+            return;
+        }
+
+        var selection = NativeViewportSelectionService.ResolveMeshSelection(document, mesh, geometryBackend.Status);
+        if (selection is null || !document.EntityById.TryGetValue(selection.ProductSourceId, out var productEntity))
+        {
+            return;
+        }
+
+        SelectEntity(productEntity, resetViewportCamera: false);
+        ViewportInfo.Text = selection.Status;
+    }
+
+    private enum ViewportDragMode
+    {
+        None,
+        Orbit,
+        Pan,
+    }
+
+    private static Color PreviewColor(int index)
+    {
+        return index switch
+        {
+            0 => Color.FromRgb(59, 130, 246),
+            1 => Color.FromRgb(34, 197, 94),
+            2 => Color.FromRgb(245, 158, 11),
+            3 => Color.FromRgb(236, 72, 153),
+            _ => Color.FromRgb(20, 184, 166),
+        };
     }
 
     private static GeometryModel3D CreateBox(Point3D center, double width, double depth, double height, Color color)
@@ -1368,6 +1564,11 @@ public partial class MainWindow : Window
 
     private void RefreshRelationshipGraph()
     {
+        if (RelationshipGraphCanvas is null || GraphFilterBox is null || GraphDepthBox is null)
+        {
+            return;
+        }
+
         if (document is null || selectedEntity is null)
         {
             currentGraphItems = Array.Empty<IfcRelationshipGraphItem>();
@@ -1422,7 +1623,7 @@ public partial class MainWindow : Window
         DraftList.ItemsSource = draftLines;
     }
 
-    private void SelectEntity(IfcEntity entity)
+    private void SelectEntity(IfcEntity entity, bool resetViewportCamera = true)
     {
         if (document is null)
         {
@@ -1443,7 +1644,7 @@ public partial class MainWindow : Window
         ViewportInfo.Text = $"Selected #{entity.Id}. {geometryBackend.Status}";
         var selectionViewportItems = geometryBackend.ProjectSelection(document, entity.Id);
         ViewportGeometryList.ItemsSource = selectionViewportItems;
-        RenderNativeViewport(selectionViewportItems);
+        RenderNativeViewport(selectionViewportItems, resetViewportCamera);
         ToggleBookmarkButton.Content = bookmarkedEntityIds.Contains(entity.Id) ? "Unpin selection" : "Pin selection";
 
         IncomingList.ItemsSource = details.IncomingReferences;

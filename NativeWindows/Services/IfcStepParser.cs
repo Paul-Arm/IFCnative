@@ -65,11 +65,13 @@ public static partial class IfcStepParser
         BuildRepresentationIndex(document);
         BuildSpatialTree(document);
         ValidateDocument(document);
+        document.MemoryModel = IfcMemoryModelBuilder.Build(document);
         document.Diagnostics.Info($"Loaded {document.Entities.Count:N0} STEP entities.");
         document.Diagnostics.Info($"Indexed {document.RelationshipById.Count:N0} IFC relationships.");
         document.Diagnostics.Info($"Indexed {document.PropertySetById.Count:N0} property/quantity sets.");
         document.Diagnostics.Info($"Indexed {document.PlacementsByEntity.Count:N0} product placements.");
         document.Diagnostics.Info($"Indexed {document.RepresentationsByEntity.Count:N0} product representations.");
+        document.Diagnostics.Info($"Built native in-memory IFC model: {document.MemoryModel.Objects.Count:N0} objects, {document.MemoryModel.PropertyValueCount:N0} property values, {document.MemoryModel.GeometryPrimitiveCount:N0} geometry primitives.");
         document.Diagnostics.Info($"Detected schema: {document.Schema}.");
 
         return document;
