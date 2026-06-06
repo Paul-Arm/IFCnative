@@ -39,9 +39,10 @@ public sealed class NativeDockFactory(MainWindowViewModel workspace) : Factory
         documentDock.DefaultDockable = activeDocument;
         documentDock.FocusedDockable = activeDocument;
 
-        var inspector = Tool("inspector", "Inspector", workspace.Inspector, 0.45);
-        var diagnostics = Tool("diagnostics", "Diagnostics", workspace.Diagnostics, 0.25);
-        var draft = Tool("draft", "Draft", workspace.Draft, 0.20);
+        var inspector = Tool("inspector", "Inspector", workspace.Inspector, 0.40);
+        var diagnostics = Tool("diagnostics", "Diagnostics", workspace.Diagnostics, 0.20);
+        var draft = Tool("draft", "Draft", workspace.Draft, 0.15);
+        var settings = Tool("settings", "Settings", workspace.Settings, 0.15);
         var console = Tool("console", "Console", workspace.Console, 0.10);
 
         var inspectorDock = CreateToolDock();
@@ -49,7 +50,7 @@ public sealed class NativeDockFactory(MainWindowViewModel workspace) : Factory
         inspectorDock.Title = "Review";
         inspectorDock.Alignment = Alignment.Right;
         inspectorDock.Proportion = 0.28;
-        inspectorDock.VisibleDockables = CreateList<IDockable>(inspector, diagnostics, draft, console);
+        inspectorDock.VisibleDockables = CreateList<IDockable>(inspector, diagnostics, draft, settings, console);
         var activeTool = workspace.SelectedWorkspace?.Id == "review" ? diagnostics : inspector;
         inspectorDock.ActiveDockable = activeTool;
         inspectorDock.DefaultDockable = activeTool;

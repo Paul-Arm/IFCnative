@@ -23,7 +23,8 @@ public sealed record IfcRenderMesh(
     int IfcTypeId,
     IfcRenderColor Color,
     IReadOnlyList<IfcRenderVertex> Vertices,
-    IReadOnlyList<int> Indices)
+    IReadOnlyList<int> Indices,
+    bool IsSpace = false)
 {
     public bool IsRenderable => ProductId > 0 && Vertices.Count > 0 && Indices.Count >= 3;
 }

@@ -9,6 +9,7 @@
     </StackPanel>
 
     <ListBox Grid.Row="1"
+             x:Name="TreeListBox"
              Classes="fileTree"
              ItemsSource="{Binding Rows}"
              SelectedItem="{Binding SelectedRow}">

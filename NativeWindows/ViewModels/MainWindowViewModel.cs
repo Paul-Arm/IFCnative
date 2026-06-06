@@ -155,13 +155,15 @@ public sealed class MainWindowViewModel : ReactiveViewModel
     private string activeEntityCount = "0 entities";
     private string sessionSummary = "0 files";
     private bool isBusy;
+    private NativeUserPreferences currentPreferences;
     private double textScale = 1.0;
 
     public MainWindowViewModel(IFileDialogService fileDialogs, NativeUserPreferencesStore? preferencesStore = null, bool loadSample = true)
     {
         this.fileDialogs = fileDialogs;
         this.preferencesStore = preferencesStore ?? new NativeUserPreferencesStore();
-        textScale = this.preferencesStore.Load().TextScale;
+        currentPreferences = this.preferencesStore.Load();
+        textScale = currentPreferences.TextScale;
 
         Workspaces.Add(new WorkspacePreset("edit", "IFC Editing", "Structure, viewport, inspector"));
         Workspaces.Add(new WorkspacePreset("review", "Review", "Diagnostics, drafts, object data"));
@@ -171,6 +173,11 @@ public sealed class MainWindowViewModel : ReactiveViewModel
         Structure = new StructurePanelViewModel(this);
         Types = new TypesPanelViewModel(this);
         Viewport = new ViewportPanelViewModel(this, geometryBackend);
+        Viewport.AntiAliasing = currentPreferences.AntiAliasing;
+        Viewport.HideSpaces = currentPreferences.HideSpaces;
+        Viewport.FieldOfView = currentPreferences.FieldOfView;
+        Viewport.NearPlane = currentPreferences.NearPlane;
+        Viewport.FarPlane = currentPreferences.FarPlane;
         Inspector = new InspectorPanelViewModel(this);
         Draft = new DraftPanelViewModel(this);
         Graph = new GraphPanelViewModel(this);
@@ -179,6 +186,7 @@ public sealed class MainWindowViewModel : ReactiveViewModel
         Recent = new RecentFilesPanelViewModel(this);
         Notes = new NotesPanelViewModel();
         Console = new ConsolePanelViewModel();
+        Settings = new SettingsPanelViewModel(this);
 
         OpenIfcCommand = ReactiveCommand.CreateFromTask(() => OpenIfcAsync(false));
         AddIfcCommand = ReactiveCommand.CreateFromTask(() => OpenIfcAsync(true));
@@ -225,6 +233,8 @@ public sealed class MainWindowViewModel : ReactiveViewModel
 
     public ConsolePanelViewModel Console { get; }
 
+    public SettingsPanelViewModel Settings { get; }
+
     public ReactiveCommand<Unit, Unit> OpenIfcCommand { get; }
 
     public ReactiveCommand<Unit, Unit> AddIfcCommand { get; }
@@ -250,17 +260,65 @@ public sealed class MainWindowViewModel : ReactiveViewModel
     public double TextScale
     {
         get => textScale;
-        private set
+        set
         {
             var nextScale = NativeUserPreferencesStore.SanitizeTextScale(value);
             if (SetProperty(ref textScale, nextScale))
             {
-                preferencesStore.Save(new NativeUserPreferences(nextScale));
+                currentPreferences = currentPreferences with { TextScale = nextScale };
+                preferencesStore.Save(currentPreferences);
                 this.RaisePropertyChanged(nameof(TextScalePercent));
                 StatusText = $"UI text zoom: {TextScalePercent}.";
                 Log($"ui.zoom({TextScalePercent})");
             }
         }
+    }
+
+    public NativeUserPreferences CurrentPreferences => currentPreferences;
+
+    public void UpdateAntiAliasing(AntiAliasingMode mode)
+    {
+        currentPreferences = currentPreferences with { AntiAliasing = mode };
+        preferencesStore.Save(currentPreferences);
+        Viewport.AntiAliasing = mode;
+        StatusText = $"Anti-aliasing mode set to: {mode}.";
+        Log($"ui.antialiasing({mode})");
+    }
+
+    public void UpdateHideSpaces(bool hide)
+    {
+        currentPreferences = currentPreferences with { HideSpaces = hide };
+        preferencesStore.Save(currentPreferences);
+        Viewport.HideSpaces = hide;
+        StatusText = hide ? "IFC Spaces hidden." : "IFC Spaces visible.";
+        Log($"ui.hidespaces({hide})");
+    }
+
+    public void UpdateFieldOfView(double fov)
+    {
+        currentPreferences = currentPreferences with { FieldOfView = fov };
+        preferencesStore.Save(currentPreferences);
+        Viewport.FieldOfView = fov;
+        StatusText = $"Field of View set to: {fov:0}°.";
+        Log($"ui.fov({fov:F1})");
+    }
+
+    public void UpdateNearPlane(double near)
+    {
+        currentPreferences = currentPreferences with { NearPlane = near };
+        preferencesStore.Save(currentPreferences);
+        Viewport.NearPlane = near;
+        StatusText = $"Near clipping plane set to: {near:F3}m.";
+        Log($"ui.nearplane({near:F3})");
+    }
+
+    public void UpdateFarPlane(double far)
+    {
+        currentPreferences = currentPreferences with { FarPlane = far };
+        preferencesStore.Save(currentPreferences);
+        Viewport.FarPlane = far;
+        StatusText = $"Far clipping plane set to: {far:0}m.";
+        Log($"ui.farplane({far:F1})");
     }
 
     public string TextScalePercent => $"{TextScale * 100:0}%";
@@ -398,6 +456,11 @@ public sealed class MainWindowViewModel : ReactiveViewModel
         if (updateViewport)
         {
             Viewport.SetSelection(document, entity);
+        }
+
+        if (source != "tree")
+        {
+            Structure.SelectEntity(entityId);
         }
 
         Graph.SetSelection(document, entity);
@@ -913,6 +976,7 @@ public sealed class StructurePanelViewModel(MainWindowViewModel owner) : Reactiv
     private string searchText = string.Empty;
     private IfcFileTreeRowViewModel? selectedRow;
     private IfcFileTreeRowViewModel? selectedBookmark;
+    private bool isSelectingProgrammatically;
 
     public ObservableCollection<IfcFileTreeRowViewModel> Rows { get; } = [];
 
@@ -937,7 +1001,10 @@ public sealed class StructurePanelViewModel(MainWindowViewModel owner) : Reactiv
         {
             if (SetProperty(ref selectedRow, value) && value is not null)
             {
-                owner.SelectEntityById(value.Node.Entity.Id, "tree");
+                if (!isSelectingProgrammatically)
+                {
+                    owner.SelectEntityById(value.Node.Entity.Id, "tree");
+                }
             }
         }
     }
@@ -952,6 +1019,77 @@ public sealed class StructurePanelViewModel(MainWindowViewModel owner) : Reactiv
                 owner.SelectEntityById(value.Node.Entity.Id, "bookmark");
             }
         }
+    }
+
+    public void SelectEntity(int entityId)
+    {
+        if (document is null)
+        {
+            return;
+        }
+
+        var path = new List<int>();
+        bool found = false;
+        foreach (var root in currentRoots)
+        {
+            if (FindPath(root, entityId, path))
+            {
+                found = true;
+                break;
+            }
+        }
+
+        if (!found)
+        {
+            found = currentRoots.Any(root => root.Entity.Id == entityId);
+        }
+
+        if (found)
+        {
+            foreach (var ancestorId in path)
+            {
+                expansionByEntityId[ancestorId] = true;
+            }
+
+            if (path.Count > 0)
+            {
+                RebuildRows();
+            }
+
+            var rowToSelect = Rows.FirstOrDefault(row => row.Node.Entity.Id == entityId);
+            if (rowToSelect is not null)
+            {
+                isSelectingProgrammatically = true;
+                try
+                {
+                    SelectedRow = rowToSelect;
+                }
+                finally
+                {
+                    isSelectingProgrammatically = false;
+                }
+            }
+        }
+    }
+
+    private bool FindPath(IfcTreeNode current, int targetId, List<int> path)
+    {
+        if (current.Entity.Id == targetId)
+        {
+            return true;
+        }
+
+        foreach (var child in current.Children)
+        {
+            path.Add(current.Entity.Id);
+            if (FindPath(child, targetId, path))
+            {
+                return true;
+            }
+            path.RemoveAt(path.Count - 1);
+        }
+
+        return false;
     }
 
     public void SetDocument(IfcDocument nextDocument, IEnumerable<int> bookmarkedEntityIds)
@@ -1084,6 +1222,11 @@ public sealed class ViewportPanelViewModel(MainWindowViewModel owner, IIfcGeomet
     private IfcViewportItem? selectedItem;
     private IfcRenderScene renderScene = IfcRenderScene.Empty();
     private int selectedProductId;
+    private AntiAliasingMode antiAliasing;
+    private bool hideSpaces;
+    private double fieldOfView;
+    private double nearPlane;
+    private double farPlane;
     private CancellationTokenSource? renderSceneCancellation;
     private long renderSceneLoadVersion;
     private object? lastRenderStore;
@@ -1117,6 +1260,36 @@ public sealed class ViewportPanelViewModel(MainWindowViewModel owner, IIfcGeomet
     {
         get => selectedProductId;
         private set => this.RaiseAndSetIfChanged(ref selectedProductId, value);
+    }
+
+    public AntiAliasingMode AntiAliasing
+    {
+        get => antiAliasing;
+        set => this.RaiseAndSetIfChanged(ref antiAliasing, value);
+    }
+
+    public bool HideSpaces
+    {
+        get => hideSpaces;
+        set => this.RaiseAndSetIfChanged(ref hideSpaces, value);
+    }
+
+    public double FieldOfView
+    {
+        get => fieldOfView;
+        set => this.RaiseAndSetIfChanged(ref fieldOfView, value);
+    }
+
+    public double NearPlane
+    {
+        get => nearPlane;
+        set => this.RaiseAndSetIfChanged(ref nearPlane, value);
+    }
+
+    public double FarPlane
+    {
+        get => farPlane;
+        set => this.RaiseAndSetIfChanged(ref farPlane, value);
     }
 
     public IfcViewportItem? SelectedItem

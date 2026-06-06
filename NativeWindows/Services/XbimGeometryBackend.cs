@@ -235,6 +235,10 @@ public sealed class XbimGeometryBackend : IIfcGeometryBackend
                 continue;
             }
 
+            var isSpace = document.EntityById.TryGetValue(instance.IfcProductLabel, out var entity)
+                && string.Equals(entity.Type, "IFCSPACE", StringComparison.OrdinalIgnoreCase);
+            mesh = mesh with { IsSpace = isSpace };
+
             meshes.Add(mesh);
             decoded++;
             triangleCount += mesh.Indices.Count / 3;

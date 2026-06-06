@@ -1,31 +1,3 @@
-namespace IFCnative.NativeWindows.Services;
-
-public sealed record NativeViewportCameraState(
-    IfcPreviewVertex Target,
-    double Distance,
-    double YawDegrees,
-    double PitchDegrees,
-    double SceneRadius,
-    double FieldOfViewDegrees = 45)
-{
-    public NativeViewportCameraPose ToPose()
-    {
-        var direction = NativeViewportCameraController.DirectionFromYawPitch(YawDegrees, PitchDegrees);
-        var position = NativeViewportCameraController.Add(Target, NativeViewportCameraController.Scale(direction, Distance));
-        return new NativeViewportCameraPose(
-            position,
-            NativeViewportCameraController.Scale(direction, -Distance),
-            NativeViewportCameraController.UnitZ,
-            FieldOfViewDegrees,
-            0.01,
-            Math.Max(1000, Distance * 12));
-    }
-}
-
-public sealed record NativeViewportCameraPose(
-    IfcPreviewVertex Position,
-    IfcPreviewVertex LookDirection,
-    IfcPreviewVertex UpDirection,
     double FieldOfViewDegrees,
     double NearPlaneDistance,
     double FarPlaneDistance);
@@ -99,7 +71,7 @@ public static class NativeViewportCameraController
     {
         return state with
         {
-            YawDegrees = NormalizeDegrees(state.YawDegrees + deltaX * 0.35),
+            YawDegrees = NormalizeDegrees(state.YawDegrees - deltaX * 0.35),
             PitchDegrees = Math.Clamp(state.PitchDegrees + deltaY * 0.25, -80, 80),
         };
     }

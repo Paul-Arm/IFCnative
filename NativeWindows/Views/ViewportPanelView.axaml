@@ -18,6 +18,11 @@
         <views:ViewportPreviewControl x:Name="ViewportCanvas"
                                       Scene="{Binding RenderScene}"
                                       SelectedProductId="{Binding SelectedProductId}"
+                                      AntiAliasing="{Binding AntiAliasing}"
+                                      HideSpaces="{Binding HideSpaces}"
+                                      FieldOfView="{Binding FieldOfView}"
+                                      NearPlane="{Binding NearPlane}"
+                                      FarPlane="{Binding FarPlane}"
                                       ProductPicked="OnViewportProductPicked" />
         <Border HorizontalAlignment="Right"
                 VerticalAlignment="Top"

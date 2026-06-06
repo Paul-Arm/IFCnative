@@ -4,20 +4,40 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.OpenGL;
 using Avalonia.OpenGL.Controls;
+using Avalonia.Rendering;
 using Avalonia.Threading;
 using IFCnative.NativeWindows.Services;
+using IFCnative.NativeWindows.Models;
 using Silk.NET.OpenGL;
 using SilkGL = Silk.NET.OpenGL.GL;
 
 namespace IFCnative.NativeWindows.Views;
 
-public sealed class ViewportPreviewControl : OpenGlControlBase
+public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
 {
     public static readonly StyledProperty<IfcRenderScene?> SceneProperty =
         AvaloniaProperty.Register<ViewportPreviewControl, IfcRenderScene?>(nameof(Scene));
 
     public static readonly StyledProperty<int> SelectedProductIdProperty =
         AvaloniaProperty.Register<ViewportPreviewControl, int>(nameof(SelectedProductId));
+
+    public static readonly StyledProperty<AntiAliasingMode> AntiAliasingProperty =
+        AvaloniaProperty.Register<ViewportPreviewControl, AntiAliasingMode>(nameof(AntiAliasing), AntiAliasingMode.None);
+
+    public AntiAliasingMode AntiAliasing
+    {
+        get => GetValue(AntiAliasingProperty);
+        set => SetValue(AntiAliasingProperty, value);
+    }
+
+    public static readonly StyledProperty<bool> HideSpacesProperty =
+        AvaloniaProperty.Register<ViewportPreviewControl, bool>(nameof(HideSpaces), false);
+
+    public bool HideSpaces
+    {
+        get => GetValue(HideSpacesProperty);
+        set => SetValue(HideSpacesProperty, value);
+    }
 
     private const int VertexStride = 11;
     private enum DragMode
@@ -49,6 +69,26 @@ public sealed class ViewportPreviewControl : OpenGlControlBase
     private bool pointerMoved;
     private DragMode dragMode;
     private int renderLogCount;
+    private bool suppressNextFraming;
+
+    // MSAA FBO buffers
+    private uint msaaFbo;
+    private uint msaaColorRb;
+    private uint msaaDepthRb;
+    private int lastMsaaWidth;
+    private int lastMsaaHeight;
+    private AntiAliasingMode lastMsaaMode = AntiAliasingMode.None;
+
+    // FXAA FBO and Shader buffers
+    private uint postFbo;
+    private uint postTexture;
+    private uint postDepthRb;
+    private uint fxaaProgram;
+    private uint quadVao;
+    private uint quadVbo;
+    private int lastPostWidth;
+    private int lastPostHeight;
+    private AntiAliasingMode lastPostMode = AntiAliasingMode.None;
 
     public event EventHandler<IfcProductPickedEventArgs>? ProductPicked;
 
@@ -59,9 +99,11 @@ public sealed class ViewportPreviewControl : OpenGlControlBase
 
     static ViewportPreviewControl()
     {
-        AffectsRender<ViewportPreviewControl>(SceneProperty, SelectedProductIdProperty);
+        AffectsRender<ViewportPreviewControl>(SceneProperty, SelectedProductIdProperty, AntiAliasingProperty, HideSpacesProperty);
         SceneProperty.Changed.AddClassHandler<ViewportPreviewControl>((control, _) => control.OnSceneChanged());
         SelectedProductIdProperty.Changed.AddClassHandler<ViewportPreviewControl>((control, _) => control.OnSelectedProductChanged());
+        AntiAliasingProperty.Changed.AddClassHandler<ViewportPreviewControl>((control, _) => control.OnAntiAliasingChanged());
+        HideSpacesProperty.Changed.AddClassHandler<ViewportPreviewControl>((control, _) => control.OnHideSpacesChanged());
     }
 
     public IfcRenderScene? Scene
@@ -124,6 +166,31 @@ public sealed class ViewportPreviewControl : OpenGlControlBase
             indexBuffer = glApi.GenBuffer();
             lineVertexArray = glApi.GenVertexArray();
             lineVertexBuffer = glApi.GenBuffer();
+
+            fxaaProgram = CreateProgram(glApi, FxaaVertexShaderSource, FxaaFragmentShaderSource);
+            quadVao = glApi.GenVertexArray();
+            quadVbo = glApi.GenBuffer();
+            glApi.BindVertexArray(quadVao);
+            glApi.BindBuffer(BufferTargetARB.ArrayBuffer, quadVbo);
+            float[] quadVertices = [
+                -1f, -1f,
+                 1f, -1f,
+                -1f,  1f,
+                -1f,  1f,
+                 1f, -1f,
+                 1f,  1f
+            ];
+            unsafe
+            {
+                fixed (float* qPtr = quadVertices)
+                {
+                    glApi.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(quadVertices.Length * sizeof(float)), qPtr, BufferUsageARB.StaticDraw);
+                }
+                glApi.EnableVertexAttribArray(0);
+                glApi.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, 2 * sizeof(float), null);
+            }
+            glApi.BindVertexArray(0);
+
             glApi.Enable(EnableCap.DepthTest);
             glApi.Disable(EnableCap.CullFace);
             buffersDirty = true;
@@ -169,6 +236,53 @@ public sealed class ViewportPreviewControl : OpenGlControlBase
             {
                 glApi.DeleteProgram(program);
             }
+
+            if (msaaFbo != 0)
+            {
+                glApi.DeleteFramebuffer(msaaFbo);
+                msaaFbo = 0;
+            }
+            if (msaaColorRb != 0)
+            {
+                glApi.DeleteRenderbuffer(msaaColorRb);
+                msaaColorRb = 0;
+            }
+            if (msaaDepthRb != 0)
+            {
+                glApi.DeleteRenderbuffer(msaaDepthRb);
+                msaaDepthRb = 0;
+            }
+
+            if (postFbo != 0)
+            {
+                glApi.DeleteFramebuffer(postFbo);
+                postFbo = 0;
+            }
+            if (postTexture != 0)
+            {
+                glApi.DeleteTexture(postTexture);
+                postTexture = 0;
+            }
+            if (postDepthRb != 0)
+            {
+                glApi.DeleteRenderbuffer(postDepthRb);
+                postDepthRb = 0;
+            }
+            if (fxaaProgram != 0)
+            {
+                glApi.DeleteProgram(fxaaProgram);
+                fxaaProgram = 0;
+            }
+            if (quadVao != 0)
+            {
+                glApi.DeleteVertexArray(quadVao);
+                quadVao = 0;
+            }
+            if (quadVbo != 0)
+            {
+                glApi.DeleteBuffer(quadVbo);
+                quadVbo = 0;
+            }
         }
 
         LogViewport("deinit");
@@ -192,6 +306,103 @@ public sealed class ViewportPreviewControl : OpenGlControlBase
 
         var width = Math.Max(1, (int)Bounds.Width);
         var height = Math.Max(1, (int)Bounds.Height);
+
+        var aaMode = AntiAliasing;
+        var msaaSamples = aaMode switch
+        {
+            AntiAliasingMode.Msaa4x => 4,
+            AntiAliasingMode.Msaa8x => 8,
+            _ => 0
+        };
+        var isFxaa = aaMode == AntiAliasingMode.Fxaa;
+
+        if (msaaSamples > 0)
+        {
+            if (msaaFbo == 0 || width != lastMsaaWidth || height != lastMsaaHeight || aaMode != lastMsaaMode)
+            {
+                if (msaaFbo != 0) glApi.DeleteFramebuffer(msaaFbo);
+                if (msaaColorRb != 0) glApi.DeleteRenderbuffer(msaaColorRb);
+                if (msaaDepthRb != 0) glApi.DeleteRenderbuffer(msaaDepthRb);
+
+                msaaFbo = glApi.GenFramebuffer();
+                glApi.BindFramebuffer(FramebufferTarget.Framebuffer, msaaFbo);
+
+                msaaColorRb = glApi.GenRenderbuffer();
+                glApi.BindRenderbuffer(RenderbufferTarget.Renderbuffer, msaaColorRb);
+                glApi.RenderbufferStorageMultisample(RenderbufferTarget.Renderbuffer, (uint)msaaSamples, InternalFormat.Rgba8, (uint)width, (uint)height);
+                glApi.FramebufferRenderbuffer(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0, RenderbufferTarget.Renderbuffer, msaaColorRb);
+
+                msaaDepthRb = glApi.GenRenderbuffer();
+                glApi.BindRenderbuffer(RenderbufferTarget.Renderbuffer, msaaDepthRb);
+                glApi.RenderbufferStorageMultisample(RenderbufferTarget.Renderbuffer, (uint)msaaSamples, InternalFormat.Depth24Stencil8, (uint)width, (uint)height);
+                glApi.FramebufferRenderbuffer(FramebufferTarget.Framebuffer, FramebufferAttachment.DepthAttachment, RenderbufferTarget.Renderbuffer, msaaDepthRb);
+
+                var status = glApi.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
+                if ((FramebufferStatus)status != FramebufferStatus.Complete)
+                {
+                    LogViewport($"MSAA FBO creation failed: {status}");
+                    msaaSamples = 0;
+                }
+                else
+                {
+                    lastMsaaWidth = width;
+                    lastMsaaHeight = height;
+                    lastMsaaMode = aaMode;
+                }
+            }
+        }
+
+        if (isFxaa)
+        {
+            if (postFbo == 0 || width != lastPostWidth || height != lastPostHeight || aaMode != lastPostMode)
+            {
+                if (postFbo != 0) glApi.DeleteFramebuffer(postFbo);
+                if (postTexture != 0) glApi.DeleteTexture(postTexture);
+                if (postDepthRb != 0) glApi.DeleteRenderbuffer(postDepthRb);
+
+                postFbo = glApi.GenFramebuffer();
+                glApi.BindFramebuffer(FramebufferTarget.Framebuffer, postFbo);
+
+                postTexture = glApi.GenTexture();
+                glApi.BindTexture(TextureTarget.Texture2D, postTexture);
+                glApi.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgb8, (uint)width, (uint)height, 0, PixelFormat.Rgb, PixelType.UnsignedByte, null);
+                glApi.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
+                glApi.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+                glApi.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0, TextureTarget.Texture2D, postTexture, 0);
+
+                postDepthRb = glApi.GenRenderbuffer();
+                glApi.BindRenderbuffer(RenderbufferTarget.Renderbuffer, postDepthRb);
+                glApi.RenderbufferStorage(RenderbufferTarget.Renderbuffer, InternalFormat.Depth24Stencil8, (uint)width, (uint)height);
+                glApi.FramebufferRenderbuffer(FramebufferTarget.Framebuffer, FramebufferAttachment.DepthAttachment, RenderbufferTarget.Renderbuffer, postDepthRb);
+
+                var status = glApi.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
+                if ((FramebufferStatus)status != FramebufferStatus.Complete)
+                {
+                    LogViewport($"FXAA FBO creation failed: {status}");
+                    isFxaa = false;
+                }
+                else
+                {
+                    lastPostWidth = width;
+                    lastPostHeight = height;
+                    lastPostMode = aaMode;
+                }
+            }
+        }
+
+        if (msaaSamples > 0)
+        {
+            glApi.BindFramebuffer(FramebufferTarget.Framebuffer, msaaFbo);
+        }
+        else if (isFxaa)
+        {
+            glApi.BindFramebuffer(FramebufferTarget.Framebuffer, postFbo);
+        }
+        else
+        {
+            glApi.BindFramebuffer(FramebufferTarget.Framebuffer, (uint)fb);
+        }
+
         glApi.Viewport(0, 0, (uint)width, (uint)height);
         glApi.ClearColor(0.055f, 0.07f, 0.06f, 1f);
         glApi.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
@@ -224,12 +435,39 @@ public sealed class ViewportPreviewControl : OpenGlControlBase
             LogViewport($"render {renderLogCount}: fb={fb} size={width}x{height} scene='{Scene?.Status}' vertices={vertices.Length / VertexStride} indices={indexCount} lines={lineVertexCount} glError={glApi.GetError()}");
         }
 
+        if (msaaSamples > 0)
+        {
+            glApi.BindFramebuffer(FramebufferTarget.ReadFramebuffer, msaaFbo);
+            glApi.BindFramebuffer(FramebufferTarget.DrawFramebuffer, (uint)fb);
+            glApi.BlitFramebuffer(0, 0, width, height, 0, 0, width, height, ClearBufferMask.ColorBufferBit, BlitFramebufferFilter.Nearest);
+            glApi.BindFramebuffer(FramebufferTarget.Framebuffer, (uint)fb);
+        }
+        else if (isFxaa && fxaaProgram != 0)
+        {
+            glApi.BindFramebuffer(FramebufferTarget.Framebuffer, (uint)fb);
+            glApi.Viewport(0, 0, (uint)width, (uint)height);
+            glApi.ClearColor(0.055f, 0.07f, 0.06f, 1f);
+            glApi.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+            
+            glApi.UseProgram(fxaaProgram);
+            glApi.ActiveTexture(TextureUnit.Texture0);
+            glApi.BindTexture(TextureTarget.Texture2D, postTexture);
+            glApi.Uniform1(glApi.GetUniformLocation(fxaaProgram, "uTexture"), 0);
+            glApi.Uniform2(glApi.GetUniformLocation(fxaaProgram, "uTexelSize"), 1.0f / width, 1.0f / height);
+            
+            glApi.BindVertexArray(quadVao);
+            glApi.DrawArrays(PrimitiveType.Triangles, 0, 6);
+            glApi.BindVertexArray(0);
+            glApi.UseProgram(0);
+        }
+
         if (pendingPickPoint is { } pickPoint)
         {
             pendingPickPoint = null;
             var pickedProductId = PickProduct(pickPoint);
             if (pickedProductId > 0)
             {
+                suppressNextFraming = true;
                 Dispatcher.UIThread.Post(() => ProductPicked?.Invoke(this, new IfcProductPickedEventArgs(pickedProductId)));
             }
         }
@@ -244,7 +482,12 @@ public sealed class ViewportPreviewControl : OpenGlControlBase
         clickStart = point.Position;
         pointerMoved = false;
         dragMode = GetDragMode(point, e.KeyModifiers);
+        LogViewport($"OnPointerPressed: button={point.Properties.PointerUpdateKind} Left={point.Properties.IsLeftButtonPressed} Middle={point.Properties.IsMiddleButtonPressed} Right={point.Properties.IsRightButtonPressed} dragMode={dragMode}");
         e.Pointer.Capture(this);
+        if (dragMode != DragMode.None)
+        {
+            e.Handled = true;
+        }
     }
 
     protected override void OnPointerMoved(PointerEventArgs e)
@@ -270,10 +513,15 @@ public sealed class ViewportPreviewControl : OpenGlControlBase
             DragMode.Dolly => NativeViewportCameraController.Dolly(camera, deltaY),
             _ => camera,
         };
+        if (dragMode != DragMode.None)
+        {
+            LogViewport($"OnPointerMoved: dragMode={dragMode} delta={deltaX:F2},{deltaY:F2} Yaw={camera.YawDegrees:F2} Pitch={camera.PitchDegrees:F2} Target={camera.Target.X:F2},{camera.Target.Y:F2},{camera.Target.Z:F2}");
+        }
         lastPointer = current;
         if (dragMode != DragMode.None)
         {
             QueueRender();
+            e.Handled = true;
         }
     }
 
@@ -283,12 +531,19 @@ public sealed class ViewportPreviewControl : OpenGlControlBase
         var point = e.GetPosition(this);
         e.Pointer.Capture(null);
         lastPointer = null;
-        if (dragMode == DragMode.None && !pointerMoved && clickStart is not null)
+
+        var pointProperties = e.GetCurrentPoint(this).Properties;
+        LogViewport($"OnPointerReleased: button={pointProperties.PointerUpdateKind} pointerMoved={pointerMoved} dragMode={dragMode}");
+        if (pointProperties.PointerUpdateKind == PointerUpdateKind.LeftButtonReleased && !pointerMoved && clickStart is not null)
         {
             pendingPickPoint = point;
             QueueRender();
         }
 
+        if (dragMode != DragMode.None)
+        {
+            e.Handled = true;
+        }
         dragMode = DragMode.None;
         clickStart = null;
     }
@@ -298,6 +553,7 @@ public sealed class ViewportPreviewControl : OpenGlControlBase
         base.OnPointerWheelChanged(e);
         camera = NativeViewportCameraController.Zoom(camera, (int)(e.Delta.Y * 120));
         QueueRender();
+        e.Handled = true;
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
@@ -341,11 +597,29 @@ public sealed class ViewportPreviewControl : OpenGlControlBase
 
     private void OnSelectedProductChanged()
     {
+        if (suppressNextFraming)
+        {
+            suppressNextFraming = false;
+            QueueRender();
+            return;
+        }
+
         if (SelectedProductId > 0 && TryFrameProduct(SelectedProductId))
         {
             return;
         }
 
+        QueueRender();
+    }
+
+    private void OnAntiAliasingChanged()
+    {
+        QueueRender();
+    }
+
+    private void OnHideSpacesChanged()
+    {
+        buffersDirty = true;
         QueueRender();
     }
 
@@ -387,8 +661,14 @@ public sealed class ViewportPreviewControl : OpenGlControlBase
             return false;
         }
 
+        var hideSpaces = HideSpaces;
         foreach (var mesh in scene.Meshes.Where(mesh => mesh.ProductId == productId && mesh.IsRenderable))
         {
+            if (hideSpaces && mesh.IsSpace)
+            {
+                continue;
+            }
+
             foreach (var vertex in mesh.Vertices)
             {
                 bounds = bounds.Include(vertex.X, vertex.Y, vertex.Z);
@@ -398,8 +678,25 @@ public sealed class ViewportPreviewControl : OpenGlControlBase
         return !bounds.IsEmpty;
     }
 
+    public bool HitTest(Point point)
+    {
+        return new Rect(Bounds.Size).Contains(point);
+    }
+
     private static DragMode GetDragMode(PointerPoint point, KeyModifiers modifiers)
     {
+        if (point.Properties.IsLeftButtonPressed)
+        {
+            if (modifiers.HasFlag(KeyModifiers.Control))
+            {
+                return DragMode.Dolly;
+            }
+
+            return modifiers.HasFlag(KeyModifiers.Shift)
+                ? DragMode.Pan
+                : DragMode.Orbit;
+        }
+
         if (point.Properties.IsMiddleButtonPressed)
         {
             if (modifiers.HasFlag(KeyModifiers.Control))
@@ -415,8 +712,8 @@ public sealed class ViewportPreviewControl : OpenGlControlBase
         if (point.Properties.IsRightButtonPressed)
         {
             return modifiers.HasFlag(KeyModifiers.Shift)
-                ? DragMode.Pan
-                : DragMode.Orbit;
+                ? DragMode.Orbit
+                : DragMode.Pan;
         }
 
         return DragMode.None;
@@ -450,10 +747,16 @@ public sealed class ViewportPreviewControl : OpenGlControlBase
             return;
         }
 
+        var hideSpaces = HideSpaces;
         var vertexValues = new List<float>();
         var indexValues = new List<uint>();
         foreach (var mesh in scene.Meshes.Where(mesh => mesh.IsRenderable))
         {
+            if (hideSpaces && mesh.IsSpace)
+            {
+                continue;
+            }
+
             var baseIndex = (uint)(vertexValues.Count / VertexStride);
             foreach (var vertex in mesh.Vertices)
             {
@@ -632,10 +935,16 @@ public sealed class ViewportPreviewControl : OpenGlControlBase
         var far = Unproject(new Vector3(ndcX, ndcY, 1f), inverse);
         var direction = Vector3.Normalize(far - near);
         var bestDistance = float.PositiveInfinity;
+        var hideSpaces = HideSpaces;
         var picked = 0;
         foreach (var mesh in scene.Meshes)
         {
             if (!mesh.IsRenderable)
+            {
+                continue;
+            }
+
+            if (hideSpaces && mesh.IsSpace)
             {
                 continue;
             }
@@ -826,6 +1135,102 @@ void main()
     }
 
     gl_FragColor = vec4(color, vColor.a);
+}
+""";
+
+    private static uint CreateProgram(SilkGL gl, string vertexShaderSource, string fragmentShaderSource)
+    {
+        var vertexShader = CompileShader(gl, ShaderType.VertexShader, vertexShaderSource);
+        var fragmentShader = CompileShader(gl, ShaderType.FragmentShader, fragmentShaderSource);
+        var shaderProgram = gl.CreateProgram();
+        gl.AttachShader(shaderProgram, vertexShader);
+        gl.AttachShader(shaderProgram, fragmentShader);
+        gl.BindAttribLocation(shaderProgram, 0, "aPosition");
+        gl.LinkProgram(shaderProgram);
+        gl.GetProgram(shaderProgram, ProgramPropertyARB.LinkStatus, out var status);
+        if (status == 0)
+        {
+            throw new InvalidOperationException(gl.GetProgramInfoLog(shaderProgram));
+        }
+
+        gl.DetachShader(shaderProgram, vertexShader);
+        gl.DetachShader(shaderProgram, fragmentShader);
+        gl.DeleteShader(vertexShader);
+        gl.DeleteShader(fragmentShader);
+        return shaderProgram;
+    }
+
+    private const string FxaaVertexShaderSource = """
+#version 120
+attribute vec2 aPosition;
+varying vec2 vTexCoord;
+
+void main()
+{
+    gl_Position = vec4(aPosition, 0.0, 1.0);
+    vTexCoord = aPosition * 0.5 + 0.5;
+}
+""";
+
+    private const string FxaaFragmentShaderSource = """
+#version 120
+varying vec2 vTexCoord;
+uniform sampler2D uTexture;
+uniform vec2 uTexelSize;
+
+// Simple FXAA implementation
+void main()
+{
+    float FXAA_SPAN_MAX = 8.0;
+    float FXAA_REDUCE_MUL = 1.0 / 8.0;
+    float FXAA_REDUCE_MIN = 1.0 / 128.0;
+
+    vec3 rgbNW = texture2D(uTexture, vTexCoord + (vec2(-1.0, -1.0) * uTexelSize)).xyz;
+    vec3 rgbNE = texture2D(uTexture, vTexCoord + (vec2(1.0, -1.0) * uTexelSize)).xyz;
+    vec3 rgbSW = texture2D(uTexture, vTexCoord + (vec2(-1.0, 1.0) * uTexelSize)).xyz;
+    vec3 rgbSE = texture2D(uTexture, vTexCoord + (vec2(1.0, 1.0) * uTexelSize)).xyz;
+    vec3 rgbM  = texture2D(uTexture, vTexCoord).xyz;
+
+    vec3 luma = vec3(0.299, 0.587, 0.114);
+    float lumaNW = dot(rgbNW, luma);
+    float lumaNE = dot(rgbNE, luma);
+    float lumaSW = dot(rgbSW, luma);
+    float lumaSE = dot(rgbSE, luma);
+    float lumaM  = dot(rgbM,  luma);
+
+    float lumaMin = min(lumaM, min(min(lumaNW, lumaNE), min(lumaSW, lumaSE)));
+    float lumaMax = max(lumaM, max(max(lumaNW, lumaNE), max(lumaSW, lumaSE)));
+
+    vec2 dir;
+    dir.x = -((lumaNW + lumaNE) - (lumaSW + lumaSE));
+    dir.y =  ((lumaNW + lumaSW) - (lumaNE + lumaSE));
+
+    float dirReduce = max(
+        (lumaNW + lumaNE + lumaSW + lumaSE) * (0.25 * FXAA_REDUCE_MUL),
+        FXAA_REDUCE_MIN
+    );
+
+    float rcpDirMin = 1.0 / (min(abs(dir.x), dir.y) + dirReduce);
+
+    dir = min(vec2(FXAA_SPAN_MAX,  FXAA_SPAN_MAX),
+          max(vec2(-FXAA_SPAN_MAX, -FXAA_SPAN_MAX),
+          dir * rcpDirMin)) * uTexelSize;
+
+    vec3 rgbA = (1.0 / 2.0) * (
+        texture2D(uTexture, vTexCoord.xy + dir * (1.0 / 3.0 - 0.5)).xyz +
+        texture2D(uTexture, vTexCoord.xy + dir * (2.0 / 3.0 - 0.5)).xyz
+    );
+    vec3 rgbB = rgbA * (1.0 / 2.0) + (1.0 / 4.0) * (
+        texture2D(uTexture, vTexCoord.xy + dir * (0.0 / 3.0 - 0.5)).xyz +
+        texture2D(uTexture, vTexCoord.xy + dir * (3.0 / 3.0 - 0.5)).xyz
+    );
+    float lumaB = dot(rgbB, luma);
+
+    if ((lumaB < lumaMin) || (lumaB > lumaMax)) {
+        gl_FragColor = vec4(rgbA, 1.0);
+    } else {
+        gl_FragColor = vec4(rgbB, 1.0);
+    }
 }
 """;
 
