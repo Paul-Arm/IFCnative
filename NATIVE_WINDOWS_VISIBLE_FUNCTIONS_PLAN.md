@@ -13,13 +13,16 @@ Important constraints:
 
 ## Current branch / push status
 
-- Branch: `windows-native-rewrite-20260524-1218`
-- Last pushed clean status seen: `26cf301 Harden native parser trailing text recovery`
+- Branch: `codex/native-ifc-memory-model`
+- Worktree: `O:\Code\native\IFCnative-native-rewrite`
+- Last pushed clean status seen: not pushed from this worktree yet.
 - Web verification has been passing:
   - `npm run test:ifc`
   - `npm run lint`
   - `npm run build`
-- Native `.NET/WPF` build/test execution is still not verified on the Mac host because `dotnet` is not installed there.
+- Native `.NET/WPF` build/test execution is now verified on Windows/.NET 9:
+  - `dotnet build NativeWindows\IFCnative.NativeWindows.csproj`
+  - `dotnet run --project NativeWindows.Tests\IFCnative.NativeWindows.Tests.csproj` (46 tests as of 2026-06-04 23:47 Europe/Berlin)
 
 ## Functions that currently exist in the native app
 
@@ -59,6 +62,7 @@ Important constraints:
 - Export validation reparses serialized STEP before writing.
 - Export blocks parser errors/entity-count mismatches.
 - Geometry backend validates indexed representation chains before final save.
+- Property, Pset/Qto template creation, simple material/classification/document/library assignment, placement, matching existing extruded body-dimension, existing-product body representation assignment, product/opening/filling preset creation, diagnostic repairs, raw entity editing, relationship create/edit/delete, element connect/disconnect, and spatial reparent/detach edits now mutate `IfcMemoryModel` first; STEP rows are patched only for draft/export.
 
 ### Spatial/products/relationships
 
@@ -66,16 +70,20 @@ Important constraints:
 - First-pass spatial reparent draft editor.
 - Cycle/spatial-parent guards.
 - Detach/delete spatial-link workflow for containment/aggregation relationships.
-- Create new contained product presets with placement/body geometry.
+- Spatial reparent/detach now edits memory-model relations instead of live STEP state.
+- Create new contained product presets with memory-model placement/body geometry.
 - Relationship creation for common IFC relationship classes.
 - Relationship endpoint selection/staging from the inspector.
 - Element connect/disconnect workflow.
+- Relationship create/edit/delete and element connect/disconnect now edit memory-model relations instead of live STEP state.
 - Opening fill workflow via `IFCRELFILLSELEMENT`.
 - Relationship neighborhood graph preview with filtering, depth controls, relationship hub nodes, edge labels, and graph-to-editor selection.
 
 ### Properties/resources
 
 - Property/quantity indexes.
+- Native in-memory IFC model stores typed property values independent of raw STEP argument strings.
+- Property value edits use the memory model instead of STEP clone/reparse as live state.
 - Property/quantity inspector view.
 - Raw value edits for single values/quantities.
 - Type assignment index/view.
@@ -84,17 +92,26 @@ Important constraints:
 - First-pass classification assignment.
 - First-pass document assignment.
 - First-pass library assignment.
+- Simple resource assignments use native memory-model resources and relations instead of STEP clone/reparse as live state.
 - First-pass `Pset_NativeCommon` preset button.
 - First-pass `Qto_NativeBaseQuantities` preset button.
+- Pset/Qto template creation uses memory-model property set objects with typed values instead of STEP clone/reparse as live state.
 
 ### Geometry/viewport
 
 - Product placement index.
 - Numeric placement editor.
 - Product representation index for `IFCPRODUCTDEFINITIONSHAPE` / `IFCSHAPEREPRESENTATION` references.
+- Native in-memory IFC model stores product geometry as first-pass primitives with placement and profile dimensions.
+- Native memory geometry transform service resolves relative product placement chains, axis/ref-direction rotations, and local solid/profile offsets before preview mesh tessellation.
+- Matching existing extruded body dimensions and assigned rectangle/cylinder body representations can be edited in the memory model before export patching.
 - Geometry backend abstraction (`IIfcGeometryBackend`).
-- STEP-reference viewport preview backend.
-- First generated WPF `Viewport3D` preview for sample geometry.
+- Native memory-model geometry backend.
+- STEP-reference viewport preview backend remains available as fallback/debug code.
+- First WPF `Viewport3D` preview now renders native `IfcPreviewMesh` output from memory-model rectangle/bounding-box and cylinder extrusion tessellation.
+- Preview camera is fitted from mesh bounds.
+- Viewport camera now supports native fit/orbit/pan/zoom state over the current preview meshes.
+- Viewport clicks on rendered native preview meshes resolve through memory-model product ids and select the corresponding inspector entity.
 - Sample IFC expanded with visible placement/body representation geometry.
 
 ### Validation/repair
@@ -117,8 +134,11 @@ Important constraints:
 These are the important gaps Paul is reacting to:
 
 1. **3D viewer is not a real IFC mesh viewer yet**
-   - Current viewport is only a first native/generated/STEP-reference preview.
-   - Need real mesh extraction/tessellation and interactive rendering.
+   - Current viewport now has first-pass native mesh tessellation for simple memory-model primitives, but not full IFC geometry extraction.
+   - Placement transforms now include relative placements, local solid/profile offsets, and axis/ref-direction rotations for supported primitive previews.
+   - Camera fit/orbit/pan/zoom exists, but rendering is still WPF `Viewport3D` preview-level rather than a mature renderer.
+   - Click selection exists for preview meshes, but hover/highlight, multi-select, isolation, and full mesh picking are still pending.
+   - Need real IFC mesh extraction/tessellation and richer native rendering.
    - Prefer native renderer/backend over WASM.
 
 2. **Graph is still not a mature visual graph editor**
@@ -141,12 +161,25 @@ These are the important gaps Paul is reacting to:
    - Some parser recovery exists.
    - But true streaming parser/lazy indexes/mesh chunking/cancellation across indexing and tessellation are still pending.
 
-6. **Native build verification is pending**
-   - Need Windows/dotnet environment to restore packages and run native tests/build.
+6. **Native build verification is no longer pending**
+   - Windows/.NET 9 build and `NativeWindows.Tests` now pass.
+   - Keep this gate in the loop while replacing STEP-entity editor state with the in-memory model.
 
 ## New priority order
 
 Stop defaulting to small parser-hardening work. Focus on visible/user-facing native app capability.
+
+### Priority 0 - Finish native in-memory editor state
+
+Goal: stop using STEP/IFC entities as the live editor state for large files.
+
+Deliverables:
+
+- Move common edit workflows from STEP clone/reparse to `IfcMemoryModel` mutations. Property, Pset/Qto template creation, simple resource assignment, placement, matching existing extruded body-dimension, existing-product body representation assignment, product/opening/filling preset creation, diagnostic repairs, raw entity editing, relationship create/edit/delete, element connect/disconnect, and spatial reparent/detach edits are now on this path; `IfcDocumentEditor` has no `document.ToStepText()` live-state reparse path left. Keep auditing future editor features against this boundary.
+- Keep STEP serialization as explicit export only.
+- Keep STEP parsing as explicit import only.
+- Maintain source-id mapping so diffs/export can still target stable IFC rows.
+- Add tests proving property and geometry edits update the memory model without reparsing STEP.
 
 ### Priority 1 — Real native 3D viewer/backend
 
@@ -157,15 +190,16 @@ Preferred direction:
 - Rendering: HelixToolkit/SharpDX/DirectX or another mature native Windows 3D option.
 - Geometry extraction/tessellation: IfcOpenShell or native C++/Rust worker if feasible.
 - Avoid making WASM/web-ifc the primary renderer for the Windows-native app.
-- Use `IIfcGeometryBackend` as the integration seam.
-- Keep STEP-reference preview as fallback/debug view.
+- Use `IIfcGeometryBackend` / `IfcPreviewMesh` as the integration seam.
+- Keep native memory-model preview and STEP-reference preview as fallback/debug views.
 
 Deliverables:
 
 - Load/display actual product meshes from sample IFC.
-- Orbit/pan/zoom camera.
+- Orbit/pan/zoom camera. First-pass tested WPF camera state exists for preview meshes; carry it forward into the mature renderer.
 - Selection sync with inspector/spatial tree.
-- Fit selection / reset camera actually affects viewport.
+- First-pass viewport click selection to inspector exists for preview meshes; carry this into the mature renderer with highlighting and robust picking.
+- Fit selection / reset camera actually affects viewport. First-pass fit now updates the WPF preview camera; richer camera commands remain pending for the mature renderer.
 - Type/category visibility toggles if practical.
 - Clear error state when geometry backend cannot tessellate.
 
@@ -235,9 +269,9 @@ Deliverables:
 Use this for the next separate session/subagent:
 
 ```text
-In /Users/paul/.openclaw/workspace/repos/IFCnative on branch windows-native-rewrite-20260524-1218, focus only on visible NativeWindows functionality. Do not delete or replace the Web/React app.
+In O:\Code\native\IFCnative-native-rewrite on branch codex/native-ifc-memory-model, continue the native rewrite. Do not delete or replace the Web/React app.
 
-Read NATIVE_WINDOWS_VISIBLE_FUNCTIONS_PLAN.md first. Stop doing parser-hardening as the default. Implement the highest-value visible feature from the plan, prioritizing a real native 3D viewer/backend using native libraries if feasible (HelixToolkit/SharpDX/DirectX + IfcOpenShell/native worker preferred; WASM/web-ifc only fallback). If native package restore/build is blocked on this Mac, prepare the integration cleanly and document exact Windows/dotnet verification steps.
+Read NATIVE_WINDOWS_VISIBLE_FUNCTIONS_PLAN.md and WINDOWS_NATIVE_REWRITE.md first. The native app now has IfcMemoryModel, IfcMemoryModelEditor, and IfcMemoryModelExporter. Property value edits, Pset/Qto template creation, simple material/classification/document/library assignments, placement edits, matching existing extruded body-dimension edits, existing-product body representation assignment, product/opening/filling preset creation, diagnostic repairs, raw entity editing, relationship create/edit/delete, element connect/disconnect, and spatial reparent/detach mutate memory first and patch STEP only at the draft/export boundary; `IfcDocumentEditor` no longer reparses serialized IFC as live editor state. The memory geometry backend now exposes `IfcPreviewMesh` and tessellates simple rectangle/bounding-box/cylinder extrusions for the WPF viewport, resolves relative placement chains, axis/ref-direction rotations, and local solid/profile offsets, the preview camera has tested fit/orbit/pan/zoom state, and click selection resolves preview meshes back to memory-model product ids, but full IFC mesh extraction/rendering is still missing. Prioritize a real native 3D viewer/backend using native libraries if feasible (HelixToolkit/SharpDX/DirectX + IfcOpenShell/native worker preferred; WASM/web-ifc only fallback), then continue docking/graph/performance work.
 
-Run npm run test:ifc, npm run lint, npm run build when practical. Update WINDOWS_NATIVE_REWRITE.md and this plan with results. Commit and push the branch if verification passes or only native dotnet remains blocked.
+Run dotnet build NativeWindows\IFCnative.NativeWindows.csproj, dotnet run --project NativeWindows.Tests\IFCnative.NativeWindows.Tests.csproj, git diff --check, npm run test:ifc, npm run lint, and npm run build. Update WINDOWS_NATIVE_REWRITE.md and this plan with results.
 ```

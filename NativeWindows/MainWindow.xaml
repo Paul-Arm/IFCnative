@@ -252,7 +252,15 @@
                                 <RowDefinition Height="*" />
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
-                            <Viewport3D x:Name="NativeViewport3D" Margin="8" ClipToBounds="True" />
+                            <Viewport3D x:Name="NativeViewport3D"
+                                        Margin="8"
+                                        ClipToBounds="True"
+                                        MouseLeftButtonDown="NativeViewport3D_MouseLeftButtonDown"
+                                        MouseLeftButtonUp="NativeViewport3D_MouseButtonUp"
+                                        MouseRightButtonDown="NativeViewport3D_MouseRightButtonDown"
+                                        MouseRightButtonUp="NativeViewport3D_MouseButtonUp"
+                                        MouseMove="NativeViewport3D_MouseMove"
+                                        MouseWheel="NativeViewport3D_MouseWheel" />
                             <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="16" Background="#99020617" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="10" MaxWidth="420">
                                 <StackPanel>
                                     <TextBlock Text="Native 3D preview" Foreground="#cbd5e1" FontSize="18" FontWeight="SemiBold" />

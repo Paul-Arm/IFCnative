@@ -1,4 +1,5 @@
 using System.Globalization;
+using IFCnative.NativeWindows.Models;
 
 namespace IFCnative.NativeWindows.Services;
 
@@ -13,8 +14,7 @@ public static class IfcDocumentEditor
             return document;
         }
 
-        var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
-        var nextId = IfcStepWriter.NextEntityId(draft);
+        var nextId = IfcStepWriter.NextEntityId(document);
         var propertySetId = nextId++;
         var referencePropertyId = nextId++;
         var statusPropertyId = nextId++;
@@ -23,22 +23,23 @@ public static class IfcDocumentEditor
         var product = document.EntityById[productId];
         var reference = string.IsNullOrWhiteSpace(referenceText) ? product.DisplayName : referenceText.Trim();
         var status = string.IsNullOrWhiteSpace(statusText) ? "New" : statusText.Trim();
-
-        AddEntity(
-            draft,
+        var updatedModel = IfcMemoryModelEditor.AddPropertySetAssignment(
+            document.MemoryModel,
+            productId,
             propertySetId,
-            "IFCPROPERTYSET",
-            [MakeGeneratedGlobalId("Pset", propertySetId), "$", StepArgumentReader.Quote("Pset_NativeCommon"), "$", $"(#{referencePropertyId},#{statusPropertyId},#{externalPropertyId})"]);
-        AddEntity(draft, referencePropertyId, "IFCPROPERTYSINGLEVALUE", [StepArgumentReader.Quote("Reference"), "$", $"IFCLABEL({StepArgumentReader.Quote(reference)})", "$"]);
-        AddEntity(draft, statusPropertyId, "IFCPROPERTYSINGLEVALUE", [StepArgumentReader.Quote("Status"), "$", $"IFCLABEL({StepArgumentReader.Quote(status)})", "$"]);
-        AddEntity(draft, externalPropertyId, "IFCPROPERTYSINGLEVALUE", [StepArgumentReader.Quote("IsExternal"), "$", "IFCBOOLEAN(.F.)", "$"]);
-        AddEntity(
-            draft,
+            "Pset",
+            "Pset_NativeCommon",
+            [
+                new IfcMemoryModelEditor.PropertyValueDraft(referencePropertyId, "IFCPROPERTYSINGLEVALUE", "Reference", new IfcModelValue(IfcPropertyValueKind.String, "IFCLABEL", reference, null, null, reference)),
+                new IfcMemoryModelEditor.PropertyValueDraft(statusPropertyId, "IFCPROPERTYSINGLEVALUE", "Status", new IfcModelValue(IfcPropertyValueKind.String, "IFCLABEL", status, null, null, status)),
+                new IfcMemoryModelEditor.PropertyValueDraft(externalPropertyId, "IFCPROPERTYSINGLEVALUE", "IsExternal", new IfcModelValue(IfcPropertyValueKind.Boolean, "IFCBOOLEAN", null, null, false, "false")),
+            ],
             relationshipId,
-            "IFCRELDEFINESBYPROPERTIES",
-            [MakeGeneratedGlobalId("PRel", relationshipId), "$", StepArgumentReader.Quote($"{product.DisplayName} common properties"), "$", $"(#{productId})", $"#{propertySetId}"]);
+            $"{product.DisplayName} common properties");
 
-        return IfcStepParser.Parse(draft.ToStepText(), draft.FileName);
+        return ReferenceEquals(updatedModel, document.MemoryModel)
+            ? document
+            : IfcMemoryModelExporter.ApplyToDocument(document, updatedModel);
     }
 
     public static IfcDocument AddBaseQuantitySet(IfcDocument document, int productId, string lengthText, string areaText, string volumeText)
@@ -51,30 +52,30 @@ public static class IfcDocumentEditor
         var length = Math.Max(0, ParseCoordinate(lengthText, 1));
         var area = Math.Max(0, ParseCoordinate(areaText, 1));
         var volume = Math.Max(0, ParseCoordinate(volumeText, 1));
-        var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
-        var nextId = IfcStepWriter.NextEntityId(draft);
+        var nextId = IfcStepWriter.NextEntityId(document);
         var quantitySetId = nextId++;
         var lengthQuantityId = nextId++;
         var areaQuantityId = nextId++;
         var volumeQuantityId = nextId++;
         var relationshipId = nextId++;
         var product = document.EntityById[productId];
-
-        AddEntity(
-            draft,
+        var updatedModel = IfcMemoryModelEditor.AddPropertySetAssignment(
+            document.MemoryModel,
+            productId,
             quantitySetId,
-            "IFCELEMENTQUANTITY",
-            [MakeGeneratedGlobalId("Qto", quantitySetId), "$", StepArgumentReader.Quote("Qto_NativeBaseQuantities"), "$", StepArgumentReader.Quote("Native measured quantities"), $"(#{lengthQuantityId},#{areaQuantityId},#{volumeQuantityId})"]);
-        AddEntity(draft, lengthQuantityId, "IFCQUANTITYLENGTH", [StepArgumentReader.Quote("Length"), "$", "$", FormatMeasure(length), "$"]);
-        AddEntity(draft, areaQuantityId, "IFCQUANTITYAREA", [StepArgumentReader.Quote("GrossArea"), "$", "$", FormatMeasure(area), "$"]);
-        AddEntity(draft, volumeQuantityId, "IFCQUANTITYVOLUME", [StepArgumentReader.Quote("GrossVolume"), "$", "$", FormatMeasure(volume), "$"]);
-        AddEntity(
-            draft,
+            "Qto",
+            "Qto_NativeBaseQuantities",
+            [
+                new IfcMemoryModelEditor.PropertyValueDraft(lengthQuantityId, "IFCQUANTITYLENGTH", "Length", new IfcModelValue(IfcPropertyValueKind.Number, null, null, length, null, FormatMeasure(length))),
+                new IfcMemoryModelEditor.PropertyValueDraft(areaQuantityId, "IFCQUANTITYAREA", "GrossArea", new IfcModelValue(IfcPropertyValueKind.Number, null, null, area, null, FormatMeasure(area))),
+                new IfcMemoryModelEditor.PropertyValueDraft(volumeQuantityId, "IFCQUANTITYVOLUME", "GrossVolume", new IfcModelValue(IfcPropertyValueKind.Number, null, null, volume, null, FormatMeasure(volume))),
+            ],
             relationshipId,
-            "IFCRELDEFINESBYPROPERTIES",
-            [MakeGeneratedGlobalId("QRel", relationshipId), "$", StepArgumentReader.Quote($"{product.DisplayName} base quantities"), "$", $"(#{productId})", $"#{quantitySetId}"]);
+            $"{product.DisplayName} base quantities");
 
-        return IfcStepParser.Parse(draft.ToStepText(), draft.FileName);
+        return ReferenceEquals(updatedModel, document.MemoryModel)
+            ? document
+            : IfcMemoryModelExporter.ApplyToDocument(document, updatedModel);
     }
 
     public static IfcDocument AddSimpleMaterialAssignment(IfcDocument document, int productId, string materialNameText)
@@ -85,9 +86,9 @@ public static class IfcDocumentEditor
             productId,
             "IFCMATERIAL",
             "IFCRELASSOCIATESMATERIAL",
-            "MatRel",
             "material",
-            [StepArgumentReader.Quote(materialName), "$", "$"]);
+            materialName,
+            string.Empty);
     }
 
     public static IfcDocument AddSimpleClassificationAssignment(IfcDocument document, int productId, string classificationNameText, string identificationText)
@@ -99,9 +100,9 @@ public static class IfcDocumentEditor
             productId,
             "IFCCLASSIFICATIONREFERENCE",
             "IFCRELASSOCIATESCLASSIFICATION",
-            "ClassRel",
             "classification",
-            ["$", StepArgumentReader.Quote(identification), StepArgumentReader.Quote(classificationName), "$", "$"]);
+            classificationName,
+            identification);
     }
 
     public static IfcDocument AddSimpleDocumentAssignment(IfcDocument document, int productId, string documentNameText, string identificationText)
@@ -113,9 +114,9 @@ public static class IfcDocumentEditor
             productId,
             "IFCDOCUMENTREFERENCE",
             "IFCRELASSOCIATESDOCUMENT",
-            "DocRel",
             "document",
-            [StepArgumentReader.Quote(identification), "$", StepArgumentReader.Quote(documentName), "$"]);
+            documentName,
+            identification);
     }
 
     public static IfcDocument AddSimpleLibraryAssignment(IfcDocument document, int productId, string libraryNameText, string identificationText)
@@ -127,9 +128,9 @@ public static class IfcDocumentEditor
             productId,
             "IFCLIBRARYREFERENCE",
             "IFCRELASSOCIATESLIBRARY",
-            "LibRel",
             "library reference",
-            ["$", StepArgumentReader.Quote(identification), StepArgumentReader.Quote(libraryName), "$", "$"]);
+            libraryName,
+            identification);
     }
 
     public static IfcDocument RegenerateDuplicateGlobalIds(IfcDocument document, string diagnosticMessage)
@@ -143,28 +144,29 @@ public static class IfcDocumentEditor
             return document;
         }
 
-        var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
-        var existingGlobalIds = draft.Entities
+        var existingGlobalIds = document.MemoryModel.Objects
             .Select(entity => entity.GlobalId)
             .Where(globalId => !string.IsNullOrWhiteSpace(globalId))
             .ToHashSet(StringComparer.Ordinal);
 
-        var changed = false;
+        var replacements = new Dictionary<int, string>();
         foreach (var entityId in duplicateIds.Skip(1))
         {
-            if (!draft.EntityById.TryGetValue(entityId, out var entity) || entity.Arguments.Count == 0)
+            if (!document.MemoryModel.ObjectsBySourceId.TryGetValue(entityId, out var modelObject))
             {
                 continue;
             }
 
-            existingGlobalIds.Remove(entity.GlobalId);
+            existingGlobalIds.Remove(modelObject.GlobalId);
             var replacement = MakeUniqueGeneratedGlobalId(entityId, existingGlobalIds);
-            entity.Arguments[0] = StepArgumentReader.Quote(replacement);
+            replacements[entityId] = replacement;
             existingGlobalIds.Add(replacement);
-            changed = true;
         }
 
-        return changed ? IfcStepParser.Parse(draft.ToStepText(), draft.FileName) : document;
+        var updatedModel = IfcMemoryModelEditor.UpdateGlobalIds(document.MemoryModel, replacements);
+        return ReferenceEquals(updatedModel, document.MemoryModel)
+            ? document
+            : IfcMemoryModelExporter.ApplyToDocument(document, updatedModel);
     }
 
     public static IfcDocument GenerateMissingGlobalIdFromDiagnostic(IfcDocument document, string diagnosticMessage)
@@ -175,20 +177,18 @@ public static class IfcDocumentEditor
             return document;
         }
 
-        var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
-        if (!draft.EntityById.TryGetValue(entityId, out var draftEntity))
-        {
-            return document;
-        }
-
-        var existingGlobalIds = draft.Entities
-            .Where(candidate => candidate.Id != entityId)
+        var existingGlobalIds = document.MemoryModel.Objects
+            .Where(candidate => candidate.SourceId != entityId)
             .Select(candidate => candidate.GlobalId)
             .Where(globalId => !string.IsNullOrWhiteSpace(globalId))
             .ToHashSet(StringComparer.Ordinal);
-        SetArgument(draftEntity, 0, StepArgumentReader.Quote(MakeUniqueGeneratedGlobalId(entityId, existingGlobalIds)));
+        var updatedModel = IfcMemoryModelEditor.UpdateGlobalIds(
+            document.MemoryModel,
+            new Dictionary<int, string> { [entityId] = MakeUniqueGeneratedGlobalId(entityId, existingGlobalIds) });
 
-        return IfcStepParser.Parse(draft.ToStepText(), draft.FileName);
+        return ReferenceEquals(updatedModel, document.MemoryModel)
+            ? document
+            : IfcMemoryModelExporter.ApplyToDocument(document, updatedModel);
     }
 
     public static IfcDocument KeepFirstPrimarySpatialContainment(IfcDocument document, string diagnosticMessage)
@@ -213,12 +213,10 @@ public static class IfcDocumentEditor
             return document;
         }
 
-        var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
-        var changed = false;
+        var updatedModel = document.MemoryModel;
         foreach (var relationshipId in relationshipIds.Skip(1))
         {
-            if (!draft.EntityById.TryGetValue(relationshipId, out var draftRelationship)
-                || !document.RelationshipById.TryGetValue(relationshipId, out var originalRelationship))
+            if (!document.RelationshipById.TryGetValue(relationshipId, out var originalRelationship))
             {
                 continue;
             }
@@ -226,18 +224,17 @@ public static class IfcDocumentEditor
             var remainingTargets = originalRelationship.TargetIds.Where(id => id != productId).Distinct().ToList();
             if (remainingTargets.Count == 0)
             {
-                draft.Entities.RemoveAll(entity => entity.Id == relationshipId);
-                draft.EntityById.Remove(relationshipId);
+                updatedModel = IfcMemoryModelEditor.RemoveRelation(updatedModel, relationshipId);
             }
             else
             {
-                SetArgument(draftRelationship, 4, FormatReferenceArgument(remainingTargets, asList: true));
+                updatedModel = IfcMemoryModelEditor.UpdateRelationEndpoints(updatedModel, relationshipId, originalRelationship.SourceIds, remainingTargets);
             }
-
-            changed = true;
         }
 
-        return changed ? IfcStepParser.Parse(draft.ToStepText(), draft.FileName) : document;
+        return ReferenceEquals(updatedModel, document.MemoryModel)
+            ? document
+            : IfcMemoryModelExporter.ApplyToDocument(document, updatedModel);
     }
 
     public static IfcDocument RemoveMissingRelationshipReferences(IfcDocument document, string diagnosticMessage)
@@ -269,24 +266,19 @@ public static class IfcDocumentEditor
             return document;
         }
 
-        var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
-        if (!draft.EntityById.TryGetValue(relationshipId, out var draftRelationship))
-        {
-            return document;
-        }
-
+        var updatedModel = document.MemoryModel;
         if (sourceIds.Count == 0 || targetIds.Count == 0)
         {
-            draft.Entities.RemoveAll(entity => entity.Id == relationshipId);
-            draft.EntityById.Remove(relationshipId);
+            updatedModel = IfcMemoryModelEditor.RemoveRelation(updatedModel, relationshipId);
         }
         else
         {
-            SetArgument(draftRelationship, map.SourceArgumentIndex, FormatReferenceArgument(sourceIds, map.SourceIsList));
-            SetArgument(draftRelationship, map.TargetArgumentIndex, FormatReferenceArgument(targetIds, map.TargetIsList));
+            updatedModel = IfcMemoryModelEditor.UpdateRelationEndpoints(updatedModel, relationshipId, sourceIds, targetIds);
         }
 
-        return IfcStepParser.Parse(draft.ToStepText(), draft.FileName);
+        return ReferenceEquals(updatedModel, document.MemoryModel)
+            ? document
+            : IfcMemoryModelExporter.ApplyToDocument(document, updatedModel);
     }
 
     public static IfcDocument AssignDefaultPlacementFromDiagnostic(IfcDocument document, string diagnosticMessage)
@@ -305,23 +297,14 @@ public static class IfcDocumentEditor
             return document;
         }
 
-        var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
-        if (!draft.EntityById.TryGetValue(productId, out var draftProduct))
-        {
-            return document;
-        }
-
-        var nextId = IfcStepWriter.NextEntityId(draft);
+        var nextId = IfcStepWriter.NextEntityId(document);
         var placementId = nextId++;
         var axisPlacementId = nextId++;
         var pointId = nextId++;
-
-        SetArgument(draftProduct, 5, $"#{placementId}");
-        AddEntity(draft, placementId, "IFCLOCALPLACEMENT", ["$", $"#{axisPlacementId}"]);
-        AddEntity(draft, axisPlacementId, "IFCAXIS2PLACEMENT3D", [$"#{pointId}", "$", "$"]);
-        AddEntity(draft, pointId, "IFCCARTESIANPOINT", ["(0.,0.,0.)"]);
-
-        return IfcStepParser.Parse(draft.ToStepText(), draft.FileName);
+        var updatedModel = IfcMemoryModelEditor.AssignDefaultPlacement(document.MemoryModel, productId, placementId, axisPlacementId, pointId);
+        return ReferenceEquals(updatedModel, document.MemoryModel)
+            ? document
+            : IfcMemoryModelExporter.ApplyToDocument(document, updatedModel);
     }
 
     public static IfcDocument AssignDefaultRepresentationFromDiagnostic(IfcDocument document, string diagnosticMessage)
@@ -348,29 +331,30 @@ public static class IfcDocumentEditor
         int productId,
         string resourceType,
         string relationshipType,
-        string relationshipGlobalIdPrefix,
         string relationshipLabel,
-        string[] resourceArguments)
+        string resourceName,
+        string resourceIdentification)
     {
         if (!CanAssignResource(document, productId))
         {
             return document;
         }
 
-        var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
-        var nextId = IfcStepWriter.NextEntityId(draft);
+        var nextId = IfcStepWriter.NextEntityId(document);
         var resourceId = nextId++;
         var relationshipId = nextId++;
         var product = document.EntityById[productId];
-
-        AddEntity(draft, resourceId, resourceType, resourceArguments);
-        AddEntity(
-            draft,
+        var updatedModel = IfcMemoryModelEditor.AddResourceAssignment(
+            document.MemoryModel,
+            productId,
+            new IfcMemoryModelEditor.ResourceDraft(resourceId, resourceType, resourceName, resourceIdentification, string.Empty),
             relationshipId,
             relationshipType,
-            [MakeGeneratedGlobalId(relationshipGlobalIdPrefix, relationshipId), "$", StepArgumentReader.Quote($"{product.DisplayName} {relationshipLabel}"), "$", $"(#{productId})", $"#{resourceId}"]);
+            $"{product.DisplayName} {relationshipLabel}");
 
-        return IfcStepParser.Parse(draft.ToStepText(), draft.FileName);
+        return ReferenceEquals(updatedModel, document.MemoryModel)
+            ? document
+            : IfcMemoryModelExporter.ApplyToDocument(document, updatedModel);
     }
 
     public static IfcDocument AddOpeningVoidWithBodyRepresentation(
@@ -388,8 +372,7 @@ public static class IfcDocumentEditor
         }
 
         var name = string.IsNullOrWhiteSpace(nameText) ? "Native opening" : nameText.Trim();
-        var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
-        var nextId = IfcStepWriter.NextEntityId(draft);
+        var nextId = IfcStepWriter.NextEntityId(document);
         var openingId = nextId++;
         var placementId = nextId++;
         var axisPlacementId = nextId++;
@@ -398,23 +381,24 @@ public static class IfcDocumentEditor
         var hostPlacementId = document.PlacementsByEntity.TryGetValue(hostElementId, out var hostPlacement)
             ? hostPlacement.PlacementId
             : 0;
-
-        AddEntity(
-            draft,
-            openingId,
-            "IFCOPENINGELEMENT",
-            [MakeGeneratedGlobalId("Opening", openingId), "$", StepArgumentReader.Quote(name), "$", "$", $"#{placementId}", "$", "$", ".OPENING."]);
-        AddEntity(draft, placementId, "IFCLOCALPLACEMENT", [hostPlacementId == 0 ? "$" : $"#{hostPlacementId}", $"#{axisPlacementId}"]);
-        AddEntity(draft, axisPlacementId, "IFCAXIS2PLACEMENT3D", [$"#{pointId}", "$", "$"]);
-        AddEntity(draft, pointId, "IFCCARTESIANPOINT", ["(0.,0.,0.)"]);
-        AddEntity(
-            draft,
-            voidRelationshipId,
-            "IFCRELVOIDSELEMENT",
-            [MakeGeneratedGlobalId("Void", voidRelationshipId), "$", StepArgumentReader.Quote($"{host.DisplayName} voids {name}"), "$", $"#{hostElementId}", $"#{openingId}"]);
-
-        var withOpening = IfcStepParser.Parse(draft.ToStepText(), draft.FileName);
-        return AssignBodyRepresentation(withOpening, openingId, widthText, depthText, heightText, profileText);
+        var updatedModel = IfcMemoryModelEditor.AddProductObject(
+            document.MemoryModel,
+            new IfcMemoryModelEditor.ProductDraft(
+                openingId,
+                "IFCOPENINGELEMENT",
+                MakeGeneratedGlobalIdValue("Opening", openingId),
+                name,
+                string.Empty,
+                ".OPENING.",
+                placementId,
+                axisPlacementId,
+                pointId,
+                hostPlacementId == 0 ? null : hostPlacementId));
+        updatedModel = IfcMemoryModelEditor.AddRelation(updatedModel, voidRelationshipId, "IFCRELVOIDSELEMENT", $"{host.DisplayName} voids {name}", [hostElementId], [openingId]);
+        updatedModel = IfcMemoryModelEditor.AssignBodyRepresentation(updatedModel, openingId, CreateBodyRepresentationDraft(document, ref nextId, widthText, depthText, heightText, profileText));
+        return ReferenceEquals(updatedModel, document.MemoryModel)
+            ? document
+            : IfcMemoryModelExporter.ApplyToDocument(document, updatedModel);
     }
 
     public static IfcDocument AddFillingElementWithBodyRepresentation(
@@ -434,8 +418,7 @@ public static class IfcDocumentEditor
 
         var productType = NormalizeProductType(productTypeText);
         var name = string.IsNullOrWhiteSpace(nameText) ? "Native filling element" : nameText.Trim();
-        var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
-        var nextId = IfcStepWriter.NextEntityId(draft);
+        var nextId = IfcStepWriter.NextEntityId(document);
         var fillingId = nextId++;
         var placementId = nextId++;
         var axisPlacementId = nextId++;
@@ -444,23 +427,24 @@ public static class IfcDocumentEditor
         var openingPlacementId = document.PlacementsByEntity.TryGetValue(openingElementId, out var openingPlacement)
             ? openingPlacement.PlacementId
             : 0;
-
-        AddEntity(
-            draft,
-            fillingId,
-            productType,
-            [MakeGeneratedGlobalId("Filling", fillingId), "$", StepArgumentReader.Quote(name), "$", "$", $"#{placementId}", "$", "$", "$"]);
-        AddEntity(draft, placementId, "IFCLOCALPLACEMENT", [openingPlacementId == 0 ? "$" : $"#{openingPlacementId}", $"#{axisPlacementId}"]);
-        AddEntity(draft, axisPlacementId, "IFCAXIS2PLACEMENT3D", [$"#{pointId}", "$", "$"]);
-        AddEntity(draft, pointId, "IFCCARTESIANPOINT", ["(0.,0.,0.)"]);
-        AddEntity(
-            draft,
-            fillRelationshipId,
-            "IFCRELFILLSELEMENT",
-            [MakeGeneratedGlobalId("Fill", fillRelationshipId), "$", StepArgumentReader.Quote($"{opening.DisplayName} filled by {name}"), "$", $"#{openingElementId}", $"#{fillingId}"]);
-
-        var withFilling = IfcStepParser.Parse(draft.ToStepText(), draft.FileName);
-        return AssignBodyRepresentation(withFilling, fillingId, widthText, depthText, heightText, profileText);
+        var updatedModel = IfcMemoryModelEditor.AddProductObject(
+            document.MemoryModel,
+            new IfcMemoryModelEditor.ProductDraft(
+                fillingId,
+                productType,
+                MakeGeneratedGlobalIdValue("Filling", fillingId),
+                name,
+                string.Empty,
+                string.Empty,
+                placementId,
+                axisPlacementId,
+                pointId,
+                openingPlacementId == 0 ? null : openingPlacementId));
+        updatedModel = IfcMemoryModelEditor.AddRelation(updatedModel, fillRelationshipId, "IFCRELFILLSELEMENT", $"{opening.DisplayName} filled by {name}", [openingElementId], [fillingId]);
+        updatedModel = IfcMemoryModelEditor.AssignBodyRepresentation(updatedModel, fillingId, CreateBodyRepresentationDraft(document, ref nextId, widthText, depthText, heightText, profileText));
+        return ReferenceEquals(updatedModel, document.MemoryModel)
+            ? document
+            : IfcMemoryModelExporter.ApplyToDocument(document, updatedModel);
     }
 
     private static bool CanHostOpening(IFCnative.NativeWindows.Models.IfcEntity entity)
@@ -504,8 +488,7 @@ public static class IfcDocumentEditor
 
         var productType = NormalizeProductType(productTypeText);
         var name = string.IsNullOrWhiteSpace(nameText) ? "New native product" : nameText.Trim();
-        var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
-        var nextId = IfcStepWriter.NextEntityId(draft);
+        var nextId = IfcStepWriter.NextEntityId(document);
         var productId = nextId++;
         var placementId = nextId++;
         var axisPlacementId = nextId++;
@@ -514,23 +497,24 @@ public static class IfcDocumentEditor
         var parentPlacementId = document.PlacementsByEntity.TryGetValue(parentSpatialId, out var parentPlacement)
             ? parentPlacement.PlacementId
             : 0;
-
-        AddEntity(
-            draft,
-            productId,
-            productType,
-            [MakeGeneratedGlobalId("Product", productId), "$", StepArgumentReader.Quote(name), "$", "$", $"#{placementId}", "$", "$", "$"]);
-        AddEntity(draft, placementId, "IFCLOCALPLACEMENT", [parentPlacementId == 0 ? "$" : $"#{parentPlacementId}", $"#{axisPlacementId}"]);
-        AddEntity(draft, axisPlacementId, "IFCAXIS2PLACEMENT3D", [$"#{pointId}", "$", "$"]);
-        AddEntity(draft, pointId, "IFCCARTESIANPOINT", ["(0.,0.,0.)"]);
-        AddEntity(
-            draft,
-            containmentId,
-            "IFCRELCONTAINEDINSPATIALSTRUCTURE",
-            [MakeGeneratedGlobalId("Contain", containmentId), "$", StepArgumentReader.Quote($"{parent.DisplayName} contains {name}"), "$", $"(#{productId})", $"#{parentSpatialId}"]);
-
-        var withProduct = IfcStepParser.Parse(draft.ToStepText(), draft.FileName);
-        return AssignBodyRepresentation(withProduct, productId, widthText, depthText, heightText, profileText);
+        var updatedModel = IfcMemoryModelEditor.AddProductObject(
+            document.MemoryModel,
+            new IfcMemoryModelEditor.ProductDraft(
+                productId,
+                productType,
+                MakeGeneratedGlobalIdValue("Product", productId),
+                name,
+                string.Empty,
+                string.Empty,
+                placementId,
+                axisPlacementId,
+                pointId,
+                parentPlacementId == 0 ? null : parentPlacementId));
+        updatedModel = IfcMemoryModelEditor.AddRelation(updatedModel, containmentId, "IFCRELCONTAINEDINSPATIALSTRUCTURE", $"{parent.DisplayName} contains {name}", [parentSpatialId], [productId]);
+        updatedModel = IfcMemoryModelEditor.AssignBodyRepresentation(updatedModel, productId, CreateBodyRepresentationDraft(document, ref nextId, widthText, depthText, heightText, profileText));
+        return ReferenceEquals(updatedModel, document.MemoryModel)
+            ? document
+            : IfcMemoryModelExporter.ApplyToDocument(document, updatedModel);
     }
 
     public static IfcDocument AssignBodyRepresentation(
@@ -546,107 +530,58 @@ public static class IfcDocumentEditor
             return document;
         }
 
-        var width = Math.Max(0.001, ParseCoordinate(widthText, 1));
-        var depth = Math.Max(0.001, ParseCoordinate(depthText, width));
-        var height = Math.Max(0.001, ParseCoordinate(heightText, 1));
-        var isCylinder = string.Equals(profileText.Trim(), "cylinder", StringComparison.OrdinalIgnoreCase);
+        var nextId = IfcStepWriter.NextEntityId(document);
+        var updatedModel = IfcMemoryModelEditor.AssignBodyRepresentation(
+            document.MemoryModel,
+            productId,
+            CreateBodyRepresentationDraft(document, ref nextId, widthText, depthText, heightText, profileText));
 
-        var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
-        if (!draft.EntityById.TryGetValue(productId, out var draftProduct))
-        {
-            return document;
-        }
-
-        var nextId = IfcStepWriter.NextEntityId(draft);
-        var contextId = EnsureRepresentationContext(draft, ref nextId);
-        var shapeId = nextId++;
-        var representationId = nextId++;
-        var solidId = nextId++;
-        var solidAxisId = nextId++;
-        var solidPointId = nextId++;
-        var profileId = nextId++;
-        var profileAxisId = nextId++;
-        var profilePointId = nextId++;
-        var extrusionDirectionId = nextId++;
-        var profileDirectionId = nextId++;
-
-        SetArgument(draftProduct, 6, $"#{shapeId}");
-
-        AddEntity(draft, shapeId, "IFCPRODUCTDEFINITIONSHAPE", ["$", "$", $"(#{representationId})"]);
-        AddEntity(draft, representationId, "IFCSHAPEREPRESENTATION", [$"#{contextId}", StepArgumentReader.Quote("Body"), StepArgumentReader.Quote("SweptSolid"), $"(#{solidId})"]);
-        AddEntity(draft, solidId, "IFCEXTRUDEDAREASOLID", [$"#{profileId}", $"#{solidAxisId}", $"#{extrusionDirectionId}", FormatMeasure(height)]);
-        AddEntity(draft, solidAxisId, "IFCAXIS2PLACEMENT3D", [$"#{solidPointId}", "$", "$"]);
-        AddEntity(draft, solidPointId, "IFCCARTESIANPOINT", ["(0.,0.,0.)"]);
-        AddEntity(
-            draft,
-            profileId,
-            isCylinder ? "IFCCIRCLEPROFILEDEF" : "IFCRECTANGLEPROFILEDEF",
-            isCylinder
-                ? [".AREA.", StepArgumentReader.Quote("Assigned Cylindrical Body"), $"#{profileAxisId}", FormatMeasure(Math.Max(width, depth) / 2)]
-                : [".AREA.", StepArgumentReader.Quote("Assigned Rectangular Body"), $"#{profileAxisId}", FormatMeasure(width), FormatMeasure(depth)]);
-        AddEntity(draft, profileAxisId, "IFCAXIS2PLACEMENT2D", [$"#{profilePointId}", $"#{profileDirectionId}"]);
-        AddEntity(draft, profilePointId, "IFCCARTESIANPOINT", ["(0.,0.)"]);
-        AddEntity(draft, extrusionDirectionId, "IFCDIRECTION", ["(0.,0.,1.)"]);
-        AddEntity(draft, profileDirectionId, "IFCDIRECTION", ["(1.,0.)"]);
-
-        return IfcStepParser.Parse(draft.ToStepText(), draft.FileName);
+        return ReferenceEquals(updatedModel, document.MemoryModel)
+            ? document
+            : IfcMemoryModelExporter.ApplyToDocument(document, updatedModel);
     }
 
     public static IfcDocument UpdateEntity(IfcDocument document, int entityId, string name, string description, string rawArguments)
     {
-        var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
-        if (!draft.EntityById.TryGetValue(entityId, out var draftEntity))
+        if (!document.MemoryModel.ObjectsBySourceId.ContainsKey(entityId))
         {
             return document;
         }
 
-        draftEntity.Name = name.Trim();
-        draftEntity.Description = description.Trim();
-
         var normalizedArguments = rawArguments.Trim();
-        if (!string.IsNullOrWhiteSpace(normalizedArguments))
-        {
-            draftEntity.Arguments.Clear();
-            draftEntity.Arguments.AddRange(StepArgumentReader.SplitTopLevel(normalizedArguments));
-        }
-
-        return IfcStepParser.Parse(draft.ToStepText(), draft.FileName);
+        var rawArgumentValues = string.IsNullOrWhiteSpace(normalizedArguments)
+            ? document.EntityById.GetValueOrDefault(entityId)?.Arguments ?? []
+            : StepArgumentReader.SplitTopLevel(normalizedArguments);
+        var updatedModel = IfcMemoryModelEditor.UpdateRawEntity(document.MemoryModel, entityId, name, description, rawArgumentValues);
+        return ReferenceEquals(updatedModel, document.MemoryModel)
+            ? document
+            : IfcMemoryModelExporter.ApplyToDocument(document, updatedModel);
     }
 
     public static IfcDocument UpdatePlacement(IfcDocument document, int productId, string xText, string yText, string zText)
     {
-        if (!document.PlacementsByEntity.TryGetValue(productId, out var placement))
-        {
-            return document;
-        }
+        var updatedModel = IfcMemoryModelEditor.UpdatePlacement(document.MemoryModel, productId, xText, yText, zText);
+        return ReferenceEquals(updatedModel, document.MemoryModel)
+            ? document
+            : IfcMemoryModelExporter.ApplyToDocument(document, updatedModel);
+    }
 
-        var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
-        if (!draft.EntityById.TryGetValue(placement.PointId, out var point))
-        {
-            return document;
-        }
-
-        var x = ParseCoordinate(xText, placement.X);
-        var y = ParseCoordinate(yText, placement.Y);
-        var z = ParseCoordinate(zText, placement.Z);
-
-        while (point.Arguments.Count == 0)
-        {
-            point.Arguments.Add("(0.,0.,0.)");
-        }
-
-        point.Arguments[0] = $"({FormatCoordinate(x)},{FormatCoordinate(y)},{FormatCoordinate(z)})";
-        return IfcStepParser.Parse(draft.ToStepText(), draft.FileName);
+    public static IfcDocument UpdateBodyDimensions(IfcDocument document, int productId, string widthText, string depthText, string heightText)
+    {
+        var updatedModel = IfcMemoryModelEditor.UpdateExtrudedBodyDimensions(document.MemoryModel, productId, widthText, depthText, heightText);
+        return ReferenceEquals(updatedModel, document.MemoryModel)
+            ? document
+            : IfcMemoryModelExporter.ApplyToDocument(document, updatedModel);
     }
 
     public static IfcDocument UpdateSpatialParent(IfcDocument document, int childId, string parentIdText)
     {
-        var relationship = document.RelationshipsByEntity.TryGetValue(childId, out var relationships)
+        var relationship = document.MemoryModel.RelationsByObjectId.TryGetValue(childId, out var relationships)
             ? relationships
-                .Where(candidate => candidate.TargetIds.Contains(childId))
-                .Where(candidate => candidate.Type is "IFCRELCONTAINEDINSPATIALSTRUCTURE" or "IFCRELAGGREGATES")
-                .OrderBy(candidate => candidate.Type == "IFCRELCONTAINEDINSPATIALSTRUCTURE" ? 0 : 1)
-                .ThenBy(candidate => candidate.Id)
+                .Where(candidate => candidate.TargetObjectIds.Contains(childId))
+                .Where(candidate => candidate.IfcClass is "IFCRELCONTAINEDINSPATIALSTRUCTURE" or "IFCRELAGGREGATES")
+                .OrderBy(candidate => candidate.IfcClass == "IFCRELCONTAINEDINSPATIALSTRUCTURE" ? 0 : 1)
+                .ThenBy(candidate => candidate.SourceId)
                 .FirstOrDefault()
             : null;
 
@@ -656,42 +591,30 @@ public static class IfcDocumentEditor
         }
 
         var parentId = ReadIds(parentIdText).FirstOrDefault();
-        if (parentId == 0 || !document.EntityById.TryGetValue(parentId, out var parent) || parentId == childId)
+        if (parentId == 0 || !document.MemoryModel.ObjectsBySourceId.TryGetValue(parentId, out var parent) || parentId == childId)
         {
             return document;
         }
 
-        if (!IsSpatialParent(parent.Type) || HasSpatialDescendant(document, childId, parentId))
+        if (!IsSpatialParent(parent.IfcClass) || HasSpatialDescendant(document.MemoryModel, childId, parentId))
         {
             return document;
         }
 
-        var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
-        if (!draft.EntityById.TryGetValue(relationship.Id, out var draftRelationship))
-        {
-            return document;
-        }
-
-        if (relationship.Type == "IFCRELCONTAINEDINSPATIALSTRUCTURE")
-        {
-            SetArgument(draftRelationship, 5, $"#{parentId}");
-        }
-        else
-        {
-            SetArgument(draftRelationship, 4, $"#{parentId}");
-        }
-
-        return IfcStepParser.Parse(draft.ToStepText(), draft.FileName);
+        var updatedModel = IfcMemoryModelEditor.UpdateRelationEndpoints(document.MemoryModel, relationship.SourceId, [parentId], relationship.TargetObjectIds);
+        return ReferenceEquals(updatedModel, document.MemoryModel)
+            ? document
+            : IfcMemoryModelExporter.ApplyToDocument(document, updatedModel);
     }
 
     public static IfcDocument RemoveFromSpatialParent(IfcDocument document, int childId)
     {
-        var relationship = document.RelationshipsByEntity.TryGetValue(childId, out var relationships)
+        var relationship = document.MemoryModel.RelationsByObjectId.TryGetValue(childId, out var relationships)
             ? relationships
-                .Where(candidate => candidate.TargetIds.Contains(childId))
-                .Where(candidate => candidate.Type is "IFCRELCONTAINEDINSPATIALSTRUCTURE" or "IFCRELAGGREGATES")
-                .OrderBy(candidate => candidate.Type == "IFCRELCONTAINEDINSPATIALSTRUCTURE" ? 0 : 1)
-                .ThenBy(candidate => candidate.Id)
+                .Where(candidate => candidate.TargetObjectIds.Contains(childId))
+                .Where(candidate => candidate.IfcClass is "IFCRELCONTAINEDINSPATIALSTRUCTURE" or "IFCRELAGGREGATES")
+                .OrderBy(candidate => candidate.IfcClass == "IFCRELCONTAINEDINSPATIALSTRUCTURE" ? 0 : 1)
+                .ThenBy(candidate => candidate.SourceId)
                 .FirstOrDefault()
             : null;
 
@@ -700,28 +623,16 @@ public static class IfcDocumentEditor
             return document;
         }
 
-        var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
-        if (!draft.EntityById.TryGetValue(relationship.Id, out var draftRelationship))
-        {
-            return document;
-        }
-
-        var targetArgumentIndex = relationship.Type == "IFCRELCONTAINEDINSPATIALSTRUCTURE" ? 4 : 5;
-        var remainingTargets = relationship.TargetIds.Where(id => id != childId).Distinct().ToList();
-        if (remainingTargets.Count == 0)
-        {
-            draft.Entities.RemoveAll(entity => entity.Id == relationship.Id);
-            draft.EntityById.Remove(relationship.Id);
-        }
-        else
-        {
-            SetArgument(draftRelationship, targetArgumentIndex, FormatReferenceArgument(remainingTargets, asList: true));
-        }
-
-        return IfcStepParser.Parse(draft.ToStepText(), draft.FileName);
+        var remainingTargets = relationship.TargetObjectIds.Where(id => id != childId).Distinct().ToList();
+        var updatedModel = remainingTargets.Count == 0
+            ? IfcMemoryModelEditor.RemoveRelation(document.MemoryModel, relationship.SourceId)
+            : IfcMemoryModelEditor.UpdateRelationEndpoints(document.MemoryModel, relationship.SourceId, relationship.SourceObjectIds, remainingTargets);
+        return ReferenceEquals(updatedModel, document.MemoryModel)
+            ? document
+            : IfcMemoryModelExporter.ApplyToDocument(document, updatedModel);
     }
 
-    private static bool HasSpatialDescendant(IfcDocument document, int rootId, int candidateDescendantId)
+    private static bool HasSpatialDescendant(IfcMemoryModel model, int rootId, int candidateDescendantId)
     {
         var visited = new HashSet<int>();
         var pending = new Stack<int>();
@@ -735,10 +646,10 @@ public static class IfcDocumentEditor
                 continue;
             }
 
-            foreach (var childId in document.RelationshipById.Values
-                .Where(relationship => relationship.Type is "IFCRELAGGREGATES" or "IFCRELCONTAINEDINSPATIALSTRUCTURE")
-                .Where(relationship => relationship.SourceIds.Contains(current))
-                .SelectMany(relationship => relationship.TargetIds))
+            foreach (var childId in model.Relations
+                .Where(relationship => relationship.IfcClass is "IFCRELAGGREGATES" or "IFCRELCONTAINEDINSPATIALSTRUCTURE")
+                .Where(relationship => relationship.SourceObjectIds.Contains(current))
+                .SelectMany(relationship => relationship.TargetObjectIds))
             {
                 if (childId == candidateDescendantId)
                 {
@@ -798,31 +709,10 @@ public static class IfcDocumentEditor
 
     public static IfcDocument UpdatePropertyValue(IfcDocument document, int propertyValueId, string rawValue)
     {
-        var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
-        if (!draft.EntityById.TryGetValue(propertyValueId, out var propertyValue))
-        {
-            return document;
-        }
-
-        var valueArgumentIndex = propertyValue.Type switch
-        {
-            "IFCPROPERTYSINGLEVALUE" => 2,
-            "IFCQUANTITYLENGTH" or "IFCQUANTITYAREA" or "IFCQUANTITYVOLUME" or "IFCQUANTITYCOUNT" or "IFCQUANTITYWEIGHT" or "IFCQUANTITYTIME" => 3,
-            _ => -1,
-        };
-
-        if (valueArgumentIndex < 0)
-        {
-            return document;
-        }
-
-        while (propertyValue.Arguments.Count <= valueArgumentIndex)
-        {
-            propertyValue.Arguments.Add("$");
-        }
-
-        propertyValue.Arguments[valueArgumentIndex] = string.IsNullOrWhiteSpace(rawValue) ? "$" : rawValue.Trim();
-        return IfcStepParser.Parse(draft.ToStepText(), draft.FileName);
+        var updatedModel = IfcMemoryModelEditor.UpdatePropertyValue(document.MemoryModel, propertyValueId, rawValue);
+        return ReferenceEquals(updatedModel, document.MemoryModel)
+            ? document
+            : IfcMemoryModelExporter.ApplyToDocument(document, updatedModel);
     }
 
     public static bool CanUpdateRelationshipEndpoints(string relationshipType)
@@ -846,17 +736,12 @@ public static class IfcDocumentEditor
             return document;
         }
 
-        var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
-        var relationshipId = IfcStepWriter.NextEntityId(draft);
+        var relationshipId = IfcStepWriter.NextEntityId(document);
         var name = string.IsNullOrWhiteSpace(nameText) ? $"Native {relationshipType}" : nameText.Trim();
-        var arguments = Enumerable.Repeat("$", Math.Max(map.SourceArgumentIndex, map.TargetArgumentIndex) + 1).ToList();
-        arguments[0] = MakeGeneratedGlobalId("Rel", relationshipId);
-        arguments[2] = StepArgumentReader.Quote(name);
-        arguments[map.SourceArgumentIndex] = FormatReferenceArgument(sourceIds, map.SourceIsList);
-        arguments[map.TargetArgumentIndex] = FormatReferenceArgument(targetIds, map.TargetIsList);
-
-        AddEntity(draft, relationshipId, relationshipType, arguments);
-        return IfcStepParser.Parse(draft.ToStepText(), draft.FileName);
+        var updatedModel = IfcMemoryModelEditor.AddRelation(document.MemoryModel, relationshipId, relationshipType, name, sourceIds, targetIds);
+        return ReferenceEquals(updatedModel, document.MemoryModel)
+            ? document
+            : IfcMemoryModelExporter.ApplyToDocument(document, updatedModel);
     }
 
     public static IfcDocument AddElementConnection(IfcDocument document, int sourceElementId, string targetElementIdsText, string nameText)
@@ -902,14 +787,15 @@ public static class IfcDocumentEditor
             return document;
         }
 
-        var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
-        draft.Entities.RemoveAll(entity => relationshipIds.Contains(entity.Id));
+        var updatedModel = document.MemoryModel;
         foreach (var relationshipId in relationshipIds)
         {
-            draft.EntityById.Remove(relationshipId);
+            updatedModel = IfcMemoryModelEditor.RemoveRelation(updatedModel, relationshipId);
         }
 
-        return IfcStepParser.Parse(draft.ToStepText(), draft.FileName);
+        return ReferenceEquals(updatedModel, document.MemoryModel)
+            ? document
+            : IfcMemoryModelExporter.ApplyToDocument(document, updatedModel);
     }
 
     public static IfcDocument UpdateRelationshipEndpoints(IfcDocument document, int relationshipId, string sourceIdsText, string targetIdsText)
@@ -925,15 +811,10 @@ public static class IfcDocumentEditor
             return document;
         }
 
-        var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
-        if (!draft.EntityById.TryGetValue(relationshipId, out var draftRelationship))
-        {
-            return document;
-        }
-
-        SetArgument(draftRelationship, map.SourceArgumentIndex, FormatReferenceArgument(ReadIds(sourceIdsText), map.SourceIsList));
-        SetArgument(draftRelationship, map.TargetArgumentIndex, FormatReferenceArgument(ReadIds(targetIdsText), map.TargetIsList));
-        return IfcStepParser.Parse(draft.ToStepText(), draft.FileName);
+        var updatedModel = IfcMemoryModelEditor.UpdateRelationEndpoints(document.MemoryModel, relationshipId, ReadIds(sourceIdsText), ReadIds(targetIdsText));
+        return ReferenceEquals(updatedModel, document.MemoryModel)
+            ? document
+            : IfcMemoryModelExporter.ApplyToDocument(document, updatedModel);
     }
 
     public static IfcDocument RemoveRelationship(IfcDocument document, int relationshipId)
@@ -943,15 +824,10 @@ public static class IfcDocumentEditor
             return document;
         }
 
-        var draft = IfcStepParser.Parse(document.ToStepText(), document.FileName);
-        var removed = draft.Entities.RemoveAll(entity => entity.Id == relationshipId);
-        if (removed == 0)
-        {
-            return document;
-        }
-
-        draft.EntityById.Remove(relationshipId);
-        return IfcStepParser.Parse(draft.ToStepText(), draft.FileName);
+        var updatedModel = IfcMemoryModelEditor.RemoveRelation(document.MemoryModel, relationshipId);
+        return ReferenceEquals(updatedModel, document.MemoryModel)
+            ? document
+            : IfcMemoryModelExporter.ApplyToDocument(document, updatedModel);
     }
 
     private static RelationshipEndpointMap? GetRelationshipEndpointMap(string relationshipType)
@@ -998,7 +874,7 @@ public static class IfcDocumentEditor
 
     private static IEnumerable<int> ReadIds(string text)
     {
-        foreach (var match in System.Text.RegularExpressions.Regex.Matches(text, @"#?(\d+)"))
+        foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(text, @"#?(\d+)"))
         {
             if (int.TryParse(match.ToString().TrimStart('#'), NumberStyles.Integer, CultureInfo.InvariantCulture, out var id))
             {
@@ -1028,17 +904,47 @@ public static class IfcDocumentEditor
         entity.Arguments[argumentIndex] = value;
     }
 
-    private static int EnsureRepresentationContext(IfcDocument draft, ref int nextId)
+    private static int FindRepresentationContextId(IfcDocument document)
     {
-        var existingContext = draft.Entities.FirstOrDefault(entity => entity.Type is "IFCGEOMETRICREPRESENTATIONCONTEXT" or "IFCGEOMETRICREPRESENTATIONSUBCONTEXT");
-        if (existingContext is not null)
+        return document.Entities
+            .FirstOrDefault(entity => entity.Type is "IFCGEOMETRICREPRESENTATIONCONTEXT" or "IFCGEOMETRICREPRESENTATIONSUBCONTEXT")
+            ?.Id ?? 0;
+    }
+
+    private static IfcMemoryModelEditor.BodyRepresentationDraft CreateBodyRepresentationDraft(
+        IfcDocument document,
+        ref int nextId,
+        string widthText,
+        string depthText,
+        string heightText,
+        string profileText)
+    {
+        var width = Math.Max(0.001, ParseCoordinate(widthText, 1));
+        var depth = Math.Max(0.001, ParseCoordinate(depthText, width));
+        var height = Math.Max(0.001, ParseCoordinate(heightText, 1));
+        var isCylinder = string.Equals(profileText.Trim(), "cylinder", StringComparison.OrdinalIgnoreCase);
+        var contextId = FindRepresentationContextId(document);
+        if (contextId == 0)
         {
-            return existingContext.Id;
+            contextId = nextId++;
         }
 
-        var contextId = nextId++;
-        AddEntity(draft, contextId, "IFCGEOMETRICREPRESENTATIONCONTEXT", [StepArgumentReader.Quote("Body"), StepArgumentReader.Quote("Model"), "3", "1.E-05", "$", "$"]);
-        return contextId;
+        return new IfcMemoryModelEditor.BodyRepresentationDraft(
+            contextId,
+            nextId++,
+            nextId++,
+            nextId++,
+            nextId++,
+            nextId++,
+            nextId++,
+            nextId++,
+            nextId++,
+            nextId++,
+            nextId++,
+            width,
+            depth,
+            height,
+            isCylinder);
     }
 
     private static void AddEntity(IfcDocument document, int id, string type, IEnumerable<string> arguments)
@@ -1056,14 +962,15 @@ public static class IfcDocumentEditor
             : fallback;
     }
 
-    private static string FormatCoordinate(double value)
-    {
-        return FormatMeasure(value);
-    }
-
     private static string FormatMeasure(double value)
     {
         var formatted = value.ToString("0.########", CultureInfo.InvariantCulture);
         return formatted.Contains('.', StringComparison.Ordinal) ? formatted : $"{formatted}.";
+    }
+
+    private static string MakeGeneratedGlobalIdValue(string prefix, int id)
+    {
+        var raw = $"IFCnative{prefix}{id:000000000000}";
+        return raw.Length <= 22 ? raw : raw[..22];
     }
 }

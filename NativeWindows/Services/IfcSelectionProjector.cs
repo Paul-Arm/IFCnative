@@ -266,7 +266,7 @@ public static class IfcSelectionProjector
         }
 
         return document.EntityById.TryGetValue(entityId, out var entity)
-            ? MatchesGraphFilter($"#{entity.Id} {entity.TypeName()} {entity.DisplayName} {entity.GlobalId}", filter)
+            ? MatchesGraphFilter($"#{entity.Id} {entity.Type} {entity.TypeName()} {entity.DisplayName} {entity.GlobalId}", filter)
             : MatchesGraphFilter($"#{entityId}", filter);
     }
 

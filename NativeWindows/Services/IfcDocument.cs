@@ -40,6 +40,8 @@ public sealed class IfcDocument
 
     public Dictionary<int, string> SpatialPathByEntity { get; } = [];
 
+    public IfcMemoryModel MemoryModel { get; internal set; } = IfcMemoryModel.Empty;
+
     public IfcDiagnostics Diagnostics { get; } = new();
 
     public string ToStepText()
