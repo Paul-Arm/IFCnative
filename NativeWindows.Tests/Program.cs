@@ -25,6 +25,8 @@ internal sealed class NativeTestRunner
         Run("xBIM geometry dirty handling preserves pset edits only", XbimGeometryDirtyHandlingPreservesPsetEditsOnly);
         Run("product id picking color roundtrips", ProductIdPickingColorRoundtrips);
         Run("viewport camera supports blender style frame pan and dolly", ViewportCameraSupportsBlenderStyleFramePanAndDolly);
+        Run("viewport preserves far-origin render precision", ViewportPreservesFarOriginRenderPrecision);
+        Run("viewport camera auto clips large scenes", ViewportCameraAutoClipsLargeScenes);
         Run("xBIM export validation roundtrips the store", XbimExportValidationRoundtripsStore);
         Run("IFC file loader reads and writes ifcZIP archives", IfcFileLoaderReadsAndWritesIfcZipArchives);
         Run("xBIM editor commits directly to the in-memory store", XbimEditorCommitsDirectlyToInMemoryStore);
@@ -334,6 +336,42 @@ END-ISO-10303-21;
         True(farther.Distance > framed.Distance, "positive dolly should move farther");
     }
 
+    private static void ViewportPreservesFarOriginRenderPrecision()
+    {
+        const double originX = 4_200_000.0;
+        const double originY = 5_600_000.0;
+        var bounds = IfcRenderBounds.Empty
+            .Include(originX, originY, 120)
+            .Include(originX + 0.25, originY + 0.50, 120.75);
+        var framed = NativeViewportCameraController.FitBounds(bounds, -30, 20);
+
+        Equal(originX + 0.125, Math.Round(bounds.Center.X, 6), "bounds center X should keep sub-meter precision far from origin");
+        Equal(originY + 0.25, Math.Round(bounds.Center.Y, 6), "bounds center Y should keep sub-meter precision far from origin");
+        Equal(originX + 0.125, Math.Round(framed.Target.X, 6), "camera target X should keep sub-meter precision far from origin");
+        Equal(originY + 0.25, Math.Round(framed.Target.Y, 6), "camera target Y should keep sub-meter precision far from origin");
+        True(bounds.Radius > 0.45d && bounds.Radius < 0.55d, "small far-origin bounds should keep their real radius");
+    }
+
+    private static void ViewportCameraAutoClipsLargeScenes()
+    {
+        var bounds = IfcRenderBounds.Empty
+            .Include(-1_000_000, -1_000_000, -50)
+            .Include(1_000_000, 1_000_000, 450);
+        var framed = NativeViewportCameraController.FitBounds(bounds, -30, 20);
+        var clipping = NativeViewportCameraController.FitClippingPlanes(framed, bounds, 0.01, 1000);
+
+        True(clipping.FarPlane > framed.Distance + framed.SceneRadius, "far clipping should expand for large fitted scenes");
+        True(clipping.NearPlane > 0.01, "near clipping should scale up for large scenes to preserve depth precision");
+        True(clipping.NearPlane < clipping.FarPlane, "near clipping should remain before far clipping");
+
+        var selectedBounds = IfcRenderBounds.Empty
+            .Include(999_999, 999_999, 0)
+            .Include(1_000_001, 1_000_001, 2);
+        var selectedFrame = NativeViewportCameraController.FitBounds(selectedBounds, -30, 20);
+        var selectedClipping = NativeViewportCameraController.FitClippingPlanes(selectedFrame, bounds, 0.01, 1000);
+        True(selectedClipping.NearPlane < selectedFrame.Distance - selectedFrame.SceneRadius, "near clipping should not clip a small framed selection inside a large scene");
+    }
+
     private static void XbimExportValidationRoundtripsStore()
     {
         var document = XbimDocumentEditor.UpdateEntity(Sample(), 40, "Exported xBIM Proxy", string.Empty);
@@ -550,9 +588,9 @@ END-ISO-10303-21;
         }
     }
 
-    private static bool IsFinite(float value)
+    private static bool IsFinite(double value)
     {
-        return !float.IsNaN(value) && !float.IsInfinity(value);
+        return !double.IsNaN(value) && !double.IsInfinity(value);
     }
 
     private sealed class CountingGeometryBackend : IIfcGeometryBackend

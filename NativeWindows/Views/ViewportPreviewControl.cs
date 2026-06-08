@@ -77,6 +77,7 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
     }
 
     private const int VertexStride = 11;
+    private const int InfiniteGridHalfLineCount = 48;
     private enum DragMode
     {
         None,
@@ -132,6 +133,8 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
     private uint[] opaqueIndices = [];
     private uint[] transparentIndices = [];
     private float[] lineVertices = [];
+    private IfcPreviewVertex renderOrigin = new(0, 0, 0);
+    private InfiniteGridSignature? currentGridSignature;
     private List<TransparentMeshBatch> transparentMeshBatches = [];
     private NativeViewportCameraState camera = NativeViewportCameraController.DefaultState();
     private Point? lastPointer;
@@ -235,6 +238,7 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
     public void FitCamera()
     {
         camera = NativeViewportCameraController.FitScene(Scene ?? IfcRenderScene.Empty());
+        RebaseRenderOrigin(camera.Target);
         QueueRender();
     }
 
@@ -316,6 +320,7 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
             glApi.Enable(EnableCap.DepthTest);
             glApi.Disable(EnableCap.CullFace);
             buffersDirty = true;
+            currentGridSignature = null;
             QueueRender();
         }
         catch (Exception exception)
@@ -562,6 +567,7 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         var previewMatrix = previewTransform;
         glApi.UniformMatrix4(glApi.GetUniformLocation(program, "uPreviewTransform"), 1, false, &previewMatrix.M11);
 
+        UpdateGridBuffer(glApi, width, height);
         if (lineVertexCount > 0)
         {
             glApi.Disable(EnableCap.Blend);
@@ -584,7 +590,7 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
 
         if (transparentMeshBatches.Count > 0)
         {
-            UpdateTransparentIndexBuffer(glApi, ToVector(camera.ToPose().Position));
+            UpdateTransparentIndexBuffer(glApi, ToRenderVector(camera.ToPose().Position, renderOrigin));
             if (transparentIndexCount > 0)
             {
                 glApi.BindVertexArray(vertexArray);
@@ -800,6 +806,7 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
     private void OnSceneChanged()
     {
         ClearCommittedTransformPreview();
+        renderOrigin = GetDefaultRenderOrigin(Scene);
         buffersDirty = true;
         if (SelectedProductId > 0 && TryFrameProduct(SelectedProductId))
         {
@@ -889,6 +896,7 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
             YawDegrees = yawDegrees,
             PitchDegrees = pitchDegrees,
         };
+        RebaseRenderOrigin(camera.Target);
         QueueRender();
     }
 
@@ -900,6 +908,7 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         }
 
         camera = NativeViewportCameraController.FitBounds(bounds, camera.YawDegrees, camera.PitchDegrees);
+        RebaseRenderOrigin(camera.Target);
         QueueRender();
         return true;
     }
@@ -978,7 +987,7 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
             return false;
         }
 
-        center = ToVector(bounds.Center) + previewMoveDeltaWorld;
+        center = ToRenderVector(bounds.Center, renderOrigin) + previewMoveDeltaWorld;
         var objectScale = Math.Max(0.15d, bounds.Radius * 1.2d);
         var cameraScale = Math.Max(0.15d, camera.Distance * 0.16d);
         var sceneScale = Math.Max(0.4d, camera.SceneRadius * 0.35d);
@@ -1541,6 +1550,7 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         var scene = Scene;
         if (scene is null || scene.IsEmpty)
         {
+            renderOrigin = new IfcPreviewVertex(0, 0, 0);
             vertices = [];
             opaqueIndices = [];
             transparentIndices = [];
@@ -1572,7 +1582,7 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
             var baseIndex = (uint)(vertexValues.Count / VertexStride);
             foreach (var vertex in mesh.Vertices)
             {
-                AddVertex(vertexValues, vertex, mesh.Color, mesh.ProductId);
+                AddVertex(vertexValues, vertex, mesh.Color, mesh.ProductId, renderOrigin);
             }
 
             var meshIndexValues = IsTransparent(mesh)
@@ -1589,7 +1599,7 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
             triangleCount += meshIndexValues.Count / 3;
             if (meshIndexValues != opaqueIndexValues && meshIndexValues.Count > 0)
             {
-                batches.Add(new TransparentMeshBatch(MeshCenter(mesh), meshIndexValues.ToArray()));
+                batches.Add(new TransparentMeshBatch(MeshCenter(mesh, renderOrigin), meshIndexValues.ToArray()));
             }
         }
 
@@ -1599,8 +1609,8 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         transparentIndices = [];
         opaqueIndexCount = opaqueIndices.Length;
         transparentIndexCount = 0;
-        lineVertices = BuildGridAndAxes(scene).ToArray();
-        lineVertexCount = lineVertices.Length / VertexStride;
+        lineVertices = [];
+        lineVertexCount = 0;
         visibleMeshCount = meshCount;
         visibleTriangleCount = triangleCount;
         visibleVertexCount = vertices.Length / VertexStride;
@@ -1626,6 +1636,28 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         fixed (float* linePointer = lineVertices)
         {
             gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(lineVertices.Length * sizeof(float)), linePointer, BufferUsageARB.StaticDraw);
+        }
+
+        ConfigureAttributes(gl);
+        gl.BindVertexArray(0);
+    }
+
+    private unsafe void UpdateGridBuffer(SilkGL gl, int width, int height)
+    {
+        var signature = CreateInfiniteGridSignature(width, height);
+        if (currentGridSignature == signature && lineVertexCount > 0)
+        {
+            return;
+        }
+
+        lineVertices = BuildInfiniteGridVertices(signature);
+        lineVertexCount = lineVertices.Length / VertexStride;
+        currentGridSignature = signature;
+
+        BindArray(gl, lineVertexArray, lineVertexBuffer);
+        fixed (float* linePointer = lineVertices)
+        {
+            gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(lineVertices.Length * sizeof(float)), linePointer, BufferUsageARB.DynamicDraw);
         }
 
         ConfigureAttributes(gl);
@@ -1689,14 +1721,29 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         gl.VertexAttribPointer(3, 1, VertexAttribPointerType.Float, false, stride, (void*)(10 * sizeof(float)));
     }
 
-    private static void AddVertex(List<float> values, IfcRenderVertex vertex, IfcRenderColor color, int productId)
+    private static void AddVertex(List<float> values, IfcRenderVertex vertex, IfcRenderColor color, int productId, IfcPreviewVertex origin)
     {
-        values.Add(vertex.X);
-        values.Add(vertex.Y);
-        values.Add(vertex.Z);
+        values.Add(ToRenderFloat(vertex.X - origin.X));
+        values.Add(ToRenderFloat(vertex.Y - origin.Y));
+        values.Add(ToRenderFloat(vertex.Z - origin.Z));
         values.Add(vertex.NormalX);
         values.Add(vertex.NormalY);
         values.Add(vertex.NormalZ);
+        values.Add(color.R);
+        values.Add(color.G);
+        values.Add(color.B);
+        values.Add(color.A);
+        values.Add(productId);
+    }
+
+    private static void AddLocalVertex(List<float> values, float x, float y, float z, IfcRenderColor color, int productId)
+    {
+        values.Add(x);
+        values.Add(y);
+        values.Add(z);
+        values.Add(0);
+        values.Add(0);
+        values.Add(1);
         values.Add(color.R);
         values.Add(color.G);
         values.Add(color.B);
@@ -1709,7 +1756,7 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         return mesh.Color.A < 0.99f;
     }
 
-    private static Vector3 MeshCenter(IfcRenderMesh mesh)
+    private static Vector3 MeshCenter(IfcRenderMesh mesh, IfcPreviewVertex origin)
     {
         var bounds = IfcRenderBounds.Empty;
         foreach (var vertex in mesh.Vertices)
@@ -1718,51 +1765,151 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         }
 
         var center = bounds.Center;
-        return new Vector3((float)center.X, (float)center.Y, (float)center.Z);
+        return ToRenderVector(center, origin);
     }
 
-    private static IEnumerable<float> BuildGridAndAxes(IfcRenderScene scene)
+    private InfiniteGridSignature CreateInfiniteGridSignature(int width, int height)
     {
-        var values = new List<float>();
-        var radius = Math.Max(1d, scene.Bounds.Radius);
-        var center = scene.Bounds.Center;
-        var step = NiceStep(radius / 6d);
-        var extent = Math.Max(step * 6d, radius * 1.25d);
-        var minX = Math.Floor((center.X - extent) / step) * step;
-        var maxX = Math.Ceiling((center.X + extent) / step) * step;
-        var minY = Math.Floor((center.Y - extent) / step) * step;
-        var maxY = Math.Ceiling((center.Y + extent) / step) * step;
-        var z = scene.Bounds.IsEmpty ? 0f : scene.Bounds.MinZ - (float)(radius * 0.015d);
+        var bounds = Scene?.Bounds ?? IfcRenderBounds.Empty;
+        var radius = Math.Max(1d, bounds.Radius);
+        var z = bounds.IsEmpty ? 0d : bounds.MinZ - radius * 0.015d;
+        var fovRadians = Math.Clamp(camera.FieldOfViewDegrees, 5d, 140d) * Math.PI / 180d;
+        var visibleHeight = 2d * Math.Max(0.25d, camera.Distance) * Math.Tan(fovRadians / 2d);
+        if (!IsFinite(visibleHeight) || visibleHeight <= 0)
+        {
+            visibleHeight = Math.Max(1d, camera.SceneRadius * 2d);
+        }
+
+        var aspect = Math.Max(0.1d, width / (double)Math.Max(1, height));
+        var visibleSpan = Math.Max(visibleHeight, visibleHeight * aspect);
+        var step = NiceStep(visibleSpan / 24d);
+        if (!IsFinite(step) || step <= 0)
+        {
+            step = 1d;
+        }
+
+        var target = IsFinite(camera.Target) ? camera.Target : renderOrigin;
+        var baseX = Math.Floor(target.X / step) * step;
+        var baseY = Math.Floor(target.Y / step) * step;
+        return new InfiniteGridSignature(
+            baseX,
+            baseY,
+            step,
+            z,
+            renderOrigin.X,
+            renderOrigin.Y,
+            renderOrigin.Z);
+    }
+
+    private static float[] BuildInfiniteGridVertices(InfiniteGridSignature signature)
+    {
+        var values = new List<float>((InfiniteGridHalfLineCount * 4 + 8) * VertexStride);
+        var origin = new IfcPreviewVertex(signature.OriginX, signature.OriginY, signature.OriginZ);
+        var extent = signature.Step * InfiniteGridHalfLineCount;
+        var minX = signature.BaseX - extent;
+        var maxX = signature.BaseX + extent;
+        var minY = signature.BaseY - extent;
+        var maxY = signature.BaseY + extent;
         var grid = new IfcRenderColor(0.17f, 0.22f, 0.19f, 1f);
+        var major = new IfcRenderColor(0.24f, 0.30f, 0.26f, 1f);
         var axisX = new IfcRenderColor(0.88f, 0.34f, 0.28f, 1f);
         var axisY = new IfcRenderColor(0.34f, 0.68f, 0.42f, 1f);
         var axisZ = new IfcRenderColor(0.32f, 0.54f, 0.86f, 1f);
 
-        for (var x = minX; x <= maxX + step / 2d; x += step)
+        for (var offset = -InfiniteGridHalfLineCount; offset <= InfiniteGridHalfLineCount; offset++)
         {
-            AddLine(values, (float)x, (float)minY, z, (float)x, (float)maxY, z, grid);
+            var x = signature.BaseX + offset * signature.Step;
+            AddWorldLine(
+                values,
+                x,
+                minY,
+                signature.Z,
+                x,
+                maxY,
+                signature.Z,
+                origin,
+                GridLineColor(x, signature.Step, axisY, major, grid));
         }
 
-        for (var y = minY; y <= maxY + step / 2d; y += step)
+        for (var offset = -InfiniteGridHalfLineCount; offset <= InfiniteGridHalfLineCount; offset++)
         {
-            AddLine(values, (float)minX, (float)y, z, (float)maxX, (float)y, z, grid);
+            var y = signature.BaseY + offset * signature.Step;
+            AddWorldLine(
+                values,
+                minX,
+                y,
+                signature.Z,
+                maxX,
+                y,
+                signature.Z,
+                origin,
+                GridLineColor(y, signature.Step, axisX, major, grid));
         }
 
-        AddLine(values, (float)(center.X - extent), (float)center.Y, z, (float)(center.X + extent), (float)center.Y, z, axisX);
-        AddLine(values, (float)center.X, (float)(center.Y - extent), z, (float)center.X, (float)(center.Y + extent), z, axisY);
-        AddLine(values, (float)center.X, (float)center.Y, z, (float)center.X, (float)center.Y, (float)(z + extent), axisZ);
-        return values;
+        if (minX <= 0d && maxX >= 0d && minY <= 0d && maxY >= 0d)
+        {
+            AddWorldLine(values, 0d, 0d, signature.Z, 0d, 0d, signature.Z + extent, origin, axisZ);
+        }
+
+        return values.ToArray();
     }
 
-    private static void AddLine(List<float> values, float x1, float y1, float z1, float x2, float y2, float z2, IfcRenderColor color)
+    private static IfcRenderColor GridLineColor(
+        double coordinate,
+        double step,
+        IfcRenderColor axis,
+        IfcRenderColor major,
+        IfcRenderColor grid)
     {
-        AddVertex(values, new IfcRenderVertex(x1, y1, z1, 0, 0, 1), color, 0);
-        AddVertex(values, new IfcRenderVertex(x2, y2, z2, 0, 0, 1), color, 0);
+        if (Math.Abs(coordinate) < step * 0.001d)
+        {
+            return axis;
+        }
+
+        var majorStep = step * 10d;
+        if (majorStep > 0)
+        {
+            var ratio = coordinate / majorStep;
+            if (Math.Abs(ratio - Math.Round(ratio)) < 0.001d)
+            {
+                return major;
+            }
+        }
+
+        return grid;
+    }
+
+    private static void AddWorldLine(
+        List<float> values,
+        double x1,
+        double y1,
+        double z1,
+        double x2,
+        double y2,
+        double z2,
+        IfcPreviewVertex origin,
+        IfcRenderColor color)
+    {
+        AddLocalLine(
+            values,
+            ToRenderFloat(x1 - origin.X),
+            ToRenderFloat(y1 - origin.Y),
+            ToRenderFloat(z1 - origin.Z),
+            ToRenderFloat(x2 - origin.X),
+            ToRenderFloat(y2 - origin.Y),
+            ToRenderFloat(z2 - origin.Z),
+            color);
+    }
+
+    private static void AddLocalLine(List<float> values, float x1, float y1, float z1, float x2, float y2, float z2, IfcRenderColor color)
+    {
+        AddLocalVertex(values, x1, y1, z1, color, 0);
+        AddLocalVertex(values, x2, y2, z2, color, 0);
     }
 
     private static void AddLine(List<float> values, Vector3 start, Vector3 end, IfcRenderColor color)
     {
-        AddLine(values, start.X, start.Y, start.Z, end.X, end.Y, end.Z, color);
+        AddLocalLine(values, start.X, start.Y, start.Z, end.X, end.Y, end.Z, color);
     }
 
     private static double NiceStep(double value)
@@ -1786,16 +1933,21 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
 
     private Matrix4x4 CreateViewProjection(double width, double height)
     {
+        var clipping = NativeViewportCameraController.FitClippingPlanes(
+            camera,
+            Scene?.Bounds ?? IfcRenderBounds.Empty,
+            NearPlane,
+            FarPlane);
         camera = camera with
         {
             FieldOfViewDegrees = FieldOfView,
-            NearPlane = NearPlane,
-            FarPlane = FarPlane
+            NearPlane = clipping.NearPlane,
+            FarPlane = clipping.FarPlane
         };
         var pose = camera.ToPose();
-        var position = ToVector(pose.Position);
-        var target = position + ToVector(pose.LookDirection);
-        var up = ToVector(pose.UpDirection);
+        var position = ToRenderVector(pose.Position, renderOrigin);
+        var target = ToRenderVector(camera.Target, renderOrigin);
+        var up = ToDirectionVector(pose.UpDirection);
         var view = Matrix4x4.CreateLookAt(position, target, up);
         var aspect = Math.Max(0.1f, (float)(width / Math.Max(1d, height)));
         var projection = Matrix4x4.CreatePerspectiveFieldOfView(
@@ -1856,9 +2008,9 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
                 if (IntersectTriangle(
                     near,
                     direction,
-                    ToVector(mesh.Vertices[first]),
-                    ToVector(mesh.Vertices[second]),
-                    ToVector(mesh.Vertices[third]),
+                    ToRenderVector(mesh.Vertices[first], renderOrigin),
+                    ToRenderVector(mesh.Vertices[second], renderOrigin),
+                    ToRenderVector(mesh.Vertices[third], renderOrigin),
                     out var distance)
                     && distance < bestDistance)
                 {
@@ -1909,14 +2061,84 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         return distance > epsilon;
     }
 
-    private static Vector3 ToVector(IfcPreviewVertex vertex)
+    private void RebaseRenderOrigin(IfcPreviewVertex origin)
     {
-        return new Vector3((float)vertex.X, (float)vertex.Y, (float)vertex.Z);
+        var next = IsFinite(origin) ? origin : GetDefaultRenderOrigin(Scene);
+        if (IsSameOrigin(renderOrigin, next))
+        {
+            return;
+        }
+
+        renderOrigin = next;
+        buffersDirty = true;
     }
 
-    private static Vector3 ToVector(IfcRenderVertex vertex)
+    private static IfcPreviewVertex GetDefaultRenderOrigin(IfcRenderScene? scene)
     {
-        return new Vector3(vertex.X, vertex.Y, vertex.Z);
+        return scene is null || scene.Bounds.IsEmpty
+            ? new IfcPreviewVertex(0, 0, 0)
+            : scene.Bounds.Center;
+    }
+
+    private static Vector3 ToRenderVector(IfcPreviewVertex vertex, IfcPreviewVertex origin)
+    {
+        return new Vector3(
+            ToRenderFloat(vertex.X - origin.X),
+            ToRenderFloat(vertex.Y - origin.Y),
+            ToRenderFloat(vertex.Z - origin.Z));
+    }
+
+    private static Vector3 ToRenderVector(IfcRenderVertex vertex, IfcPreviewVertex origin)
+    {
+        return new Vector3(
+            ToRenderFloat(vertex.X - origin.X),
+            ToRenderFloat(vertex.Y - origin.Y),
+            ToRenderFloat(vertex.Z - origin.Z));
+    }
+
+    private static Vector3 ToDirectionVector(IfcPreviewVertex vertex)
+    {
+        return new Vector3(
+            ToRenderFloat(vertex.X),
+            ToRenderFloat(vertex.Y),
+            ToRenderFloat(vertex.Z));
+    }
+
+    private static float ToRenderFloat(double value)
+    {
+        if (double.IsNaN(value))
+        {
+            return 0f;
+        }
+
+        if (double.IsPositiveInfinity(value) || value > float.MaxValue)
+        {
+            return float.MaxValue;
+        }
+
+        if (double.IsNegativeInfinity(value) || value < -float.MaxValue)
+        {
+            return -float.MaxValue;
+        }
+
+        return (float)value;
+    }
+
+    private static bool IsSameOrigin(IfcPreviewVertex left, IfcPreviewVertex right)
+    {
+        return Math.Abs(left.X - right.X) < 0.000001d
+            && Math.Abs(left.Y - right.Y) < 0.000001d
+            && Math.Abs(left.Z - right.Z) < 0.000001d;
+    }
+
+    private static bool IsFinite(IfcPreviewVertex vertex)
+    {
+        return IsFinite(vertex.X) && IsFinite(vertex.Y) && IsFinite(vertex.Z);
+    }
+
+    private static bool IsFinite(double value)
+    {
+        return !double.IsNaN(value) && !double.IsInfinity(value);
     }
 
     private static float DegreesToRadians(float degrees)
@@ -2146,6 +2368,15 @@ void main()
 """;
 
     private sealed record TransparentMeshBatch(Vector3 Center, uint[] Indices);
+
+    private readonly record struct InfiniteGridSignature(
+        double BaseX,
+        double BaseY,
+        double Step,
+        double Z,
+        double OriginX,
+        double OriginY,
+        double OriginZ);
 
 }
 

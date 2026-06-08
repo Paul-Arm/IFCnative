@@ -32,6 +32,8 @@ public sealed record NativeViewportCameraPose(
     double NearPlaneDistance,
     double FarPlaneDistance);
 
+public readonly record struct NativeViewportCameraClipping(double NearPlane, double FarPlane);
+
 public static class NativeViewportCameraController
 {
     public static IfcPreviewVertex UnitZ { get; } = new(0, 0, 1);
@@ -136,6 +138,67 @@ public static class NativeViewportCameraController
         return state with { Target = Add(state.Target, offset) };
     }
 
+    public static NativeViewportCameraClipping FitClippingPlanes(
+        NativeViewportCameraState state,
+        IfcRenderBounds bounds,
+        double requestedNearPlane,
+        double requestedFarPlane)
+    {
+        var nearPlane = SanitizePositive(requestedNearPlane, 0.01);
+        var farPlane = Math.Max(SanitizePositive(requestedFarPlane, 1000), nearPlane + 1);
+        if (bounds.IsEmpty)
+        {
+            return new NativeViewportCameraClipping(nearPlane, farPlane);
+        }
+
+        var pose = state.ToPose();
+        var look = Normalize(pose.LookDirection);
+        if (!IsFinite(look) || Length(look) == 0)
+        {
+            return new NativeViewportCameraClipping(nearPlane, farPlane);
+        }
+
+        var minDepth = double.PositiveInfinity;
+        var maxDepth = double.NegativeInfinity;
+        foreach (var corner in BoundsCorners(bounds))
+        {
+            var depth = Dot(Subtract(corner, pose.Position), look);
+            if (!IsFinite(depth))
+            {
+                continue;
+            }
+
+            minDepth = Math.Min(minDepth, depth);
+            maxDepth = Math.Max(maxDepth, depth);
+        }
+
+        if (!IsFinite(minDepth) || !IsFinite(maxDepth))
+        {
+            return new NativeViewportCameraClipping(nearPlane, farPlane);
+        }
+
+        var radius = Math.Max(0.1, bounds.Radius);
+        var margin = Math.Max(0.1, radius * 0.05);
+        var requiredFar = Math.Max(maxDepth + margin, state.Distance + radius + margin);
+        farPlane = Math.Max(farPlane, requiredFar);
+
+        if (minDepth > margin)
+        {
+            var precisionNear = Math.Min(minDepth - margin, farPlane / 100_000d);
+            var framedNearLimit = state.Distance - state.SceneRadius;
+            if (framedNearLimit > nearPlane)
+            {
+                precisionNear = Math.Min(precisionNear, framedNearLimit * 0.8d);
+            }
+
+            nearPlane = Math.Max(nearPlane, precisionNear);
+        }
+
+        nearPlane = Math.Max(0.0001, Math.Min(nearPlane, farPlane * 0.5));
+        farPlane = Math.Max(farPlane, nearPlane + 1);
+        return new NativeViewportCameraClipping(nearPlane, farPlane);
+    }
+
     public static IfcPreviewVertex DirectionFromYawPitch(double yawDegrees, double pitchDegrees)
     {
         var yaw = DegreesToRadians(yawDegrees);
@@ -185,6 +248,16 @@ public static class NativeViewportCameraController
             left.X * right.Y - left.Y * right.X);
     }
 
+    private static IfcPreviewVertex Subtract(IfcPreviewVertex left, IfcPreviewVertex right)
+    {
+        return new IfcPreviewVertex(left.X - right.X, left.Y - right.Y, left.Z - right.Z);
+    }
+
+    private static double Dot(IfcPreviewVertex left, IfcPreviewVertex right)
+    {
+        return left.X * right.X + left.Y * right.Y + left.Z * right.Z;
+    }
+
     private static IfcPreviewVertex Normalize(IfcPreviewVertex vertex)
     {
         var length = Length(vertex);
@@ -216,5 +289,22 @@ public static class NativeViewportCameraController
     private static bool IsFinite(double value)
     {
         return !double.IsNaN(value) && !double.IsInfinity(value);
+    }
+
+    private static double SanitizePositive(double value, double fallback)
+    {
+        return value > 0 && IsFinite(value) ? value : fallback;
+    }
+
+    private static IEnumerable<IfcPreviewVertex> BoundsCorners(IfcRenderBounds bounds)
+    {
+        yield return new IfcPreviewVertex(bounds.MinX, bounds.MinY, bounds.MinZ);
+        yield return new IfcPreviewVertex(bounds.MinX, bounds.MinY, bounds.MaxZ);
+        yield return new IfcPreviewVertex(bounds.MinX, bounds.MaxY, bounds.MinZ);
+        yield return new IfcPreviewVertex(bounds.MinX, bounds.MaxY, bounds.MaxZ);
+        yield return new IfcPreviewVertex(bounds.MaxX, bounds.MinY, bounds.MinZ);
+        yield return new IfcPreviewVertex(bounds.MaxX, bounds.MinY, bounds.MaxZ);
+        yield return new IfcPreviewVertex(bounds.MaxX, bounds.MaxY, bounds.MinZ);
+        yield return new IfcPreviewVertex(bounds.MaxX, bounds.MaxY, bounds.MaxZ);
     }
 }

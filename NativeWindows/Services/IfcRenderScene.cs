@@ -30,9 +30,9 @@ public sealed record IfcRenderMesh(
 }
 
 public readonly record struct IfcRenderVertex(
-    float X,
-    float Y,
-    float Z,
+    double X,
+    double Y,
+    double Z,
     float NormalX,
     float NormalY,
     float NormalZ);
@@ -43,20 +43,20 @@ public readonly record struct IfcRenderColor(float R, float G, float B, float A)
 }
 
 public readonly record struct IfcRenderBounds(
-    float MinX,
-    float MinY,
-    float MinZ,
-    float MaxX,
-    float MaxY,
-    float MaxZ)
+    double MinX,
+    double MinY,
+    double MinZ,
+    double MaxX,
+    double MaxY,
+    double MaxZ)
 {
     public static IfcRenderBounds Empty { get; } = new(
-        float.PositiveInfinity,
-        float.PositiveInfinity,
-        float.PositiveInfinity,
-        float.NegativeInfinity,
-        float.NegativeInfinity,
-        float.NegativeInfinity);
+        double.PositiveInfinity,
+        double.PositiveInfinity,
+        double.PositiveInfinity,
+        double.NegativeInfinity,
+        double.NegativeInfinity,
+        double.NegativeInfinity);
 
     public bool IsEmpty => !IsFinite(MinX) || !IsFinite(MinY) || !IsFinite(MinZ)
         || !IsFinite(MaxX) || !IsFinite(MaxY) || !IsFinite(MaxZ)
@@ -83,7 +83,7 @@ public readonly record struct IfcRenderBounds(
         }
     }
 
-    public IfcRenderBounds Include(float x, float y, float z)
+    public IfcRenderBounds Include(double x, double y, double z)
     {
         if (!IsFinite(x) || !IsFinite(y) || !IsFinite(z))
         {
@@ -99,9 +99,9 @@ public readonly record struct IfcRenderBounds(
             Math.Max(MaxZ, z));
     }
 
-    private static bool IsFinite(float value)
+    private static bool IsFinite(double value)
     {
-        return !float.IsNaN(value) && !float.IsInfinity(value);
+        return !double.IsNaN(value) && !double.IsInfinity(value);
     }
 }
 

@@ -319,7 +319,7 @@ public sealed class XbimGeometryBackend : IIfcGeometryBackend
         }
 
         var vertices = points
-            .Select(point => new IfcRenderVertex(point[0], point[1], point[2], point[3], point[4], point[5]))
+            .Select(point => new IfcRenderVertex(point[0], point[1], point[2], (float)point[3], (float)point[4], (float)point[5]))
             .ToList();
 
         return new IfcRenderMesh(
