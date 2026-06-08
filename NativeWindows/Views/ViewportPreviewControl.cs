@@ -77,7 +77,7 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
     }
 
     private const int VertexStride = 11;
-    private const int InfiniteGridHalfLineCount = 48;
+    private const int InfiniteGridTargetLineCount = 160;
     private enum DragMode
     {
         None,
@@ -283,7 +283,17 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
             glApi = SilkGL.GetApi(name => gl.GetProcAddress(name));
             LogViewport($"init context={gl.ContextInfo}");
             LogViewport($"gl version={ReadGlString(glApi, StringName.Version)} renderer={ReadGlString(glApi, StringName.Renderer)} shading={ReadGlString(glApi, StringName.ShadingLanguageVersion)}");
-            program = CreateProgram(glApi);
+            program = CreateProgramWithFallback(
+                glApi,
+                "scene",
+                SceneVertexShaderSource330,
+                SceneFragmentShaderSource330,
+                SceneVertexShaderSource120,
+                SceneFragmentShaderSource120,
+                "aPosition",
+                "aNormal",
+                "aColor",
+                "aProductId");
             vertexArray = glApi.GenVertexArray();
             vertexBuffer = glApi.GenBuffer();
             indexBuffer = glApi.GenBuffer();
@@ -293,7 +303,14 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
             gizmoVertexArray = glApi.GenVertexArray();
             gizmoVertexBuffer = glApi.GenBuffer();
 
-            fxaaProgram = CreateProgram(glApi, FxaaVertexShaderSource, FxaaFragmentShaderSource);
+            fxaaProgram = CreateProgramWithFallback(
+                glApi,
+                "fxaa",
+                FxaaVertexShaderSource330,
+                FxaaFragmentShaderSource330,
+                FxaaVertexShaderSource120,
+                FxaaFragmentShaderSource120,
+                "aPosition");
             quadVao = glApi.GenVertexArray();
             quadVbo = glApi.GenBuffer();
             glApi.BindVertexArray(quadVao);
@@ -570,11 +587,14 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         UpdateGridBuffer(glApi, width, height);
         if (lineVertexCount > 0)
         {
-            glApi.Disable(EnableCap.Blend);
-            glApi.DepthMask(true);
+            glApi.Enable(EnableCap.Blend);
+            glApi.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+            glApi.DepthMask(false);
             glApi.BindVertexArray(lineVertexArray);
             glApi.LineWidth(1f);
             glApi.DrawArrays(PrimitiveType.Lines, 0, (uint)lineVertexCount);
+            glApi.DepthMask(true);
+            glApi.Disable(EnableCap.Blend);
             drawCalls++;
         }
 
@@ -1782,19 +1802,40 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
 
         var aspect = Math.Max(0.1d, width / (double)Math.Max(1, height));
         var visibleSpan = Math.Max(visibleHeight, visibleHeight * aspect);
-        var step = NiceStep(visibleSpan / 24d);
-        if (!IsFinite(step) || step <= 0)
+        var target = IsFinite(camera.Target) ? camera.Target : renderOrigin;
+        var look = NormalizeVertex(camera.ToPose().LookDirection);
+        var grazingFactor = Math.Clamp(1d / Math.Max(0.12d, Math.Abs(look.Z)), 1d, 10d);
+        var footprintSpan = Math.Max(
+            visibleSpan * 3d * grazingFactor,
+            Math.Max(camera.Distance * 4d, camera.SceneRadius * 2d) * grazingFactor);
+        if (!IsFinite(footprintSpan) || footprintSpan <= 0)
         {
-            step = 1d;
+            footprintSpan = visibleSpan * 8d;
         }
 
-        var target = IsFinite(camera.Target) ? camera.Target : renderOrigin;
-        var baseX = Math.Floor(target.X / step) * step;
-        var baseY = Math.Floor(target.Y / step) * step;
+        var desiredStep = Math.Max(visibleSpan / 24d, footprintSpan / InfiniteGridTargetLineCount);
+        var fineStep = NiceStepFloor(desiredStep);
+        if (!IsFinite(fineStep) || fineStep <= 0)
+        {
+            fineStep = 1d;
+        }
+
+        var coarseStep = NextNiceStep(fineStep);
+        var lodBlend = GridLodBlend(desiredStep, fineStep, coarseStep);
+        var minX = Math.Floor((target.X - footprintSpan * 0.5d) / fineStep) * fineStep;
+        var maxX = Math.Ceiling((target.X + footprintSpan * 0.5d) / fineStep) * fineStep;
+        var minY = Math.Floor((target.Y - footprintSpan * 0.5d) / fineStep) * fineStep;
+        var maxY = Math.Ceiling((target.Y + footprintSpan * 0.5d) / fineStep) * fineStep;
         return new InfiniteGridSignature(
-            baseX,
-            baseY,
-            step,
+            target.X,
+            target.Y,
+            minX,
+            maxX,
+            minY,
+            maxY,
+            fineStep,
+            coarseStep,
+            lodBlend,
             z,
             renderOrigin.X,
             renderOrigin.Y,
@@ -1803,22 +1844,46 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
 
     private static float[] BuildInfiniteGridVertices(InfiniteGridSignature signature)
     {
-        var values = new List<float>((InfiniteGridHalfLineCount * 4 + 8) * VertexStride);
+        var estimatedLineCount = EstimateGridLineCount(signature.MinX, signature.MaxX, signature.FineStep)
+            + EstimateGridLineCount(signature.MinY, signature.MaxY, signature.FineStep)
+            + EstimateGridLineCount(signature.MinX, signature.MaxX, signature.CoarseStep)
+            + EstimateGridLineCount(signature.MinY, signature.MaxY, signature.CoarseStep)
+            + 2;
+        var values = new List<float>(estimatedLineCount * 2 * VertexStride);
         var origin = new IfcPreviewVertex(signature.OriginX, signature.OriginY, signature.OriginZ);
-        var extent = signature.Step * InfiniteGridHalfLineCount;
-        var minX = signature.BaseX - extent;
-        var maxX = signature.BaseX + extent;
-        var minY = signature.BaseY - extent;
-        var maxY = signature.BaseY + extent;
-        var grid = new IfcRenderColor(0.17f, 0.22f, 0.19f, 1f);
-        var major = new IfcRenderColor(0.24f, 0.30f, 0.26f, 1f);
-        var axisX = new IfcRenderColor(0.88f, 0.34f, 0.28f, 1f);
-        var axisY = new IfcRenderColor(0.34f, 0.68f, 0.42f, 1f);
-        var axisZ = new IfcRenderColor(0.32f, 0.54f, 0.86f, 1f);
+        var fineAlpha = 1d - SmoothStep(0d, 1d, signature.LodBlend);
+        var coarseAlpha = SmoothStep(0d, 1d, signature.LodBlend);
+        AddGridLevel(values, origin, signature, signature.FineStep, fineAlpha);
+        AddGridLevel(values, origin, signature, signature.CoarseStep, coarseAlpha);
 
-        for (var offset = -InfiniteGridHalfLineCount; offset <= InfiniteGridHalfLineCount; offset++)
+        return values.ToArray();
+    }
+
+    private static void AddGridLevel(
+        List<float> values,
+        IfcPreviewVertex origin,
+        InfiniteGridSignature signature,
+        double step,
+        double levelAlpha)
+    {
+        if (levelAlpha <= 0.001d || step <= 0 || !IsFinite(step))
         {
-            var x = signature.BaseX + offset * signature.Step;
+            return;
+        }
+
+        var minX = Math.Floor(signature.MinX / step) * step;
+        var maxX = Math.Ceiling(signature.MaxX / step) * step;
+        var minY = Math.Floor(signature.MinY / step) * step;
+        var maxY = Math.Ceiling(signature.MaxY / step) * step;
+        var grid = new IfcRenderColor(0.17f, 0.22f, 0.19f, 0.72f);
+        var major = new IfcRenderColor(0.24f, 0.30f, 0.26f, 0.88f);
+        var axisX = new IfcRenderColor(0.88f, 0.34f, 0.28f, 0.95f);
+        var axisY = new IfcRenderColor(0.34f, 0.68f, 0.42f, 0.95f);
+        var axisZ = new IfcRenderColor(0.32f, 0.54f, 0.86f, 0.95f);
+
+        for (var x = minX; x <= maxX + step * 0.5d; x += step)
+        {
+            var edgeAlpha = EdgeFade(x, minX, maxX);
             AddWorldLine(
                 values,
                 x,
@@ -1828,12 +1893,12 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
                 maxY,
                 signature.Z,
                 origin,
-                GridLineColor(x, signature.Step, axisY, major, grid));
+                WithAlpha(GridLineColor(x, step, axisY, major, grid), levelAlpha * edgeAlpha));
         }
 
-        for (var offset = -InfiniteGridHalfLineCount; offset <= InfiniteGridHalfLineCount; offset++)
+        for (var y = minY; y <= maxY + step * 0.5d; y += step)
         {
-            var y = signature.BaseY + offset * signature.Step;
+            var edgeAlpha = EdgeFade(y, minY, maxY);
             AddWorldLine(
                 values,
                 minX,
@@ -1843,15 +1908,14 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
                 y,
                 signature.Z,
                 origin,
-                GridLineColor(y, signature.Step, axisX, major, grid));
+                WithAlpha(GridLineColor(y, step, axisX, major, grid), levelAlpha * edgeAlpha));
         }
 
         if (minX <= 0d && maxX >= 0d && minY <= 0d && maxY >= 0d)
         {
-            AddWorldLine(values, 0d, 0d, signature.Z, 0d, 0d, signature.Z + extent, origin, axisZ);
+            var zExtent = Math.Max(maxX - minX, maxY - minY) * 0.25d;
+            AddWorldLine(values, 0d, 0d, signature.Z, 0d, 0d, signature.Z + zExtent, origin, WithAlpha(axisZ, levelAlpha));
         }
-
-        return values.ToArray();
     }
 
     private static IfcRenderColor GridLineColor(
@@ -1877,6 +1941,34 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         }
 
         return grid;
+    }
+
+    private static IfcRenderColor WithAlpha(IfcRenderColor color, double alpha)
+    {
+        return color with { A = (float)Math.Clamp(color.A * alpha, 0d, 1d) };
+    }
+
+    private static double EdgeFade(double coordinate, double min, double max)
+    {
+        var span = max - min;
+        if (span <= 0 || !IsFinite(span))
+        {
+            return 1d;
+        }
+
+        var distanceToEdge = Math.Min(coordinate - min, max - coordinate);
+        var normalized = Math.Clamp(distanceToEdge / Math.Max(0.000001d, span * 0.16d), 0d, 1d);
+        return SmoothStep(0d, 1d, normalized);
+    }
+
+    private static int EstimateGridLineCount(double min, double max, double step)
+    {
+        if (step <= 0 || !IsFinite(step) || !IsFinite(min) || !IsFinite(max) || max < min)
+        {
+            return 0;
+        }
+
+        return Math.Max(0, (int)Math.Ceiling((max - min) / step) + 1);
     }
 
     private static void AddWorldLine(
@@ -1929,6 +2021,66 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
             _ => 10,
         };
         return niceFraction * Math.Pow(10, exponent);
+    }
+
+    private static double NiceStepFloor(double value)
+    {
+        if (value <= 0 || double.IsNaN(value) || double.IsInfinity(value))
+        {
+            return 1;
+        }
+
+        var exponent = Math.Floor(Math.Log10(value));
+        var magnitude = Math.Pow(10, exponent);
+        var fraction = value / magnitude;
+        var niceFraction = fraction switch
+        {
+            >= 2 => 2,
+            _ => 1,
+        };
+        return niceFraction * magnitude;
+    }
+
+    private static double NextNiceStep(double step)
+    {
+        if (step <= 0 || double.IsNaN(step) || double.IsInfinity(step))
+        {
+            return 2;
+        }
+
+        var exponent = Math.Floor(Math.Log10(step));
+        var magnitude = Math.Pow(10, exponent);
+        var fraction = step / magnitude;
+        var nextFraction = fraction switch
+        {
+            < 1.5 => 2,
+            _ => 10,
+        };
+        return nextFraction == 10
+            ? magnitude * 10
+            : magnitude * nextFraction;
+    }
+
+    private static double GridLodBlend(double desiredStep, double fineStep, double coarseStep)
+    {
+        if (coarseStep <= fineStep || !IsFinite(desiredStep) || !IsFinite(fineStep) || !IsFinite(coarseStep))
+        {
+            return 0;
+        }
+
+        var blend = (Math.Log(desiredStep) - Math.Log(fineStep)) / (Math.Log(coarseStep) - Math.Log(fineStep));
+        return Math.Clamp(blend, 0d, 1d);
+    }
+
+    private static double SmoothStep(double edge0, double edge1, double value)
+    {
+        if (edge1 <= edge0)
+        {
+            return value < edge0 ? 0d : 1d;
+        }
+
+        var t = Math.Clamp((value - edge0) / (edge1 - edge0), 0d, 1d);
+        return t * t * (3d - 2d * t);
     }
 
     private Matrix4x4 CreateViewProjection(double width, double height)
@@ -2136,6 +2288,14 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         return IsFinite(vertex.X) && IsFinite(vertex.Y) && IsFinite(vertex.Z);
     }
 
+    private static IfcPreviewVertex NormalizeVertex(IfcPreviewVertex vertex)
+    {
+        var length = Math.Sqrt(vertex.X * vertex.X + vertex.Y * vertex.Y + vertex.Z * vertex.Z);
+        return length > 0 && IsFinite(length)
+            ? new IfcPreviewVertex(vertex.X / length, vertex.Y / length, vertex.Z / length)
+            : new IfcPreviewVertex(0, 0, -1);
+    }
+
     private static bool IsFinite(double value)
     {
         return !double.IsNaN(value) && !double.IsInfinity(value);
@@ -2156,29 +2316,95 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
                 : normalized;
     }
 
-    private static uint CreateProgram(SilkGL gl)
+    private static uint CreateProgramWithFallback(
+        SilkGL gl,
+        string label,
+        string modernVertexShaderSource,
+        string modernFragmentShaderSource,
+        string legacyVertexShaderSource,
+        string legacyFragmentShaderSource,
+        params string[] attributeNames)
     {
-        var vertexShader = CompileShader(gl, ShaderType.VertexShader, VertexShaderSource);
-        var fragmentShader = CompileShader(gl, ShaderType.FragmentShader, FragmentShaderSource);
-        var shaderProgram = gl.CreateProgram();
-        gl.AttachShader(shaderProgram, vertexShader);
-        gl.AttachShader(shaderProgram, fragmentShader);
-        gl.BindAttribLocation(shaderProgram, 0, "aPosition");
-        gl.BindAttribLocation(shaderProgram, 1, "aNormal");
-        gl.BindAttribLocation(shaderProgram, 2, "aColor");
-        gl.BindAttribLocation(shaderProgram, 3, "aProductId");
-        gl.LinkProgram(shaderProgram);
-        gl.GetProgram(shaderProgram, ProgramPropertyARB.LinkStatus, out var status);
-        if (status == 0)
+        try
         {
-            throw new InvalidOperationException(gl.GetProgramInfoLog(shaderProgram));
+            var programId = CreateProgram(
+                gl,
+                WithGlslCoreVersion(modernVertexShaderSource, 460),
+                WithGlslCoreVersion(modernFragmentShaderSource, 460),
+                attributeNames);
+            LogViewport($"shader {label}: using GLSL 460 core");
+            return programId;
+        }
+        catch (Exception exception)
+        {
+            LogViewport($"shader {label}: GLSL 460 core failed, trying GLSL 330 core ({exception.Message})");
         }
 
-        gl.DetachShader(shaderProgram, vertexShader);
-        gl.DetachShader(shaderProgram, fragmentShader);
-        gl.DeleteShader(vertexShader);
-        gl.DeleteShader(fragmentShader);
-        return shaderProgram;
+        try
+        {
+            var programId = CreateProgram(gl, modernVertexShaderSource, modernFragmentShaderSource, attributeNames);
+            LogViewport($"shader {label}: using GLSL 330 core");
+            return programId;
+        }
+        catch (Exception exception)
+        {
+            LogViewport($"shader {label}: GLSL 330 core failed, falling back to GLSL 120 ({exception.Message})");
+        }
+
+        var legacyProgramId = CreateProgram(gl, legacyVertexShaderSource, legacyFragmentShaderSource, attributeNames);
+        LogViewport($"shader {label}: using GLSL 120 fallback");
+        return legacyProgramId;
+    }
+
+    private static uint CreateProgram(SilkGL gl, string vertexShaderSource, string fragmentShaderSource, IReadOnlyList<string> attributeNames)
+    {
+        uint vertexShader = 0;
+        uint fragmentShader = 0;
+        uint shaderProgram = 0;
+        try
+        {
+            vertexShader = CompileShader(gl, ShaderType.VertexShader, vertexShaderSource);
+            fragmentShader = CompileShader(gl, ShaderType.FragmentShader, fragmentShaderSource);
+            shaderProgram = gl.CreateProgram();
+            gl.AttachShader(shaderProgram, vertexShader);
+            gl.AttachShader(shaderProgram, fragmentShader);
+            for (var index = 0u; index < attributeNames.Count; index++)
+            {
+                gl.BindAttribLocation(shaderProgram, index, attributeNames[(int)index]);
+            }
+
+            gl.LinkProgram(shaderProgram);
+            gl.GetProgram(shaderProgram, ProgramPropertyARB.LinkStatus, out var status);
+            if (status == 0)
+            {
+                throw new InvalidOperationException(gl.GetProgramInfoLog(shaderProgram));
+            }
+
+            gl.DetachShader(shaderProgram, vertexShader);
+            gl.DetachShader(shaderProgram, fragmentShader);
+            gl.DeleteShader(vertexShader);
+            gl.DeleteShader(fragmentShader);
+            return shaderProgram;
+        }
+        catch
+        {
+            if (shaderProgram != 0)
+            {
+                gl.DeleteProgram(shaderProgram);
+            }
+
+            if (vertexShader != 0)
+            {
+                gl.DeleteShader(vertexShader);
+            }
+
+            if (fragmentShader != 0)
+            {
+                gl.DeleteShader(fragmentShader);
+            }
+
+            throw;
+        }
     }
 
     private static uint CompileShader(SilkGL gl, ShaderType type, string source)
@@ -2189,10 +2415,17 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         gl.GetShader(shader, ShaderParameterName.CompileStatus, out var status);
         if (status == 0)
         {
-            throw new InvalidOperationException(gl.GetShaderInfoLog(shader));
+            var info = gl.GetShaderInfoLog(shader);
+            gl.DeleteShader(shader);
+            throw new InvalidOperationException(info);
         }
 
         return shader;
+    }
+
+    private static string WithGlslCoreVersion(string source, int version)
+    {
+        return source.Replace("#version 330 core", $"#version {version} core", StringComparison.Ordinal);
     }
 
     private static string ReadGlString(SilkGL gl, StringName name)
@@ -2219,7 +2452,61 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         }
     }
 
-    private const string VertexShaderSource = """
+    private const string SceneVertexShaderSource330 = """
+#version 330 core
+layout(location = 0) in vec3 aPosition;
+layout(location = 1) in vec3 aNormal;
+layout(location = 2) in vec4 aColor;
+layout(location = 3) in float aProductId;
+
+uniform mat4 uMvp;
+uniform mat4 uPreviewTransform;
+uniform int uPreviewProductId;
+
+out vec3 vNormal;
+out vec4 vColor;
+flat out float vProductId;
+
+void main()
+{
+    vec4 worldPosition = vec4(aPosition, 1.0);
+    if (uPreviewProductId > 0 && abs(aProductId - float(uPreviewProductId)) < 0.5)
+    {
+        worldPosition = uPreviewTransform * worldPosition;
+    }
+
+    gl_Position = uMvp * worldPosition;
+    vNormal = aNormal;
+    vColor = aColor;
+    vProductId = aProductId;
+}
+""";
+
+    private const string SceneFragmentShaderSource330 = """
+#version 330 core
+in vec3 vNormal;
+in vec4 vColor;
+flat in float vProductId;
+
+uniform int uSelectedProductId;
+
+out vec4 outColor;
+
+void main()
+{
+    vec3 normal = normalize(vNormal);
+    float light = max(dot(normal, normalize(vec3(0.35, 0.55, 0.75))), 0.0);
+    vec3 color = vColor.rgb * (0.38 + light * 0.62);
+    if (uSelectedProductId > 0 && abs(vProductId - float(uSelectedProductId)) < 0.5)
+    {
+        color = mix(color, vec3(1.0, 0.78, 0.22), 0.68);
+    }
+
+    outColor = vec4(color, vColor.a);
+}
+""";
+
+    private const string SceneVertexShaderSource120 = """
 #version 120
 attribute vec3 aPosition;
 attribute vec3 aNormal;
@@ -2249,7 +2536,7 @@ void main()
 }
 """;
 
-    private const string FragmentShaderSource = """
+    private const string SceneFragmentShaderSource120 = """
 #version 120
 varying vec3 vNormal;
 varying vec4 vColor;
@@ -2271,29 +2558,82 @@ void main()
 }
 """;
 
-    private static uint CreateProgram(SilkGL gl, string vertexShaderSource, string fragmentShaderSource)
-    {
-        var vertexShader = CompileShader(gl, ShaderType.VertexShader, vertexShaderSource);
-        var fragmentShader = CompileShader(gl, ShaderType.FragmentShader, fragmentShaderSource);
-        var shaderProgram = gl.CreateProgram();
-        gl.AttachShader(shaderProgram, vertexShader);
-        gl.AttachShader(shaderProgram, fragmentShader);
-        gl.BindAttribLocation(shaderProgram, 0, "aPosition");
-        gl.LinkProgram(shaderProgram);
-        gl.GetProgram(shaderProgram, ProgramPropertyARB.LinkStatus, out var status);
-        if (status == 0)
-        {
-            throw new InvalidOperationException(gl.GetProgramInfoLog(shaderProgram));
-        }
+    private const string FxaaVertexShaderSource330 = """
+#version 330 core
+layout(location = 0) in vec2 aPosition;
+out vec2 vTexCoord;
 
-        gl.DetachShader(shaderProgram, vertexShader);
-        gl.DetachShader(shaderProgram, fragmentShader);
-        gl.DeleteShader(vertexShader);
-        gl.DeleteShader(fragmentShader);
-        return shaderProgram;
+void main()
+{
+    gl_Position = vec4(aPosition, 0.0, 1.0);
+    vTexCoord = aPosition * 0.5 + 0.5;
+}
+""";
+
+    private const string FxaaFragmentShaderSource330 = """
+#version 330 core
+in vec2 vTexCoord;
+uniform sampler2D uTexture;
+uniform vec2 uTexelSize;
+
+out vec4 outColor;
+
+void main()
+{
+    float FXAA_SPAN_MAX = 8.0;
+    float FXAA_REDUCE_MUL = 1.0 / 8.0;
+    float FXAA_REDUCE_MIN = 1.0 / 128.0;
+
+    vec3 rgbNW = texture(uTexture, vTexCoord + (vec2(-1.0, -1.0) * uTexelSize)).xyz;
+    vec3 rgbNE = texture(uTexture, vTexCoord + (vec2(1.0, -1.0) * uTexelSize)).xyz;
+    vec3 rgbSW = texture(uTexture, vTexCoord + (vec2(-1.0, 1.0) * uTexelSize)).xyz;
+    vec3 rgbSE = texture(uTexture, vTexCoord + (vec2(1.0, 1.0) * uTexelSize)).xyz;
+    vec3 rgbM  = texture(uTexture, vTexCoord).xyz;
+
+    vec3 luma = vec3(0.299, 0.587, 0.114);
+    float lumaNW = dot(rgbNW, luma);
+    float lumaNE = dot(rgbNE, luma);
+    float lumaSW = dot(rgbSW, luma);
+    float lumaSE = dot(rgbSE, luma);
+    float lumaM  = dot(rgbM,  luma);
+
+    float lumaMin = min(lumaM, min(min(lumaNW, lumaNE), min(lumaSW, lumaSE)));
+    float lumaMax = max(lumaM, max(max(lumaNW, lumaNE), max(lumaSW, lumaSE)));
+
+    vec2 dir;
+    dir.x = -((lumaNW + lumaNE) - (lumaSW + lumaSE));
+    dir.y =  ((lumaNW + lumaSW) - (lumaNE + lumaSE));
+
+    float dirReduce = max(
+        (lumaNW + lumaNE + lumaSW + lumaSE) * (0.25 * FXAA_REDUCE_MUL),
+        FXAA_REDUCE_MIN
+    );
+
+    float rcpDirMin = 1.0 / (min(abs(dir.x), dir.y) + dirReduce);
+
+    dir = min(vec2(FXAA_SPAN_MAX,  FXAA_SPAN_MAX),
+          max(vec2(-FXAA_SPAN_MAX, -FXAA_SPAN_MAX),
+          dir * rcpDirMin)) * uTexelSize;
+
+    vec3 rgbA = (1.0 / 2.0) * (
+        texture(uTexture, vTexCoord.xy + dir * (1.0 / 3.0 - 0.5)).xyz +
+        texture(uTexture, vTexCoord.xy + dir * (2.0 / 3.0 - 0.5)).xyz
+    );
+    vec3 rgbB = rgbA * (1.0 / 2.0) + (1.0 / 4.0) * (
+        texture(uTexture, vTexCoord.xy + dir * (0.0 / 3.0 - 0.5)).xyz +
+        texture(uTexture, vTexCoord.xy + dir * (3.0 / 3.0 - 0.5)).xyz
+    );
+    float lumaB = dot(rgbB, luma);
+
+    if ((lumaB < lumaMin) || (lumaB > lumaMax)) {
+        outColor = vec4(rgbA, 1.0);
+    } else {
+        outColor = vec4(rgbB, 1.0);
     }
+}
+""";
 
-    private const string FxaaVertexShaderSource = """
+    private const string FxaaVertexShaderSource120 = """
 #version 120
 attribute vec2 aPosition;
 varying vec2 vTexCoord;
@@ -2305,7 +2645,7 @@ void main()
 }
 """;
 
-    private const string FxaaFragmentShaderSource = """
+    private const string FxaaFragmentShaderSource120 = """
 #version 120
 varying vec2 vTexCoord;
 uniform sampler2D uTexture;
@@ -2370,9 +2710,15 @@ void main()
     private sealed record TransparentMeshBatch(Vector3 Center, uint[] Indices);
 
     private readonly record struct InfiniteGridSignature(
-        double BaseX,
-        double BaseY,
-        double Step,
+        double TargetX,
+        double TargetY,
+        double MinX,
+        double MaxX,
+        double MinY,
+        double MaxY,
+        double FineStep,
+        double CoarseStep,
+        double LodBlend,
         double Z,
         double OriginX,
         double OriginY,
