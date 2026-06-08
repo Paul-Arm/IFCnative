@@ -1579,7 +1579,7 @@ public sealed class InspectorPanelViewModel : ReactiveViewModel
     private string relationshipTargetIds = string.Empty;
     private string resourceName = "Native material";
     private string resourceIdentification = "NATIVE-REF";
-    private string psetSummary = "No Psets.";
+    private string psetSummary = "Keine Psets.";
 
     public InspectorPanelViewModel(MainWindowViewModel owner)
     {
@@ -1755,8 +1755,8 @@ public sealed class InspectorPanelViewModel : ReactiveViewModel
         MainWindowViewModel.ReplaceItems(Resources, details.Resources);
         MainWindowViewModel.ReplaceItems(Units, details.Units);
         PsetSummary = details.PropertySetTables.Count == 0
-            ? "No property or quantity sets linked."
-            : $"{details.PropertySetTables.Count:N0} Pset/Qto table(s), {details.PropertySetTables.Sum(table => table.Rows.Count):N0} value(s).";
+            ? "Keine Psets."
+            : $"{details.PropertySetTables.Count:N0} Pset/Qto, {details.PropertySetTables.Sum(table => table.Rows.Count):N0} Werte.";
 
         SelectedProperty = IfcPropertyDetails.Empty;
         SelectedRelationship = IfcRelationshipDetails.Empty;
@@ -1784,7 +1784,7 @@ public sealed class InspectorPanelViewModel : ReactiveViewModel
         MainWindowViewModel.ReplaceItems(TypeAssignments, []);
         MainWindowViewModel.ReplaceItems(Resources, []);
         MainWindowViewModel.ReplaceItems(Units, []);
-        PsetSummary = "No Psets.";
+        PsetSummary = "Keine Psets.";
     }
 }
 
@@ -1885,10 +1885,50 @@ public sealed class GraphPanelViewModel(MainWindowViewModel owner) : ReactiveVie
     private IfcDocument? document;
     private IfcEntity? entity;
     private string filterText = string.Empty;
-    private int depth = 1;
+    private int depth = 3;
+    private string centerTitle = "No selection";
+    private string centerSubtitle = "Select an IFC entity to inspect local relationships.";
+    private string centerMeta = string.Empty;
+    private string graphSummary = "0 Nachbarn";
     private IfcRelationshipGraphItem? selectedItem;
 
     public ObservableCollection<IfcRelationshipGraphItem> Items { get; } = [];
+
+    public ObservableCollection<IfcRelationshipGraphVisualNode> VisualNodes { get; } = [];
+
+    public ObservableCollection<IfcRelationshipGraphVisualEdge> VisualEdges { get; } = [];
+
+    public ReactiveCommand<IfcRelationshipGraphVisualNode, Unit> SelectVisualNodeCommand { get; } = ReactiveCommand.Create<IfcRelationshipGraphVisualNode>(node =>
+    {
+        if (node.EntityId > 0)
+        {
+            owner.SelectEntityById(node.EntityId, "graph");
+        }
+    });
+
+    public string CenterTitle
+    {
+        get => centerTitle;
+        private set => this.RaiseAndSetIfChanged(ref centerTitle, value);
+    }
+
+    public string CenterSubtitle
+    {
+        get => centerSubtitle;
+        private set => this.RaiseAndSetIfChanged(ref centerSubtitle, value);
+    }
+
+    public string CenterMeta
+    {
+        get => centerMeta;
+        private set => this.RaiseAndSetIfChanged(ref centerMeta, value);
+    }
+
+    public string GraphSummary
+    {
+        get => graphSummary;
+        private set => this.RaiseAndSetIfChanged(ref graphSummary, value);
+    }
 
     public string FilterText
     {
@@ -1907,7 +1947,7 @@ public sealed class GraphPanelViewModel(MainWindowViewModel owner) : ReactiveVie
         get => depth;
         set
         {
-            if (SetProperty(ref depth, Math.Clamp(value, 1, 2)))
+            if (SetProperty(ref depth, Math.Clamp(value, 1, 3)))
             {
                 Refresh();
             }
@@ -1936,6 +1976,11 @@ public sealed class GraphPanelViewModel(MainWindowViewModel owner) : ReactiveVie
     {
         document = nextDocument;
         entity = selectedEntity;
+        CenterTitle = selectedEntity.TypeName();
+        CenterSubtitle = $"#{selectedEntity.Id} {selectedEntity.DisplayName}";
+        CenterMeta = string.IsNullOrWhiteSpace(selectedEntity.GlobalId)
+            ? "No GlobalId"
+            : $"GUID: {selectedEntity.GlobalId}";
         Refresh();
     }
 
@@ -1944,12 +1989,615 @@ public sealed class GraphPanelViewModel(MainWindowViewModel owner) : ReactiveVie
         if (document is null || entity is null)
         {
             Items.Clear();
+            VisualNodes.Clear();
+            VisualEdges.Clear();
+            CenterTitle = "No selection";
+            CenterSubtitle = "Select an IFC entity to inspect local relationships.";
+            CenterMeta = string.Empty;
+            GraphSummary = "0 Nachbarn";
             return;
         }
 
         MainWindowViewModel.ReplaceItems(Items, IfcSelectionProjector.ProjectRelationshipGraph(document, entity, FilterText, Depth));
+        BuildVisualGraph(document, entity);
     }
+
+    private void BuildVisualGraph(IfcDocument currentDocument, IfcEntity selectedEntity)
+    {
+        var filter = FilterText.Trim();
+        var relationships = currentDocument.RelationshipsByEntity.TryGetValue(selectedEntity.Id, out var indexedRelationships)
+            ? indexedRelationships
+                .Where(relationship => MatchesVisualFilter(currentDocument, selectedEntity.Id, relationship, filter))
+                .OrderBy(relationship => relationship.Type)
+                .ThenBy(relationship => relationship.Id)
+                .ToList()
+            : [];
+
+        const double centerX = 660;
+        const double centerY = 620;
+        var nodes = new List<IfcRelationshipGraphVisualNode>
+        {
+            CreateVisualNode(selectedEntity, centerX, centerY, true),
+        };
+
+        var upstreamCandidates = CollectUpstreamCandidates(currentDocument, selectedEntity.Id, filter);
+        var upstreamNodeIds = upstreamCandidates.Select(candidate => candidate.NodeId).ToHashSet();
+        var upstreamGroupsByLevel = upstreamCandidates
+            .GroupBy(candidate => candidate.Level)
+            .ToDictionary(
+                group => group.Key,
+                group => group
+                    .GroupBy(candidate => candidate.NodeId)
+                    .Select(nodeGroup => nodeGroup
+                        .OrderBy(candidate => candidate.Relationship.Type)
+                        .ThenBy(candidate => candidate.Relationship.Id)
+                        .First())
+                    .OrderBy(candidate => currentDocument.EntityById[candidate.NodeId].Type)
+                    .ThenBy(candidate => currentDocument.EntityById[candidate.NodeId].DisplayName)
+                    .ThenBy(candidate => candidate.NodeId)
+                    .ToList());
+        var upstreamNodeByLevel = new Dictionary<int, IfcRelationshipGraphVisualNode>();
+
+        for (var level = Depth; level >= 1; level--)
+        {
+            if (!upstreamGroupsByLevel.TryGetValue(level, out var levelCandidates) || levelCandidates.Count == 0)
+            {
+                continue;
+            }
+
+            var y = UpstreamY(level);
+            var node = levelCandidates.Count == 1
+                ? CreateVisualNode(currentDocument.EntityById[levelCandidates[0].NodeId], centerX, y, false)
+                : CreateSummaryNode(
+                    -1000 - level,
+                    UpstreamSummaryTitle(currentDocument, levelCandidates, level),
+                    $"{levelCandidates.Count:N0} Knoten",
+                    TypeSummaryMeta(currentDocument, levelCandidates),
+                    SummaryTone(currentDocument, levelCandidates),
+                    SummaryGlyph(currentDocument, levelCandidates),
+                    centerX,
+                    y);
+
+            nodes.Add(node);
+            upstreamNodeByLevel[level] = node;
+        }
+
+        var psetSummary = GetPsetSummary(currentDocument, selectedEntity.Id);
+        IfcRelationshipGraphVisualNode? psetNode = null;
+        if (psetSummary.SetCount > 0)
+        {
+            psetNode = new IfcRelationshipGraphVisualNode(
+                -1,
+                "Psets",
+                $"{psetSummary.SetCount:N0} Pset/Qto",
+                $"{psetSummary.ValueCount:N0} Werte",
+                "#2F9E44",
+                "P",
+                170,
+                centerY,
+                false);
+            nodes.Add(psetNode);
+        }
+
+        var directCandidates = relationships
+            .Where(relationship => !IsPropertySetRelationship(relationship))
+            .Where(relationship => !relationship.TargetIds.Contains(selectedEntity.Id))
+            .SelectMany(relationship => DirectCandidatesFor(currentDocument, selectedEntity.Id, relationship))
+            .Where(candidate => !upstreamNodeIds.Contains(candidate.NodeId))
+            .GroupBy(candidate => candidate.NodeId)
+            .Select(group => group.OrderBy(candidate => candidate.Relationship.Type).ThenBy(candidate => candidate.Relationship.Id).First())
+            .ToList();
+
+        var directGroups = directCandidates
+            .GroupBy(candidate => currentDocument.EntityById[candidate.NodeId].Type)
+            .OrderBy(group => group.Key)
+            .Select(group => group
+                .OrderBy(candidate => currentDocument.EntityById[candidate.NodeId].DisplayName)
+                .ThenBy(candidate => candidate.NodeId)
+                .ToList())
+            .ToList();
+        var directPositions = LayoutDirectNodes(directGroups.Count, psetNode is not null);
+        var directVisualGroups = new List<(IfcRelationshipGraphVisualNode Node, IReadOnlyList<VisualRelationshipCandidate> Candidates)>();
+        var nextSummaryId = -10;
+
+        for (var index = 0; index < directGroups.Count; index++)
+        {
+            var group = directGroups[index];
+            var position = directPositions[index];
+            var node = group.Count == 1
+                ? CreateVisualNode(currentDocument.EntityById[group[0].NodeId], position.X, position.Y, false)
+                : CreateSummaryNode(
+                    nextSummaryId--,
+                    ShortType(currentDocument.EntityById[group[0].NodeId].Type),
+                    $"{group.Count:N0} zusammengefasst",
+                    RelationshipSummaryMeta(group),
+                    EntityTone(currentDocument.EntityById[group[0].NodeId].Type),
+                    SummaryGlyph(currentDocument, group),
+                    position.X,
+                    position.Y);
+
+            nodes.Add(node);
+            directVisualGroups.Add((node, group));
+        }
+
+        var nodeById = nodes.ToDictionary(node => node.EntityId);
+        var edges = new List<IfcRelationshipGraphVisualEdge>();
+        var emittedEdges = new HashSet<(int SourceId, int TargetId, string Label)>();
+
+        for (var level = Depth; level >= 1; level--)
+        {
+            if (!upstreamNodeByLevel.TryGetValue(level, out var sourceNode) ||
+                !upstreamGroupsByLevel.TryGetValue(level, out var levelCandidates))
+            {
+                continue;
+            }
+
+            var targetNode = level == 1
+                ? nodeById[selectedEntity.Id]
+                : upstreamNodeByLevel.GetValueOrDefault(level - 1);
+            if (targetNode is null)
+            {
+                continue;
+            }
+
+            var edgeRelationship = levelCandidates[0].Relationship;
+            var label = RelationshipSummaryLabel(levelCandidates);
+            if (emittedEdges.Add((sourceNode.EntityId, targetNode.EntityId, label)))
+            {
+                edges.Add(CreateVisualEdge(edgeRelationship, sourceNode, targetNode, label));
+            }
+        }
+
+        if (psetNode is not null)
+        {
+            var psetRelationship = relationships.FirstOrDefault(IsPropertySetRelationship);
+            edges.Add(CreateVisualEdge(
+                psetRelationship ?? new IfcRelationship { Id = -1, Type = "IFCRELDEFINESBYPROPERTIES" },
+                psetNode,
+                nodeById[selectedEntity.Id],
+                "Psets"));
+        }
+
+        foreach (var visualGroup in directVisualGroups)
+        {
+            var candidates = visualGroup.Candidates;
+            if (candidates.Count == 1)
+            {
+                var candidate = candidates[0];
+                if (!nodeById.TryGetValue(candidate.SourceId, out var sourceNode) ||
+                    !nodeById.TryGetValue(candidate.TargetId, out var targetNode))
+                {
+                    continue;
+                }
+
+                var label = ShortRelationship(candidate.Relationship.Type);
+                if (emittedEdges.Add((candidate.SourceId, candidate.TargetId, label)))
+                {
+                    edges.Add(CreateVisualEdge(candidate.Relationship, sourceNode, targetNode, label));
+                }
+            }
+            else
+            {
+                var first = candidates[0];
+                var label = RelationshipSummaryLabel(candidates);
+                if (emittedEdges.Add((selectedEntity.Id, visualGroup.Node.EntityId, label)))
+                {
+                    edges.Add(CreateVisualEdge(first.Relationship, nodeById[selectedEntity.Id], visualGroup.Node, label));
+                }
+            }
+        }
+
+        MainWindowViewModel.ReplaceItems(VisualNodes, nodes);
+        MainWindowViewModel.ReplaceItems(VisualEdges, edges);
+        GraphSummary = $"{nodes.Count - 1:N0} Knoten / {edges.Count:N0} Beziehungen / ab 2 zusammengefasst";
+    }
+
+    private static double UpstreamY(int level)
+    {
+        return level switch
+        {
+            1 => 440d,
+            2 => 260d,
+            _ => 80d,
+        };
+    }
+
+    private static IfcRelationshipGraphVisualNode CreateSummaryNode(
+        int entityId,
+        string title,
+        string subtitle,
+        string meta,
+        string tone,
+        string glyph,
+        double centerX,
+        double centerY)
+    {
+        return new IfcRelationshipGraphVisualNode(
+            entityId,
+            title,
+            subtitle,
+            meta,
+            tone,
+            glyph,
+            centerX,
+            centerY,
+            false);
+    }
+
+    private static string UpstreamSummaryTitle(IfcDocument document, IReadOnlyList<VisualRelationshipCandidate> candidates, int level)
+    {
+        var types = CandidateTypes(document, candidates);
+        return types.Count == 1 ? ShortType(types[0]) : $"Ebene {level}";
+    }
+
+    private static string TypeSummaryMeta(IfcDocument document, IReadOnlyList<VisualRelationshipCandidate> candidates)
+    {
+        var types = CandidateTypes(document, candidates).Select(ShortType).ToList();
+        return types.Count == 1
+            ? $"{types[0]} x {candidates.Count:N0}"
+            : $"{string.Join(", ", types.Take(3))}{(types.Count > 3 ? " ..." : string.Empty)}";
+    }
+
+    private static string SummaryTone(IfcDocument document, IReadOnlyList<VisualRelationshipCandidate> candidates)
+    {
+        var types = CandidateTypes(document, candidates);
+        return types.Count == 1 ? EntityTone(types[0]) : "#64748B";
+    }
+
+    private static string SummaryGlyph(IfcDocument document, IReadOnlyList<VisualRelationshipCandidate> candidates)
+    {
+        var types = CandidateTypes(document, candidates);
+        if (types.Count == 1)
+        {
+            return EntityGlyph(types[0]);
+        }
+
+        return candidates.Count > 9 ? "+" : candidates.Count.ToString();
+    }
+
+    private static string RelationshipSummaryMeta(IReadOnlyList<VisualRelationshipCandidate> candidates)
+    {
+        var relationships = candidates
+            .Select(candidate => ShortRelationship(candidate.Relationship.Type))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return relationships.Count == 1
+            ? $"{candidates.Count:N0} Beziehungen"
+            : $"{string.Join(", ", relationships.Take(2))}{(relationships.Count > 2 ? " ..." : string.Empty)}";
+    }
+
+    private static string RelationshipSummaryLabel(IReadOnlyList<VisualRelationshipCandidate> candidates)
+    {
+        var relationships = candidates
+            .Select(candidate => ShortRelationship(candidate.Relationship.Type))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (relationships.Count == 1)
+        {
+            return candidates.Count == 1 ? relationships[0] : $"{candidates.Count:N0}x {relationships[0]}";
+        }
+
+        return $"{candidates.Count:N0} Bez.";
+    }
+
+    private static List<string> CandidateTypes(IfcDocument document, IReadOnlyList<VisualRelationshipCandidate> candidates)
+    {
+        return candidates
+            .Select(candidate => document.EntityById[candidate.NodeId].Type)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(type => type)
+            .ToList();
+    }
+
+    private List<VisualRelationshipCandidate> CollectUpstreamCandidates(IfcDocument currentDocument, int selectedId, string filter)
+    {
+        var candidates = new List<VisualRelationshipCandidate>();
+        var seenNodes = new HashSet<int> { selectedId };
+        var frontier = new List<int> { selectedId };
+
+        for (var level = 1; level <= Depth && frontier.Count > 0; level++)
+        {
+            var nextFrontier = new List<int>();
+            foreach (var focusId in frontier)
+            {
+                if (!currentDocument.RelationshipsByEntity.TryGetValue(focusId, out var focusRelationships))
+                {
+                    continue;
+                }
+
+                foreach (var relationship in focusRelationships
+                    .Where(relationship => !IsPropertySetRelationship(relationship))
+                    .Where(relationship => relationship.TargetIds.Contains(focusId))
+                    .OrderBy(relationship => relationship.Type)
+                    .ThenBy(relationship => relationship.Id))
+                {
+                    foreach (var sourceId in relationship.SourceIds.Where(id => id != focusId).Distinct().OrderBy(id => id))
+                    {
+                        if (!currentDocument.EntityById.TryGetValue(sourceId, out var sourceEntity) ||
+                            IsPropertyLikeEntity(sourceEntity) ||
+                            !MatchesVisualFilterForPair(currentDocument, focusId, sourceId, relationship, filter))
+                        {
+                            continue;
+                        }
+
+                        candidates.Add(new VisualRelationshipCandidate(relationship, sourceId, focusId, sourceId, level));
+                        if (seenNodes.Add(sourceId))
+                        {
+                            nextFrontier.Add(sourceId);
+                        }
+                    }
+                }
+            }
+
+            frontier = nextFrontier;
+        }
+
+        return candidates;
+    }
+
+    private static IEnumerable<VisualRelationshipCandidate> DirectCandidatesFor(IfcDocument document, int selectedId, IfcRelationship relationship)
+    {
+        foreach (var neighborId in NeighborIdsFor(selectedId, relationship).Distinct().OrderBy(id => id))
+        {
+            if (!document.EntityById.TryGetValue(neighborId, out var neighbor) || IsPropertyLikeEntity(neighbor))
+            {
+                continue;
+            }
+
+            if (relationship.SourceIds.Contains(selectedId))
+            {
+                yield return new VisualRelationshipCandidate(relationship, selectedId, neighborId, neighborId, 0);
+            }
+            else if (relationship.TargetIds.Contains(selectedId))
+            {
+                yield return new VisualRelationshipCandidate(relationship, neighborId, selectedId, neighborId, 0);
+            }
+            else
+            {
+                yield return new VisualRelationshipCandidate(relationship, selectedId, neighborId, neighborId, 0);
+            }
+        }
+    }
+
+    private static IfcRelationshipGraphVisualEdge CreateVisualEdge(
+        IfcRelationship relationship,
+        IfcRelationshipGraphVisualNode sourceNode,
+        IfcRelationshipGraphVisualNode targetNode,
+        string label)
+    {
+        return new IfcRelationshipGraphVisualEdge(
+            relationship.Id,
+            sourceNode.EntityId,
+            targetNode.EntityId,
+            label,
+            RelationshipTone(relationship.Type),
+            sourceNode.CenterX,
+            sourceNode.CenterY,
+            targetNode.CenterX,
+            targetNode.CenterY,
+            (sourceNode.CenterX + targetNode.CenterX) / 2,
+            (sourceNode.CenterY + targetNode.CenterY) / 2);
+    }
+
+    private static (int SetCount, int ValueCount) GetPsetSummary(IfcDocument document, int entityId)
+    {
+        return document.PropertySetsByEntity.TryGetValue(entityId, out var propertySets)
+            ? (propertySets.Count, propertySets.Sum(set => set.Values.Count))
+            : (0, 0);
+    }
+
+    private static double SpreadX(int index, int count, double minX, double maxX)
+    {
+        if (count <= 1)
+        {
+            return (minX + maxX) / 2;
+        }
+
+        return minX + ((maxX - minX) * index / (count - 1));
+    }
+
+    private static IReadOnlyList<(double X, double Y)> LayoutDirectNodes(int count, bool reservePsetSlot)
+    {
+        var preferred = new List<(double X, double Y)>
+        {
+            (1150, 620),
+            (360, 720),
+            (960, 720),
+            (360, 500),
+            (960, 500),
+            (120, 720),
+            (1200, 720),
+            (120, 500),
+            (1200, 500),
+            (560, 790),
+            (760, 790),
+            (560, 450),
+            (760, 450),
+        };
+
+        if (!reservePsetSlot)
+        {
+            preferred.Insert(0, (170, 525));
+        }
+
+        while (preferred.Count < count)
+        {
+            var index = preferred.Count;
+            var row = (index - 13) / 4;
+            var column = (index - 13) % 4;
+            preferred.Add((180 + (column * 300), 835 + (row * 95)));
+        }
+
+        return preferred.Take(count).ToList();
+    }
+
+    private static IfcRelationshipGraphVisualNode CreateVisualNode(IfcEntity entity, double centerX, double centerY, bool isCenter)
+    {
+        return new IfcRelationshipGraphVisualNode(
+            entity.Id,
+            ShortType(entity.Type),
+            entity.DisplayName,
+            string.IsNullOrWhiteSpace(entity.GlobalId) ? $"#{entity.Id}" : entity.GlobalId,
+            EntityTone(entity.Type),
+            EntityGlyph(entity.Type),
+            centerX,
+            centerY,
+            isCenter);
+    }
+
+    private static IEnumerable<int> NeighborIdsFor(int selectedId, IfcRelationship relationship)
+    {
+        if (relationship.SourceIds.Contains(selectedId))
+        {
+            return relationship.TargetIds.Where(id => id != selectedId);
+        }
+
+        if (relationship.TargetIds.Contains(selectedId))
+        {
+            return relationship.SourceIds.Where(id => id != selectedId);
+        }
+
+        return relationship.SourceIds.Concat(relationship.TargetIds).Where(id => id != selectedId);
+    }
+
+    private static bool MatchesVisualFilter(IfcDocument document, int selectedId, IfcRelationship relationship, string filter)
+    {
+        if (string.IsNullOrWhiteSpace(filter))
+        {
+            return true;
+        }
+
+        if ($"#{relationship.Id} {relationship.Type} {relationship.Label}".Contains(filter, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return NeighborIdsFor(selectedId, relationship).Any(id =>
+            document.EntityById.TryGetValue(id, out var entity) &&
+            $"#{entity.Id} {entity.Type} {entity.TypeName()} {entity.DisplayName} {entity.GlobalId}".Contains(filter, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool MatchesVisualFilterForPair(IfcDocument document, int focusId, int neighborId, IfcRelationship relationship, string filter)
+    {
+        if (string.IsNullOrWhiteSpace(filter))
+        {
+            return true;
+        }
+
+        if ($"#{relationship.Id} {relationship.Type} {relationship.Label}".Contains(filter, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return EntityMatchesFilter(document, focusId, filter) || EntityMatchesFilter(document, neighborId, filter);
+    }
+
+    private static bool EntityMatchesFilter(IfcDocument document, int entityId, string filter)
+    {
+        return document.EntityById.TryGetValue(entityId, out var entity) &&
+            $"#{entity.Id} {entity.Type} {entity.TypeName()} {entity.DisplayName} {entity.GlobalId}".Contains(filter, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsPropertySetRelationship(IfcRelationship relationship)
+    {
+        return relationship.Type.Equals("IFCRELDEFINESBYPROPERTIES", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsPropertyLikeEntity(IfcEntity entity)
+    {
+        var normalized = entity.Type.ToUpperInvariant();
+        return normalized.Contains("PROPERTYSET") || normalized.Contains("ELEMENTQUANTITY");
+    }
+
+    private static string ShortType(string type)
+    {
+        return type.StartsWith("IFC", StringComparison.OrdinalIgnoreCase) ? type[3..] : type;
+    }
+
+    private static string ShortRelationship(string type)
+    {
+        return type
+            .Replace("IFCREL", string.Empty, StringComparison.OrdinalIgnoreCase)
+            .Replace("IFC", string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string EntityTone(string type)
+    {
+        var normalized = type.ToUpperInvariant();
+        if (normalized == "IFCPROJECT") return "#2F80ED";
+        if (normalized == "IFCSITE") return "#2F9E44";
+        if (normalized == "IFCBUILDING") return "#E39B16";
+        if (normalized == "IFCBUILDINGSTOREY") return "#8E5AD7";
+        if (normalized.Contains("SPACE") || normalized.Contains("DOOR") || normalized.Contains("WINDOW")) return "#22A6A1";
+        if (normalized.Contains("WALL")) return "#DC4F45";
+        if (normalized.Contains("SLAB") || normalized.Contains("ROOF")) return "#F97316";
+        if (normalized.Contains("MATERIAL")) return "#8E5AD7";
+        if (normalized.Contains("PROPERTY") || normalized.Contains("QUANTITY")) return "#2F9E44";
+        if (normalized.Contains("TYPE")) return "#E39B16";
+        return "#64748B";
+    }
+
+    private static string RelationshipTone(string type)
+    {
+        var normalized = type.ToUpperInvariant();
+        if (normalized.Contains("PROPERT")) return "#2F9E44";
+        if (normalized.Contains("MATERIAL")) return "#8E5AD7";
+        if (normalized.Contains("TYPE")) return "#E39B16";
+        if (normalized.Contains("FILL") || normalized.Contains("VOID")) return "#22A6A1";
+        return "#73849A";
+    }
+
+    private static string EntityGlyph(string type)
+    {
+        var normalized = type.ToUpperInvariant();
+        if (normalized.Contains("WALL")) return "W";
+        if (normalized.Contains("DOOR")) return "D";
+        if (normalized.Contains("BUILDING")) return "B";
+        if (normalized.Contains("SITE")) return "S";
+        if (normalized.Contains("MATERIAL")) return "M";
+        if (normalized.Contains("PROPERTY") || normalized.Contains("QUANTITY")) return "P";
+        if (normalized.Contains("TYPE")) return "T";
+        if (normalized.Contains("WALL")) return "▦";
+        if (normalized.Contains("DOOR")) return "▯";
+        if (normalized.Contains("BUILDING")) return "▥";
+        if (normalized.Contains("SITE")) return "⌂";
+        if (normalized.Contains("MATERIAL")) return "▱";
+        if (normalized.Contains("PROPERTY") || normalized.Contains("QUANTITY")) return "☷";
+        if (normalized.Contains("TYPE")) return "◫";
+        return "#";
+    }
+
+    private sealed record VisualRelationshipCandidate(
+        IfcRelationship Relationship,
+        int SourceId,
+        int TargetId,
+        int NodeId,
+        int Level);
 }
+
+public sealed record IfcRelationshipGraphVisualNode(
+    int EntityId,
+    string Title,
+    string Subtitle,
+    string Meta,
+    string Tone,
+    string Glyph,
+    double CenterX,
+    double CenterY,
+    bool IsCenter);
+
+public sealed record IfcRelationshipGraphVisualEdge(
+    int RelationshipId,
+    int SourceId,
+    int TargetId,
+    string Label,
+    string Tone,
+    double X1,
+    double Y1,
+    double X2,
+    double Y2,
+    double LabelX,
+    double LabelY);
 
 public sealed class DiagnosticsPanelViewModel : ReactiveViewModel
 {
