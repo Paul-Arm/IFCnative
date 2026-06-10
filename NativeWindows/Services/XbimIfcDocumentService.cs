@@ -74,7 +74,7 @@ public static class XbimIfcDocumentService
         return document.XbimStore;
     }
 
-    public static Xbim3DModelContext EnsureGeometryContext(IfcDocument document)
+    public static Xbim3DModelContext EnsureGeometryContext(IfcDocument document, Action<int>? progressPercent = null)
     {
         if (document.XbimGeometryContext is not null)
         {
@@ -82,8 +82,32 @@ public static class XbimIfcDocumentService
         }
 
         var store = EnsureStore(document);
-        var context = new Xbim3DModelContext(store);
-        context.CreateContext();
+        // Coarser meshing tolerances: viewer-grade tessellation instead of
+        // analysis-grade. This is the difference between minutes and seconds
+        // on curved/BRep-heavy models without visible quality loss at scale.
+        var factors = store.Model.ModelFactors;
+        factors.DeflectionTolerance = Math.Max(factors.DeflectionTolerance, factors.OneMilliMetre * 4);
+        factors.DeflectionAngle = Math.Max(factors.DeflectionAngle, 1d);
+        var context = new Xbim3DModelContext(store)
+        {
+            MaxThreads = Environment.ProcessorCount,
+        };
+        var phaseWatch = System.Diagnostics.Stopwatch.StartNew();
+        var lastPhase = string.Empty;
+        context.CreateContext((percent, state) =>
+        {
+            var phase = state?.ToString() ?? string.Empty;
+            if (!string.Equals(phase, lastPhase, StringComparison.Ordinal))
+            {
+                Views.ViewportPreviewControl.LogViewport($"xbim phase ({phaseWatch.Elapsed.TotalSeconds:0.0}s): {phase}");
+                lastPhase = phase;
+            }
+
+            if (percent >= 0)
+            {
+                progressPercent?.Invoke(percent);
+            }
+        });
         document.XbimGeometryContext = context;
         document.GeometryBackendStatus = "Using xBIM geometry; BRep and mapped representations are tessellated by xBIM/OpenCascade.";
         return context;
@@ -103,6 +127,39 @@ public static class XbimIfcDocumentService
     {
         _ = document;
         return WithToolkitAccess(action, cancellationToken);
+    }
+
+    /// <summary>
+    /// Attempts store access without blocking the caller for long; returns false when the
+    /// store is busy (e.g. a background geometry build holds the toolkit lock).
+    /// Intended for UI-thread projections that must never freeze the window.
+    /// </summary>
+    public static bool TryWithStoreAccess<T>(IfcDocument document, Func<T> action, TimeSpan timeout, out T? result)
+    {
+        _ = document;
+        if (storeAccessDepth > 0)
+        {
+            result = action();
+            return true;
+        }
+
+        if (!StoreAccessSemaphore.Wait(timeout))
+        {
+            result = default;
+            return false;
+        }
+
+        try
+        {
+            storeAccessDepth++;
+            result = action();
+            return true;
+        }
+        finally
+        {
+            storeAccessDepth--;
+            StoreAccessSemaphore.Release();
+        }
     }
 
     private static T WithToolkitAccess<T>(Func<T> action, CancellationToken cancellationToken = default)

@@ -9,7 +9,7 @@ Important constraint from Paul: the native app is a separate/additional folder/p
 ## Technical direction
 
 - **Project layout:** keep the existing Web/React app intact; build the Windows-native app as a separate project folder (`NativeWindows/` for now, unless later moved/renamed).
-- **UI shell:** C#/.NET Avalonia + ReactiveUI (`net9.0-windows`) with Dock.Avalonia for a fast native desktop shell, docking-style panels, file dialogs, keyboard workflows, and incremental UI virtualization.
+- **UI shell:** C#/.NET Avalonia + ReactiveUI (`net10.0-windows`) with Dock.Avalonia for a fast native desktop shell, docking-style panels, file dialogs, keyboard workflows, and incremental UI virtualization.
 - **IFC document core:** C# services first, designed around streaming/indexed STEP parsing so large files do not require expensive full UI materialization. STEP/IFC text is an import/export boundary; live native editor state is moving to an own in-memory IFC model for objects, properties, placements, relationships, and geometry.
 - **Geometry pipeline:** isolate behind service interfaces. Prefer a genuinely native Windows renderer/backend when a solid option exists (for example HelixToolkit/SharpDX/DirectX plus IfcOpenShell or a native C++/Rust mesh worker). Treat the existing WASM/web-ifc renderer path as a compatibility/fallback option for the Web app, not the target for the Windows-native app.
 - **Editing model:** draft-first changes with diff/review before export; never blindly overwrite opened IFC.
@@ -36,7 +36,7 @@ Important constraint from Paul: the native app is a separate/additional folder/p
 
 ### Existing native Windows project
 
-- `NativeWindows/IFCnative.NativeWindows.csproj` targets `net9.0-windows` with Avalonia, ReactiveUI, and Dock.Avalonia enabled.
+- `NativeWindows/IFCnative.NativeWindows.csproj` targets `net10.0-windows` with Avalonia, ReactiveUI, and Dock.Avalonia enabled.
 - `NativeWindows.Tests/` contains a lightweight native service test runner for parser/index/edit/diff/draft behavior; execution is now verified on a Windows/.NET 9 environment.
 - Current C# shell code already includes:
   - Open IFC/STEP/ifcZIP file dialog.

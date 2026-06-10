@@ -182,18 +182,18 @@ public static class NativeViewportCameraController
         var requiredFar = Math.Max(maxDepth + margin, state.Distance + radius + margin);
         farPlane = Math.Max(farPlane, requiredFar);
 
+        // Scale the near plane with the view distance so the near/far ratio stays
+        // bounded for very large scenes; otherwise the depth buffer collapses and
+        // distant geometry z-fights or disappears.
+        var adaptiveNear = state.Distance * 0.0005;
         if (minDepth > margin)
         {
-            var precisionNear = Math.Min(minDepth - margin, farPlane / 100_000d);
-            var framedNearLimit = state.Distance - state.SceneRadius;
-            if (framedNearLimit > nearPlane)
-            {
-                precisionNear = Math.Min(precisionNear, framedNearLimit * 0.8d);
-            }
-
-            nearPlane = Math.Max(nearPlane, precisionNear);
+            // The whole scene is in front of the camera; push the near plane out
+            // as far as the closest geometry allows.
+            adaptiveNear = Math.Max(adaptiveNear, Math.Min(minDepth - margin, farPlane / 50_000d));
         }
 
+        nearPlane = Math.Max(nearPlane, adaptiveNear);
         nearPlane = Math.Max(0.0001, Math.Min(nearPlane, farPlane * 0.5));
         farPlane = Math.Max(farPlane, nearPlane + 1);
         return new NativeViewportCameraClipping(nearPlane, farPlane);
@@ -225,7 +225,9 @@ public static class NativeViewportCameraController
 
     private static double ClampDistance(NativeViewportCameraState state, double distance)
     {
-        var min = Math.Max(0.1, state.SceneRadius * 0.2);
+        // Keep the minimum independent of the full scene size so large or far-away
+        // (geo-referenced) models can still be inspected up close.
+        var min = Math.Max(0.02, state.SceneRadius * 0.002);
         var max = Math.Max(1000, state.SceneRadius * 80);
         return Math.Clamp(distance, min, max);
     }

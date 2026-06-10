@@ -50,6 +50,12 @@ public sealed class IfcDocument
 
     public string GeometryBackendStatus { get; internal set; } = string.Empty;
 
+    /// <summary>
+    /// Monotonic counter that increments whenever a committed edit changes geometry.
+    /// Used to decide whether a cached render scene is still valid.
+    /// </summary>
+    public long GeometryVersion { get; internal set; }
+
     public string ToStepText()
     {
         return XbimStore is not null

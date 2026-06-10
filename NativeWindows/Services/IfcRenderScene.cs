@@ -6,13 +6,145 @@ public sealed record IfcRenderScene(
     IfcRenderBounds Bounds,
     int ShapeInstanceCount,
     int TriangleCount,
-    string Status)
+    string Status,
+    IReadOnlyDictionary<int, IfcPreviewVertex>? ProductPlacements = null)
 {
     public bool IsEmpty => Meshes.Count == 0 || TriangleCount == 0 || Bounds.IsEmpty;
 
     public static IfcRenderScene Empty(string status = "No xBIM render geometry.")
     {
         return new IfcRenderScene("Empty", [], IfcRenderBounds.Empty, 0, 0, status);
+    }
+}
+
+public static class IfcRenderSceneTransform
+{
+    /// <summary>
+    /// Applies a committed move/rotate of a single product to an existing render
+    /// scene without re-tessellating the model. The rotation pivot matches the
+    /// STEP edit semantics: world Z through the product's placement origin.
+    /// </summary>
+    public static IfcRenderScene TransformProduct(
+        IfcRenderScene scene,
+        int productId,
+        double moveDeltaX,
+        double moveDeltaY,
+        double moveDeltaZ,
+        double rotateZRadians)
+    {
+        var hasMove = Math.Abs(moveDeltaX) > 1e-9 || Math.Abs(moveDeltaY) > 1e-9 || Math.Abs(moveDeltaZ) > 1e-9;
+        var hasRotation = Math.Abs(rotateZRadians) > 1e-9;
+        if (scene.IsEmpty || productId <= 0 || (!hasMove && !hasRotation))
+        {
+            return scene;
+        }
+
+        var pivot = ResolvePivot(scene, productId);
+        var cos = Math.Cos(rotateZRadians);
+        var sin = Math.Sin(rotateZRadians);
+        var meshes = new List<IfcRenderMesh>(scene.Meshes.Count);
+        var bounds = IfcRenderBounds.Empty;
+        var changed = false;
+        foreach (var mesh in scene.Meshes)
+        {
+            var next = mesh;
+            if (mesh.ProductId == productId && mesh.Vertices.Count > 0)
+            {
+                var vertices = new List<IfcRenderVertex>(mesh.Vertices.Count);
+                foreach (var vertex in mesh.Vertices)
+                {
+                    vertices.Add(TransformVertex(vertex, pivot, cos, sin, hasRotation, moveDeltaX, moveDeltaY, moveDeltaZ));
+                }
+
+                next = mesh with { Vertices = vertices };
+                changed = true;
+            }
+
+            meshes.Add(next);
+            foreach (var vertex in next.Vertices)
+            {
+                bounds = bounds.Include(vertex.X, vertex.Y, vertex.Z);
+            }
+        }
+
+        if (!changed)
+        {
+            return scene;
+        }
+
+        var placements = scene.ProductPlacements;
+        if (placements is not null && placements.TryGetValue(productId, out var origin))
+        {
+            var updated = new Dictionary<int, IfcPreviewVertex>(placements.Count);
+            foreach (var pair in placements)
+            {
+                updated[pair.Key] = pair.Value;
+            }
+
+            updated[productId] = new IfcPreviewVertex(origin.X + moveDeltaX, origin.Y + moveDeltaY, origin.Z + moveDeltaZ);
+            placements = updated;
+        }
+
+        return scene with { Meshes = meshes, Bounds = bounds, ProductPlacements = placements };
+    }
+
+    private static IfcPreviewVertex ResolvePivot(IfcRenderScene scene, int productId)
+    {
+        if (scene.ProductPlacements is not null
+            && scene.ProductPlacements.TryGetValue(productId, out var origin)
+            && double.IsFinite(origin.X) && double.IsFinite(origin.Y) && double.IsFinite(origin.Z))
+        {
+            return origin;
+        }
+
+        var bounds = IfcRenderBounds.Empty;
+        foreach (var mesh in scene.Meshes)
+        {
+            if (mesh.ProductId != productId)
+            {
+                continue;
+            }
+
+            foreach (var vertex in mesh.Vertices)
+            {
+                bounds = bounds.Include(vertex.X, vertex.Y, vertex.Z);
+            }
+        }
+
+        return bounds.Center;
+    }
+
+    private static IfcRenderVertex TransformVertex(
+        IfcRenderVertex vertex,
+        IfcPreviewVertex pivot,
+        double cos,
+        double sin,
+        bool hasRotation,
+        double moveDeltaX,
+        double moveDeltaY,
+        double moveDeltaZ)
+    {
+        var x = vertex.X;
+        var y = vertex.Y;
+        var normalX = vertex.NormalX;
+        var normalY = vertex.NormalY;
+        if (hasRotation)
+        {
+            var localX = vertex.X - pivot.X;
+            var localY = vertex.Y - pivot.Y;
+            x = pivot.X + localX * cos - localY * sin;
+            y = pivot.Y + localX * sin + localY * cos;
+            normalX = (float)(vertex.NormalX * cos - vertex.NormalY * sin);
+            normalY = (float)(vertex.NormalX * sin + vertex.NormalY * cos);
+        }
+
+        return new IfcRenderVertex(
+            x + moveDeltaX,
+            y + moveDeltaY,
+            vertex.Z + moveDeltaZ,
+            normalX,
+            normalY,
+            vertex.NormalZ);
     }
 }
 

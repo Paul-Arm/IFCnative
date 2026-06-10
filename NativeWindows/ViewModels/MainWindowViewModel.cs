@@ -337,7 +337,7 @@ public sealed class MainWindowViewModel : ReactiveViewModel
     public string StatusText
     {
         get => statusText;
-        private set
+        internal set
         {
             if (SetProperty(ref statusText, value))
             {
@@ -981,7 +981,7 @@ public sealed class MainWindowViewModel : ReactiveViewModel
         Recent.SetEntries(recentFileStore.Load());
     }
 
-    private void Log(string line)
+    internal void Log(string line)
     {
         Console.Add(line);
     }
@@ -1327,7 +1327,8 @@ public sealed class ViewportPanelViewModel(MainWindowViewModel owner, IIfcGeomet
     private CancellationTokenSource? renderSceneCancellation;
     private long renderSceneLoadVersion;
     private object? lastRenderStore;
-    private object? lastGeometryContext;
+    private long lastGeometryVersion = -1;
+    private (int ProductId, Vector3 MoveDeltaWorld, float RotateZRadians)? pendingTransformPatch;
 
     public ObservableCollection<IfcViewportItem> Items { get; } = [];
 
@@ -1437,12 +1438,24 @@ public sealed class ViewportPanelViewModel(MainWindowViewModel owner, IIfcGeomet
             : 0;
         SelectedProductId = retainedSelection;
         CanTransformSelection = retainedSelection > 0 && document.PlacementsByEntity.ContainsKey(retainedSelection);
-        var geometryContext = XbimIfcDocumentService.TryGetGeometryContext(document);
-        if (!RenderScene.IsEmpty
-            && document.XbimStore is not null
-            && geometryContext is not null
-            && ReferenceEquals(document.XbimStore, lastRenderStore)
-            && ReferenceEquals(geometryContext, lastGeometryContext))
+        var sameStore = document.XbimStore is not null && ReferenceEquals(document.XbimStore, lastRenderStore);
+        if (pendingTransformPatch is { } patch && sameStore && !RenderScene.IsEmpty)
+        {
+            // A committed move/rotate of a single product: patch the cached scene
+            // in place instead of re-tessellating the whole model.
+            RenderScene = IfcRenderSceneTransform.TransformProduct(
+                RenderScene,
+                patch.ProductId,
+                patch.MoveDeltaWorld.X,
+                patch.MoveDeltaWorld.Y,
+                patch.MoveDeltaWorld.Z,
+                patch.RotateZRadians);
+            lastGeometryVersion = document.GeometryVersion;
+            Summary = RenderScene.Status;
+            return;
+        }
+
+        if (!RenderScene.IsEmpty && sameStore && document.GeometryVersion == lastGeometryVersion)
         {
             Summary = RenderScene.Status;
             return;
@@ -1490,7 +1503,15 @@ public sealed class ViewportPanelViewModel(MainWindowViewModel owner, IIfcGeomet
     public bool CommitProductTransform(int productId, Vector3 moveDeltaWorld, float rotateZRadians)
     {
         CancelRenderSceneLoad();
-        return owner.CommitProductTransform(productId, moveDeltaWorld, rotateZRadians);
+        pendingTransformPatch = (productId, moveDeltaWorld, rotateZRadians);
+        try
+        {
+            return owner.CommitProductTransform(productId, moveDeltaWorld, rotateZRadians);
+        }
+        finally
+        {
+            pendingTransformPatch = null;
+        }
     }
 
     public void CancelRenderSceneLoad()
@@ -1527,7 +1548,9 @@ public sealed class ViewportPanelViewModel(MainWindowViewModel owner, IIfcGeomet
     {
         try
         {
+            Views.ViewportPreviewControl.LogViewport($"scene build start: doc='{document.FileName}' entities={document.Entities.Count}");
             var scene = await geometryBackend.BuildRenderSceneAsync(document, request, cancellationToken, progress);
+            Views.ViewportPreviewControl.LogViewport($"scene build done: {scene.Status}");
             if (cancellationToken.IsCancellationRequested || version != renderSceneLoadVersion)
             {
                 return;
@@ -1535,18 +1558,22 @@ public sealed class ViewportPanelViewModel(MainWindowViewModel owner, IIfcGeomet
 
             RenderScene = scene;
             lastRenderStore = document.XbimStore;
-            lastGeometryContext = XbimIfcDocumentService.TryGetGeometryContext(document);
+            lastGeometryVersion = document.GeometryVersion;
             Summary = scene.Status;
         }
         catch (OperationCanceledException)
         {
+            Views.ViewportPreviewControl.LogViewport("scene build cancelled");
         }
         catch (Exception exception)
         {
+            Views.ViewportPreviewControl.LogViewport($"scene build failed: {exception}");
             if (!cancellationToken.IsCancellationRequested && version == renderSceneLoadVersion)
             {
                 RenderScene = IfcRenderScene.Empty($"xBIM render scene failed: {exception.Message}");
                 Summary = $"xBIM render scene failed: {exception.Message}";
+                owner.StatusText = $"xBIM render scene failed: {exception.Message}";
+                owner.Log($"viewport.scene.error('{exception.Message.Replace("'", string.Empty, StringComparison.Ordinal)}')");
             }
         }
     }

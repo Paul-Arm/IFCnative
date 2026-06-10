@@ -159,6 +159,7 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
     private int visibleMeshCount;
     private int visibleTriangleCount;
     private int visibleVertexCount;
+    private bool hadRenderableScene;
 
     // MSAA FBO buffers
     private uint msaaFbo;
@@ -281,10 +282,12 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         {
             base.OnOpenGlInit(gl);
             glApi = SilkGL.GetApi(name => gl.GetProcAddress(name));
-            LogViewport($"init context={gl.ContextInfo}");
+            var isGles = GlVersion.Type == GlProfileType.OpenGLES;
+            LogViewport($"init context={gl.ContextInfo} profile={GlVersion.Type} {GlVersion.Major}.{GlVersion.Minor}");
             LogViewport($"gl version={ReadGlString(glApi, StringName.Version)} renderer={ReadGlString(glApi, StringName.Renderer)} shading={ReadGlString(glApi, StringName.ShadingLanguageVersion)}");
             program = CreateProgramWithFallback(
                 glApi,
+                isGles,
                 "scene",
                 SceneVertexShaderSource330,
                 SceneFragmentShaderSource330,
@@ -305,6 +308,7 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
 
             fxaaProgram = CreateProgramWithFallback(
                 glApi,
+                isGles,
                 "fxaa",
                 FxaaVertexShaderSource330,
                 FxaaFragmentShaderSource330,
@@ -470,8 +474,12 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
             buffersDirty = false;
         }
 
-        var width = Math.Max(1, (int)Bounds.Width);
-        var height = Math.Max(1, (int)Bounds.Height);
+        // The Avalonia swapchain framebuffer is sized in physical pixels
+        // (Bounds * RenderScaling); the GL viewport must match or the image
+        // renders into a smaller corner of the control on scaled displays.
+        var renderScaling = VisualRoot?.RenderScaling ?? 1.0;
+        var width = Math.Max(1, (int)(Bounds.Width * renderScaling));
+        var height = Math.Max(1, (int)(Bounds.Height * renderScaling));
 
         var aaMode = AntiAliasing;
         var msaaSamples = aaMode switch
@@ -777,6 +785,7 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
 
         if (dragMode != DragMode.None)
         {
+            MaybeRebaseNavigationOrigin();
             e.Handled = true;
         }
         dragMode = DragMode.None;
@@ -787,6 +796,7 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
     {
         base.OnPointerWheelChanged(e);
         camera = NativeViewportCameraController.Zoom(camera, (int)(e.Delta.Y * 120));
+        MaybeRebaseNavigationOrigin();
         QueueRender();
         e.Handled = true;
     }
@@ -826,14 +836,45 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
     private void OnSceneChanged()
     {
         ClearCommittedTransformPreview();
-        renderOrigin = GetDefaultRenderOrigin(Scene);
         buffersDirty = true;
+        var scene = Scene;
+        var sceneIsRenderable = scene is not null && !scene.IsEmpty;
+        if (hadRenderableScene && sceneIsRenderable && IsCameraCompatibleWithScene(scene!))
+        {
+            // Incremental update of the same model (e.g. a committed move/rotate):
+            // keep the camera and render origin instead of re-framing.
+            camera = camera with { SceneRadius = Math.Max(0.1, scene!.Bounds.Radius) };
+            QueueRender();
+            return;
+        }
+
+        hadRenderableScene = sceneIsRenderable;
+        renderOrigin = GetDefaultRenderOrigin(scene);
         if (SelectedProductId > 0 && TryFrameProduct(SelectedProductId))
         {
             return;
         }
 
         FitCamera();
+    }
+
+    private bool IsCameraCompatibleWithScene(IfcRenderScene scene)
+    {
+        var bounds = scene.Bounds;
+        if (bounds.IsEmpty || !IsFinite(camera.Target) || !IsFinite(camera.Distance))
+        {
+            return false;
+        }
+
+        var radius = Math.Max(1d, bounds.Radius);
+        var center = bounds.Center;
+        var dx = camera.Target.X - center.X;
+        var dy = camera.Target.Y - center.Y;
+        var dz = camera.Target.Z - center.Z;
+        var targetOffset = Math.Sqrt(dx * dx + dy * dy + dz * dz);
+        return targetOffset <= radius * 4d
+            && camera.Distance <= radius * 64d
+            && camera.Distance >= radius * 0.00005d;
     }
 
     private void OnSelectedProductChanged()
@@ -1007,11 +1048,30 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
             return false;
         }
 
-        center = ToRenderVector(bounds.Center, renderOrigin) + previewMoveDeltaWorld;
+        // Rotation is committed around the product's placement origin, so anchor the
+        // rotate gizmo (and its preview) there to match the persisted result.
+        var pivot = InteractionMode == ViewportInteractionMode.Rotate
+            && TryGetProductPlacementOrigin(SelectedProductId, out var placementOrigin)
+            ? placementOrigin
+            : bounds.Center;
+        center = ToRenderVector(pivot, renderOrigin) + previewMoveDeltaWorld;
         var objectScale = Math.Max(0.15d, bounds.Radius * 1.2d);
         var cameraScale = Math.Max(0.15d, camera.Distance * 0.16d);
         var sceneScale = Math.Max(0.4d, camera.SceneRadius * 0.35d);
         size = (float)Math.Clamp(Math.Max(objectScale, cameraScale), 0.15d, sceneScale);
+        return true;
+    }
+
+    private bool TryGetProductPlacementOrigin(int productId, out IfcPreviewVertex origin)
+    {
+        origin = new IfcPreviewVertex(0, 0, 0);
+        var placements = Scene?.ProductPlacements;
+        if (placements is null || !placements.TryGetValue(productId, out var value) || !IsFinite(value))
+        {
+            return false;
+        }
+
+        origin = value;
         return true;
     }
 
@@ -2225,6 +2285,26 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         buffersDirty = true;
     }
 
+    private void MaybeRebaseNavigationOrigin()
+    {
+        var dx = camera.Target.X - renderOrigin.X;
+        var dy = camera.Target.Y - renderOrigin.Y;
+        var dz = camera.Target.Z - renderOrigin.Z;
+        var offset = Math.Sqrt(dx * dx + dy * dy + dz * dz);
+        if (!IsFinite(offset))
+        {
+            return;
+        }
+
+        // Rebase before single-precision render coordinates lose visible accuracy
+        // (float ~7 significant digits versus the current view distance).
+        if (offset > Math.Max(2_000d, camera.Distance * 512d))
+        {
+            RebaseRenderOrigin(camera.Target);
+            QueueRender();
+        }
+    }
+
     private static IfcPreviewVertex GetDefaultRenderOrigin(IfcRenderScene? scene)
     {
         return scene is null || scene.Bounds.IsEmpty
@@ -2318,6 +2398,7 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
 
     private static uint CreateProgramWithFallback(
         SilkGL gl,
+        bool isGles,
         string label,
         string modernVertexShaderSource,
         string modernFragmentShaderSource,
@@ -2325,6 +2406,24 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         string legacyFragmentShaderSource,
         params string[] attributeNames)
     {
+        if (isGles)
+        {
+            try
+            {
+                var programId = CreateProgram(
+                    gl,
+                    WithGlslEsVersion(modernVertexShaderSource),
+                    WithGlslEsVersion(modernFragmentShaderSource),
+                    attributeNames);
+                LogViewport($"shader {label}: using GLSL ES 300");
+                return programId;
+            }
+            catch (Exception exception)
+            {
+                LogViewport($"shader {label}: GLSL ES 300 failed, trying desktop GLSL ({exception.Message})");
+            }
+        }
+
         try
         {
             var programId = CreateProgram(
@@ -2428,6 +2527,14 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         return source.Replace("#version 330 core", $"#version {version} core", StringComparison.Ordinal);
     }
 
+    private static string WithGlslEsVersion(string source)
+    {
+        return source.Replace(
+            "#version 330 core",
+            "#version 300 es\nprecision highp float;\nprecision highp int;",
+            StringComparison.Ordinal);
+    }
+
     private static string ReadGlString(SilkGL gl, StringName name)
     {
         try
@@ -2440,7 +2547,7 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         }
     }
 
-    private static void LogViewport(string message)
+    internal static void LogViewport(string message)
     {
         try
         {

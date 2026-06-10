@@ -486,6 +486,7 @@ public static class XbimDocumentEditor
             }
 
             var projected = XbimIfcDocumentService.ProjectStore(store, document.FileName);
+            projected.GeometryVersion = affectsGeometry ? document.GeometryVersion + 1 : document.GeometryVersion;
             if (!affectsGeometry && XbimIfcDocumentService.TryGetGeometryContext(document) is { } geometryContext)
             {
                 projected.XbimGeometryContext = geometryContext;

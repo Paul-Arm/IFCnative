@@ -2,7 +2,9 @@ using IFCnative.NativeWindows.Models;
 using IFCnative.NativeWindows.ViewModels;
 using Xbim.Common.Geometry;
 using Xbim.Common.XbimExtensions;
+using Xbim.Ifc4.Interfaces;
 using Xbim.ModelGeometry.Scene;
+using Xbim.ModelGeometry.Scene.Extensions;
 
 namespace IFCnative.NativeWindows.Services;
 
@@ -16,6 +18,8 @@ public sealed class XbimGeometryBackend : IIfcGeometryBackend
         "IFCCURTAINWALL",
     };
 
+    private static readonly TimeSpan UiStoreAccessTimeout = TimeSpan.FromMilliseconds(250);
+
     public string Name => "xBIM geometry";
 
     public string Status => "Using xBIM/OpenCascade geometry; the xBIM store is projected into the UI.";
@@ -24,7 +28,7 @@ public sealed class XbimGeometryBackend : IIfcGeometryBackend
     {
         try
         {
-            return XbimIfcDocumentService.WithStoreAccess(document, () =>
+            if (!XbimIfcDocumentService.TryWithStoreAccess(document, () =>
             {
                 var context = TryGetContext(document, allowSmallModelCreate: false);
                 if (context is null)
@@ -47,7 +51,15 @@ public sealed class XbimGeometryBackend : IIfcGeometryBackend
                 }
 
                 return new IfcGeometryValidationResult(Name, [], warnings);
-            });
+            }, UiStoreAccessTimeout, out var validationResult))
+            {
+                return new IfcGeometryValidationResult(
+                    Name,
+                    [],
+                    ["Warning: the xBIM store is busy (geometry is being generated); validation was skipped."]);
+            }
+
+            return validationResult!;
         }
         catch (Exception exception)
         {
@@ -59,7 +71,7 @@ public sealed class XbimGeometryBackend : IIfcGeometryBackend
     {
         try
         {
-            return XbimIfcDocumentService.WithStoreAccess(document, () =>
+            if (!XbimIfcDocumentService.TryWithStoreAccess(document, () =>
             {
                 var context = TryGetContext(document, allowSmallModelCreate: true);
                 if (context is null)
@@ -102,7 +114,12 @@ public sealed class XbimGeometryBackend : IIfcGeometryBackend
                 }
 
                 return items;
-            });
+            }, UiStoreAccessTimeout, out var documentItems))
+            {
+                return [new IfcViewportItem(null, "xBIM geometry is being generated in the background; the preview list will refresh when it completes.")];
+            }
+
+            return documentItems!;
         }
         catch (Exception exception)
         {
@@ -114,7 +131,7 @@ public sealed class XbimGeometryBackend : IIfcGeometryBackend
     {
         try
         {
-            return XbimIfcDocumentService.WithStoreAccess(document, () =>
+            if (!XbimIfcDocumentService.TryWithStoreAccess(document, () =>
             {
                 var context = TryGetContext(document, allowSmallModelCreate: true);
                 if (context is null)
@@ -152,7 +169,16 @@ public sealed class XbimGeometryBackend : IIfcGeometryBackend
                     $"  - xBIM shape #{instance.ShapeGeometryLabel}, instance #{instance.InstanceLabel}, {instance.RepresentationType}")));
 
                 return items;
-            });
+            }, UiStoreAccessTimeout, out var selectionItems))
+            {
+                return
+                [
+                    new IfcViewportItem(null, $"{Name}: selected entity #{entityId}."),
+                    new IfcViewportItem(entityId, "xBIM geometry is being generated in the background; selection details will refresh when it completes."),
+                ];
+            }
+
+            return selectionItems!;
         }
         catch (Exception exception)
         {
@@ -164,7 +190,7 @@ public sealed class XbimGeometryBackend : IIfcGeometryBackend
     {
         try
         {
-            return XbimIfcDocumentService.WithStoreAccess(document, () =>
+            if (!XbimIfcDocumentService.TryWithStoreAccess<IReadOnlyList<IfcPreviewMesh>>(document, () =>
             {
                 var context = TryGetContext(document, allowSmallModelCreate: true);
                 if (context is null)
@@ -194,7 +220,12 @@ public sealed class XbimGeometryBackend : IIfcGeometryBackend
                 }
 
                 return meshes;
-            });
+            }, UiStoreAccessTimeout, out var previewMeshes))
+            {
+                return [];
+            }
+
+            return previewMeshes!;
         }
         catch
         {
@@ -227,8 +258,24 @@ public sealed class XbimGeometryBackend : IIfcGeometryBackend
         IProgress<string>? progress)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        // Fast path: models whose geometry is exclusively pre-triangulated
+        // (IfcTriangulatedFaceSet) need no OpenCascade tessellation at all.
+        // Decoding the triangles directly takes seconds instead of minutes.
+        var fastScene = TryBuildTessellatedFastScene(document, request, cancellationToken, progress);
+        if (fastScene is not null)
+        {
+            Views.ViewportPreviewControl.LogViewport($"fast tessellation path done in {stopwatch.Elapsed.TotalSeconds:0.0}s");
+            return fastScene;
+        }
+
         progress?.Report("Generating xBIM geometry context...");
-        XbimIfcDocumentService.EnsureGeometryContext(document);
+        XbimIfcDocumentService.EnsureGeometryContext(
+            document,
+            percent => progress?.Report($"Generating xBIM geometry... {percent}%"));
+        Views.ViewportPreviewControl.LogViewport($"geometry context ready in {stopwatch.Elapsed.TotalSeconds:0.0}s");
+        stopwatch.Restart();
         cancellationToken.ThrowIfCancellationRequested();
         var store = XbimIfcDocumentService.EnsureStore(document);
         progress?.Report("Reading xBIM GeometryStore...");
@@ -246,6 +293,7 @@ public sealed class XbimGeometryBackend : IIfcGeometryBackend
 
         var meshes = new List<IfcRenderMesh>();
         var bounds = IfcRenderBounds.Empty;
+        var productOrigins = new Dictionary<int, IfcPreviewVertex>();
         var triangleCount = 0;
         var decoded = 0;
         foreach (var instance in instances)
@@ -270,6 +318,12 @@ public sealed class XbimGeometryBackend : IIfcGeometryBackend
                 && string.Equals(entity.Type, "IFCSPACE", StringComparison.OrdinalIgnoreCase);
             mesh = mesh with { IsSpace = isSpace };
 
+            if (!productOrigins.ContainsKey(instance.IfcProductLabel))
+            {
+                var transform = instance.Transformation;
+                productOrigins[instance.IfcProductLabel] = new IfcPreviewVertex(transform.OffsetX, transform.OffsetY, transform.OffsetZ);
+            }
+
             meshes.Add(mesh);
             decoded++;
             triangleCount += mesh.Indices.Count / 3;
@@ -289,6 +343,8 @@ public sealed class XbimGeometryBackend : IIfcGeometryBackend
             return IfcRenderScene.Empty("xBIM GeometryStore contains no renderable triangle meshes.");
         }
 
+        Views.ViewportPreviewControl.LogViewport($"scene assembled in {stopwatch.Elapsed.TotalSeconds:0.0}s: meshes={meshes.Count} tris={triangleCount}");
+
         var label = request.ProductId is int selectedProductId
             ? $"Selection #{selectedProductId}"
             : document.FileName;
@@ -298,11 +354,294 @@ public sealed class XbimGeometryBackend : IIfcGeometryBackend
             bounds,
             instances.Count,
             triangleCount,
-            $"xBIM GeometryStore: {meshes.Count:N0} mesh(es), {triangleCount:N0} triangle(s).");
+            $"xBIM GeometryStore: {meshes.Count:N0} mesh(es), {triangleCount:N0} triangle(s).",
+            productOrigins);
     }
 
-    private static IfcRenderMesh? DecodeShapeGeometry(IXbimShapeGeometryData geometry, IXbimShapeInstanceData instance, string? productType)
+    /// <summary>
+    /// Builds a render scene directly from IfcTriangulatedFaceSet data when the
+    /// model contains no geometry that requires OpenCascade (no solids, booleans,
+    /// mapped items or openings). Returns null when the fast path does not apply.
+    /// </summary>
+    private static IfcRenderScene? TryBuildTessellatedFastScene(
+        IfcDocument document,
+        IfcRenderSceneRequest request,
+        CancellationToken cancellationToken,
+        IProgress<string>? progress)
     {
+        var store = XbimIfcDocumentService.EnsureStore(document);
+        var model = store.Model;
+
+        var faceSetCount = model.Instances.CountOf<IIfcTriangulatedFaceSet>();
+        if (faceSetCount == 0)
+        {
+            return null;
+        }
+
+        // Any of these representation kinds needs the full OpenCascade pipeline.
+        if (model.Instances.OfType<IIfcSolidModel>().Any()
+            || model.Instances.OfType<IIfcBooleanResult>().Any()
+            || model.Instances.OfType<IIfcFaceBasedSurfaceModel>().Any()
+            || model.Instances.OfType<IIfcShellBasedSurfaceModel>().Any()
+            || model.Instances.OfType<IIfcPolygonalFaceSet>().Any()
+            || model.Instances.OfType<IIfcMappedItem>().Any()
+            || model.Instances.OfType<IIfcRelVoidsElement>().Any())
+        {
+            return null;
+        }
+
+        progress?.Report($"Decoding {faceSetCount:N0} triangulated face set(s)...");
+
+        // Mirror Xbim3DModelContext's adjustWcs: when there is a single root
+        // placement (e.g. geo-referenced site offset), drop it so coordinates
+        // stay small enough for float-precision rendering.
+        var rootPlacements = model.Instances.OfType<IIfcLocalPlacement>()
+            .Where(placement => placement.PlacementRelTo is null)
+            .Select(placement => placement.EntityLabel)
+            .Distinct()
+            .ToList();
+        var adjustedRootLabel = rootPlacements.Count == 1 ? rootPlacements[0] : (int?)null;
+        var placementCache = new Dictionary<int, XbimMatrix3D>();
+
+        var meshes = new List<IfcRenderMesh>();
+        var bounds = IfcRenderBounds.Empty;
+        var productOrigins = new Dictionary<int, IfcPreviewVertex>();
+        var triangleCount = 0;
+        var instanceCount = 0;
+        var limitReached = false;
+
+        foreach (var product in model.Instances.OfType<IIfcProduct>())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (limitReached)
+            {
+                break;
+            }
+
+            if (product is IIfcFeatureElement || product.Representation?.Representations is null)
+            {
+                continue;
+            }
+
+            if (request.ProductId is int requestedProductId && product.EntityLabel != requestedProductId)
+            {
+                continue;
+            }
+
+            var transform = GetPlacementMatrix(product.ObjectPlacement, adjustedRootLabel, placementCache);
+
+            document.EntityById.TryGetValue(product.EntityLabel, out var entity);
+            var isSpace = entity is not null
+                && string.Equals(entity.Type, "IFCSPACE", StringComparison.OrdinalIgnoreCase);
+
+            foreach (var representation in product.Representation.Representations)
+            {
+                foreach (var faceSet in representation.Items.OfType<IIfcTriangulatedFaceSet>())
+                {
+                    instanceCount++;
+                    var mesh = DecodeTriangulatedFaceSet(faceSet, transform, product.EntityLabel, entity?.Type);
+                    if (mesh is null || !mesh.IsRenderable)
+                    {
+                        continue;
+                    }
+
+                    mesh = mesh with { IsSpace = isSpace };
+
+                    if (!productOrigins.ContainsKey(product.EntityLabel))
+                    {
+                        productOrigins[product.EntityLabel] = new IfcPreviewVertex(transform.OffsetX, transform.OffsetY, transform.OffsetZ);
+                    }
+
+                    meshes.Add(mesh);
+                    triangleCount += mesh.Indices.Count / 3;
+                    foreach (var vertex in mesh.Vertices)
+                    {
+                        bounds = bounds.Include(vertex.X, vertex.Y, vertex.Z);
+                    }
+
+                    if (meshes.Count % 500 == 0)
+                    {
+                        progress?.Report($"Decoded {meshes.Count:N0} triangulated mesh(es)...");
+                    }
+
+                    if (request.Limit is int limit && limit > 0 && meshes.Count >= limit)
+                    {
+                        limitReached = true;
+                        break;
+                    }
+                }
+
+                if (limitReached)
+                {
+                    break;
+                }
+            }
+        }
+
+        if (meshes.Count == 0)
+        {
+            return null;
+        }
+
+        document.GeometryBackendStatus = "Direct tessellation fast path: IfcTriangulatedFaceSet decoded without OpenCascade.";
+        var label = request.ProductId is int selectedProductId
+            ? $"Selection #{selectedProductId}"
+            : document.FileName;
+        return new IfcRenderScene(
+            label,
+            meshes,
+            bounds,
+            instanceCount,
+            triangleCount,
+            $"Direct tessellation: {meshes.Count:N0} mesh(es), {triangleCount:N0} triangle(s).",
+            productOrigins);
+    }
+
+    private static XbimMatrix3D GetPlacementMatrix(
+        IIfcObjectPlacement? placement,
+        int? adjustedRootLabel,
+        Dictionary<int, XbimMatrix3D> cache)
+    {
+        if (placement is not IIfcLocalPlacement localPlacement)
+        {
+            return XbimMatrix3D.Identity;
+        }
+
+        if (cache.TryGetValue(localPlacement.EntityLabel, out var cached))
+        {
+            return cached;
+        }
+
+        var local = localPlacement.EntityLabel == adjustedRootLabel
+            ? XbimMatrix3D.Identity
+            : localPlacement.RelativePlacement is IIfcAxis2Placement axisPlacement
+                ? axisPlacement.ToMatrix3D()
+                : XbimMatrix3D.Identity;
+        var result = localPlacement.PlacementRelTo is null
+            ? local
+            : local * GetPlacementMatrix(localPlacement.PlacementRelTo, adjustedRootLabel, cache);
+        cache[localPlacement.EntityLabel] = result;
+        return result;
+    }
+
+    private static IfcRenderMesh? DecodeTriangulatedFaceSet(
+        IIfcTriangulatedFaceSet faceSet,
+        XbimMatrix3D transform,
+        int productLabel,
+        string? productType)
+    {
+        var coordList = faceSet.Coordinates?.CoordList;
+        if (coordList is null || coordList.Count == 0 || faceSet.CoordIndex.Count == 0)
+        {
+            return null;
+        }
+
+        var points = new (double X, double Y, double Z)[coordList.Count];
+        var index = 0;
+        foreach (var coordinate in coordList)
+        {
+            if (coordinate.Count < 3)
+            {
+                return null;
+            }
+
+            var transformed = transform.Transform(new XbimPoint3D(coordinate[0], coordinate[1], coordinate[2]));
+            points[index++] = (transformed.X, transformed.Y, transformed.Z);
+        }
+
+        var pnIndex = faceSet.PnIndex is { Count: > 0 }
+            ? faceSet.PnIndex.Select(value => (int)(long)value.Value - 1).ToArray()
+            : null;
+
+        var indices = new List<int>(faceSet.CoordIndex.Count * 3);
+        foreach (var triangle in faceSet.CoordIndex)
+        {
+            if (triangle.Count < 3)
+            {
+                continue;
+            }
+
+            for (var corner = 0; corner < 3; corner++)
+            {
+                var pointIndex = (int)(long)triangle[corner].Value - 1;
+                if (pnIndex is not null)
+                {
+                    if (pointIndex < 0 || pointIndex >= pnIndex.Length)
+                    {
+                        return null;
+                    }
+
+                    pointIndex = pnIndex[pointIndex];
+                }
+
+                if (pointIndex < 0 || pointIndex >= points.Length)
+                {
+                    return null;
+                }
+
+                indices.Add(pointIndex);
+            }
+        }
+
+        if (indices.Count == 0)
+        {
+            return null;
+        }
+
+        // Averaged vertex normals from accumulated face normals.
+        var normals = new (double X, double Y, double Z)[points.Length];
+        for (var i = 0; i < indices.Count; i += 3)
+        {
+            var a = points[indices[i]];
+            var b = points[indices[i + 1]];
+            var c = points[indices[i + 2]];
+            var abX = b.X - a.X;
+            var abY = b.Y - a.Y;
+            var abZ = b.Z - a.Z;
+            var acX = c.X - a.X;
+            var acY = c.Y - a.Y;
+            var acZ = c.Z - a.Z;
+            var nx = abY * acZ - abZ * acY;
+            var ny = abZ * acX - abX * acZ;
+            var nz = abX * acY - abY * acX;
+            for (var corner = 0; corner < 3; corner++)
+            {
+                var vertexIndex = indices[i + corner];
+                normals[vertexIndex] = (normals[vertexIndex].X + nx, normals[vertexIndex].Y + ny, normals[vertexIndex].Z + nz);
+            }
+        }
+
+        var vertices = new List<IfcRenderVertex>(points.Length);
+        for (var i = 0; i < points.Length; i++)
+        {
+            var normal = normals[i];
+            var length = Math.Sqrt(normal.X * normal.X + normal.Y * normal.Y + normal.Z * normal.Z);
+            if (length < 1e-12)
+            {
+                normal = (0d, 0d, 1d);
+                length = 1d;
+            }
+
+            vertices.Add(new IfcRenderVertex(
+                points[i].X,
+                points[i].Y,
+                points[i].Z,
+                (float)(normal.X / length),
+                (float)(normal.Y / length),
+                (float)(normal.Z / length)));
+        }
+
+        return new IfcRenderMesh(
+            productLabel,
+            faceSet.EntityLabel,
+            0,
+            0,
+            ColorFor(0, 0, productLabel, productType),
+            vertices,
+            indices);
+    }
+
+    private static IfcRenderMesh? DecodeShapeGeometry(IXbimShapeGeometryData geometry, IXbimShapeInstanceData instance, string? productType)    {
         if (geometry.Format != (byte)XbimGeometryType.PolyhedronBinary || geometry.ShapeData.Length == 0)
         {
             return null;

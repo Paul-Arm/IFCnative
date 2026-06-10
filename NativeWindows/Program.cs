@@ -19,7 +19,13 @@ internal static class Program
         return AppBuilder
             .Configure<App>()
             .UsePlatformDetect()
-            .With(new Win32PlatformOptions { RenderingMode = [Win32RenderingMode.Wgl] })
+            .With(new Win32PlatformOptions
+            {
+                // ANGLE (D3D11) is Avalonia's default and most stable Windows backend.
+                // The WGL shared-context path intermittently fails to configure the
+                // swapchain FBO under continuous rendering, crashing the process.
+                RenderingMode = [Win32RenderingMode.AngleEgl, Win32RenderingMode.Wgl, Win32RenderingMode.Software],
+            })
             .LogToTrace()
             .UseReactiveUI();
     }
