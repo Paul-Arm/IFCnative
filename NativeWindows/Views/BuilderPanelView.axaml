@@ -10,13 +10,11 @@
         </StackPanel>
       </Border>
 
-      <TextBlock Classes="caption" Text="IFC class" />
-      <AutoCompleteBox Text="{Binding ClassName, Mode=TwoWay}"
-                       ItemsSource="{Binding ClassNames}"
-                       FilterMode="Contains"
-                       MinimumPrefixLength="1"
-                       MaxDropDownHeight="260"
-                       Watermark="IfcWall, IfcDoor, IfcGroup, ..." />
+      <TextBlock Classes="caption" Text="IFC class (valid for the current selection)" />
+      <ComboBox HorizontalAlignment="Stretch"
+                MaxDropDownHeight="320"
+                ItemsSource="{Binding ClassNames}"
+                SelectedItem="{Binding ClassName, Mode=TwoWay}" />
       <TextBox Watermark="Name" Text="{Binding ProductName}" />
 
       <TextBlock Classes="caption" Text="Insert position in structure" />

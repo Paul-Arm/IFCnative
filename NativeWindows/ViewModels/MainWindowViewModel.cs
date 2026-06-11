@@ -3323,7 +3323,11 @@ public sealed class BuilderPanelViewModel : ReactiveViewModel
     private bool createAsChild = true;
     private bool isGeometryClass = true;
     private string loadedSchema = string.Empty;
+    private string appliedClassFilterKey = string.Empty;
+    private IReadOnlyList<IfcCreatableClass> allClasses = [];
     private Dictionary<string, IfcCreatableClass> classByName = new(StringComparer.OrdinalIgnoreCase);
+    private IfcDocument? currentDocument;
+    private int currentSelectionId;
 
     public BuilderPanelViewModel(MainWindowViewModel owner)
     {
@@ -3374,7 +3378,17 @@ public sealed class BuilderPanelViewModel : ReactiveViewModel
     public string PositionZ { get => positionZ; set => this.RaiseAndSetIfChanged(ref positionZ, value); }
 
     /// <summary>true: child of selection; false: same parent as selection.</summary>
-    public bool CreateAsChild { get => createAsChild; set => this.RaiseAndSetIfChanged(ref createAsChild, value); }
+    public bool CreateAsChild
+    {
+        get => createAsChild;
+        set
+        {
+            if (SetProperty(ref createAsChild, value))
+            {
+                ApplyClassFilter();
+            }
+        }
+    }
 
     /// <summary>Whether the entered class is an IfcProduct (drives the body/position UI).</summary>
     public bool IsGeometryClass { get => isGeometryClass; private set => this.RaiseAndSetIfChanged(ref isGeometryClass, value); }
@@ -3382,16 +3396,29 @@ public sealed class BuilderPanelViewModel : ReactiveViewModel
     public void SetDocument(IfcDocument document)
     {
         SelectedLabel = $"{document.FileName}: {document.Entities.Count:N0} entities";
+        currentDocument = document;
+        if (!document.EntityById.ContainsKey(currentSelectionId))
+        {
+            currentSelectionId = 0;
+        }
+
         if (!string.Equals(loadedSchema, document.Schema, StringComparison.OrdinalIgnoreCase))
         {
             loadedSchema = document.Schema;
             _ = LoadClassCatalogAsync(document);
+        }
+        else
+        {
+            ApplyClassFilter();
         }
     }
 
     public void SetSelection(IfcDocument document, IfcEntity entity)
     {
         SelectedLabel = $"#{entity.Id} {entity.TypeName()} {entity.DisplayName}";
+        currentDocument = document;
+        currentSelectionId = entity.Id;
+        ApplyClassFilter();
     }
 
     public void SetPickedPoint(double x, double y, double z)
@@ -3443,15 +3470,82 @@ public sealed class BuilderPanelViewModel : ReactiveViewModel
         try
         {
             var classes = await Task.Run(() => XbimDocumentEditor.GetCreatableClasses(document));
+            allClasses = classes;
             classByName = classes.ToDictionary(info => info.Name, StringComparer.OrdinalIgnoreCase);
-            MainWindowViewModel.ReplaceItems(ClassNames, classes.Select(info => info.Name));
-            UpdateGeometryFlag();
+            // Force a rebuild: the cached filter key may match the previous
+            // schema's catalog.
+            appliedClassFilterKey = string.Empty;
+            ApplyClassFilter();
         }
         catch (Exception exception)
         {
             loadedSchema = string.Empty;
             owner.StatusText = $"IFC class catalog failed: {exception.Message}";
         }
+    }
+
+    /// <summary>
+    /// Context-sensitive class list: only classes that can be linked to the
+    /// effective parent (selection in child mode, its parent in sibling mode).
+    /// Project parents take spatial structure only; element parents cannot nest
+    /// spatial structure; resource-layer classes are never offered.
+    /// </summary>
+    private void ApplyClassFilter()
+    {
+        if (allClasses.Count == 0)
+        {
+            return;
+        }
+
+        var parentInfo = ResolveEffectiveParentClass(out var parentIsProject);
+        var filterKey = parentIsProject
+            ? "project"
+            : parentInfo is { IsProduct: true, IsSpatial: false }
+                ? "element"
+                : "default";
+        if (filterKey == appliedClassFilterKey)
+        {
+            return;
+        }
+
+        appliedClassFilterKey = filterKey;
+        var filtered = allClasses.Where(info => info.IsObjectDefinition
+            && !string.Equals(info.Name, "IfcProject", StringComparison.OrdinalIgnoreCase));
+        if (parentIsProject)
+        {
+            filtered = filtered.Where(info => info.IsSpatial);
+        }
+        else if (parentInfo is { IsProduct: true, IsSpatial: false })
+        {
+            filtered = filtered.Where(info => !info.IsSpatial);
+        }
+
+        var names = filtered.Select(info => info.Name).ToList();
+        var current = ClassName.Trim();
+        MainWindowViewModel.ReplaceItems(ClassNames, names);
+        ClassName = names.FirstOrDefault(name => string.Equals(name, current, StringComparison.OrdinalIgnoreCase))
+            ?? names.FirstOrDefault(name => name == "IfcBuildingElementProxy")
+            ?? names.FirstOrDefault()
+            ?? string.Empty;
+        UpdateGeometryFlag();
+    }
+
+    private IfcCreatableClass? ResolveEffectiveParentClass(out bool parentIsProject)
+    {
+        parentIsProject = false;
+        if (currentDocument is null)
+        {
+            return null;
+        }
+
+        var parentId = XbimDocumentEditor.ResolveCreationParentId(currentDocument, currentSelectionId, !CreateAsChild);
+        if (parentId <= 0 || !currentDocument.EntityById.TryGetValue(parentId, out var parent))
+        {
+            return null;
+        }
+
+        parentIsProject = parent.Type.Equals("IFCPROJECT", StringComparison.OrdinalIgnoreCase);
+        return classByName.TryGetValue(parent.Type, out var info) ? info : null;
     }
 
     private void UpdateGeometryFlag()

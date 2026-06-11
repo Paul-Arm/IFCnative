@@ -10,7 +10,7 @@ using Xbim.IO.Step21;
 namespace IFCnative.NativeWindows.Services;
 
 /// <summary>An instantiable IFC class from the active schema's metadata.</summary>
-public sealed record IfcCreatableClass(string Name, bool IsProduct);
+public sealed record IfcCreatableClass(string Name, bool IsProduct, bool IsSpatial, bool IsObjectDefinition);
 
 /// <summary>
 /// Everything the Builder needs to create one element. World coordinates are
@@ -62,7 +62,11 @@ public static class XbimDocumentEditor
                 .Where(type => type is { IsAbstract: false }
                     && typeof(IPersistEntity).IsAssignableFrom(type)
                     && type.Name.StartsWith("Ifc", StringComparison.Ordinal))
-                .Select(type => new IfcCreatableClass(type.Name, typeof(IIfcProduct).IsAssignableFrom(type)))
+                .Select(type => new IfcCreatableClass(
+                    type.Name,
+                    typeof(IIfcProduct).IsAssignableFrom(type),
+                    typeof(IIfcSpatialStructureElement).IsAssignableFrom(type),
+                    typeof(IIfcObjectDefinition).IsAssignableFrom(type)))
                 .OrderBy(info => info.Name, StringComparer.Ordinal)
                 .ToList();
         });
@@ -104,8 +108,9 @@ public static class XbimDocumentEditor
     /// <summary>
     /// Child mode parents at the anchor itself; sibling mode walks to the
     /// anchor's containment/aggregation parent. No anchor: first spatial root.
+    /// Public so the Builder can filter its class list for the same parent.
     /// </summary>
-    private static int ResolveCreationParentId(IfcDocument document, int anchorId, bool asSibling)
+    public static int ResolveCreationParentId(IfcDocument document, int anchorId, bool asSibling)
     {
         if (anchorId <= 0 || !document.EntityById.ContainsKey(anchorId))
         {
