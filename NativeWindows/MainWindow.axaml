@@ -8,6 +8,7 @@
         Height="900"
         MinWidth="1100"
         MinHeight="720">
+  <Panel>
   <Grid RowDefinitions="Auto,*,Auto">
     <Menu Grid.Row="0"
           Classes="nativeTopMenu">
@@ -63,4 +64,30 @@
       </Grid>
     </Border>
   </Grid>
+
+  <!-- Export progress popup: covers the whole window so no edits can race the
+       background export; the bar mirrors the validator/serializer stages. -->
+  <Border IsVisible="{Binding IsExportInProgress}"
+          Background="#90141813">
+    <Border Background="#20231E"
+            BorderBrush="#3D453B"
+            BorderThickness="1"
+            CornerRadius="6"
+            Padding="24,18"
+            MinWidth="380"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center">
+      <StackPanel Spacing="10">
+        <TextBlock Classes="sectionTitle" Text="Exporting IFC" />
+        <TextBlock Classes="caption"
+                   Text="{Binding ExportProgressText}"
+                   TextTrimming="CharacterEllipsis" />
+        <ProgressBar Minimum="0"
+                     Maximum="100"
+                     Height="8"
+                     Value="{Binding ExportProgressValue}" />
+      </StackPanel>
+    </Border>
+  </Border>
+  </Panel>
 </Window>

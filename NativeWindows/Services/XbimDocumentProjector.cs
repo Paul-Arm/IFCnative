@@ -336,6 +336,9 @@ public static class XbimDocumentProjector
             Type = type,
             Name = ReadDisplayText(GetPropertyValue(instance, "Name"), $"#{instance.EntityLabel}"),
             Value = ReadPropertyDisplayValue(instance, type),
+            ValueType = type == "IFCPROPERTYSINGLEVALUE"
+                ? GetPropertyValue(instance, "NominalValue")?.GetType().Name ?? "IfcLabel"
+                : string.Empty,
         };
     }
 

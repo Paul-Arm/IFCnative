@@ -662,48 +662,10 @@ public sealed class XbimGeometryBackend : IIfcGeometryBackend
             Array.Resize(ref indices, indexCursor);
         }
 
-        // Averaged vertex normals from accumulated face normals.
-        var accumulated = new double[vertexCount * 3];
-        for (var i = 0; i < indices.Length; i += 3)
-        {
-            var a = indices[i] * 3;
-            var b = indices[i + 1] * 3;
-            var c = indices[i + 2] * 3;
-            var abX = positions[b] - positions[a];
-            var abY = positions[b + 1] - positions[a + 1];
-            var abZ = positions[b + 2] - positions[a + 2];
-            var acX = positions[c] - positions[a];
-            var acY = positions[c + 1] - positions[a + 1];
-            var acZ = positions[c + 2] - positions[a + 2];
-            var nx = abY * acZ - abZ * acY;
-            var ny = abZ * acX - abX * acZ;
-            var nz = abX * acY - abY * acX;
-            for (var corner = 0; corner < 3; corner++)
-            {
-                var vertexOffset = indices[i + corner] * 3;
-                accumulated[vertexOffset] += nx;
-                accumulated[vertexOffset + 1] += ny;
-                accumulated[vertexOffset + 2] += nz;
-            }
-        }
-
+        // Triangulated face sets carry faceted geometry with shared vertices, so
+        // averaged vertex normals would smear hard edges. Zero normals signal
+        // the shader to derive flat face normals from screen-space derivatives.
         var normals = new float[vertexCount * 3];
-        for (var i = 0; i < vertexCount; i++)
-        {
-            var vertexOffset = i * 3;
-            var nx = accumulated[vertexOffset];
-            var ny = accumulated[vertexOffset + 1];
-            var nz = accumulated[vertexOffset + 2];
-            var length = Math.Sqrt(nx * nx + ny * ny + nz * nz);
-            if (length < 1e-12)
-            {
-                (nx, ny, nz, length) = (0d, 0d, 1d, 1d);
-            }
-
-            normals[vertexOffset] = (float)(nx / length);
-            normals[vertexOffset + 1] = (float)(ny / length);
-            normals[vertexOffset + 2] = (float)(nz / length);
-        }
 
         return new IfcRenderMesh(
             productLabel,

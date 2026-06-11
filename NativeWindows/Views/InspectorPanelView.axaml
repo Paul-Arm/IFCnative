@@ -2,57 +2,104 @@
              xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
   <Grid RowDefinitions="Auto,*" Margin="8" RowSpacing="8">
-    <Border Classes="surface" Padding="10">
-      <Grid ColumnDefinitions="*,Auto">
-        <StackPanel>
-          <TextBlock Classes="sectionTitle" Text="{Binding Title}" />
-          <TextBlock Classes="caption" Text="{Binding EntityType}" />
+    <Border Classes="surface" Padding="10,8">
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+        <StackPanel Spacing="5">
+          <TextBlock Classes="sectionTitle"
+                     Text="{Binding Title}"
+                     TextTrimming="CharacterEllipsis"
+                     TextWrapping="NoWrap" />
+          <StackPanel Orientation="Horizontal" Spacing="5">
+            <Border Classes="chip accent">
+              <TextBlock Text="{Binding EntityType}" />
+            </Border>
+          </StackPanel>
         </StackPanel>
-        <Button Grid.Column="1" Classes="ghost" Content="{Binding BookmarkLabel}" Command="{Binding ToggleBookmarkCommand}" />
+        <Button Grid.Column="1"
+                Classes="icon"
+                VerticalAlignment="Top"
+                Command="{Binding ToggleBookmarkCommand}"
+                ToolTip.Tip="{Binding BookmarkLabel}">
+          <PathIcon Data="M12,2 L14.9,8.6 L22,9.3 L16.7,14 L18.2,21 L12,17.3 L5.8,21 L7.3,14 L2,9.3 L9.1,8.6 Z" />
+        </Button>
       </Grid>
     </Border>
 
     <TabControl Grid.Row="1">
       <TabItem Header="Info">
         <ScrollViewer>
-          <StackPanel Margin="8" Spacing="8">
-            <Grid ColumnDefinitions="90,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="4">
+          <StackPanel Margin="8" Spacing="12">
+            <Grid ColumnDefinitions="84,*" RowDefinitions="Auto,Auto" RowSpacing="4">
               <TextBlock Classes="caption" Text="STEP id" />
-              <TextBlock Grid.Column="1" Text="{Binding EntityId}" />
+              <TextBlock Grid.Column="1" Classes="caption" Foreground="#D8DCD2" Text="{Binding EntityId}" />
               <TextBlock Grid.Row="1" Classes="caption" Text="GlobalId" />
-              <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding GlobalId}" TextTrimming="CharacterEllipsis" />
-              <TextBlock Grid.Row="2" Classes="caption" Text="Path" />
-              <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding SpatialPath}" />
+              <TextBlock Grid.Row="1" Grid.Column="1"
+                         Classes="caption"
+                         Foreground="#D8DCD2"
+                         FontFamily="Cascadia Mono, Consolas, monospace"
+                         Text="{Binding GlobalId}"
+                         TextTrimming="CharacterEllipsis"
+                         TextWrapping="NoWrap" />
             </Grid>
 
-            <TextBox Watermark="Name" Text="{Binding NameDraft}" />
-            <TextBox Watermark="Description" Text="{Binding DescriptionDraft}" />
-            <TextBox MinHeight="110"
-                     AcceptsReturn="True"
-                     TextWrapping="Wrap"
-                     Watermark="Raw arguments"
-                     Text="{Binding RawArguments}" />
-            <Button Classes="primary" Content="Save entity" Command="{Binding SaveEntityCommand}" />
+            <StackPanel Spacing="4">
+              <TextBlock Classes="caption" Text="Spatial path" />
+              <TextBlock Text="{Binding SpatialPath}" />
+            </StackPanel>
+
+            <StackPanel Spacing="6">
+              <TextBlock Classes="caption" Text="Name" />
+              <TextBox Text="{Binding NameDraft}" />
+              <TextBlock Classes="caption" Text="Description" Margin="0,4,0,0" />
+              <TextBox Text="{Binding DescriptionDraft}" />
+              <TextBlock Classes="caption" Text="Raw STEP arguments" Margin="0,4,0,0" />
+              <TextBox MinHeight="90"
+                       AcceptsReturn="True"
+                       TextWrapping="Wrap"
+                       FontFamily="Cascadia Mono, Consolas, monospace"
+                       FontSize="{DynamicResource FontSizeCaption}"
+                       Text="{Binding RawArguments}" />
+            </StackPanel>
+            <Button Classes="primary"
+                    HorizontalAlignment="Right"
+                    Content="Save entity"
+                    Command="{Binding SaveEntityCommand}" />
           </StackPanel>
         </ScrollViewer>
       </TabItem>
 
       <TabItem Header="Placement">
         <ScrollViewer>
-          <StackPanel Margin="8" Spacing="8">
-            <TextBlock Classes="caption" Text="Spatial parent" />
-            <TextBox Text="{Binding SpatialParentId}" />
-            <StackPanel Orientation="Horizontal" Spacing="6">
-              <Button Classes="ghost" Content="Save parent" Command="{Binding SaveSpatialParentCommand}" IsEnabled="{Binding CanEditSpatialParent}" />
-              <Button Classes="danger" Content="Detach" Command="{Binding DetachSpatialParentCommand}" IsEnabled="{Binding CanEditSpatialParent}" />
-            </StackPanel>
+          <StackPanel Margin="8" Spacing="10">
+            <Border Classes="subtle" Padding="10">
+              <StackPanel Spacing="6">
+                <TextBlock Classes="caption" Text="Spatial parent (STEP id)" />
+                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
+                  <TextBox Text="{Binding SpatialParentId}" />
+                  <Button Grid.Column="1" Classes="ghost" Content="Save" Command="{Binding SaveSpatialParentCommand}" IsEnabled="{Binding CanEditSpatialParent}" />
+                  <Button Grid.Column="2" Classes="danger" Content="Detach" Command="{Binding DetachSpatialParentCommand}" IsEnabled="{Binding CanEditSpatialParent}" />
+                </Grid>
+              </StackPanel>
+            </Border>
 
-            <Grid ColumnDefinitions="*,*,*" ColumnSpacing="8">
-              <TextBox Watermark="X" Text="{Binding PlacementX}" />
-              <TextBox Grid.Column="1" Watermark="Y" Text="{Binding PlacementY}" />
-              <TextBox Grid.Column="2" Watermark="Z" Text="{Binding PlacementZ}" />
-            </Grid>
-            <Button Classes="primary" Content="Save placement" Command="{Binding SavePlacementCommand}" IsEnabled="{Binding CanEditPlacement}" />
+            <Border Classes="subtle" Padding="10">
+              <StackPanel Spacing="6">
+                <TextBlock Classes="caption" Text="Local placement" />
+                <Grid ColumnDefinitions="Auto,*,Auto,*,Auto,*" ColumnSpacing="6">
+                  <TextBlock Text="X" Classes="caption" VerticalAlignment="Center" />
+                  <TextBox Grid.Column="1" Text="{Binding PlacementX}" />
+                  <TextBlock Grid.Column="2" Text="Y" Classes="caption" VerticalAlignment="Center" />
+                  <TextBox Grid.Column="3" Text="{Binding PlacementY}" />
+                  <TextBlock Grid.Column="4" Text="Z" Classes="caption" VerticalAlignment="Center" />
+                  <TextBox Grid.Column="5" Text="{Binding PlacementZ}" />
+                </Grid>
+                <Button Classes="primary"
+                        HorizontalAlignment="Right"
+                        Content="Save placement"
+                        Command="{Binding SavePlacementCommand}"
+                        IsEnabled="{Binding CanEditPlacement}" />
+              </StackPanel>
+            </Border>
           </StackPanel>
         </ScrollViewer>
       </TabItem>
@@ -82,7 +129,7 @@
               <ItemsControl.ItemTemplate>
                 <DataTemplate>
                   <Border Classes="surface" BorderThickness="1,1,1,1" Padding="0">
-                    <Grid RowDefinitions="Auto,Auto,*">
+                    <Grid RowDefinitions="Auto,*">
                       <Border Background="#20271F" BorderBrush="#3A4035" BorderThickness="0,0,0,1" Padding="8">
                         <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
                           <Border Background="#2F7D68" Padding="7,3" CornerRadius="4" VerticalAlignment="Center">
@@ -102,50 +149,44 @@
                         </Grid>
                       </Border>
 
-                      <Grid Grid.Row="1"
-                            Background="#1B1F1A"
-                            ColumnDefinitions="72,1.15*,0.9*,1.45*,Auto"
-                            MinHeight="28">
-                        <TextBlock Margin="8,5" Classes="caption" Text="STEP" />
-                        <TextBlock Grid.Column="1" Margin="8,5" Classes="caption" Text="Name" />
-                        <TextBlock Grid.Column="2" Margin="8,5" Classes="caption" Text="Typ" />
-                        <TextBlock Grid.Column="3" Margin="8,5" Classes="caption" Text="Wert" />
-                        <TextBlock Grid.Column="4" Margin="8,5" Classes="caption" Text="Aktion" />
-                      </Grid>
-
-                      <ItemsControl Grid.Row="2" ItemsSource="{Binding Rows}">
+                      <ItemsControl Grid.Row="1" ItemsSource="{Binding Rows}">
                         <ItemsControl.ItemTemplate>
                           <DataTemplate>
-                            <Border BorderBrush="#343A30" BorderThickness="0,1,0,0" Padding="0">
-                              <Grid ColumnDefinitions="72,1.15*,0.9*,1.45*,Auto" MinHeight="38">
-                                <TextBlock Margin="8,0"
-                                           Classes="caption"
-                                           Text="{Binding StepId}"
-                                           VerticalAlignment="Center" />
-                                <TextBlock Grid.Column="1"
-                                           Margin="8,0"
-                                           Text="{Binding Name}"
-                                           TextTrimming="CharacterEllipsis"
-                                           VerticalAlignment="Center" />
-                                <TextBlock Grid.Column="2"
-                                           Margin="8,0"
-                                           Classes="caption"
-                                           Text="{Binding Type}"
-                                           TextTrimming="CharacterEllipsis"
-                                           VerticalAlignment="Center" />
-                                <TextBox Grid.Column="3"
-                                         Margin="4"
-                                         MinHeight="28"
-                                         Text="{Binding ValueDraft}"
-                                         IsEnabled="{Binding CanEdit}" />
-                                <Button Grid.Column="4"
-                                        Classes="primary"
-                                        Margin="4"
-                                        Padding="10,4"
-                                        Content="Save"
-                                        Command="{Binding SaveCommand}"
-                                        IsEnabled="{Binding CanEdit}" />
-                              </Grid>
+                            <Border BorderBrush="#343A30" BorderThickness="0,1,0,0" Padding="8,6">
+                              <StackPanel Spacing="4">
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                  <TextBlock Classes="caption"
+                                             Foreground="#D8DCD2"
+                                             FontWeight="SemiBold"
+                                             Text="{Binding Name}"
+                                             TextTrimming="CharacterEllipsis"
+                                             TextWrapping="NoWrap"
+                                             ToolTip.Tip="{Binding Type}"
+                                             VerticalAlignment="Center" />
+                                  <TextBlock Grid.Column="1"
+                                             FontSize="{DynamicResource FontSizeTreeMeta}"
+                                             Foreground="#788074"
+                                             Text="{Binding StepId}"
+                                             VerticalAlignment="Center" />
+                                </Grid>
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                                  <TextBox MinHeight="28"
+                                           Text="{Binding ValueDraft}"
+                                           IsEnabled="{Binding CanEdit}"
+                                           Watermark="(undefined)"
+                                           LostFocus="OnPsetValueLostFocus"
+                                           KeyDown="OnPsetValueKeyDown" />
+                                  <ComboBox Grid.Column="1"
+                                            MinHeight="28"
+                                            MinWidth="118"
+                                            FontSize="{DynamicResource FontSizeCaption}"
+                                            ItemsSource="{Binding ValueTypeOptions}"
+                                            SelectedItem="{Binding ValueTypeDraft, Mode=TwoWay}"
+                                            IsVisible="{Binding CanEditValueType}"
+                                            SelectionChanged="OnPsetTypeChanged"
+                                            ToolTip.Tip="Data type" />
+                                </Grid>
+                              </StackPanel>
                             </Border>
                           </DataTemplate>
                         </ItemsControl.ItemTemplate>

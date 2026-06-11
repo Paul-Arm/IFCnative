@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Reactive;
@@ -183,6 +184,9 @@ public sealed class MainWindowViewModel : ReactiveViewModel
     private string activeEntityCount = "0 entities";
     private string sessionSummary = "0 files";
     private bool isBusy;
+    private bool isExportInProgress;
+    private string exportProgressText = string.Empty;
+    private double exportProgressValue;
     private bool isForeignInspection;
     private NativeUserPreferences currentPreferences;
     private double textScale = 1.0;
@@ -400,6 +404,24 @@ public sealed class MainWindowViewModel : ReactiveViewModel
     {
         get => isBusy;
         private set => this.RaiseAndSetIfChanged(ref isBusy, value);
+    }
+
+    public bool IsExportInProgress
+    {
+        get => isExportInProgress;
+        private set => this.RaiseAndSetIfChanged(ref isExportInProgress, value);
+    }
+
+    public string ExportProgressText
+    {
+        get => exportProgressText;
+        private set => this.RaiseAndSetIfChanged(ref exportProgressText, value);
+    }
+
+    public double ExportProgressValue
+    {
+        get => exportProgressValue;
+        private set => this.RaiseAndSetIfChanged(ref exportProgressValue, value);
     }
 
     public WorkspacePreset? SelectedWorkspace
@@ -668,7 +690,7 @@ public sealed class MainWindowViewModel : ReactiveViewModel
         StageDraft(XbimDocumentEditor.RemoveFromSpatialParent(session.Document, selectedId), selectedId, $"Staged xBIM spatial detach for #{selectedId}.");
     }
 
-    public void SaveProperty(IfcPropertyDetails property, string value)
+    public void SaveProperty(IfcPropertyDetails property, string value, string? valueTypeName = null)
     {
         var session = ActiveSession;
         if (session is null || property.EntityId is null || !property.CanEdit)
@@ -676,7 +698,7 @@ public sealed class MainWindowViewModel : ReactiveViewModel
             return;
         }
 
-        StageDraft(XbimDocumentEditor.UpdatePropertyValue(session.Document, property.EntityId.Value, value), session.SelectedEntityId, $"Staged xBIM property edit for #{property.EntityId.Value}.");
+        StageDraft(XbimDocumentEditor.UpdatePropertyValue(session.Document, property.EntityId.Value, value, valueTypeName), session.SelectedEntityId, $"Staged xBIM property edit for #{property.EntityId.Value}.");
     }
 
     public void AddCommonPropertySet()
@@ -721,25 +743,54 @@ public sealed class MainWindowViewModel : ReactiveViewModel
         var selectedId = session?.SelectedEntityId ?? 0;
         if (session is null || selectedId == 0)
         {
+            StatusText = "Select an element to assign a body to.";
             return;
         }
 
-        StageDraft(XbimDocumentEditor.AssignBodyRepresentation(session.Document, selectedId, width, depth, height, profile), selectedId, $"Staged xBIM body representation for #{selectedId}.");
+        try
+        {
+            StageDraft(XbimDocumentEditor.AssignBodyRepresentation(session.Document, selectedId, width, depth, height, profile), selectedId, $"Staged xBIM body representation for #{selectedId}.");
+        }
+        catch (Exception exception)
+        {
+            StatusText = $"Assign body failed: {exception.Message}";
+            Log($"builder.body.error('{exception.Message.Replace("'", string.Empty, StringComparison.Ordinal)}')");
+        }
     }
 
-    public void CreateProduct(string type, string name, string width, string depth, string height, string profile)
+    /// <summary>
+    /// Builder create: anchors the request at the current selection and stages
+    /// the draft. All xbim failures (unknown class, schema mismatches) land in
+    /// the status bar instead of tearing down the command pipeline.
+    /// </summary>
+    public void CreateElementFromBuilder(IfcElementCreationRequest request)
     {
         var session = ActiveSession;
-        var selectedId = session?.SelectedEntityId ?? 0;
-        if (session is null || selectedId == 0)
+        if (session is null)
         {
+            StatusText = "No active IFC to add elements to.";
             return;
         }
 
-        var before = session.Document.EntityById.Keys.ToHashSet();
-        var draft = XbimDocumentEditor.AddProductWithBodyRepresentation(session.Document, selectedId, type, name, width, depth, height, profile);
-        var newId = draft.EntityById.Keys.Except(before).OrderBy(id => id).FirstOrDefault();
-        StageDraft(draft, newId == 0 ? selectedId : newId, $"Staged new xBIM product under #{selectedId}.");
+        if (string.IsNullOrWhiteSpace(request.TypeName))
+        {
+            StatusText = "Enter or pick an IFC class first.";
+            return;
+        }
+
+        try
+        {
+            var anchored = request with { AnchorEntityId = session.SelectedEntityId };
+            var before = session.Document.EntityById.Keys.ToHashSet();
+            var draft = XbimDocumentEditor.CreateElement(session.Document, anchored);
+            var newId = draft.EntityById.Keys.Except(before).OrderBy(id => id).FirstOrDefault();
+            StageDraft(draft, newId == 0 ? session.SelectedEntityId : newId, $"Staged new {request.TypeName.Trim()}.");
+        }
+        catch (Exception exception)
+        {
+            StatusText = $"Create {request.TypeName.Trim()} failed: {exception.Message}";
+            Log($"builder.create.error('{exception.Message.Replace("'", string.Empty, StringComparison.Ordinal)}')");
+        }
     }
 
     public void AddRelationship(string relationshipType, string sourceIds, string targetIds, string name)
@@ -948,24 +999,102 @@ public sealed class MainWindowViewModel : ReactiveViewModel
             return;
         }
 
-        var validation = IfcExportValidator.Validate(session.Document, geometryBackend);
-        if (!validation.CanExport)
-        {
-            StatusText = validation.Summary;
-            return;
-        }
-
         var path = await fileDialogs.SaveIfcFileAsync(session.Document.FileName);
         if (string.IsNullOrWhiteSpace(path))
         {
             return;
         }
 
-        var exportedStep = await Task.Run(() => XbimIfcDocumentService.NormalizeForExport(session.Document));
-        IfcFileLoader.WriteText(path, exportedStep, session.Document.FileName);
-        session.IsDirty = false;
-        StatusText = $"Exported {Path.GetFileName(path)}. {validation.Summary}.";
-        Log($"xbim.export('{Path.GetFileName(path)}')");
+        IsExportInProgress = true;
+        ExportProgressValue = 0;
+        ExportProgressText = "Preparing export...";
+        try
+        {
+            // Progress posts back to the UI thread (created here, on the UI
+            // sync context); all heavy work runs on the thread pool so the
+            // window stays responsive behind the progress overlay.
+            var progress = new Progress<(string Message, double Percent)>(report =>
+            {
+                ExportProgressText = report.Message;
+                ExportProgressValue = report.Percent;
+            });
+            var reporter = (IProgress<(string, double)>)progress;
+            var (validation, exported) = await Task.Run(() =>
+            {
+                var result = IfcExportValidator.Validate(
+                    session.Document,
+                    geometryBackend,
+                    (stage, fraction) => reporter.Report((stage, 5d + fraction * 65d)));
+                if (!result.CanExport)
+                {
+                    return (result, false);
+                }
+
+                reporter.Report(("Serializing STEP text...", 75d));
+                var exportedStep = XbimIfcDocumentService.NormalizeForExport(session.Document);
+                reporter.Report(($"Writing {Path.GetFileName(path)}...", 90d));
+                IfcFileLoader.WriteText(path, exportedStep, session.Document.FileName);
+                reporter.Report(("Done.", 100d));
+                return (result, true);
+            });
+
+            if (!exported)
+            {
+                StatusText = validation.Summary;
+                return;
+            }
+
+            session.IsDirty = false;
+            StatusText = $"Exported {Path.GetFileName(path)}. {validation.Summary}.";
+            Log($"xbim.export('{Path.GetFileName(path)}')");
+        }
+        catch (Exception exception)
+        {
+            StatusText = $"Export failed: {exception.Message}";
+            Log($"xbim.export.error('{exception.Message.Replace("'", string.Empty, StringComparison.Ordinal)}')");
+        }
+        finally
+        {
+            IsExportInProgress = false;
+        }
+    }
+
+    /// <summary>
+    /// Removes a loaded IFC from the session (Models panel). The viewport
+    /// composition refreshes immediately; unsaved edits are discarded.
+    /// </summary>
+    public void CloseSession(IfcDocumentSessionViewModel session)
+    {
+        var index = Documents.IndexOf(session);
+        if (index < 0)
+        {
+            return;
+        }
+
+        var wasActive = ReferenceEquals(session, ActiveSession);
+        var wasDirty = session.IsDirty;
+        Documents.RemoveAt(index);
+        if (wasActive)
+        {
+            ActiveSession = Documents.Count > 0 ? Documents[Math.Min(index, Documents.Count - 1)] : null;
+        }
+
+        if (ActiveSession is null)
+        {
+            SessionSummary = "0 files";
+            Viewport.SetSessions([], null);
+        }
+        else if (!wasActive)
+        {
+            // Active document unchanged: only the composite scene needs the file
+            // removed (the ActiveSession setter handles the active-change case).
+            RefreshForActiveDocument();
+        }
+
+        StatusText = wasDirty
+            ? $"Closed {session.FileName} (unsaved changes discarded)."
+            : $"Closed {session.FileName}.";
+        Log($"session.close('{session.FileName}')");
     }
 
     private void LoadSample()
@@ -1176,6 +1305,7 @@ public sealed class StructurePanelViewModel(MainWindowViewModel owner) : Reactiv
     private IfcFileTreeRowViewModel? selectedRow;
     private IfcFileTreeRowViewModel? selectedBookmark;
     private bool isSelectingProgrammatically;
+    private bool isPinnedSectionExpanded;
 
     public ObservableCollection<IfcFileTreeRowViewModel> Rows { get; } = [];
 
@@ -1191,6 +1321,16 @@ public sealed class StructurePanelViewModel(MainWindowViewModel owner) : Reactiv
                 ApplySearch();
             }
         }
+    }
+
+    /// <summary>
+    /// The Pinned section starts collapsed to keep the tree large; pinning a
+    /// new entity expands it so the action gives visible feedback.
+    /// </summary>
+    public bool IsPinnedSectionExpanded
+    {
+        get => isPinnedSectionExpanded;
+        set => this.RaiseAndSetIfChanged(ref isPinnedSectionExpanded, value);
     }
 
     public IfcFileTreeRowViewModel? SelectedRow
@@ -1325,6 +1465,7 @@ public sealed class StructurePanelViewModel(MainWindowViewModel owner) : Reactiv
 
     public void SetBookmarks(IfcDocument nextDocument, IEnumerable<int> bookmarkedEntityIds)
     {
+        var previousCount = Bookmarks.Count;
         var rows = IfcNavigationProjector.GetBookmarks(nextDocument, bookmarkedEntityIds)
             .Select((node, index) => new IfcFileTreeRowViewModel(
                 this,
@@ -1334,6 +1475,10 @@ public sealed class StructurePanelViewModel(MainWindowViewModel owner) : Reactiv
                 guides: [],
                 isExpanded: false));
         MainWindowViewModel.ReplaceItems(Bookmarks, rows);
+        if (Bookmarks.Count > previousCount)
+        {
+            IsPinnedSectionExpanded = true;
+        }
     }
 
     public void ToggleRow(IfcFileTreeRowViewModel row)
@@ -1448,6 +1593,7 @@ public sealed class ViewportPanelViewModel(MainWindowViewModel owner, IIfcGeomet
     private int selectedProductId;
     private ViewportInteractionMode interactionMode = ViewportInteractionMode.Select;
     private bool canTransformSelection;
+    private bool isPointPickingActive;
     private AntiAliasingMode antiAliasing;
     private bool hideSpaces;
     private bool showFpsCounter;
@@ -1510,13 +1656,63 @@ public sealed class ViewportPanelViewModel(MainWindowViewModel owner, IIfcGeomet
     public ViewportInteractionMode InteractionMode
     {
         get => interactionMode;
-        set => this.RaiseAndSetIfChanged(ref interactionMode, value);
+        set
+        {
+            this.RaiseAndSetIfChanged(ref interactionMode, value);
+            this.RaisePropertyChanged(nameof(IsSelectMode));
+            this.RaisePropertyChanged(nameof(IsMoveMode));
+            this.RaisePropertyChanged(nameof(IsRotateMode));
+        }
+    }
+
+    public bool IsSelectMode
+    {
+        get => InteractionMode == ViewportInteractionMode.Select;
+        set => SetMode(ViewportInteractionMode.Select, value, nameof(IsSelectMode));
+    }
+
+    public bool IsMoveMode
+    {
+        get => InteractionMode == ViewportInteractionMode.Move;
+        set => SetMode(ViewportInteractionMode.Move, value, nameof(IsMoveMode));
+    }
+
+    public bool IsRotateMode
+    {
+        get => InteractionMode == ViewportInteractionMode.Rotate;
+        set => SetMode(ViewportInteractionMode.Rotate, value, nameof(IsRotateMode));
+    }
+
+    private void SetMode(ViewportInteractionMode mode, bool value, string propertyName)
+    {
+        if (value)
+        {
+            InteractionMode = mode;
+        }
+        else
+        {
+            // Radio semantics: un-toggling the active mode snaps back to checked.
+            this.RaisePropertyChanged(propertyName);
+        }
     }
 
     public bool CanTransformSelection
     {
         get => canTransformSelection;
         private set => this.RaiseAndSetIfChanged(ref canTransformSelection, value);
+    }
+
+    /// <summary>Coordinate picking for the Builder; the viewport control resets it after the click.</summary>
+    public bool IsPointPickingActive
+    {
+        get => isPointPickingActive;
+        set => this.RaiseAndSetIfChanged(ref isPointPickingActive, value);
+    }
+
+    public void HandlePointPicked(double worldX, double worldY, double worldZ)
+    {
+        owner.Builder.SetPickedPoint(worldX, worldY, worldZ);
+        owner.StatusText = $"Picked position: X={worldX:0.###} Y={worldY:0.###} Z={worldZ:0.###}";
     }
 
     public AntiAliasingMode AntiAliasing
@@ -1896,6 +2092,7 @@ public sealed class ModelsPanelViewModel : ReactiveViewModel
     public ModelsPanelViewModel(MainWindowViewModel owner)
     {
         this.owner = owner;
+        RemoveModelCommand = ReactiveCommand.Create<IfcDocumentSessionViewModel>(owner.CloseSession);
         owner.PropertyChanged += (_, args) =>
         {
             if (args.PropertyName is nameof(MainWindowViewModel.ActiveSession) or nameof(MainWindowViewModel.SessionSummary))
@@ -1909,6 +2106,8 @@ public sealed class ModelsPanelViewModel : ReactiveViewModel
     public ObservableCollection<IfcDocumentSessionViewModel> Documents => owner.Documents;
 
     public ReactiveCommand<Unit, Unit> AddIfcCommand => owner.AddIfcCommand;
+
+    public ReactiveCommand<IfcDocumentSessionViewModel, Unit> RemoveModelCommand { get; }
 
     public string SessionSummary => owner.SessionSummary;
 
@@ -2087,7 +2286,7 @@ public sealed class InspectorPanelViewModel : ReactiveViewModel
 
     public void SavePropertyRow(IfcPropertyTableRowViewModel row)
     {
-        owner.SaveProperty(row.ToPropertyDetails(), row.ValueDraft);
+        owner.SaveProperty(row.ToPropertyDetails(), row.ValueDraft, row.CanEditValueType ? row.ValueTypeDraft : null);
     }
 
     public void SetSelection(IfcDocument document, IfcSelectionDetails details, bool bookmarked)
@@ -2178,13 +2377,40 @@ public sealed class IfcPropertySetTableViewModel
 
 public sealed class IfcPropertyTableRowViewModel : ReactiveViewModel
 {
+    private static readonly string[] CommonValueTypes =
+    [
+        "IfcLabel",
+        "IfcText",
+        "IfcIdentifier",
+        "IfcBoolean",
+        "IfcLogical",
+        "IfcInteger",
+        "IfcReal",
+        "IfcLengthMeasure",
+        "IfcAreaMeasure",
+        "IfcVolumeMeasure",
+        "IfcCountMeasure",
+        "IfcMassMeasure",
+        "IfcTimeMeasure",
+        "IfcPlaneAngleMeasure",
+        "IfcThermodynamicTemperatureMeasure",
+    ];
+
+    private readonly InspectorPanelViewModel owner;
     private readonly IfcPropertyTableRowDetails details;
     private string valueDraft;
+    private string valueTypeDraft;
+    private bool saved;
 
     public IfcPropertyTableRowViewModel(InspectorPanelViewModel owner, IfcPropertyTableRowDetails details)
     {
+        this.owner = owner;
         this.details = details;
         valueDraft = details.Value;
+        valueTypeDraft = string.IsNullOrWhiteSpace(details.ValueType) ? "IfcLabel" : details.ValueType;
+        ValueTypeOptions = CommonValueTypes.Contains(valueTypeDraft, StringComparer.OrdinalIgnoreCase)
+            ? CommonValueTypes
+            : [valueTypeDraft, .. CommonValueTypes];
         SaveCommand = ReactiveCommand.Create(() => owner.SavePropertyRow(this));
     }
 
@@ -2196,13 +2422,47 @@ public sealed class IfcPropertyTableRowViewModel : ReactiveViewModel
 
     public bool CanEdit => details.CanEdit;
 
+    public bool CanEditValueType => details.CanEditValueType;
+
+    public IReadOnlyList<string> ValueTypeOptions { get; }
+
     public string ValueDraft
     {
         get => valueDraft;
         set => this.RaiseAndSetIfChanged(ref valueDraft, value);
     }
 
+    public string ValueTypeDraft
+    {
+        get => valueTypeDraft;
+        set => this.RaiseAndSetIfChanged(ref valueTypeDraft, value ?? valueTypeDraft);
+    }
+
     public ReactiveCommand<Unit, Unit> SaveCommand { get; }
+
+    /// <summary>
+    /// Auto-save entry point (Enter / focus loss / type change): commits only
+    /// when the draft differs from the loaded value and only once — the commit
+    /// rebuilds the inspector, which would otherwise re-fire focus-loss events.
+    /// </summary>
+    public void SaveIfChanged()
+    {
+        if (saved || !CanEdit)
+        {
+            return;
+        }
+
+        var valueChanged = !string.Equals(valueDraft, details.Value, StringComparison.Ordinal);
+        var originalType = string.IsNullOrWhiteSpace(details.ValueType) ? "IfcLabel" : details.ValueType;
+        var typeChanged = CanEditValueType && !string.Equals(valueTypeDraft, originalType, StringComparison.OrdinalIgnoreCase);
+        if (!valueChanged && !typeChanged)
+        {
+            return;
+        }
+
+        saved = true;
+        owner.SavePropertyRow(this);
+    }
 
     public IfcPropertyDetails ToPropertyDetails()
     {
@@ -3051,29 +3311,51 @@ public sealed class BuilderPanelViewModel : ReactiveViewModel
 {
     private readonly MainWindowViewModel owner;
     private string selectedLabel = "No selection";
-    private string productType = "IFCBUILDINGELEMENTPROXY";
-    private string productName = "New native product";
-    private string width = "2";
+    private string className = "IfcBuildingElementProxy";
+    private string productName = "New element";
+    private string width = "1";
     private string depth = "1";
     private string height = "1";
     private string profile = "rectangle";
+    private string positionX = "0";
+    private string positionY = "0";
+    private string positionZ = "0";
+    private bool createAsChild = true;
+    private bool isGeometryClass = true;
+    private string loadedSchema = string.Empty;
+    private Dictionary<string, IfcCreatableClass> classByName = new(StringComparer.OrdinalIgnoreCase);
 
     public BuilderPanelViewModel(MainWindowViewModel owner)
     {
         this.owner = owner;
-        CreateProductCommand = ReactiveCommand.Create(() => owner.CreateProduct(ProductType, ProductName, Width, Depth, Height, Profile));
+        CreateElementCommand = ReactiveCommand.Create(CreateElement);
         AssignBodyCommand = ReactiveCommand.Create(() => owner.AssignBody(Width, Depth, Height, Profile));
+        PickPointCommand = ReactiveCommand.Create(BeginPickPoint);
     }
+
+    public ObservableCollection<string> ClassNames { get; } = [];
 
     public ObservableCollection<string> Profiles { get; } = ["rectangle", "cylinder"];
 
-    public ReactiveCommand<Unit, Unit> CreateProductCommand { get; }
+    public ReactiveCommand<Unit, Unit> CreateElementCommand { get; }
 
     public ReactiveCommand<Unit, Unit> AssignBodyCommand { get; }
 
+    public ReactiveCommand<Unit, Unit> PickPointCommand { get; }
+
     public string SelectedLabel { get => selectedLabel; private set => this.RaiseAndSetIfChanged(ref selectedLabel, value); }
 
-    public string ProductType { get => productType; set => this.RaiseAndSetIfChanged(ref productType, value); }
+    public string ClassName
+    {
+        get => className;
+        set
+        {
+            if (SetProperty(ref className, value))
+            {
+                UpdateGeometryFlag();
+            }
+        }
+    }
 
     public string ProductName { get => productName; set => this.RaiseAndSetIfChanged(ref productName, value); }
 
@@ -3085,14 +3367,98 @@ public sealed class BuilderPanelViewModel : ReactiveViewModel
 
     public string Profile { get => profile; set => this.RaiseAndSetIfChanged(ref profile, value); }
 
+    public string PositionX { get => positionX; set => this.RaiseAndSetIfChanged(ref positionX, value); }
+
+    public string PositionY { get => positionY; set => this.RaiseAndSetIfChanged(ref positionY, value); }
+
+    public string PositionZ { get => positionZ; set => this.RaiseAndSetIfChanged(ref positionZ, value); }
+
+    /// <summary>true: child of selection; false: same parent as selection.</summary>
+    public bool CreateAsChild { get => createAsChild; set => this.RaiseAndSetIfChanged(ref createAsChild, value); }
+
+    /// <summary>Whether the entered class is an IfcProduct (drives the body/position UI).</summary>
+    public bool IsGeometryClass { get => isGeometryClass; private set => this.RaiseAndSetIfChanged(ref isGeometryClass, value); }
+
     public void SetDocument(IfcDocument document)
     {
         SelectedLabel = $"{document.FileName}: {document.Entities.Count:N0} entities";
+        if (!string.Equals(loadedSchema, document.Schema, StringComparison.OrdinalIgnoreCase))
+        {
+            loadedSchema = document.Schema;
+            _ = LoadClassCatalogAsync(document);
+        }
     }
 
     public void SetSelection(IfcDocument document, IfcEntity entity)
     {
         SelectedLabel = $"#{entity.Id} {entity.TypeName()} {entity.DisplayName}";
+    }
+
+    public void SetPickedPoint(double x, double y, double z)
+    {
+        PositionX = x.ToString("0.###", CultureInfo.InvariantCulture);
+        PositionY = y.ToString("0.###", CultureInfo.InvariantCulture);
+        PositionZ = z.ToString("0.###", CultureInfo.InvariantCulture);
+    }
+
+    private void BeginPickPoint()
+    {
+        owner.Viewport.IsPointPickingActive = true;
+        owner.StatusText = "Pick position: click in the 3D viewport (Esc cancels).";
+    }
+
+    private void CreateElement()
+    {
+        owner.CreateElementFromBuilder(new IfcElementCreationRequest
+        {
+            TypeName = ClassName,
+            Name = ProductName,
+            AnchorEntityId = 0,
+            AsSibling = !CreateAsChild,
+            WithGeometry = IsGeometryClass,
+            Profile = Profile,
+            Width = Width,
+            Depth = Depth,
+            Height = Height,
+            WorldX = ParseCoordinate(PositionX),
+            WorldY = ParseCoordinate(PositionY),
+            WorldZ = ParseCoordinate(PositionZ),
+        });
+    }
+
+    private static double ParseCoordinate(string text)
+    {
+        return double.TryParse(text.Trim().Replace(',', '.'), NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
+            && double.IsFinite(value)
+            ? value
+            : 0;
+    }
+
+    /// <summary>
+    /// Loads the schema's class catalog off the UI thread: the store access
+    /// lock may be held by a background geometry build for seconds.
+    /// </summary>
+    private async Task LoadClassCatalogAsync(IfcDocument document)
+    {
+        try
+        {
+            var classes = await Task.Run(() => XbimDocumentEditor.GetCreatableClasses(document));
+            classByName = classes.ToDictionary(info => info.Name, StringComparer.OrdinalIgnoreCase);
+            MainWindowViewModel.ReplaceItems(ClassNames, classes.Select(info => info.Name));
+            UpdateGeometryFlag();
+        }
+        catch (Exception exception)
+        {
+            loadedSchema = string.Empty;
+            owner.StatusText = $"IFC class catalog failed: {exception.Message}";
+        }
+    }
+
+    private void UpdateGeometryFlag()
+    {
+        // Unknown names keep the geometry section visible (catalog may still be
+        // loading); CreateElement validates the class for real.
+        IsGeometryClass = !classByName.TryGetValue(ClassName.Trim(), out var info) || info.IsProduct;
     }
 }
 

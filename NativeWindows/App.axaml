@@ -61,6 +61,104 @@
       <Setter Property="Background" Value="#2A2F28" />
       <Setter Property="Foreground" Value="#E8EAE4" />
     </Style>
+    <Style Selector="Button.icon, ToggleButton.icon">
+      <Setter Property="Width" Value="30" />
+      <Setter Property="Height" Value="30" />
+      <Setter Property="MinHeight" Value="30" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="CornerRadius" Value="5" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.icon PathIcon, ToggleButton.icon PathIcon">
+      <Setter Property="Width" Value="16" />
+      <Setter Property="Height" Value="16" />
+      <Setter Property="Foreground" Value="#C9CEC4" />
+    </Style>
+    <Style Selector="Button.icon:pointerover /template/ ContentPresenter, ToggleButton.icon:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#33404636" />
+    </Style>
+    <Style Selector="ToggleButton.icon:checked /template/ ContentPresenter">
+      <Setter Property="Background" Value="#2F7D68" />
+    </Style>
+    <Style Selector="ToggleButton.icon:checked PathIcon">
+      <Setter Property="Foreground" Value="White" />
+    </Style>
+    <Style Selector="TabItem">
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeBody}" />
+      <Setter Property="FontWeight" Value="Normal" />
+      <Setter Property="MinHeight" Value="32" />
+      <Setter Property="Padding" Value="10,5" />
+    </Style>
+    <Style Selector="TabItem:selected">
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Border.chip">
+      <Setter Property="Background" Value="#2A2F28" />
+      <Setter Property="BorderBrush" Value="#3A4035" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="3" />
+      <Setter Property="Padding" Value="6,2" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border.chip TextBlock">
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeCaption}" />
+      <Setter Property="Foreground" Value="#C9CEC4" />
+      <Setter Property="TextWrapping" Value="NoWrap" />
+    </Style>
+    <Style Selector="Border.chip.accent">
+      <Setter Property="Background" Value="#1E2D29" />
+      <Setter Property="BorderBrush" Value="#2F7D68" />
+    </Style>
+    <Style Selector="Border.chip.accent TextBlock">
+      <Setter Property="Foreground" Value="#7FD7BC" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Border.modelCard">
+      <Setter Property="Background" Value="#20231E" />
+      <Setter Property="BorderBrush" Value="#343A30" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Padding" Value="8,5" />
+      <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Border.modelCard:pointerover">
+      <Setter Property="BorderBrush" Value="#4B5548" />
+    </Style>
+    <Style Selector="Border.modelCard.active">
+      <Setter Property="BorderBrush" Value="#2F7D68" />
+      <Setter Property="Background" Value="#1E2922" />
+    </Style>
+    <Style Selector="Ellipse.activeDot">
+      <Setter Property="Fill" Value="#4B5548" />
+    </Style>
+    <Style Selector="Ellipse.activeDot.active">
+      <Setter Property="Fill" Value="#3FCF9E" />
+    </Style>
+    <Style Selector="ToggleButton.eye">
+      <Setter Property="Width" Value="24" />
+      <Setter Property="Height" Value="24" />
+      <Setter Property="MinHeight" Value="24" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="ToggleButton.eye PathIcon">
+      <Setter Property="Width" Value="13" />
+      <Setter Property="Height" Value="13" />
+      <Setter Property="Foreground" Value="#4B5548" />
+    </Style>
+    <Style Selector="ToggleButton.eye:checked PathIcon">
+      <Setter Property="Foreground" Value="#C9CEC4" />
+    </Style>
+    <Style Selector="ToggleButton.eye:checked /template/ ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
     <Style Selector="Button.statusLink">
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="BorderBrush" Value="Transparent" />

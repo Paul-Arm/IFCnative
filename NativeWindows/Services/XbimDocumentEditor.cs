@@ -4,12 +4,197 @@ using System.Reflection;
 using IFCnative.NativeWindows.Models;
 using Xbim.Common;
 using Xbim.Ifc;
+using Xbim.Ifc4.Interfaces;
 using Xbim.IO.Step21;
 
 namespace IFCnative.NativeWindows.Services;
 
+/// <summary>An instantiable IFC class from the active schema's metadata.</summary>
+public sealed record IfcCreatableClass(string Name, bool IsProduct);
+
+/// <summary>
+/// Everything the Builder needs to create one element. World coordinates are
+/// optional; when present the placement is computed relative to the resolved
+/// parent so the element lands at that world position.
+/// </summary>
+public sealed record IfcElementCreationRequest
+{
+    public required string TypeName { get; init; }
+
+    public string Name { get; init; } = string.Empty;
+
+    /// <summary>The current selection; 0 falls back to the first spatial root.</summary>
+    public required int AnchorEntityId { get; init; }
+
+    /// <summary>false: child of the anchor; true: same parent as the anchor.</summary>
+    public bool AsSibling { get; init; }
+
+    public bool WithGeometry { get; init; }
+
+    public string Profile { get; init; } = "rectangle";
+
+    public string Width { get; init; } = "1";
+
+    public string Depth { get; init; } = "1";
+
+    public string Height { get; init; } = "1";
+
+    public double WorldX { get; init; }
+
+    public double WorldY { get; init; }
+
+    public double WorldZ { get; init; }
+}
+
 public static class XbimDocumentEditor
 {
+    /// <summary>
+    /// All non-abstract IFC classes of the document's schema, flagged with
+    /// whether they are products (can carry placement + body geometry).
+    /// </summary>
+    public static IReadOnlyList<IfcCreatableClass> GetCreatableClasses(IfcDocument document)
+    {
+        return XbimIfcDocumentService.WithStoreAccess(document, () =>
+        {
+            var store = XbimIfcDocumentService.EnsureStore(document);
+            return (IReadOnlyList<IfcCreatableClass>)store.Metadata.Types()
+                .Select(expressType => expressType.Type)
+                .Where(type => type is { IsAbstract: false }
+                    && typeof(IPersistEntity).IsAssignableFrom(type)
+                    && type.Name.StartsWith("Ifc", StringComparison.Ordinal))
+                .Select(type => new IfcCreatableClass(type.Name, typeof(IIfcProduct).IsAssignableFrom(type)))
+                .OrderBy(info => info.Name, StringComparer.Ordinal)
+                .ToList();
+        });
+    }
+
+    /// <summary>
+    /// Creates a new element of any IFC class. Products get a placement (at the
+    /// requested world position) and optionally a simple extruded body; the
+    /// parent link uses the relationship type that matches both ends
+    /// (containment for elements in spatial structure, aggregation otherwise).
+    /// </summary>
+    public static IfcDocument CreateElement(IfcDocument document, IfcElementCreationRequest request)
+    {
+        var parentId = ResolveCreationParentId(document, request.AnchorEntityId, request.AsSibling);
+        return Edit(document, $"Create {request.TypeName}", store =>
+        {
+            var type = ResolveIfcEntityType(store, NormalizeIfcType(request.TypeName, "IFCBUILDINGELEMENTPROXY"));
+            var element = New(store, type);
+            var name = string.IsNullOrWhiteSpace(request.Name) ? $"New {type.Name}" : request.Name.Trim();
+            SetRootDefaults(store, element, name, string.Empty);
+
+            var parent = parentId > 0 ? GetEntity(store, parentId) : null;
+            if (element is IIfcProduct)
+            {
+                SetPropertyIfPresent(element, "ObjectPlacement", CreateLocalPlacementAtWorld(store, parent, request.WorldX, request.WorldY, request.WorldZ));
+                if (request.WithGeometry)
+                {
+                    SetPropertyIfPresent(element, "Representation", CreateBodyRepresentation(store, request.Width, request.Depth, request.Height, request.Profile));
+                }
+            }
+
+            if (parent is not null)
+            {
+                CreateParentRelationship(store, parent, element, name);
+            }
+        }, affectsGeometry: request.WithGeometry);
+    }
+
+    /// <summary>
+    /// Child mode parents at the anchor itself; sibling mode walks to the
+    /// anchor's containment/aggregation parent. No anchor: first spatial root.
+    /// </summary>
+    private static int ResolveCreationParentId(IfcDocument document, int anchorId, bool asSibling)
+    {
+        if (anchorId <= 0 || !document.EntityById.ContainsKey(anchorId))
+        {
+            return document.SpatialRoots.FirstOrDefault()?.Entity.Id ?? 0;
+        }
+
+        if (!asSibling)
+        {
+            return anchorId;
+        }
+
+        var containmentParent = FindContainment(document, anchorId)?.SourceIds.FirstOrDefault() ?? 0;
+        if (containmentParent > 0)
+        {
+            return containmentParent;
+        }
+
+        var aggregationParent = document.RelationshipsByEntity.TryGetValue(anchorId, out var relationships)
+            ? relationships.FirstOrDefault(relationship =>
+                relationship.Type.Equals("IFCRELAGGREGATES", StringComparison.OrdinalIgnoreCase)
+                && relationship.TargetIds.Contains(anchorId))?.SourceIds.FirstOrDefault() ?? 0
+            : 0;
+        return aggregationParent > 0 ? aggregationParent : anchorId;
+    }
+
+    /// <summary>
+    /// Picks the IFC-conformant parent link: spatial-in-spatial and
+    /// element-in-element aggregate, elements in a spatial structure are
+    /// contained. Non-object classes (resource layer) get no link at all.
+    /// </summary>
+    private static void CreateParentRelationship(IfcStore store, IPersistEntity parent, IPersistEntity child, string name)
+    {
+        // Element placed into a spatial structure: containment. Everything else
+        // that is still an object pair (spatial-in-spatial, element-in-element,
+        // groups/processes): aggregation. Resource-layer instances get no link.
+        if (child is IIfcProduct and not IIfcSpatialStructureElement && parent is IIfcSpatialStructureElement)
+        {
+            CreateContainment(store, parent, child, $"{ReadName(parent, "Parent")} contains {name}");
+            return;
+        }
+
+        if (child is IIfcObjectDefinition && parent is IIfcObjectDefinition)
+        {
+            var relation = New(store, ResolveSchemaType(store, "Kernel", "IfcRelAggregates"));
+            SetRootDefaults(store, relation, $"{ReadName(parent, "Parent")} aggregates {name}", string.Empty);
+            SetPropertyIfPresent(relation, "RelatingObject", parent);
+            AddToCollection(GetPropertyValue(relation, "RelatedObjects"), child);
+        }
+    }
+
+    /// <summary>
+    /// Builds a local placement whose world position equals the requested
+    /// coordinates: the parent's world pose (origin + accumulated yaw) is
+    /// subtracted so the relative chain still resolves to the picked point.
+    /// </summary>
+    private static IPersistEntity CreateLocalPlacementAtWorld(IfcStore store, IPersistEntity? parent, double worldX, double worldY, double worldZ)
+    {
+        var localX = worldX;
+        var localY = worldY;
+        var localZ = worldZ;
+        var parentPlacement = parent is null ? null : GetPropertyValue(parent, "ObjectPlacement");
+        if (parentPlacement is IPersistEntity)
+        {
+            var pose = ReadWorldPose(parentPlacement, []);
+            (localX, localY, localZ) = RotateWorldDeltaIntoParent(worldX - pose.X, worldY - pose.Y, worldZ - pose.Z, pose.Yaw);
+        }
+
+        return CreateLocalPlacement(store, parent, localX, localY, localZ);
+    }
+
+    private static (double X, double Y, double Z, double Yaw) ReadWorldPose(object? placement, HashSet<int> seen)
+    {
+        if (placement is not IPersistEntity entity || !seen.Add(entity.EntityLabel))
+        {
+            return (0, 0, 0, 0);
+        }
+
+        var parentPose = ReadWorldPose(GetPropertyValue(placement, "PlacementRelTo"), seen);
+        var relativePlacement = GetPropertyValue(placement, "RelativePlacement");
+        var coordinates = ReadCoordinateList(GetPropertyValue(GetPropertyValue(relativePlacement, "Location"), "Coordinates"));
+        var cos = Math.Cos(parentPose.Yaw);
+        var sin = Math.Sin(parentPose.Yaw);
+        return (
+            parentPose.X + coordinates[0] * cos - coordinates[1] * sin,
+            parentPose.Y + coordinates[0] * sin + coordinates[1] * cos,
+            parentPose.Z + coordinates[2],
+            NormalizeRadians(parentPose.Yaw + ReadAxisPlacementYaw(relativePlacement)));
+    }
+
     private sealed record RelationshipEndpointProperties(
         string? SourceProperty,
         string? SourceCollection,
@@ -43,7 +228,7 @@ public static class XbimDocumentEditor
         });
     }
 
-    public static IfcDocument UpdatePropertyValue(IfcDocument document, int propertyValueId, string rawValue)
+    public static IfcDocument UpdatePropertyValue(IfcDocument document, int propertyValueId, string rawValue, string? valueTypeName = null)
     {
         return Edit(document, "Update property value", store =>
         {
@@ -54,7 +239,12 @@ public static class XbimDocumentEditor
             }
 
             var current = GetPropertyValue(property, "NominalValue");
-            var valueType = current?.GetType() ?? ResolveSchemaType(store, "MeasureResource", "IfcLabel");
+            var requestedType = string.IsNullOrWhiteSpace(valueTypeName)
+                ? null
+                : TryResolveSchemaType(store, "MeasureResource", valueTypeName.Trim());
+            var valueType = requestedType
+                ?? current?.GetType()
+                ?? ResolveSchemaType(store, "MeasureResource", "IfcLabel");
             SetProperty(property, "NominalValue", CreateMeasureValue(valueType, rawValue));
         });
     }
@@ -555,10 +745,10 @@ public static class XbimDocumentEditor
         SetPropertyIfPresent(relation, "RelatingStructure", parent);
     }
 
-    private static IPersistEntity CreateLocalPlacement(IfcStore store, IPersistEntity? parent)
+    private static IPersistEntity CreateLocalPlacement(IfcStore store, IPersistEntity? parent, double x = 0, double y = 0, double z = 0)
     {
         var point = New(store, ResolveSchemaType(store, "GeometryResource", "IfcCartesianPoint"));
-        SetCoordinateList(GetPropertyValue(point, "Coordinates"), 0, 0, 0);
+        SetCoordinateList(GetPropertyValue(point, "Coordinates"), x, y, z);
 
         var axisPlacement = New(store, ResolveSchemaType(store, "GeometryResource", "IfcAxis2Placement3D"));
         SetProperty(axisPlacement, "Location", point);

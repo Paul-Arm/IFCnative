@@ -5,25 +5,65 @@
     <StackPanel Margin="8" Spacing="8">
       <Border Classes="surface" Padding="10">
         <StackPanel>
-          <TextBlock Classes="sectionTitle" Text="Body Builder" />
+          <TextBlock Classes="sectionTitle" Text="Builder" />
           <TextBlock Classes="caption" Text="{Binding SelectedLabel}" />
         </StackPanel>
       </Border>
 
-      <TextBox Watermark="IFC type" Text="{Binding ProductType}" />
+      <TextBlock Classes="caption" Text="IFC class" />
+      <AutoCompleteBox Text="{Binding ClassName, Mode=TwoWay}"
+                       ItemsSource="{Binding ClassNames}"
+                       FilterMode="Contains"
+                       MinimumPrefixLength="1"
+                       MaxDropDownHeight="260"
+                       Watermark="IfcWall, IfcDoor, IfcGroup, ..." />
       <TextBox Watermark="Name" Text="{Binding ProductName}" />
 
-      <Grid ColumnDefinitions="*,*,*" ColumnSpacing="8">
-        <TextBox Watermark="Width" Text="{Binding Width}" />
-        <TextBox Grid.Column="1" Watermark="Depth" Text="{Binding Depth}" />
-        <TextBox Grid.Column="2" Watermark="Height" Text="{Binding Height}" />
-      </Grid>
+      <TextBlock Classes="caption" Text="Insert position in structure" />
+      <StackPanel Spacing="4">
+        <RadioButton GroupName="builderParent"
+                     Content="Child of selection"
+                     IsChecked="{Binding CreateAsChild}" />
+        <RadioButton GroupName="builderParent"
+                     Content="Same level as selection (same parent)"
+                     IsChecked="{Binding !CreateAsChild}" />
+      </StackPanel>
 
-      <ComboBox ItemsSource="{Binding Profiles}" SelectedItem="{Binding Profile}" />
+      <!-- Body + position only apply to product classes -->
+      <StackPanel Spacing="8" IsVisible="{Binding IsGeometryClass}">
+        <TextBlock Classes="caption" Text="Body" />
+        <Grid ColumnDefinitions="Auto,*,*,*" ColumnSpacing="8">
+          <ComboBox MinWidth="110"
+                    ItemsSource="{Binding Profiles}"
+                    SelectedItem="{Binding Profile}" />
+          <TextBox Grid.Column="1" Watermark="Width" Text="{Binding Width}" />
+          <TextBox Grid.Column="2" Watermark="Depth" Text="{Binding Depth}" />
+          <TextBox Grid.Column="3" Watermark="Height" Text="{Binding Height}" />
+        </Grid>
+
+        <TextBlock Classes="caption" Text="Position (world coordinates)" />
+        <Grid ColumnDefinitions="*,*,*,Auto" ColumnSpacing="8">
+          <TextBox Watermark="X" Text="{Binding PositionX}" />
+          <TextBox Grid.Column="1" Watermark="Y" Text="{Binding PositionY}" />
+          <TextBox Grid.Column="2" Watermark="Z" Text="{Binding PositionZ}" />
+          <Button Grid.Column="3"
+                  Classes="ghost"
+                  Padding="8,3"
+                  Command="{Binding PickPointCommand}"
+                  ToolTip.Tip="Pick the position with a click in the 3D viewport (Esc cancels)">
+            <PathIcon Width="13"
+                      Height="13"
+                      Data="M12,5 A 7,7 0 1 0 12.01,5 Z M12,8 A 4,4 0 1 1 11.99,8 Z M11,0 H13 V4 H11 Z M11,20 H13 V24 H11 Z M0,11 H4 V13 H0 Z M20,11 H24 V13 H20 Z" />
+          </Button>
+        </Grid>
+      </StackPanel>
 
       <StackPanel Orientation="Horizontal" Spacing="6">
-        <Button Classes="primary" Content="Create child" Command="{Binding CreateProductCommand}" />
-        <Button Classes="ghost" Content="Assign body" Command="{Binding AssignBodyCommand}" />
+        <Button Classes="primary" Content="Create element" Command="{Binding CreateElementCommand}" />
+        <Button Classes="ghost"
+                Content="Assign body to selection"
+                Command="{Binding AssignBodyCommand}"
+                IsVisible="{Binding IsGeometryClass}" />
       </StackPanel>
     </StackPanel>
   </ScrollViewer>

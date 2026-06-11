@@ -16,11 +16,13 @@ internal sealed class NativeTestRunner
         Run("xBIM sample projects tree inspector psets relations placement and refs", XbimSampleProjectsTreeInspectorPsetsRelationsPlacementAndRefs);
         Run("xBIM editor updates entity property and placement", XbimEditorUpdatesEntityPropertyAndPlacement);
         Run("xBIM editor creates psets quantities resources and products", XbimEditorCreatesPsetsQuantitiesResourcesAndProducts);
+        Run("builder creates any class with child and sibling parents", BuilderCreatesAnyClassWithChildAndSiblingParents);
         Run("xBIM editor updates spatial parents and relationships", XbimEditorUpdatesSpatialParentsAndRelationships);
         Run("xBIM geometry backend projects sample meshes", XbimGeometryBackendProjectsSampleMeshes);
         Run("xBIM GeometryStore builds finite render scene", XbimGeometryStoreBuildsFiniteRenderScene);
         Run("viewport selection highlights without scene rebuild", ViewportSelectionHighlightsWithoutSceneRebuild);
         Run("viewport composes multiple IFC sessions", ViewportComposesMultipleIfcSessions);
+        Run("rotation patch with placement compensation pivots at object center", RotationPatchPivotsAroundObjectCenter);
         Run("foreign viewport pick inspects read-only", ForeignViewportPickInspectsReadOnly);
         Run("structure tree reveals viewport selection through filters", StructureTreeRevealsViewportSelectionThroughFilters);
         Run("spatial tree nests hosted element relationships", SpatialTreeNestsHostedElementRelationships);
@@ -109,6 +111,75 @@ internal sealed class NativeTestRunner
         var withBody = XbimDocumentEditor.AssignBodyRepresentation(transformed, 40, "5", "2.5", "3", "rectangle");
         True(withBody.RepresentationsByEntity.TryGetValue(40, out var representation)
             && representation.GeometryItemIds.Count > 0, "body assignment should create xBIM representation items");
+    }
+
+    private static void BuilderCreatesAnyClassWithChildAndSiblingParents()
+    {
+        var document = Sample();
+
+        var classes = XbimDocumentEditor.GetCreatableClasses(document);
+        True(classes.Any(info => info.Name == "IfcWall" && info.IsProduct), "catalog should flag IfcWall as product");
+        True(classes.Any(info => info.Name == "IfcPropertySet" && !info.IsProduct), "catalog should flag IfcPropertySet as non-product");
+
+        // Child under a non-spatial element: this used to throw (containment
+        // requires a spatial parent) — it must aggregate instead.
+        var before = document.EntityById.Keys.ToHashSet();
+        var withNested = XbimDocumentEditor.CreateElement(document, new IfcElementCreationRequest
+        {
+            TypeName = "IfcBuildingElementProxy",
+            Name = "Nested proxy",
+            AnchorEntityId = 40,
+            WithGeometry = true,
+            Width = "1",
+            Depth = "1",
+            Height = "2",
+            WorldX = 4,
+            WorldY = 5,
+            WorldZ = 0,
+        });
+        var nestedId = withNested.EntityById.Keys.Except(before)
+            .First(id => withNested.EntityById[id].Type == "IFCBUILDINGELEMENTPROXY");
+        True(withNested.RelationshipById.Values.Any(relationship => relationship.Type == "IFCRELAGGREGATES"
+            && relationship.SourceIds.Contains(40)
+            && relationship.TargetIds.Contains(nestedId)), "element under element should aggregate");
+        True(withNested.RepresentationsByEntity.ContainsKey(nestedId), "nested element should carry a body");
+
+        // Sibling of #40: same spatial parent (#30) via containment.
+        before = withNested.EntityById.Keys.ToHashSet();
+        var withSibling = XbimDocumentEditor.CreateElement(withNested, new IfcElementCreationRequest
+        {
+            TypeName = "IfcWall",
+            Name = "Sibling wall",
+            AnchorEntityId = 40,
+            AsSibling = true,
+            WithGeometry = true,
+            WorldX = 1,
+            WorldY = 2,
+            WorldZ = 0,
+        });
+        var wallId = withSibling.EntityById.Keys.Except(before)
+            .First(id => withSibling.EntityById[id].Type == "IFCWALL");
+        True(withSibling.RelationshipById.Values.Any(relationship => relationship.Type == "IFCRELCONTAINEDINSPATIALSTRUCTURE"
+            && relationship.SourceIds.Contains(30)
+            && relationship.TargetIds.Contains(wallId)), "sibling should land under the anchor's parent");
+        var wallPlacement = withSibling.PlacementsByEntity[wallId];
+        Equal(1d, Math.Round(wallPlacement.X, 6), "picked X should reach the placement");
+        Equal(2d, Math.Round(wallPlacement.Y, 6), "picked Y should reach the placement");
+
+        // Non-product class: created without placement/geometry, aggregated.
+        before = withSibling.EntityById.Keys.ToHashSet();
+        var withGroup = XbimDocumentEditor.CreateElement(withSibling, new IfcElementCreationRequest
+        {
+            TypeName = "IfcGroup",
+            Name = "Builder group",
+            AnchorEntityId = 30,
+        });
+        var groupId = withGroup.EntityById.Keys.Except(before)
+            .First(id => withGroup.EntityById[id].Type == "IFCGROUP");
+        True(withGroup.RelationshipById.Values.Any(relationship => relationship.Type == "IFCRELAGGREGATES"
+            && relationship.SourceIds.Contains(30)
+            && relationship.TargetIds.Contains(groupId)), "group should aggregate under the spatial anchor");
+        True(!withGroup.PlacementsByEntity.ContainsKey(groupId), "group should not get a placement");
     }
 
     private static void XbimEditorCreatesPsetsQuantitiesResourcesAndProducts()
@@ -230,6 +301,42 @@ internal sealed class NativeTestRunner
             Equal(1, viewport.RenderScene.Meshes.Count, "hidden sessions should drop out of the composite scene");
             Equal(2, backend.SceneBuilds, "visibility toggles should not rebuild scenes");
         });
+    }
+
+    private static void RotationPatchPivotsAroundObjectCenter()
+    {
+        // Product geometry far from its placement origin (identity placement with
+        // absolute coordinates): square spanning (10,0)..(11,1), origin at (0,0,0).
+        double[] positions = [10, 0, 0, 11, 0, 0, 11, 1, 0, 10, 1, 0];
+        float[] normals = new float[12];
+        int[] indices = [0, 1, 2, 0, 2, 3];
+        var bounds = IfcRenderBounds.FromPositions(positions);
+        var mesh = new IfcRenderMesh(40, 1, 0, 0, IfcRenderColor.Default, positions, normals, indices, bounds);
+        var scene = new IfcRenderScene(
+            "pivot test",
+            [mesh],
+            bounds,
+            1,
+            2,
+            "test",
+            new Dictionary<int, IfcPreviewVertex> { [40] = new(0, 0, 0) });
+
+        // Rotate 90° about the object center C = (10.5, 0.5): the gizmo commit
+        // encodes that as placement rotation θ plus move delta (R - I)(o - C).
+        var theta = Math.PI / 2d;
+        var centerX = 10.5d;
+        var centerY = 0.5d;
+        var relX = 0d - centerX;
+        var relY = 0d - centerY;
+        var deltaX = -relY - relX;
+        var deltaY = relX - relY;
+        var patched = IfcRenderSceneTransform.TransformProduct(scene, 40, deltaX, deltaY, 0, theta);
+
+        // Vertex (10,0) under R(x - C) + C must land on (11,0).
+        var patchedMesh = patched.Meshes[0];
+        True(Math.Abs(patchedMesh.Positions[0] - 11d) < 1e-9, $"pivot rotation X expected 11, got {patchedMesh.Positions[0]}");
+        True(Math.Abs(patchedMesh.Positions[1] - 0d) < 1e-9, $"pivot rotation Y expected 0, got {patchedMesh.Positions[1]}");
+        True(Math.Abs(patched.Bounds.MinX - 10d) < 1e-9 && Math.Abs(patched.Bounds.MaxX - 11d) < 1e-9, "rotated square should stay centered on C");
     }
 
     private static void ForeignViewportPickInspectsReadOnly()

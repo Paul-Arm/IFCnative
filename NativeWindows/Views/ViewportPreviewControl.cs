@@ -31,6 +31,20 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
     public static readonly StyledProperty<bool> ShowFpsCounterProperty =
         AvaloniaProperty.Register<ViewportPreviewControl, bool>(nameof(ShowFpsCounter), false);
 
+    public static readonly StyledProperty<bool> IsPointPickingActiveProperty =
+        AvaloniaProperty.Register<ViewportPreviewControl, bool>(nameof(IsPointPickingActive), false, defaultBindingMode: Avalonia.Data.BindingMode.TwoWay);
+
+    /// <summary>
+    /// One-shot coordinate picking: while true, the next left click raycasts the
+    /// scene (ground plane fallback) and raises <see cref="PointPicked"/> with
+    /// world coordinates instead of selecting a product.
+    /// </summary>
+    public bool IsPointPickingActive
+    {
+        get => GetValue(IsPointPickingActiveProperty);
+        set => SetValue(IsPointPickingActiveProperty, value);
+    }
+
     public static readonly StyledProperty<AntiAliasingMode> AntiAliasingProperty =
         AvaloniaProperty.Register<ViewportPreviewControl, AntiAliasingMode>(nameof(AntiAliasing), AntiAliasingMode.None);
 
@@ -76,7 +90,22 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         set => SetValue(FarPlaneProperty, value);
     }
 
-    private const int VertexStride = 11;
+    public static readonly DirectProperty<ViewportPreviewControl, double> CameraYawDegreesProperty =
+        AvaloniaProperty.RegisterDirect<ViewportPreviewControl, double>(nameof(CameraYawDegrees), control => control.cameraYawDegrees);
+
+    public static readonly DirectProperty<ViewportPreviewControl, double> CameraPitchDegreesProperty =
+        AvaloniaProperty.RegisterDirect<ViewportPreviewControl, double>(nameof(CameraPitchDegrees), control => control.cameraPitchDegrees);
+
+    private double cameraYawDegrees = -51.633;
+    private double cameraPitchDegrees = 25.2;
+
+    public double CameraYawDegrees => cameraYawDegrees;
+
+    public double CameraPitchDegrees => cameraPitchDegrees;
+
+    // Compact interleaved layout, 6 uints (24 bytes) per vertex:
+    // position float3 | normal sbyte4 normalized | color rgba8 | product id float bits.
+    private const int VertexStride = 6;
     private const int InfiniteGridTargetLineCount = 160;
     private enum DragMode
     {
@@ -129,13 +158,19 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
     private int lineVertexCount;
     private bool buffersDirty = true;
     private bool renderQueued;
-    private float[] vertices = [];
+    private uint[] vertices = [];
     private uint[] opaqueIndices = [];
     private uint[] transparentIndices = [];
-    private float[] lineVertices = [];
+    private uint[] lineVertices = [];
     private IfcPreviewVertex renderOrigin = new(0, 0, 0);
     private InfiniteGridSignature? currentGridSignature;
     private List<TransparentMeshBatch> transparentMeshBatches = [];
+    private MeshDrawRange[] opaqueDrawRanges = [];
+    private readonly List<(int Offset, int Count)> opaqueSpans = [];
+    private readonly List<TransparentMeshBatch> visibleTransparentScratch = [];
+    private readonly List<TransparentMeshBatch> uploadedTransparentBatches = [];
+    private Vector3 lastTransparentSortCamera;
+    private bool transparentOrderDirty = true;
     private NativeViewportCameraState camera = NativeViewportCameraController.DefaultState();
     private Point? lastPointer;
     private Point? clickStart;
@@ -159,6 +194,8 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
     private int visibleMeshCount;
     private int visibleTriangleCount;
     private int visibleVertexCount;
+    private int totalMeshCount;
+    private int totalTriangleCount;
     private bool hadRenderableScene;
 
     // MSAA FBO buffers
@@ -180,6 +217,10 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
     private int lastPostHeight;
     private AntiAliasingMode lastPostMode = AntiAliasingMode.None;
 
+    // Fullscreen gradient sky: gives the viewport a horizon so far-out zooms
+    // read as "empty world" instead of a broken flat color.
+    private uint backgroundProgram;
+
     // GPU picking FBO: product ids are rendered as colors and read back under
     // the cursor, replacing the O(triangles) CPU raycast on every click.
     private uint pickFbo;
@@ -195,6 +236,8 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
 
     public event EventHandler<ViewportFpsUpdatedEventArgs>? FpsUpdated;
 
+    public event EventHandler<ViewportPointPickedEventArgs>? PointPicked;
+
     public ViewportPreviewControl()
     {
         Focusable = true;
@@ -203,6 +246,7 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
     static ViewportPreviewControl()
     {
         AffectsRender<ViewportPreviewControl>(SceneProperty, SelectedProductIdProperty, InteractionModeProperty, CanTransformSelectionProperty, ShowFpsCounterProperty, AntiAliasingProperty, HideSpacesProperty, FieldOfViewProperty, NearPlaneProperty, FarPlaneProperty);
+        IsPointPickingActiveProperty.Changed.AddClassHandler<ViewportPreviewControl>((control, _) => control.OnPointPickingChanged());
         SceneProperty.Changed.AddClassHandler<ViewportPreviewControl>((control, _) => control.OnSceneChanged());
         SelectedProductIdProperty.Changed.AddClassHandler<ViewportPreviewControl>((control, _) => control.OnSelectedProductChanged());
         InteractionModeProperty.Changed.AddClassHandler<ViewportPreviewControl>((control, _) => control.OnInteractionModeChanged());
@@ -265,6 +309,22 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         SetCameraAngles(-51.633, 25.2);
     }
 
+    /// <summary>
+    /// Orients the camera; a null yaw keeps the current heading (used by the
+    /// navigation cube's top/bottom faces).
+    /// </summary>
+    public void SetViewOrientation(double? yawDegrees, double pitchDegrees)
+    {
+        SetCameraAngles(yawDegrees ?? camera.YawDegrees, pitchDegrees);
+    }
+
+    /// <summary>Orbits the camera by screen-pixel deltas (navigation cube drag).</summary>
+    public void OrbitCamera(double deltaX, double deltaY)
+    {
+        camera = NativeViewportCameraController.Orbit(camera, deltaX, deltaY);
+        QueueRender();
+    }
+
     public void SetTopView()
     {
         SetCameraAngles(-90, 89);
@@ -324,6 +384,24 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
                 FxaaVertexShaderSource120,
                 FxaaFragmentShaderSource120,
                 "aPosition");
+
+            try
+            {
+                backgroundProgram = CreateProgramWithFallback(
+                    glApi,
+                    isGles,
+                    "background",
+                    BackgroundVertexShaderSource330,
+                    BackgroundFragmentShaderSource330,
+                    BackgroundVertexShaderSource120,
+                    BackgroundFragmentShaderSource120,
+                    "aPosition");
+            }
+            catch (Exception exception)
+            {
+                LogViewport($"background shader unavailable, keeping flat clear color: {exception.Message}");
+                backgroundProgram = 0;
+            }
 
             try
             {
@@ -486,6 +564,11 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
                 glApi.DeleteProgram(pickProgram);
                 pickProgram = 0;
             }
+            if (backgroundProgram != 0)
+            {
+                glApi.DeleteProgram(backgroundProgram);
+                backgroundProgram = 0;
+            }
             if (quadVao != 0)
             {
                 glApi.DeleteVertexArray(quadVao);
@@ -632,6 +715,23 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         glApi.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
         var viewProjection = CreateViewProjection(width, height);
+
+        // Gradient sky: drawn as a fullscreen quad before anything else; the
+        // per-pixel view ray gives a horizon that rotates with the camera.
+        if (backgroundProgram != 0 && quadVao != 0 && Matrix4x4.Invert(viewProjection, out var inverseViewProjection))
+        {
+            glApi.Disable(EnableCap.DepthTest);
+            glApi.DepthMask(false);
+            glApi.UseProgram(backgroundProgram);
+            glApi.UniformMatrix4(glApi.GetUniformLocation(backgroundProgram, "uInverseViewProjection"), 1, false, &inverseViewProjection.M11);
+            glApi.BindVertexArray(quadVao);
+            glApi.DrawArrays(PrimitiveType.Triangles, 0, 6);
+            glApi.BindVertexArray(0);
+            glApi.DepthMask(true);
+            glApi.Enable(EnableCap.DepthTest);
+            drawCalls++;
+        }
+
         var uniformMatrix = viewProjection;
         glApi.UseProgram(program);
         var matrix = &uniformMatrix.M11;
@@ -641,10 +741,14 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         glApi.Uniform1(glApi.GetUniformLocation(program, "uPreviewProductId"), previewProductId);
         var previewMatrix = previewTransform;
         glApi.UniformMatrix4(glApi.GetUniformLocation(program, "uPreviewTransform"), 1, false, &previewMatrix.M11);
+        var cameraRenderPosition = ToRenderVector(camera.ToPose().Position, renderOrigin);
+        glApi.Uniform3(glApi.GetUniformLocation(program, "uCameraPosition"), cameraRenderPosition.X, cameraRenderPosition.Y, cameraRenderPosition.Z);
+        var unlitLocation = glApi.GetUniformLocation(program, "uUnlit");
 
         UpdateGridBuffer(glApi, width, height);
         if (lineVertexCount > 0)
         {
+            glApi.Uniform1(unlitLocation, 1);
             glApi.Enable(EnableCap.Blend);
             glApi.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
             glApi.DepthMask(false);
@@ -656,19 +760,26 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
             drawCalls++;
         }
 
-        if (opaqueIndexCount > 0)
+        glApi.Uniform1(unlitLocation, 0);
+        var frustum = new FrustumPlanes(viewProjection);
+        BuildVisibleOpaqueSpans(frustum);
+        if (opaqueSpans.Count > 0)
         {
             glApi.Disable(EnableCap.Blend);
             glApi.DepthMask(true);
             glApi.BindVertexArray(vertexArray);
             glApi.BindBuffer(BufferTargetARB.ElementArrayBuffer, indexBuffer);
-            glApi.DrawElements(PrimitiveType.Triangles, (uint)opaqueIndexCount, DrawElementsType.UnsignedInt, null);
-            drawCalls++;
+            foreach (var (offset, count) in opaqueSpans)
+            {
+                glApi.DrawElements(PrimitiveType.Triangles, (uint)count, DrawElementsType.UnsignedInt, (void*)((long)offset * sizeof(uint)));
+            }
+
+            drawCalls += opaqueSpans.Count;
         }
 
         if (transparentMeshBatches.Count > 0)
         {
-            UpdateTransparentIndexBuffer(glApi, ToRenderVector(camera.ToPose().Position, renderOrigin));
+            UpdateTransparentIndexBuffer(glApi, ToRenderVector(camera.ToPose().Position, renderOrigin), frustum);
             if (transparentIndexCount > 0)
             {
                 glApi.BindVertexArray(vertexArray);
@@ -738,12 +849,38 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
             }
         }
 
+        PublishCameraOrientation();
+
         var cpuFrameMs = (Stopwatch.GetTimestamp() - renderStartTicks) * 1000d / Stopwatch.Frequency;
         UpdateFpsCounter(frameIntervalMs, cpuFrameMs, drawCalls, aaMode, isFxaa);
         if (ShowFpsCounter)
         {
             QueueRender();
         }
+    }
+
+    /// <summary>
+    /// Mirrors the camera orientation into bindable properties (navigation
+    /// cube). Render may run off the UI thread, so changes are posted.
+    /// </summary>
+    private void PublishCameraOrientation()
+    {
+        var yaw = camera.YawDegrees;
+        var pitch = camera.PitchDegrees;
+        if (Math.Abs(yaw - cameraYawDegrees) < 0.01 && Math.Abs(pitch - cameraPitchDegrees) < 0.01)
+        {
+            return;
+        }
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            var previousYaw = cameraYawDegrees;
+            var previousPitch = cameraPitchDegrees;
+            cameraYawDegrees = yaw;
+            cameraPitchDegrees = pitch;
+            RaisePropertyChanged(CameraYawDegreesProperty, previousYaw, yaw);
+            RaisePropertyChanged(CameraPitchDegreesProperty, previousPitch, pitch);
+        });
     }
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
@@ -837,6 +974,21 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
 
         if (pointProperties.PointerUpdateKind == PointerUpdateKind.LeftButtonReleased && !pointerMoved && clickStart is not null)
         {
+            if (IsPointPickingActive)
+            {
+                if (TryPickWorldPoint(point, out var worldX, out var worldY, out var worldZ))
+                {
+                    SetCurrentValue(IsPointPickingActiveProperty, false);
+                    var pickedArgs = new ViewportPointPickedEventArgs(worldX, worldY, worldZ);
+                    Dispatcher.UIThread.Post(() => PointPicked?.Invoke(this, pickedArgs));
+                }
+
+                dragMode = DragMode.None;
+                clickStart = null;
+                e.Handled = true;
+                return;
+            }
+
             pendingPickPoint = point;
             QueueRender();
         }
@@ -864,6 +1016,10 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         base.OnKeyDown(e);
         switch (e.Key)
         {
+            case Key.Escape when IsPointPickingActive:
+                SetCurrentValue(IsPointPickingActiveProperty, false);
+                e.Handled = true;
+                break;
             case Key.Escape when gizmoDrag is not null || previewProductId != 0:
                 CancelGizmoDrag();
                 e.Handled = true;
@@ -956,6 +1112,13 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
     private void OnAntiAliasingChanged()
     {
         QueueRender();
+    }
+
+    private void OnPointPickingChanged()
+    {
+        Cursor = IsPointPickingActive
+            ? new Cursor(StandardCursorType.Cross)
+            : Cursor.Default;
     }
 
     private void OnInteractionModeChanged()
@@ -1070,19 +1233,18 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
 
         BindArray(gl, gizmoVertexArray, gizmoVertexBuffer);
         var gizmoVertices = values.ToArray();
-        fixed (float* pointer = gizmoVertices)
+        fixed (uint* pointer = gizmoVertices)
         {
-            gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(gizmoVertices.Length * sizeof(float)), pointer, BufferUsageARB.DynamicDraw);
+            gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(gizmoVertices.Length * sizeof(uint)), pointer, BufferUsageARB.DynamicDraw);
         }
 
         ConfigureAttributes(gl);
+        gl.Uniform1(gl.GetUniformLocation(program, "uUnlit"), 1);
         gl.Disable(EnableCap.DepthTest);
         gl.Enable(EnableCap.Blend);
         gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
         gl.DepthMask(false);
-        gl.LineWidth(3f);
-        gl.DrawArrays(PrimitiveType.Lines, 0, (uint)(gizmoVertices.Length / VertexStride));
-        gl.LineWidth(1f);
+        gl.DrawArrays(PrimitiveType.Triangles, 0, (uint)(gizmoVertices.Length / VertexStride));
         gl.DepthMask(true);
         gl.Disable(EnableCap.Blend);
         gl.Enable(EnableCap.DepthTest);
@@ -1103,18 +1265,27 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
             return false;
         }
 
-        // Rotation is committed around the product's placement origin, so anchor the
-        // rotate gizmo (and its preview) there to match the persisted result.
-        var pivot = InteractionMode == ViewportInteractionMode.Rotate
-            && TryGetProductPlacementOrigin(SelectedProductId, out var placementOrigin)
-            ? placementOrigin
-            : bounds.Center;
+        // Anchor both gizmos at the object's bounds center: placement origins can
+        // sit arbitrarily far from the geometry (identity placements with absolute
+        // coordinates are common), which would put the gizmo out of view. The
+        // rotate commit compensates so the STEP edit still matches this pivot.
+        var pivot = bounds.Center;
         center = ToRenderVector(pivot, renderOrigin) + previewMoveDeltaWorld;
-        var objectScale = Math.Max(0.15d, bounds.Radius * 1.2d);
-        var cameraScale = Math.Max(0.15d, camera.Distance * 0.16d);
-        var sceneScale = Math.Max(0.4d, camera.SceneRadius * 0.35d);
-        size = (float)Math.Clamp(Math.Max(objectScale, cameraScale), 0.15d, sceneScale);
-        return true;
+
+        // Constant screen-space size: the gizmo always spans ~GizmoScreenPixels
+        // on screen, independent of object size, scene radius or zoom level.
+        const double GizmoScreenPixels = 92d;
+        var cameraPosition = ToRenderVector(camera.ToPose().Position, renderOrigin);
+        var distance = Vector3.Distance(cameraPosition, center);
+        if (!float.IsFinite(distance) || distance < 0.0001f)
+        {
+            distance = (float)Math.Max(0.25d, camera.Distance);
+        }
+
+        var fovRadians = Math.Clamp(camera.FieldOfViewDegrees, 5d, 140d) * Math.PI / 180d;
+        var viewportHeight = Math.Max(64d, Bounds.Height);
+        size = (float)(distance * Math.Tan(fovRadians / 2d) * 2d * (GizmoScreenPixels / viewportHeight));
+        return float.IsFinite(size) && size > 0;
     }
 
     private bool TryGetProductPlacementOrigin(int productId, out IfcPreviewVertex origin)
@@ -1130,61 +1301,151 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         return true;
     }
 
-    private List<float> BuildGizmoVertices(Vector3 center, float size)
+    private List<uint> BuildGizmoVertices(Vector3 center, float size)
     {
-        var values = new List<float>();
+        var values = new List<uint>();
         var active = gizmoDrag?.Handle ?? GizmoHandle.None;
 
         if (InteractionMode == ViewportInteractionMode.Move)
         {
-            AddMoveHandle(values, center, Vector3.UnitX, size, active == GizmoHandle.MoveX, new IfcRenderColor(0.96f, 0.22f, 0.16f, 1f));
-            AddMoveHandle(values, center, Vector3.UnitY, size, active == GizmoHandle.MoveY, new IfcRenderColor(0.24f, 0.78f, 0.34f, 1f));
-            AddMoveHandle(values, center, Vector3.UnitZ, size, active == GizmoHandle.MoveZ, new IfcRenderColor(0.24f, 0.50f, 1.00f, 1f));
+            AddMoveHandle(values, center, Vector3.UnitX, size, active == GizmoHandle.MoveX, new IfcRenderColor(0.93f, 0.26f, 0.21f, 0.96f));
+            AddMoveHandle(values, center, Vector3.UnitY, size, active == GizmoHandle.MoveY, new IfcRenderColor(0.33f, 0.78f, 0.36f, 0.96f));
+            AddMoveHandle(values, center, Vector3.UnitZ, size, active == GizmoHandle.MoveZ, new IfcRenderColor(0.27f, 0.52f, 0.96f, 0.96f));
+            AddSphere(values, center, size * 0.045f, new IfcRenderColor(0.92f, 0.93f, 0.90f, 0.95f));
         }
         else if (InteractionMode == ViewportInteractionMode.Rotate)
         {
-            var color = active == GizmoHandle.RotateZ
-                ? new IfcRenderColor(1.00f, 0.82f, 0.20f, 1f)
-                : new IfcRenderColor(0.28f, 0.72f, 1.00f, 0.96f);
-            AddRotationRing(values, center, size * 0.85f, color);
+            var isActive = active == GizmoHandle.RotateZ;
+            var color = isActive
+                ? new IfcRenderColor(1.00f, 0.82f, 0.20f, 0.98f)
+                : new IfcRenderColor(0.30f, 0.66f, 0.95f, 0.92f);
+            var ringRadius = size * 0.85f;
+            var halfWidth = size * (isActive ? 0.035f : 0.025f);
+            AddAnnulus(values, center, ringRadius - halfWidth, ringRadius + halfWidth, color);
+            // Thin vertical wall keeps the ring visible when viewed edge-on.
+            AddRingBand(values, center, ringRadius, size * 0.012f, color);
+            AddSphere(values, center, size * 0.04f, new IfcRenderColor(0.92f, 0.93f, 0.90f, 0.95f));
         }
 
         return values;
     }
 
-    private static void AddMoveHandle(List<float> values, Vector3 center, Vector3 axis, float size, bool active, IfcRenderColor baseColor)
+    private static void AddMoveHandle(List<uint> values, Vector3 center, Vector3 axis, float size, bool active, IfcRenderColor baseColor)
     {
         var color = active
             ? new IfcRenderColor(1f, 0.84f, 0.20f, 1f)
             : baseColor;
-        var end = center + axis * size;
-        AddLine(values, center, end, color);
+        var shaftEnd = center + axis * (size * 0.78f);
+        var tip = center + axis * size;
+        AddCylinder(values, center, shaftEnd, size * 0.014f, color);
+        AddCone(values, shaftEnd, tip, size * 0.055f, color);
+    }
 
-        var headLength = size * 0.16f;
-        var headWidth = size * 0.07f;
-        var side = Math.Abs(Vector3.Dot(axis, Vector3.UnitX)) > 0.9f
-            ? Vector3.UnitY
-            : Vector3.UnitX;
-        AddLine(values, end, end - axis * headLength + side * headWidth, color);
-        AddLine(values, end, end - axis * headLength - side * headWidth, color);
-        if (Math.Abs(Vector3.Dot(axis, Vector3.UnitZ)) > 0.9f)
+    private static (Vector3 U, Vector3 V) PerpendicularBasis(Vector3 axis)
+    {
+        var reference = Math.Abs(Vector3.Dot(axis, Vector3.UnitZ)) > 0.9f ? Vector3.UnitX : Vector3.UnitZ;
+        var u = Vector3.Normalize(Vector3.Cross(axis, reference));
+        var v = Vector3.Normalize(Vector3.Cross(axis, u));
+        return (u, v);
+    }
+
+    private static void AddCylinder(List<uint> values, Vector3 start, Vector3 end, float radius, IfcRenderColor color)
+    {
+        const int segments = 10;
+        var axis = Vector3.Normalize(end - start);
+        var (u, v) = PerpendicularBasis(axis);
+        for (var i = 0; i < segments; i++)
         {
-            AddLine(values, end, end - axis * headLength + Vector3.UnitY * headWidth, color);
-            AddLine(values, end, end - axis * headLength - Vector3.UnitY * headWidth, color);
+            var angleA = i * MathF.Tau / segments;
+            var angleB = (i + 1) * MathF.Tau / segments;
+            var offsetA = (u * MathF.Cos(angleA) + v * MathF.Sin(angleA)) * radius;
+            var offsetB = (u * MathF.Cos(angleB) + v * MathF.Sin(angleB)) * radius;
+            AddTriangle(values, start + offsetA, end + offsetA, end + offsetB, color);
+            AddTriangle(values, start + offsetA, end + offsetB, start + offsetB, color);
         }
     }
 
-    private static void AddRotationRing(List<float> values, Vector3 center, float radius, IfcRenderColor color)
+    private static void AddCone(List<uint> values, Vector3 baseCenter, Vector3 tip, float radius, IfcRenderColor color)
     {
-        const int segments = 96;
-        var previous = center + new Vector3(radius, 0, 0);
-        for (var i = 1; i <= segments; i++)
+        const int segments = 14;
+        var axis = Vector3.Normalize(tip - baseCenter);
+        var (u, v) = PerpendicularBasis(axis);
+        for (var i = 0; i < segments; i++)
         {
-            var angle = i * MathF.Tau / segments;
-            var next = center + new Vector3(MathF.Cos(angle) * radius, MathF.Sin(angle) * radius, 0);
-            AddLine(values, previous, next, color);
-            previous = next;
+            var angleA = i * MathF.Tau / segments;
+            var angleB = (i + 1) * MathF.Tau / segments;
+            var offsetA = (u * MathF.Cos(angleA) + v * MathF.Sin(angleA)) * radius;
+            var offsetB = (u * MathF.Cos(angleB) + v * MathF.Sin(angleB)) * radius;
+            AddTriangle(values, baseCenter + offsetA, tip, baseCenter + offsetB, color);
+            AddTriangle(values, baseCenter + offsetA, baseCenter + offsetB, baseCenter, color);
         }
+    }
+
+    private static void AddAnnulus(List<uint> values, Vector3 center, float innerRadius, float outerRadius, IfcRenderColor color)
+    {
+        const int segments = 72;
+        for (var i = 0; i < segments; i++)
+        {
+            var angleA = i * MathF.Tau / segments;
+            var angleB = (i + 1) * MathF.Tau / segments;
+            var dirA = new Vector3(MathF.Cos(angleA), MathF.Sin(angleA), 0);
+            var dirB = new Vector3(MathF.Cos(angleB), MathF.Sin(angleB), 0);
+            var innerA = center + dirA * innerRadius;
+            var innerB = center + dirB * innerRadius;
+            var outerA = center + dirA * outerRadius;
+            var outerB = center + dirB * outerRadius;
+            AddTriangle(values, innerA, outerA, outerB, color);
+            AddTriangle(values, innerA, outerB, innerB, color);
+        }
+    }
+
+    private static void AddRingBand(List<uint> values, Vector3 center, float radius, float halfHeight, IfcRenderColor color)
+    {
+        const int segments = 72;
+        var up = new Vector3(0, 0, halfHeight);
+        for (var i = 0; i < segments; i++)
+        {
+            var angleA = i * MathF.Tau / segments;
+            var angleB = (i + 1) * MathF.Tau / segments;
+            var rimA = center + new Vector3(MathF.Cos(angleA), MathF.Sin(angleA), 0) * radius;
+            var rimB = center + new Vector3(MathF.Cos(angleB), MathF.Sin(angleB), 0) * radius;
+            AddTriangle(values, rimA - up, rimA + up, rimB + up, color);
+            AddTriangle(values, rimA - up, rimB + up, rimB - up, color);
+        }
+    }
+
+    private static void AddSphere(List<uint> values, Vector3 center, float radius, IfcRenderColor color)
+    {
+        // Low-poly octahedron-based ball; small enough on screen that 8 faces read as round.
+        const int segments = 12;
+        for (var i = 0; i < segments; i++)
+        {
+            var angleA = i * MathF.Tau / segments;
+            var angleB = (i + 1) * MathF.Tau / segments;
+            var a = center + new Vector3(MathF.Cos(angleA), MathF.Sin(angleA), 0) * radius;
+            var b = center + new Vector3(MathF.Cos(angleB), MathF.Sin(angleB), 0) * radius;
+            AddTriangle(values, a, b, center + new Vector3(0, 0, radius), color);
+            AddTriangle(values, b, a, center - new Vector3(0, 0, radius), color);
+        }
+    }
+
+    private static void AddTriangle(List<uint> values, Vector3 a, Vector3 b, Vector3 c, IfcRenderColor color)
+    {
+        AddGizmoVertex(values, a, color);
+        AddGizmoVertex(values, b, color);
+        AddGizmoVertex(values, c, color);
+    }
+
+    private static void AddGizmoVertex(List<uint> values, Vector3 position, IfcRenderColor color)
+    {
+        // Normal points along the scene light so the gizmo renders at full
+        // brightness regardless of orientation.
+        values.Add(BitConverter.SingleToUInt32Bits(position.X));
+        values.Add(BitConverter.SingleToUInt32Bits(position.Y));
+        values.Add(BitConverter.SingleToUInt32Bits(position.Z));
+        values.Add(PackNormal(0.35f, 0.55f, 0.75f));
+        values.Add(PackColor(color));
+        values.Add(BitConverter.SingleToUInt32Bits(0f));
     }
 
     private bool TryBeginGizmoDrag(Point point)
@@ -1274,6 +1535,22 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
             var productId = state.ProductId;
             var moveDelta = state.MoveDeltaWorld;
             var rotateZ = state.RotateZRadians;
+
+            // The STEP edit rotates the product about its placement origin o, but
+            // the gizmo pivots at the bounds center C. Adding the translation
+            // (R - I)(o - C) makes both transforms identical: R(x - C) + C.
+            if (Math.Abs(rotateZ) > 0.0000001f && TryGetProductPlacementOrigin(productId, out var placementOrigin))
+            {
+                var originRender = ToRenderVector(placementOrigin, renderOrigin);
+                var cos = MathF.Cos(rotateZ);
+                var sin = MathF.Sin(rotateZ);
+                var relativeX = originRender.X - state.Center.X;
+                var relativeY = originRender.Y - state.Center.Y;
+                moveDelta += new Vector3(
+                    cos * relativeX - sin * relativeY - relativeX,
+                    sin * relativeX + cos * relativeY - relativeY,
+                    0f);
+            }
             gizmoDrag = null;
             if (shouldCommit)
             {
@@ -1675,7 +1952,7 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
             Environment.NewLine,
             $"{fps:0} FPS  interval {frameIntervalMs:0.0} ms",
             $"CPU {cpuFrameMs:0.0} ms  draws {drawCalls:N0}",
-            $"meshes {visibleMeshCount:N0}  tris {visibleTriangleCount:N0}",
+            $"meshes {visibleMeshCount:N0}/{totalMeshCount:N0}  tris {visibleTriangleCount:N0}/{totalTriangleCount:N0}",
             $"verts {visibleVertexCount:N0}  inst {instanceCount:N0}",
             $"loop continuous  AA {aaLabel}");
     }
@@ -1691,21 +1968,27 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
             transparentIndices = [];
             lineVertices = [];
             transparentMeshBatches = [];
+            opaqueDrawRanges = [];
+            uploadedTransparentBatches.Clear();
+            transparentOrderDirty = true;
             opaqueIndexCount = 0;
             transparentIndexCount = 0;
             lineVertexCount = 0;
             visibleMeshCount = 0;
             visibleTriangleCount = 0;
             visibleVertexCount = 0;
+            totalMeshCount = 0;
+            totalTriangleCount = 0;
             return;
         }
 
         var hideSpaces = HideSpaces;
 
         // First pass: exact totals so the interleaved buffers are allocated once
-        // (a growing List<float> peaks at ~3x the final size on large models).
+        // (a growing list peaks at ~3x the final size on large models).
         var totalVertexCount = 0;
         var totalOpaqueIndexCount = 0;
+        var opaqueMeshCount = 0;
         foreach (var mesh in scene.Meshes)
         {
             if (!mesh.IsRenderable || (hideSpaces && mesh.IsSpace))
@@ -1717,14 +2000,17 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
             if (!IsTransparent(mesh))
             {
                 totalOpaqueIndexCount += mesh.Indices.Length;
+                opaqueMeshCount++;
             }
         }
 
-        var vertexValues = new float[totalVertexCount * VertexStride];
+        var vertexValues = new uint[totalVertexCount * VertexStride];
         var opaqueIndexValues = new uint[totalOpaqueIndexCount];
+        var drawRanges = new MeshDrawRange[opaqueMeshCount];
         var batches = new List<TransparentMeshBatch>();
         var vertexCursor = 0;
         var opaqueCursor = 0;
+        var rangeCursor = 0;
         var baseVertex = 0u;
         var meshCount = 0;
         var triangleCount = 0;
@@ -1737,22 +2023,20 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
 
             meshCount++;
             var meshVertexCount = mesh.VertexCount;
+            var packedColor = PackColor(mesh.Color);
+            var productIdBits = BitConverter.SingleToUInt32Bits(mesh.ProductId);
             for (var i = 0; i < meshVertexCount; i++)
             {
                 var offset = i * 3;
-                vertexValues[vertexCursor++] = ToRenderFloat(mesh.Positions[offset] - renderOrigin.X);
-                vertexValues[vertexCursor++] = ToRenderFloat(mesh.Positions[offset + 1] - renderOrigin.Y);
-                vertexValues[vertexCursor++] = ToRenderFloat(mesh.Positions[offset + 2] - renderOrigin.Z);
-                vertexValues[vertexCursor++] = mesh.Normals[offset];
-                vertexValues[vertexCursor++] = mesh.Normals[offset + 1];
-                vertexValues[vertexCursor++] = mesh.Normals[offset + 2];
-                vertexValues[vertexCursor++] = mesh.Color.R;
-                vertexValues[vertexCursor++] = mesh.Color.G;
-                vertexValues[vertexCursor++] = mesh.Color.B;
-                vertexValues[vertexCursor++] = mesh.Color.A;
-                vertexValues[vertexCursor++] = mesh.ProductId;
+                vertexValues[vertexCursor++] = BitConverter.SingleToUInt32Bits(ToRenderFloat(mesh.Positions[offset] - renderOrigin.X));
+                vertexValues[vertexCursor++] = BitConverter.SingleToUInt32Bits(ToRenderFloat(mesh.Positions[offset + 1] - renderOrigin.Y));
+                vertexValues[vertexCursor++] = BitConverter.SingleToUInt32Bits(ToRenderFloat(mesh.Positions[offset + 2] - renderOrigin.Z));
+                vertexValues[vertexCursor++] = PackNormal(mesh.Normals[offset], mesh.Normals[offset + 1], mesh.Normals[offset + 2]);
+                vertexValues[vertexCursor++] = packedColor;
+                vertexValues[vertexCursor++] = productIdBits;
             }
 
+            GetRenderBounds(mesh.Bounds, renderOrigin, out var boundsMin, out var boundsMax);
             if (IsTransparent(mesh))
             {
                 var meshIndices = new uint[mesh.Indices.Length];
@@ -1773,11 +2057,12 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
                     }
 
                     triangleCount += meshCursor / 3;
-                    batches.Add(new TransparentMeshBatch(MeshCenter(mesh, renderOrigin), meshIndices));
+                    batches.Add(new TransparentMeshBatch(mesh.ProductId, MeshCenter(mesh, renderOrigin), boundsMin, boundsMax, meshVertexCount, meshIndices));
                 }
             }
             else
             {
+                var rangeStart = opaqueCursor;
                 foreach (var index in mesh.Indices)
                 {
                     if (index >= 0 && index < meshVertexCount)
@@ -1786,6 +2071,7 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
                     }
                 }
 
+                drawRanges[rangeCursor++] = new MeshDrawRange(mesh.ProductId, rangeStart, opaqueCursor - rangeStart, meshVertexCount, boundsMin, boundsMax);
                 triangleCount += mesh.Indices.Length / 3;
             }
 
@@ -1800,6 +2086,9 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         vertices = vertexValues;
         opaqueIndices = opaqueIndexValues;
         transparentMeshBatches = batches;
+        opaqueDrawRanges = drawRanges;
+        uploadedTransparentBatches.Clear();
+        transparentOrderDirty = true;
         transparentIndices = [];
         opaqueIndexCount = opaqueIndices.Length;
         transparentIndexCount = 0;
@@ -1808,14 +2097,85 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         visibleMeshCount = meshCount;
         visibleTriangleCount = triangleCount;
         visibleVertexCount = totalVertexCount;
+        totalMeshCount = meshCount;
+        totalTriangleCount = triangleCount;
+    }
+
+    /// <summary>
+    /// Walks the per-mesh draw ranges, frustum-culls against their bounds and
+    /// merges adjacent visible ranges into contiguous index-buffer spans (a
+    /// fully visible scene collapses back into a single draw call).
+    /// </summary>
+    private void BuildVisibleOpaqueSpans(in FrustumPlanes frustum)
+    {
+        opaqueSpans.Clear();
+        visibleMeshCount = 0;
+        visibleTriangleCount = 0;
+        visibleVertexCount = 0;
+        var spanStart = -1;
+        var spanEnd = 0;
+        foreach (var range in opaqueDrawRanges)
+        {
+            // A previewed (gizmo-dragged) product is displaced in the vertex
+            // shader, so its stored bounds are stale: never cull it.
+            if (range.ProductId != previewProductId && !frustum.Intersects(range.BoundsMin, range.BoundsMax))
+            {
+                continue;
+            }
+
+            visibleMeshCount++;
+            visibleTriangleCount += range.IndexCount / 3;
+            visibleVertexCount += range.VertexCount;
+            if (spanStart < 0)
+            {
+                spanStart = range.IndexOffset;
+                spanEnd = range.IndexOffset + range.IndexCount;
+            }
+            else if (range.IndexOffset == spanEnd)
+            {
+                spanEnd += range.IndexCount;
+            }
+            else
+            {
+                opaqueSpans.Add((spanStart, spanEnd - spanStart));
+                spanStart = range.IndexOffset;
+                spanEnd = range.IndexOffset + range.IndexCount;
+            }
+        }
+
+        if (spanStart >= 0)
+        {
+            opaqueSpans.Add((spanStart, spanEnd - spanStart));
+        }
+    }
+
+    private static void GetRenderBounds(IfcRenderBounds bounds, IfcPreviewVertex origin, out Vector3 min, out Vector3 max)
+    {
+        if (bounds.IsEmpty)
+        {
+            // Degenerate bounds: keep the mesh always visible instead of risking
+            // a wrong cull.
+            min = new Vector3(-1e30f);
+            max = new Vector3(1e30f);
+            return;
+        }
+
+        min = new Vector3(
+            ToRenderFloat(bounds.MinX - origin.X),
+            ToRenderFloat(bounds.MinY - origin.Y),
+            ToRenderFloat(bounds.MinZ - origin.Z));
+        max = new Vector3(
+            ToRenderFloat(bounds.MaxX - origin.X),
+            ToRenderFloat(bounds.MaxY - origin.Y),
+            ToRenderFloat(bounds.MaxZ - origin.Z));
     }
 
     private unsafe void UploadBuffers(SilkGL gl)
     {
         BindArray(gl, vertexArray, vertexBuffer);
-        fixed (float* vertexPointer = vertices)
+        fixed (uint* vertexPointer = vertices)
         {
-            gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(vertices.Length * sizeof(float)), vertexPointer, BufferUsageARB.StaticDraw);
+            gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(vertices.Length * sizeof(uint)), vertexPointer, BufferUsageARB.StaticDraw);
         }
 
         gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, indexBuffer);
@@ -1827,9 +2187,9 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         ConfigureAttributes(gl);
 
         BindArray(gl, lineVertexArray, lineVertexBuffer);
-        fixed (float* linePointer = lineVertices)
+        fixed (uint* linePointer = lineVertices)
         {
-            gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(lineVertices.Length * sizeof(float)), linePointer, BufferUsageARB.StaticDraw);
+            gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(lineVertices.Length * sizeof(uint)), linePointer, BufferUsageARB.StaticDraw);
         }
 
         ConfigureAttributes(gl);
@@ -1849,32 +2209,72 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         currentGridSignature = signature;
 
         BindArray(gl, lineVertexArray, lineVertexBuffer);
-        fixed (float* linePointer = lineVertices)
+        fixed (uint* linePointer = lineVertices)
         {
-            gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(lineVertices.Length * sizeof(float)), linePointer, BufferUsageARB.DynamicDraw);
+            gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(lineVertices.Length * sizeof(uint)), linePointer, BufferUsageARB.DynamicDraw);
         }
 
         ConfigureAttributes(gl);
         gl.BindVertexArray(0);
     }
 
-    private unsafe void UpdateTransparentIndexBuffer(SilkGL gl, Vector3 cameraPosition)
+    /// <summary>
+    /// Keeps the transparent index buffer sorted back-to-front and culled to the
+    /// frustum. The sort is throttled to noticeable camera movement and the
+    /// rebuild + GPU upload only happens when the sort ran or the visible set
+    /// changed — a static camera costs nothing per frame.
+    /// </summary>
+    private unsafe void UpdateTransparentIndexBuffer(SilkGL gl, Vector3 cameraPosition, in FrustumPlanes frustum)
     {
-        var totalIndexCount = 0;
-        foreach (var batch in transparentMeshBatches)
-        {
-            totalIndexCount += batch.Indices.Length;
-        }
-
-        if (totalIndexCount == 0)
+        if (transparentMeshBatches.Count == 0)
         {
             transparentIndexCount = 0;
             return;
         }
 
-        transparentMeshBatches.Sort((left, right) =>
-            Vector3.DistanceSquared(right.Center, cameraPosition)
-                .CompareTo(Vector3.DistanceSquared(left.Center, cameraPosition)));
+        var sortThreshold = (float)Math.Max(camera.Distance * 0.01d, 0.001d);
+        var needsSort = transparentOrderDirty
+            || Vector3.DistanceSquared(cameraPosition, lastTransparentSortCamera) > sortThreshold * sortThreshold;
+        if (needsSort)
+        {
+            transparentMeshBatches.Sort((left, right) =>
+                Vector3.DistanceSquared(right.Center, cameraPosition)
+                    .CompareTo(Vector3.DistanceSquared(left.Center, cameraPosition)));
+            lastTransparentSortCamera = cameraPosition;
+            transparentOrderDirty = false;
+        }
+
+        visibleTransparentScratch.Clear();
+        foreach (var batch in transparentMeshBatches)
+        {
+            if (batch.ProductId == previewProductId || frustum.Intersects(batch.BoundsMin, batch.BoundsMax))
+            {
+                visibleTransparentScratch.Add(batch);
+                visibleMeshCount++;
+                visibleTriangleCount += batch.Indices.Length / 3;
+                visibleVertexCount += batch.VertexCount;
+            }
+        }
+
+        if (!needsSort && SameBatchList(visibleTransparentScratch, uploadedTransparentBatches))
+        {
+            return;
+        }
+
+        uploadedTransparentBatches.Clear();
+        uploadedTransparentBatches.AddRange(visibleTransparentScratch);
+
+        var totalIndexCount = 0;
+        foreach (var batch in visibleTransparentScratch)
+        {
+            totalIndexCount += batch.Indices.Length;
+        }
+
+        transparentIndexCount = totalIndexCount;
+        if (totalIndexCount == 0)
+        {
+            return;
+        }
 
         if (transparentIndices.Length != totalIndexCount)
         {
@@ -1882,18 +2282,35 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         }
 
         var offset = 0;
-        foreach (var batch in transparentMeshBatches)
+        foreach (var batch in visibleTransparentScratch)
         {
             Array.Copy(batch.Indices, 0, transparentIndices, offset, batch.Indices.Length);
             offset += batch.Indices.Length;
         }
 
-        transparentIndexCount = totalIndexCount;
         gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, transparentIndexBuffer);
         fixed (uint* indexPointer = transparentIndices)
         {
             gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint)(transparentIndices.Length * sizeof(uint)), indexPointer, BufferUsageARB.DynamicDraw);
         }
+    }
+
+    private static bool SameBatchList(List<TransparentMeshBatch> left, List<TransparentMeshBatch> right)
+    {
+        if (left.Count != right.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < left.Count; i++)
+        {
+            if (!ReferenceEquals(left[i], right[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static void BindArray(SilkGL gl, uint array, uint buffer)
@@ -1904,30 +2321,49 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
 
     private static unsafe void ConfigureAttributes(SilkGL gl)
     {
-        const uint stride = VertexStride * sizeof(float);
+        // Normals/colors ride as normalized bytes (GL 2.0-compatible, unlike
+        // INT_2_10_10_10) so the same layout works on the GLSL 120 fallback.
+        const uint stride = VertexStride * sizeof(uint);
         gl.EnableVertexAttribArray(0);
         gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, stride, null);
         gl.EnableVertexAttribArray(1);
-        gl.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, stride, (void*)(3 * sizeof(float)));
+        gl.VertexAttribPointer(1, 4, VertexAttribPointerType.Byte, true, stride, (void*)(3 * sizeof(uint)));
         gl.EnableVertexAttribArray(2);
-        gl.VertexAttribPointer(2, 4, VertexAttribPointerType.Float, false, stride, (void*)(6 * sizeof(float)));
+        gl.VertexAttribPointer(2, 4, VertexAttribPointerType.UnsignedByte, true, stride, (void*)(4 * sizeof(uint)));
         gl.EnableVertexAttribArray(3);
-        gl.VertexAttribPointer(3, 1, VertexAttribPointerType.Float, false, stride, (void*)(10 * sizeof(float)));
+        gl.VertexAttribPointer(3, 1, VertexAttribPointerType.Float, false, stride, (void*)(5 * sizeof(uint)));
     }
 
-    private static void AddLocalVertex(List<float> values, float x, float y, float z, IfcRenderColor color, int productId)
+    /// <summary>Packs a unit normal into 4 signed normalized bytes (w unused).</summary>
+    private static uint PackNormal(float x, float y, float z)
     {
-        values.Add(x);
-        values.Add(y);
-        values.Add(z);
-        values.Add(0);
-        values.Add(0);
-        values.Add(1);
-        values.Add(color.R);
-        values.Add(color.G);
-        values.Add(color.B);
-        values.Add(color.A);
-        values.Add(productId);
+        return SByteBits(x) | (SByteBits(y) << 8) | (SByteBits(z) << 16);
+    }
+
+    private static uint SByteBits(float value)
+    {
+        var scaled = (int)MathF.Round(Math.Clamp(value, -1f, 1f) * 127f);
+        return (uint)(scaled & 0xFF);
+    }
+
+    private static uint PackColor(IfcRenderColor color)
+    {
+        return ByteBits(color.R) | (ByteBits(color.G) << 8) | (ByteBits(color.B) << 16) | (ByteBits(color.A) << 24);
+    }
+
+    private static uint ByteBits(float value)
+    {
+        return (uint)Math.Clamp((int)MathF.Round(value * 255f), 0, 255);
+    }
+
+    private static void AddLocalVertex(List<uint> values, float x, float y, float z, IfcRenderColor color, int productId)
+    {
+        values.Add(BitConverter.SingleToUInt32Bits(x));
+        values.Add(BitConverter.SingleToUInt32Bits(y));
+        values.Add(BitConverter.SingleToUInt32Bits(z));
+        values.Add(PackNormal(0, 0, 1));
+        values.Add(PackColor(color));
+        values.Add(BitConverter.SingleToUInt32Bits(productId));
     }
 
     private static bool IsTransparent(IfcRenderMesh mesh)
@@ -1965,6 +2401,15 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
             footprintSpan = visibleSpan * 8d;
         }
 
+        // Never extend the grid past the far clipping plane: the edge fade must
+        // dissolve it before the clip would cut a hard line across the ground
+        // (the "chopped off" look when zooming far out).
+        var farLimit = (camera.FarPlane - camera.Distance) * 1.8d;
+        if (IsFinite(farLimit) && farLimit > 0)
+        {
+            footprintSpan = Math.Min(footprintSpan, farLimit);
+        }
+
         var desiredStep = Math.Max(visibleSpan / 24d, footprintSpan / InfiniteGridTargetLineCount);
         var fineStep = NiceStepFloor(desiredStep);
         if (!IsFinite(fineStep) || fineStep <= 0)
@@ -1994,14 +2439,14 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
             renderOrigin.Z);
     }
 
-    private static float[] BuildInfiniteGridVertices(InfiniteGridSignature signature)
+    private static uint[] BuildInfiniteGridVertices(InfiniteGridSignature signature)
     {
         var estimatedLineCount = EstimateGridLineCount(signature.MinX, signature.MaxX, signature.FineStep)
             + EstimateGridLineCount(signature.MinY, signature.MaxY, signature.FineStep)
             + EstimateGridLineCount(signature.MinX, signature.MaxX, signature.CoarseStep)
             + EstimateGridLineCount(signature.MinY, signature.MaxY, signature.CoarseStep)
             + 2;
-        var values = new List<float>(estimatedLineCount * 2 * VertexStride);
+        var values = new List<uint>(estimatedLineCount * 2 * VertexStride);
         var origin = new IfcPreviewVertex(signature.OriginX, signature.OriginY, signature.OriginZ);
         var fineAlpha = 1d - SmoothStep(0d, 1d, signature.LodBlend);
         var coarseAlpha = SmoothStep(0d, 1d, signature.LodBlend);
@@ -2012,7 +2457,7 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
     }
 
     private static void AddGridLevel(
-        List<float> values,
+        List<uint> values,
         IfcPreviewVertex origin,
         InfiniteGridSignature signature,
         double step,
@@ -2124,7 +2569,7 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
     }
 
     private static void AddWorldLine(
-        List<float> values,
+        List<uint> values,
         double x1,
         double y1,
         double z1,
@@ -2145,15 +2590,10 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
             color);
     }
 
-    private static void AddLocalLine(List<float> values, float x1, float y1, float z1, float x2, float y2, float z2, IfcRenderColor color)
+    private static void AddLocalLine(List<uint> values, float x1, float y1, float z1, float x2, float y2, float z2, IfcRenderColor color)
     {
         AddLocalVertex(values, x1, y1, z1, color, 0);
         AddLocalVertex(values, x2, y2, z2, color, 0);
-    }
-
-    private static void AddLine(List<float> values, Vector3 start, Vector3 end, IfcRenderColor color)
-    {
-        AddLocalLine(values, start.X, start.Y, start.Z, end.X, end.Y, end.Z, color);
     }
 
     private static double NiceStep(double value)
@@ -2339,10 +2779,13 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         gl.UniformMatrix4(gl.GetUniformLocation(pickProgram, "uPreviewTransform"), 1, false, &previewMatrix.M11);
 
         gl.BindVertexArray(vertexArray);
-        if (opaqueIndexCount > 0)
+        if (opaqueSpans.Count > 0)
         {
             gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, indexBuffer);
-            gl.DrawElements(PrimitiveType.Triangles, (uint)opaqueIndexCount, DrawElementsType.UnsignedInt, null);
+            foreach (var (offset, count) in opaqueSpans)
+            {
+                gl.DrawElements(PrimitiveType.Triangles, (uint)count, DrawElementsType.UnsignedInt, (void*)((long)offset * sizeof(uint)));
+            }
         }
 
         // Transparent surfaces stay pickable (nearest hit wins), matching the
@@ -2363,6 +2806,83 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         gl.BindFramebuffer(FramebufferTarget.Framebuffer, (uint)fb);
 
         return IfcRenderPicking.DecodeProductId(pixel[0], pixel[1], pixel[2]);
+    }
+
+    /// <summary>
+    /// CPU raycast for coordinate picking: nearest mesh triangle hit, falling
+    /// back to the ground plane (scene bottom) so empty areas still yield a
+    /// usable point. Returns world coordinates (render space + render origin).
+    /// </summary>
+    private bool TryPickWorldPoint(Point point, out double worldX, out double worldY, out double worldZ)
+    {
+        worldX = 0;
+        worldY = 0;
+        worldZ = 0;
+        if (!TryCreateRay(point, out var rayOrigin, out var rayDirection))
+        {
+            return false;
+        }
+
+        var scene = Scene;
+        var bestDistance = float.PositiveInfinity;
+        if (scene is not null && !scene.IsEmpty)
+        {
+            var hideSpaces = HideSpaces;
+            foreach (var mesh in scene.Meshes)
+            {
+                if (!mesh.IsRenderable || (hideSpaces && mesh.IsSpace))
+                {
+                    continue;
+                }
+
+                var vertexCount = mesh.VertexCount;
+                for (var i = 0; i + 2 < mesh.Indices.Length; i += 3)
+                {
+                    var first = mesh.Indices[i];
+                    var second = mesh.Indices[i + 1];
+                    var third = mesh.Indices[i + 2];
+                    if (first < 0 || second < 0 || third < 0
+                        || first >= vertexCount || second >= vertexCount || third >= vertexCount)
+                    {
+                        continue;
+                    }
+
+                    if (IntersectTriangle(
+                        rayOrigin,
+                        rayDirection,
+                        ToRenderVector(mesh.Positions, first, renderOrigin),
+                        ToRenderVector(mesh.Positions, second, renderOrigin),
+                        ToRenderVector(mesh.Positions, third, renderOrigin),
+                        out var distance)
+                        && distance < bestDistance)
+                    {
+                        bestDistance = distance;
+                    }
+                }
+            }
+        }
+
+        Vector3 hit;
+        if (float.IsFinite(bestDistance))
+        {
+            hit = rayOrigin + rayDirection * bestDistance;
+        }
+        else
+        {
+            // Ground plane at the scene bottom (the grid's height); rays parallel
+            // to the plane or pointing away cannot pick.
+            var bounds = scene?.Bounds ?? IfcRenderBounds.Empty;
+            var planeZ = bounds.IsEmpty ? 0f : ToRenderFloat(bounds.MinZ - renderOrigin.Z);
+            if (!TryIntersectPlane(rayOrigin, rayDirection, new Vector3(0, 0, planeZ), Vector3.UnitZ, out hit))
+            {
+                return false;
+            }
+        }
+
+        worldX = hit.X + renderOrigin.X;
+        worldY = hit.Y + renderOrigin.Y;
+        worldZ = hit.Z + renderOrigin.Z;
+        return true;
     }
 
     private int PickProduct(Point point)
@@ -2769,6 +3289,7 @@ uniform int uPreviewProductId;
 
 out vec3 vNormal;
 out vec4 vColor;
+out vec3 vWorldPos;
 flat out float vProductId;
 
 void main()
@@ -2782,6 +3303,7 @@ void main()
     gl_Position = uMvp * worldPosition;
     vNormal = aNormal;
     vColor = aColor;
+    vWorldPos = worldPosition.xyz;
     vProductId = aProductId;
 }
 """;
@@ -2790,17 +3312,48 @@ void main()
 #version 330 core
 in vec3 vNormal;
 in vec4 vColor;
+in vec3 vWorldPos;
 flat in float vProductId;
 
 uniform int uSelectedProductId;
+uniform vec3 uCameraPosition;
+uniform int uUnlit;
 
 out vec4 outColor;
 
 void main()
 {
-    vec3 normal = normalize(vNormal);
-    float light = max(dot(normal, normalize(vec3(0.35, 0.55, 0.75))), 0.0);
-    vec3 color = vColor.rgb * (0.38 + light * 0.62);
+    vec3 color;
+    if (uUnlit == 1)
+    {
+        color = vColor.rgb;
+    }
+    else
+    {
+        // Zero-length vertex normals mark faceted geometry: derive the flat
+        // face normal from screen-space derivatives (crisp hard edges, no
+        // duplicated vertices).
+        vec3 normal = dot(vNormal, vNormal) > 0.25
+            ? normalize(vNormal)
+            : normalize(cross(dFdx(vWorldPos), dFdy(vWorldPos)));
+
+        // IFC windings are inconsistent; light the side facing the camera.
+        vec3 viewDirection = normalize(uCameraPosition - vWorldPos);
+        if (dot(normal, viewDirection) < 0.0)
+        {
+            normal = -normal;
+        }
+
+        // Hemisphere ambient + key + fill + headlight: cheap, stable, no pitch
+        // black faces and no blown-out highlights.
+        float sky = normal.z * 0.5 + 0.5;
+        vec3 ambient = mix(vec3(0.27, 0.27, 0.26), vec3(0.48, 0.49, 0.48), sky);
+        float key = max(dot(normal, normalize(vec3(0.38, 0.26, 0.89))), 0.0) * 0.46;
+        float fill = max(dot(normal, normalize(vec3(-0.50, -0.40, 0.20))), 0.0) * 0.15;
+        float head = max(dot(normal, viewDirection), 0.0) * 0.10;
+        color = vColor.rgb * min(ambient + vec3(key + fill + head), vec3(1.08));
+    }
+
     if (uSelectedProductId > 0 && abs(vProductId - float(uSelectedProductId)) < 0.5)
     {
         color = mix(color, vec3(1.0, 0.78, 0.22), 0.68);
@@ -2823,6 +3376,7 @@ uniform int uPreviewProductId;
 
 varying vec3 vNormal;
 varying vec4 vColor;
+varying vec3 vWorldPos;
 varying float vProductId;
 
 void main()
@@ -2836,6 +3390,7 @@ void main()
     gl_Position = uMvp * worldPosition;
     vNormal = aNormal;
     vColor = aColor;
+    vWorldPos = worldPosition.xyz;
     vProductId = aProductId;
 }
 """;
@@ -2844,21 +3399,124 @@ void main()
 #version 120
 varying vec3 vNormal;
 varying vec4 vColor;
+varying vec3 vWorldPos;
 varying float vProductId;
 
 uniform int uSelectedProductId;
+uniform vec3 uCameraPosition;
+uniform int uUnlit;
 
 void main()
 {
-    vec3 normal = normalize(vNormal);
-    float light = max(dot(normal, normalize(vec3(0.35, 0.55, 0.75))), 0.0);
-    vec3 color = vColor.rgb * (0.38 + light * 0.62);
+    vec3 color;
+    if (uUnlit == 1)
+    {
+        color = vColor.rgb;
+    }
+    else
+    {
+        vec3 normal = dot(vNormal, vNormal) > 0.25
+            ? normalize(vNormal)
+            : normalize(cross(dFdx(vWorldPos), dFdy(vWorldPos)));
+        vec3 viewDirection = normalize(uCameraPosition - vWorldPos);
+        if (dot(normal, viewDirection) < 0.0)
+        {
+            normal = -normal;
+        }
+
+        float sky = normal.z * 0.5 + 0.5;
+        vec3 ambient = mix(vec3(0.27, 0.27, 0.26), vec3(0.48, 0.49, 0.48), sky);
+        float key = max(dot(normal, normalize(vec3(0.38, 0.26, 0.89))), 0.0) * 0.46;
+        float fill = max(dot(normal, normalize(vec3(-0.50, -0.40, 0.20))), 0.0) * 0.15;
+        float head = max(dot(normal, viewDirection), 0.0) * 0.10;
+        color = vColor.rgb * min(ambient + vec3(key + fill + head), vec3(1.08));
+    }
+
     if (uSelectedProductId > 0 && abs(vProductId - float(uSelectedProductId)) < 0.5)
     {
         color = mix(color, vec3(1.0, 0.78, 0.22), 0.68);
     }
 
     gl_FragColor = vec4(color, vColor.a);
+}
+""";
+
+    private const string BackgroundVertexShaderSource330 = """
+#version 330 core
+layout(location = 0) in vec2 aPosition;
+
+out vec2 vNdc;
+
+void main()
+{
+    gl_Position = vec4(aPosition, 0.0, 1.0);
+    vNdc = aPosition;
+}
+""";
+
+    private const string BackgroundFragmentShaderSource330 = """
+#version 330 core
+in vec2 vNdc;
+
+uniform mat4 uInverseViewProjection;
+
+out vec4 outColor;
+
+void main()
+{
+    vec4 nearPoint = uInverseViewProjection * vec4(vNdc, -1.0, 1.0);
+    vec4 farPoint = uInverseViewProjection * vec4(vNdc, 1.0, 1.0);
+    vec3 direction = normalize(farPoint.xyz / farPoint.w - nearPoint.xyz / nearPoint.w);
+    float up = direction.z;
+
+    vec3 zenith = vec3(0.071, 0.086, 0.102);
+    vec3 horizon = vec3(0.149, 0.173, 0.165);
+    vec3 ground = vec3(0.051, 0.059, 0.053);
+    vec3 color = up >= 0.0
+        ? mix(horizon, zenith, smoothstep(0.0, 0.55, up))
+        : mix(horizon, ground, smoothstep(0.0, 0.32, -up));
+
+    // Soft glow band right at the horizon line.
+    color += vec3(0.014, 0.020, 0.017) * (1.0 - smoothstep(0.0, 0.10, abs(up)));
+    outColor = vec4(color, 1.0);
+}
+""";
+
+    private const string BackgroundVertexShaderSource120 = """
+#version 120
+attribute vec2 aPosition;
+
+varying vec2 vNdc;
+
+void main()
+{
+    gl_Position = vec4(aPosition, 0.0, 1.0);
+    vNdc = aPosition;
+}
+""";
+
+    private const string BackgroundFragmentShaderSource120 = """
+#version 120
+varying vec2 vNdc;
+
+uniform mat4 uInverseViewProjection;
+
+void main()
+{
+    vec4 nearPoint = uInverseViewProjection * vec4(vNdc, -1.0, 1.0);
+    vec4 farPoint = uInverseViewProjection * vec4(vNdc, 1.0, 1.0);
+    vec3 direction = normalize(farPoint.xyz / farPoint.w - nearPoint.xyz / nearPoint.w);
+    float up = direction.z;
+
+    vec3 zenith = vec3(0.071, 0.086, 0.102);
+    vec3 horizon = vec3(0.149, 0.173, 0.165);
+    vec3 ground = vec3(0.051, 0.059, 0.053);
+    vec3 color = up >= 0.0
+        ? mix(horizon, zenith, smoothstep(0.0, 0.55, up))
+        : mix(horizon, ground, smoothstep(0.0, 0.32, -up));
+
+    color += vec3(0.014, 0.020, 0.017) * (1.0 - smoothstep(0.0, 0.10, abs(up)));
+    gl_FragColor = vec4(color, 1.0);
 }
 """;
 
@@ -3089,7 +3747,54 @@ void main()
 }
 """;
 
-    private sealed record TransparentMeshBatch(Vector3 Center, uint[] Indices);
+    private sealed record TransparentMeshBatch(int ProductId, Vector3 Center, Vector3 BoundsMin, Vector3 BoundsMax, int VertexCount, uint[] Indices);
+
+    private readonly record struct MeshDrawRange(int ProductId, int IndexOffset, int IndexCount, int VertexCount, Vector3 BoundsMin, Vector3 BoundsMax);
+
+    /// <summary>
+    /// View frustum extracted from a row-vector view-projection matrix. The
+    /// near plane uses the GL convention (z &gt;= -w), which is the conservative
+    /// superset of what actually rasterizes — culling never clips visible geometry.
+    /// </summary>
+    private readonly struct FrustumPlanes
+    {
+        private readonly Vector4 left;
+        private readonly Vector4 right;
+        private readonly Vector4 bottom;
+        private readonly Vector4 top;
+        private readonly Vector4 near;
+        private readonly Vector4 far;
+
+        public FrustumPlanes(in Matrix4x4 m)
+        {
+            left = new Vector4(m.M14 + m.M11, m.M24 + m.M21, m.M34 + m.M31, m.M44 + m.M41);
+            right = new Vector4(m.M14 - m.M11, m.M24 - m.M21, m.M34 - m.M31, m.M44 - m.M41);
+            bottom = new Vector4(m.M14 + m.M12, m.M24 + m.M22, m.M34 + m.M32, m.M44 + m.M42);
+            top = new Vector4(m.M14 - m.M12, m.M24 - m.M22, m.M34 - m.M32, m.M44 - m.M42);
+            near = new Vector4(m.M14 + m.M13, m.M24 + m.M23, m.M34 + m.M33, m.M44 + m.M43);
+            far = new Vector4(m.M14 - m.M13, m.M24 - m.M23, m.M34 - m.M33, m.M44 - m.M43);
+        }
+
+        public bool Intersects(Vector3 min, Vector3 max)
+        {
+            return !Outside(left, min, max)
+                && !Outside(right, min, max)
+                && !Outside(bottom, min, max)
+                && !Outside(top, min, max)
+                && !Outside(near, min, max)
+                && !Outside(far, min, max);
+        }
+
+        private static bool Outside(in Vector4 plane, in Vector3 min, in Vector3 max)
+        {
+            // Positive-vertex test: if the AABB corner furthest along the plane
+            // normal is behind the plane, the whole box is outside.
+            var x = plane.X >= 0 ? max.X : min.X;
+            var y = plane.Y >= 0 ? max.Y : min.Y;
+            var z = plane.Z >= 0 ? max.Z : min.Z;
+            return plane.X * x + plane.Y * y + plane.Z * z + plane.W < 0;
+        }
+    }
 
     private readonly record struct InfiniteGridSignature(
         double TargetX,
@@ -3125,4 +3830,13 @@ public sealed class IfcProductTransformCommittedEventArgs(int productId, Vector3
 public sealed class ViewportFpsUpdatedEventArgs(string text) : EventArgs
 {
     public string Text { get; } = text;
+}
+
+public sealed class ViewportPointPickedEventArgs(double worldX, double worldY, double worldZ) : EventArgs
+{
+    public double WorldX { get; } = worldX;
+
+    public double WorldY { get; } = worldY;
+
+    public double WorldZ { get; } = worldZ;
 }

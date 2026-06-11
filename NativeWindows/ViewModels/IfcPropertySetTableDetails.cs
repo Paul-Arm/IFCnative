@@ -14,9 +14,13 @@ public sealed record IfcPropertyTableRowDetails(
     string Name,
     string Type,
     string Value,
-    bool CanEdit)
+    bool CanEdit,
+    string ValueType = "")
 {
     public string StepId => EntityId is null ? "-" : $"#{EntityId}";
+
+    /// <summary>The measure type is only switchable on IfcPropertySingleValue.</summary>
+    public bool CanEditValueType => CanEdit && Type == "IFCPROPERTYSINGLEVALUE";
 
     public IfcPropertyDetails ToPropertyDetails()
     {

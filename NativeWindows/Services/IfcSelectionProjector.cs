@@ -114,7 +114,8 @@ public static class IfcSelectionProjector
                         value.Name,
                         value.Type,
                         value.Value,
-                        IsEditablePropertyValue(value.Type)))
+                        IsEditablePropertyValue(value.Type),
+                        value.ValueType))
                     .ToList());
         }
     }

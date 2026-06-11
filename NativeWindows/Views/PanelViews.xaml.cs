@@ -1,6 +1,9 @@
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Shapes;
+using Avalonia.Input;
 using Avalonia.ReactiveUI;
+using Avalonia.VisualTree;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
@@ -57,6 +60,22 @@ public partial class TypesPanelView : ReactiveUserControl<TypesPanelViewModel>
 public partial class ModelsPanelView : ReactiveUserControl<ModelsPanelViewModel>
 {
     public ModelsPanelView() => InitializeComponent();
+
+    private void OnModelCardPressed(object? sender, Avalonia.Input.PointerPressedEventArgs e)
+    {
+        // The eye toggle and the remove button inside the card handle their own
+        // clicks; activating the card here would race them (e.g. re-activating a
+        // session that is being removed).
+        if (e.Source is Control source && source.FindAncestorOfType<Button>(includeSelf: true) is not null)
+        {
+            return;
+        }
+
+        if (sender is Control { DataContext: IfcDocumentSessionViewModel session })
+        {
+            session.IsActive = true;
+        }
+    }
 }
 
 public partial class ViewportPanelView : ReactiveUserControl<ViewportPanelViewModel>
@@ -68,6 +87,14 @@ public partial class ViewportPanelView : ReactiveUserControl<ViewportPanelViewMo
         if (DataContext is ViewportPanelViewModel viewModel)
         {
             viewModel.SelectProduct(e.ProductId);
+        }
+    }
+
+    private void OnViewportPointPicked(object? sender, ViewportPointPickedEventArgs e)
+    {
+        if (DataContext is ViewportPanelViewModel viewModel)
+        {
+            viewModel.HandlePointPicked(e.WorldX, e.WorldY, e.WorldZ);
         }
     }
 
@@ -90,30 +117,6 @@ public partial class ViewportPanelView : ReactiveUserControl<ViewportPanelViewMo
         }
     }
 
-    private void OnViewportSelectMode(object? sender, RoutedEventArgs e)
-    {
-        if (DataContext is ViewportPanelViewModel viewModel)
-        {
-            viewModel.SetInteractionMode(ViewportInteractionMode.Select);
-        }
-    }
-
-    private void OnViewportMoveMode(object? sender, RoutedEventArgs e)
-    {
-        if (DataContext is ViewportPanelViewModel viewModel)
-        {
-            viewModel.SetInteractionMode(ViewportInteractionMode.Move);
-        }
-    }
-
-    private void OnViewportRotateMode(object? sender, RoutedEventArgs e)
-    {
-        if (DataContext is ViewportPanelViewModel viewModel)
-        {
-            viewModel.SetInteractionMode(ViewportInteractionMode.Rotate);
-        }
-    }
-
     private void OnViewportFit(object? sender, RoutedEventArgs e)
     {
         ViewportCanvas.FitCamera();
@@ -129,25 +132,47 @@ public partial class ViewportPanelView : ReactiveUserControl<ViewportPanelViewMo
         ViewportCanvas.SetIsoView();
     }
 
-    private void OnViewportTop(object? sender, RoutedEventArgs e)
+    private void OnNavCubeViewRequested(object? sender, NavCubeViewRequestedEventArgs e)
     {
-        ViewportCanvas.SetTopView();
+        ViewportCanvas.SetViewOrientation(e.YawDegrees, e.PitchDegrees);
     }
 
-    private void OnViewportFront(object? sender, RoutedEventArgs e)
+    private void OnNavCubeOrbitRequested(object? sender, NavCubeOrbitEventArgs e)
     {
-        ViewportCanvas.SetFrontView();
-    }
-
-    private void OnViewportRight(object? sender, RoutedEventArgs e)
-    {
-        ViewportCanvas.SetRightView();
+        ViewportCanvas.OrbitCamera(e.DeltaX, e.DeltaY);
     }
 }
 
 public partial class InspectorPanelView : ReactiveUserControl<InspectorPanelViewModel>
 {
     public InspectorPanelView() => InitializeComponent();
+
+    private void OnPsetValueLostFocus(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Control { DataContext: IfcPropertyTableRowViewModel row })
+        {
+            row.SaveIfChanged();
+        }
+    }
+
+    private void OnPsetValueKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter && sender is Control { DataContext: IfcPropertyTableRowViewModel row })
+        {
+            row.SaveIfChanged();
+            e.Handled = true;
+        }
+    }
+
+    private void OnPsetTypeChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        // Fires during template binding too; SaveIfChanged is dirty-checked, so
+        // only real user changes commit.
+        if (sender is Control { DataContext: IfcPropertyTableRowViewModel row, IsLoaded: true })
+        {
+            row.SaveIfChanged();
+        }
+    }
 }
 
 public partial class DraftPanelView : ReactiveUserControl<DraftPanelViewModel>

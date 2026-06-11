@@ -2,7 +2,29 @@
              xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:views="using:IFCnative.NativeWindows.Views">
-  <Grid RowDefinitions="Auto,*,Auto,150" Margin="8" RowSpacing="8">
+  <UserControl.Styles>
+    <Style Selector="ToggleButton.collapseHeader">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="MinHeight" Value="0" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Left" />
+    </Style>
+    <Style Selector="ToggleButton.collapseHeader:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="ToggleButton.collapseHeader:checked /template/ ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="ToggleButton.collapseHeader PathIcon">
+      <Setter Property="RenderTransform" Value="rotate(-90deg)" />
+    </Style>
+    <Style Selector="ToggleButton.collapseHeader:checked PathIcon">
+      <Setter Property="RenderTransform" Value="rotate(0deg)" />
+    </Style>
+  </UserControl.Styles>
+  <Grid RowDefinitions="Auto,*,Auto,Auto" Margin="8" RowSpacing="8">
     <StackPanel Spacing="6">
       <TextBlock Classes="sectionTitle" Text="Structure" />
       <TextBox Watermark="Search" Text="{Binding SearchText}" />
@@ -16,8 +38,10 @@
       <ListBox.ItemTemplate>
         <DataTemplate>
           <Grid Height="{DynamicResource FileTreeRowHeight}"
-                ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto"
-                VerticalAlignment="Center">
+                ColumnDefinitions="Auto,Auto,Auto,Auto,*"
+                VerticalAlignment="Center"
+                Background="Transparent"
+                ToolTip.Tip="{Binding TypeLabel}">
             <ItemsControl Grid.Column="0"
                           ItemsSource="{Binding Guides}">
               <ItemsControl.ItemsPanel>
@@ -87,28 +111,39 @@
                        Text="{Binding DisplayName}"
                        TextTrimming="CharacterEllipsis"
                        TextWrapping="NoWrap" />
-            <TextBlock Grid.Column="5"
-                       Margin="12,0,2,0"
-                       FontSize="{DynamicResource FontSizeTreeMeta}"
-                       Foreground="#9AA59A"
-                       VerticalAlignment="Center"
-                       HorizontalAlignment="Right"
-                       Text="{Binding TypeLabel}"
-                       TextAlignment="Right"
-                       TextWrapping="NoWrap" />
           </Grid>
         </DataTemplate>
       </ListBox.ItemTemplate>
     </ListBox>
 
-    <TextBlock Grid.Row="2" Classes="sectionTitle" Text="Pinned" />
+    <ToggleButton Grid.Row="2"
+                  x:Name="PinnedToggle"
+                  Classes="collapseHeader"
+                  IsChecked="{Binding IsPinnedSectionExpanded, Mode=TwoWay}"
+                  ToolTip.Tip="Show or hide pinned entities">
+      <StackPanel Orientation="Horizontal" Spacing="6">
+        <PathIcon Width="10"
+                  Height="10"
+                  Foreground="#A4AA9F"
+                  Data="M4.5,5.5 L8,9 L11.5,5.5 L12.5,6.5 L8,11 L3.5,6.5 Z" />
+        <TextBlock Classes="sectionTitle" Text="Pinned" />
+        <TextBlock Classes="caption"
+                   VerticalAlignment="Center"
+                   Text="{Binding Bookmarks.Count}" />
+      </StackPanel>
+    </ToggleButton>
     <ListBox Grid.Row="3"
              Classes="compact"
+             MaxHeight="110"
+             IsVisible="{Binding #PinnedToggle.IsChecked}"
              ItemsSource="{Binding Bookmarks}"
              SelectedItem="{Binding SelectedBookmark}">
       <ListBox.ItemTemplate>
         <DataTemplate>
-          <Grid Height="{DynamicResource FileTreeRowHeight}" ColumnDefinitions="Auto,*,Auto">
+          <Grid Height="{DynamicResource FileTreeRowHeight}"
+                ColumnDefinitions="Auto,*"
+                Background="Transparent"
+                ToolTip.Tip="{Binding TypeLabel}">
             <views:IfcTreeIconControl Height="{DynamicResource FileTreeIconSize}"
                                       Width="{DynamicResource FileTreeIconSize}"
                                       Margin="1,0,7,0"
@@ -119,15 +154,6 @@
                        VerticalAlignment="Center"
                        Text="{Binding DisplayName}"
                        TextTrimming="CharacterEllipsis"
-                       TextWrapping="NoWrap" />
-            <TextBlock Grid.Column="2"
-                       Margin="10,0,0,0"
-                       FontSize="{DynamicResource FontSizeTreeMeta}"
-                       Foreground="#9AA59A"
-                       VerticalAlignment="Center"
-                       HorizontalAlignment="Right"
-                       Text="{Binding TypeLabel}"
-                       TextAlignment="Right"
                        TextWrapping="NoWrap" />
           </Grid>
         </DataTemplate>

@@ -9,10 +9,20 @@ public sealed record IfcExportValidationResult(bool CanExport, int EntityCount, 
 
 public static class IfcExportValidator
 {
-    public static IfcExportValidationResult Validate(IfcDocument document, IIfcGeometryBackend? geometryBackend = null)
+    /// <summary>
+    /// Validates the document for export. <paramref name="reportProgress"/>
+    /// receives a stage label and a 0..1 fraction of the validation work; the
+    /// full STEP roundtrip below takes seconds on large models, so callers
+    /// should run this off the UI thread.
+    /// </summary>
+    public static IfcExportValidationResult Validate(
+        IfcDocument document,
+        IIfcGeometryBackend? geometryBackend = null,
+        Action<string, double>? reportProgress = null)
     {
         try
         {
+            reportProgress?.Invoke("Checking document shape...", 0.02);
             var preflightErrors = ValidateDocumentShape(document);
             if (preflightErrors.Count > 0)
             {
@@ -23,13 +33,17 @@ public static class IfcExportValidator
             var geometryWarnings = new List<string>();
             if (geometryBackend is not null)
             {
+                reportProgress?.Invoke("Validating geometry...", 0.08);
                 var originalGeometryValidation = geometryBackend.ValidateDocument(document);
                 geometryErrors.AddRange(originalGeometryValidation.Errors);
                 geometryWarnings.AddRange(originalGeometryValidation.Warnings);
             }
 
+            reportProgress?.Invoke("Normalizing STEP output...", 0.30);
             var normalizedStep = XbimIfcDocumentService.NormalizeForExport(document);
+            reportProgress?.Invoke("Re-parsing normalized STEP...", 0.55);
             var reparsed = XbimIfcDocumentService.OpenText(normalizedStep, document.FileName);
+            reportProgress?.Invoke("Running diagnostics...", 0.75);
             IfcDocumentDiagnostics.Run(reparsed);
             var errors = reparsed.Diagnostics.Messages
                 .Where(message => message.StartsWith("Error:", StringComparison.OrdinalIgnoreCase))
@@ -47,6 +61,7 @@ public static class IfcExportValidator
 
             if (geometryBackend is not null && geometryErrors.Count == 0)
             {
+                reportProgress?.Invoke("Validating normalized geometry...", 0.85);
                 var geometryValidation = geometryBackend.ValidateDocument(reparsed);
                 errors.AddRange(geometryValidation.Errors);
                 warnings.AddRange(geometryValidation.Warnings);
