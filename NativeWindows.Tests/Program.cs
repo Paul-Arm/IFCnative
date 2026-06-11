@@ -184,14 +184,11 @@ internal sealed class NativeTestRunner
         True(IsFinite(scene.Bounds.MinX) && IsFinite(scene.Bounds.MaxX), "scene bounds should be finite");
 
         var mesh = scene.Meshes.First(mesh => mesh.ProductId == 40 && mesh.IsRenderable);
-        True(mesh.Indices.All(index => index >= 0 && index < mesh.Vertices.Count), "mesh indices should address vertices");
-        True(mesh.Vertices.All(vertex =>
-            IsFinite(vertex.X)
-            && IsFinite(vertex.Y)
-            && IsFinite(vertex.Z)
-            && IsFinite(vertex.NormalX)
-            && IsFinite(vertex.NormalY)
-            && IsFinite(vertex.NormalZ)), "mesh vertices and normals should be finite");
+        True(mesh.Indices.All(index => index >= 0 && index < mesh.VertexCount), "mesh indices should address vertices");
+        True(mesh.Positions.All(IsFinite), "mesh positions should be finite");
+        True(mesh.Normals.All(value => IsFinite(value)), "mesh normals should be finite");
+        True(mesh.Positions.Length == mesh.Normals.Length, "positions and normals should pair up");
+        True(!mesh.Bounds.IsEmpty, "mesh bounds should be computed at decode time");
 
         var selectedScene = backend.BuildRenderSceneAsync(document, IfcRenderSceneRequest.ForProduct(40)).GetAwaiter().GetResult();
         True(!selectedScene.IsEmpty && selectedScene.Meshes.All(value => value.ProductId == 40), "product scene should use ShapeInstancesOfEntity filtering");

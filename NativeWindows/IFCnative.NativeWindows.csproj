@@ -7,6 +7,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Large IFC models need the 64-bit address space; an x86 build OOMs on ~100MB+ files. -->
+    <PlatformTarget>x64</PlatformTarget>
   </PropertyGroup>
 
   <ItemGroup>

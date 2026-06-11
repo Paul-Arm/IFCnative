@@ -180,6 +180,15 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
     private int lastPostHeight;
     private AntiAliasingMode lastPostMode = AntiAliasingMode.None;
 
+    // GPU picking FBO: product ids are rendered as colors and read back under
+    // the cursor, replacing the O(triangles) CPU raycast on every click.
+    private uint pickFbo;
+    private uint pickColorRb;
+    private uint pickDepthRb;
+    private uint pickProgram;
+    private int lastPickWidth;
+    private int lastPickHeight;
+
     public event EventHandler<IfcProductPickedEventArgs>? ProductPicked;
 
     public event EventHandler<IfcProductTransformCommittedEventArgs>? ProductTransformCommitted;
@@ -315,6 +324,27 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
                 FxaaVertexShaderSource120,
                 FxaaFragmentShaderSource120,
                 "aPosition");
+
+            try
+            {
+                pickProgram = CreateProgramWithFallback(
+                    glApi,
+                    isGles,
+                    "pick",
+                    PickVertexShaderSource330,
+                    PickFragmentShaderSource330,
+                    PickVertexShaderSource120,
+                    PickFragmentShaderSource120,
+                    "aPosition",
+                    "aNormal",
+                    "aColor",
+                    "aProductId");
+            }
+            catch (Exception exception)
+            {
+                LogViewport($"pick shader unavailable, falling back to CPU picking: {exception.Message}");
+                pickProgram = 0;
+            }
             quadVao = glApi.GenVertexArray();
             quadVbo = glApi.GenBuffer();
             glApi.BindVertexArray(quadVao);
@@ -435,6 +465,26 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
             {
                 glApi.DeleteProgram(fxaaProgram);
                 fxaaProgram = 0;
+            }
+            if (pickFbo != 0)
+            {
+                glApi.DeleteFramebuffer(pickFbo);
+                pickFbo = 0;
+            }
+            if (pickColorRb != 0)
+            {
+                glApi.DeleteRenderbuffer(pickColorRb);
+                pickColorRb = 0;
+            }
+            if (pickDepthRb != 0)
+            {
+                glApi.DeleteRenderbuffer(pickDepthRb);
+                pickDepthRb = 0;
+            }
+            if (pickProgram != 0)
+            {
+                glApi.DeleteProgram(pickProgram);
+                pickProgram = 0;
             }
             if (quadVao != 0)
             {
@@ -672,7 +722,15 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         if (pendingPickPoint is { } pickPoint)
         {
             pendingPickPoint = null;
-            var pickedProductId = PickProduct(pickPoint);
+            var pickWatch = Stopwatch.GetTimestamp();
+            var pickedProductId = PickProductGpu(glApi, pickPoint, width, height, fb, viewProjection);
+            var usedGpu = pickedProductId >= 0;
+            if (!usedGpu)
+            {
+                pickedProductId = PickProduct(pickPoint);
+            }
+
+            LogViewport($"pick: product=#{pickedProductId} via {(usedGpu ? "gpu" : "cpu")} in {(Stopwatch.GetTimestamp() - pickWatch) * 1000d / Stopwatch.Frequency:0.0}ms");
             if (pickedProductId > 0)
             {
                 suppressNextFraming = true;
@@ -991,10 +1049,7 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
                 continue;
             }
 
-            foreach (var vertex in mesh.Vertices)
-            {
-                bounds = bounds.Include(vertex.X, vertex.Y, vertex.Z);
-            }
+            bounds = bounds.Include(mesh.Bounds);
         }
 
         return !bounds.IsEmpty;
@@ -1646,45 +1701,104 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         }
 
         var hideSpaces = HideSpaces;
-        var vertexValues = new List<float>();
-        var opaqueIndexValues = new List<uint>();
+
+        // First pass: exact totals so the interleaved buffers are allocated once
+        // (a growing List<float> peaks at ~3x the final size on large models).
+        var totalVertexCount = 0;
+        var totalOpaqueIndexCount = 0;
+        foreach (var mesh in scene.Meshes)
+        {
+            if (!mesh.IsRenderable || (hideSpaces && mesh.IsSpace))
+            {
+                continue;
+            }
+
+            totalVertexCount += mesh.VertexCount;
+            if (!IsTransparent(mesh))
+            {
+                totalOpaqueIndexCount += mesh.Indices.Length;
+            }
+        }
+
+        var vertexValues = new float[totalVertexCount * VertexStride];
+        var opaqueIndexValues = new uint[totalOpaqueIndexCount];
         var batches = new List<TransparentMeshBatch>();
+        var vertexCursor = 0;
+        var opaqueCursor = 0;
+        var baseVertex = 0u;
         var meshCount = 0;
         var triangleCount = 0;
-        foreach (var mesh in scene.Meshes.Where(mesh => mesh.IsRenderable))
+        foreach (var mesh in scene.Meshes)
         {
-            if (hideSpaces && mesh.IsSpace)
+            if (!mesh.IsRenderable || (hideSpaces && mesh.IsSpace))
             {
                 continue;
             }
 
             meshCount++;
-            var baseIndex = (uint)(vertexValues.Count / VertexStride);
-            foreach (var vertex in mesh.Vertices)
+            var meshVertexCount = mesh.VertexCount;
+            for (var i = 0; i < meshVertexCount; i++)
             {
-                AddVertex(vertexValues, vertex, mesh.Color, mesh.ProductId, renderOrigin);
+                var offset = i * 3;
+                vertexValues[vertexCursor++] = ToRenderFloat(mesh.Positions[offset] - renderOrigin.X);
+                vertexValues[vertexCursor++] = ToRenderFloat(mesh.Positions[offset + 1] - renderOrigin.Y);
+                vertexValues[vertexCursor++] = ToRenderFloat(mesh.Positions[offset + 2] - renderOrigin.Z);
+                vertexValues[vertexCursor++] = mesh.Normals[offset];
+                vertexValues[vertexCursor++] = mesh.Normals[offset + 1];
+                vertexValues[vertexCursor++] = mesh.Normals[offset + 2];
+                vertexValues[vertexCursor++] = mesh.Color.R;
+                vertexValues[vertexCursor++] = mesh.Color.G;
+                vertexValues[vertexCursor++] = mesh.Color.B;
+                vertexValues[vertexCursor++] = mesh.Color.A;
+                vertexValues[vertexCursor++] = mesh.ProductId;
             }
 
-            var meshIndexValues = IsTransparent(mesh)
-                ? new List<uint>(mesh.Indices.Count)
-                : opaqueIndexValues;
-            foreach (var index in mesh.Indices)
+            if (IsTransparent(mesh))
             {
-                if (index >= 0 && index < mesh.Vertices.Count)
+                var meshIndices = new uint[mesh.Indices.Length];
+                var meshCursor = 0;
+                foreach (var index in mesh.Indices)
                 {
-                    meshIndexValues.Add(baseIndex + (uint)index);
+                    if (index >= 0 && index < meshVertexCount)
+                    {
+                        meshIndices[meshCursor++] = baseVertex + (uint)index;
+                    }
+                }
+
+                if (meshCursor > 0)
+                {
+                    if (meshCursor < meshIndices.Length)
+                    {
+                        Array.Resize(ref meshIndices, meshCursor);
+                    }
+
+                    triangleCount += meshCursor / 3;
+                    batches.Add(new TransparentMeshBatch(MeshCenter(mesh, renderOrigin), meshIndices));
                 }
             }
-
-            triangleCount += meshIndexValues.Count / 3;
-            if (meshIndexValues != opaqueIndexValues && meshIndexValues.Count > 0)
+            else
             {
-                batches.Add(new TransparentMeshBatch(MeshCenter(mesh, renderOrigin), meshIndexValues.ToArray()));
+                foreach (var index in mesh.Indices)
+                {
+                    if (index >= 0 && index < meshVertexCount)
+                    {
+                        opaqueIndexValues[opaqueCursor++] = baseVertex + (uint)index;
+                    }
+                }
+
+                triangleCount += mesh.Indices.Length / 3;
             }
+
+            baseVertex += (uint)meshVertexCount;
         }
 
-        vertices = vertexValues.ToArray();
-        opaqueIndices = opaqueIndexValues.ToArray();
+        if (opaqueCursor < opaqueIndexValues.Length)
+        {
+            Array.Resize(ref opaqueIndexValues, opaqueCursor);
+        }
+
+        vertices = vertexValues;
+        opaqueIndices = opaqueIndexValues;
         transparentMeshBatches = batches;
         transparentIndices = [];
         opaqueIndexCount = opaqueIndices.Length;
@@ -1693,7 +1807,7 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         lineVertexCount = 0;
         visibleMeshCount = meshCount;
         visibleTriangleCount = triangleCount;
-        visibleVertexCount = vertices.Length / VertexStride;
+        visibleVertexCount = totalVertexCount;
     }
 
     private unsafe void UploadBuffers(SilkGL gl)
@@ -1801,21 +1915,6 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         gl.VertexAttribPointer(3, 1, VertexAttribPointerType.Float, false, stride, (void*)(10 * sizeof(float)));
     }
 
-    private static void AddVertex(List<float> values, IfcRenderVertex vertex, IfcRenderColor color, int productId, IfcPreviewVertex origin)
-    {
-        values.Add(ToRenderFloat(vertex.X - origin.X));
-        values.Add(ToRenderFloat(vertex.Y - origin.Y));
-        values.Add(ToRenderFloat(vertex.Z - origin.Z));
-        values.Add(vertex.NormalX);
-        values.Add(vertex.NormalY);
-        values.Add(vertex.NormalZ);
-        values.Add(color.R);
-        values.Add(color.G);
-        values.Add(color.B);
-        values.Add(color.A);
-        values.Add(productId);
-    }
-
     private static void AddLocalVertex(List<float> values, float x, float y, float z, IfcRenderColor color, int productId)
     {
         values.Add(x);
@@ -1838,14 +1937,7 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
 
     private static Vector3 MeshCenter(IfcRenderMesh mesh, IfcPreviewVertex origin)
     {
-        var bounds = IfcRenderBounds.Empty;
-        foreach (var vertex in mesh.Vertices)
-        {
-            bounds = bounds.Include(vertex.X, vertex.Y, vertex.Z);
-        }
-
-        var center = bounds.Center;
-        return ToRenderVector(center, origin);
+        return ToRenderVector(mesh.Bounds.Center, origin);
     }
 
     private InfiniteGridSignature CreateInfiniteGridSignature(int width, int height)
@@ -2170,6 +2262,109 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
         return view * projection;
     }
 
+    /// <summary>
+    /// Renders product ids into an offscreen color buffer and reads back the
+    /// pixel under <paramref name="point"/>. Returns the picked product id,
+    /// 0 for empty space, or -1 when the GPU path is unavailable (caller
+    /// falls back to the CPU raycast).
+    /// </summary>
+    private unsafe int PickProductGpu(SilkGL gl, Point point, int width, int height, int fb, Matrix4x4 viewProjection)
+    {
+        if (pickProgram == 0 || (opaqueIndexCount == 0 && transparentIndexCount == 0 && transparentMeshBatches.Count == 0))
+        {
+            return pickProgram == 0 ? -1 : 0;
+        }
+
+        if (pickFbo == 0 || width != lastPickWidth || height != lastPickHeight)
+        {
+            if (pickFbo != 0)
+            {
+                gl.DeleteFramebuffer(pickFbo);
+            }
+
+            if (pickColorRb != 0)
+            {
+                gl.DeleteRenderbuffer(pickColorRb);
+            }
+
+            if (pickDepthRb != 0)
+            {
+                gl.DeleteRenderbuffer(pickDepthRb);
+            }
+
+            pickFbo = gl.GenFramebuffer();
+            gl.BindFramebuffer(FramebufferTarget.Framebuffer, pickFbo);
+
+            pickColorRb = gl.GenRenderbuffer();
+            gl.BindRenderbuffer(RenderbufferTarget.Renderbuffer, pickColorRb);
+            gl.RenderbufferStorage(RenderbufferTarget.Renderbuffer, InternalFormat.Rgba8, (uint)width, (uint)height);
+            gl.FramebufferRenderbuffer(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0, RenderbufferTarget.Renderbuffer, pickColorRb);
+
+            pickDepthRb = gl.GenRenderbuffer();
+            gl.BindRenderbuffer(RenderbufferTarget.Renderbuffer, pickDepthRb);
+            gl.RenderbufferStorage(RenderbufferTarget.Renderbuffer, InternalFormat.Depth24Stencil8, (uint)width, (uint)height);
+            gl.FramebufferRenderbuffer(FramebufferTarget.Framebuffer, FramebufferAttachment.DepthAttachment, RenderbufferTarget.Renderbuffer, pickDepthRb);
+
+            var status = gl.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
+            if ((FramebufferStatus)status != FramebufferStatus.Complete)
+            {
+                LogViewport($"pick FBO creation failed: {status}");
+                gl.BindFramebuffer(FramebufferTarget.Framebuffer, (uint)fb);
+                gl.DeleteFramebuffer(pickFbo);
+                gl.DeleteRenderbuffer(pickColorRb);
+                gl.DeleteRenderbuffer(pickDepthRb);
+                pickFbo = 0;
+                pickColorRb = 0;
+                pickDepthRb = 0;
+                return -1;
+            }
+
+            lastPickWidth = width;
+            lastPickHeight = height;
+        }
+
+        gl.BindFramebuffer(FramebufferTarget.Framebuffer, pickFbo);
+        gl.Viewport(0, 0, (uint)width, (uint)height);
+        gl.ClearColor(0f, 0f, 0f, 1f);
+        gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+        gl.Disable(EnableCap.Blend);
+        gl.Enable(EnableCap.DepthTest);
+        gl.DepthMask(true);
+
+        gl.UseProgram(pickProgram);
+        var uniformMatrix = viewProjection;
+        gl.UniformMatrix4(gl.GetUniformLocation(pickProgram, "uMvp"), 1, false, &uniformMatrix.M11);
+        gl.Uniform1(gl.GetUniformLocation(pickProgram, "uPreviewProductId"), previewProductId);
+        var previewMatrix = previewTransform;
+        gl.UniformMatrix4(gl.GetUniformLocation(pickProgram, "uPreviewTransform"), 1, false, &previewMatrix.M11);
+
+        gl.BindVertexArray(vertexArray);
+        if (opaqueIndexCount > 0)
+        {
+            gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, indexBuffer);
+            gl.DrawElements(PrimitiveType.Triangles, (uint)opaqueIndexCount, DrawElementsType.UnsignedInt, null);
+        }
+
+        // Transparent surfaces stay pickable (nearest hit wins), matching the
+        // CPU raycast semantics; they render opaquely into the id buffer.
+        if (transparentIndexCount > 0)
+        {
+            gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, transparentIndexBuffer);
+            gl.DrawElements(PrimitiveType.Triangles, (uint)transparentIndexCount, DrawElementsType.UnsignedInt, null);
+        }
+
+        gl.BindVertexArray(0);
+
+        var scaling = VisualRoot?.RenderScaling ?? 1.0;
+        var pixelX = Math.Clamp((int)(point.X * scaling), 0, width - 1);
+        var pixelY = Math.Clamp(height - 1 - (int)(point.Y * scaling), 0, height - 1);
+        var pixel = stackalloc byte[4];
+        gl.ReadPixels(pixelX, pixelY, 1, 1, PixelFormat.Rgba, PixelType.UnsignedByte, pixel);
+        gl.BindFramebuffer(FramebufferTarget.Framebuffer, (uint)fb);
+
+        return IfcRenderPicking.DecodeProductId(pixel[0], pixel[1], pixel[2]);
+    }
+
     private int PickProduct(Point point)
     {
         var scene = Scene;
@@ -2206,13 +2401,14 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
                 continue;
             }
 
-            for (var i = 0; i + 2 < mesh.Indices.Count; i += 3)
+            var vertexCount = mesh.VertexCount;
+            for (var i = 0; i + 2 < mesh.Indices.Length; i += 3)
             {
                 var first = mesh.Indices[i];
                 var second = mesh.Indices[i + 1];
                 var third = mesh.Indices[i + 2];
                 if (first < 0 || second < 0 || third < 0
-                    || first >= mesh.Vertices.Count || second >= mesh.Vertices.Count || third >= mesh.Vertices.Count)
+                    || first >= vertexCount || second >= vertexCount || third >= vertexCount)
                 {
                     continue;
                 }
@@ -2220,9 +2416,9 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
                 if (IntersectTriangle(
                     near,
                     direction,
-                    ToRenderVector(mesh.Vertices[first], renderOrigin),
-                    ToRenderVector(mesh.Vertices[second], renderOrigin),
-                    ToRenderVector(mesh.Vertices[third], renderOrigin),
+                    ToRenderVector(mesh.Positions, first, renderOrigin),
+                    ToRenderVector(mesh.Positions, second, renderOrigin),
+                    ToRenderVector(mesh.Positions, third, renderOrigin),
                     out var distance)
                     && distance < bestDistance)
                 {
@@ -2320,12 +2516,13 @@ public sealed class ViewportPreviewControl : OpenGlControlBase, ICustomHitTest
             ToRenderFloat(vertex.Z - origin.Z));
     }
 
-    private static Vector3 ToRenderVector(IfcRenderVertex vertex, IfcPreviewVertex origin)
+    private static Vector3 ToRenderVector(double[] positions, int vertexIndex, IfcPreviewVertex origin)
     {
+        var offset = vertexIndex * 3;
         return new Vector3(
-            ToRenderFloat(vertex.X - origin.X),
-            ToRenderFloat(vertex.Y - origin.Y),
-            ToRenderFloat(vertex.Z - origin.Z));
+            ToRenderFloat(positions[offset] - origin.X),
+            ToRenderFloat(positions[offset + 1] - origin.Y),
+            ToRenderFloat(positions[offset + 2] - origin.Z));
     }
 
     private static Vector3 ToDirectionVector(IfcPreviewVertex vertex)
@@ -2662,6 +2859,84 @@ void main()
     }
 
     gl_FragColor = vec4(color, vColor.a);
+}
+""";
+
+    private const string PickVertexShaderSource330 = """
+#version 330 core
+layout(location = 0) in vec3 aPosition;
+layout(location = 3) in float aProductId;
+
+uniform mat4 uMvp;
+uniform mat4 uPreviewTransform;
+uniform int uPreviewProductId;
+
+flat out float vProductId;
+
+void main()
+{
+    vec4 worldPosition = vec4(aPosition, 1.0);
+    if (uPreviewProductId > 0 && abs(aProductId - float(uPreviewProductId)) < 0.5)
+    {
+        worldPosition = uPreviewTransform * worldPosition;
+    }
+
+    gl_Position = uMvp * worldPosition;
+    vProductId = aProductId;
+}
+""";
+
+    private const string PickFragmentShaderSource330 = """
+#version 330 core
+flat in float vProductId;
+
+out vec4 outColor;
+
+void main()
+{
+    int id = int(vProductId + 0.5);
+    int r = (id / 65536) - ((id / 16777216) * 256);
+    int g = (id / 256) - ((id / 65536) * 256);
+    int b = id - ((id / 256) * 256);
+    outColor = vec4(float(r) / 255.0, float(g) / 255.0, float(b) / 255.0, 1.0);
+}
+""";
+
+    private const string PickVertexShaderSource120 = """
+#version 120
+attribute vec3 aPosition;
+attribute float aProductId;
+
+uniform mat4 uMvp;
+uniform mat4 uPreviewTransform;
+uniform int uPreviewProductId;
+
+varying float vProductId;
+
+void main()
+{
+    vec4 worldPosition = vec4(aPosition, 1.0);
+    if (uPreviewProductId > 0 && abs(aProductId - float(uPreviewProductId)) < 0.5)
+    {
+        worldPosition = uPreviewTransform * worldPosition;
+    }
+
+    gl_Position = uMvp * worldPosition;
+    vProductId = aProductId;
+}
+""";
+
+    private const string PickFragmentShaderSource120 = """
+#version 120
+varying float vProductId;
+
+void main()
+{
+    float id = floor(vProductId + 0.5);
+    float r = floor(id / 65536.0);
+    float g = floor(mod(id / 256.0, 256.0));
+    float b = mod(id, 256.0);
+    gl_FragColor = vec4(r / 255.0, g / 255.0, b / 255.0, 1.0);
 }
 """;
 

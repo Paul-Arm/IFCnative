@@ -291,33 +291,88 @@ public sealed class XbimGeometryBackend : IIfcGeometryBackend
             instances = instances.Take(limit).ToList();
         }
 
-        var meshes = new List<IfcRenderMesh>();
+        var renderableInstances = instances.Where(ShouldRenderInstance).ToList();
+
+        // Prefetch each distinct shape geometry once: mapped/typed products reuse
+        // the same triangulation, so this avoids re-reading (and later re-parsing)
+        // the binary mesh per duplicate instance. The reader is only touched here,
+        // on this thread.
+        progress?.Report($"Reading {renderableInstances.Count:N0} xBIM shape instance(s)...");
+        var geometryByLabel = new Dictionary<int, Xbim.Common.Geometry.IXbimShapeGeometryData>();
+        var styleColors = new Dictionary<int, IfcRenderColor>();
+        foreach (var instance in renderableInstances)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!geometryByLabel.ContainsKey(instance.ShapeGeometryLabel))
+            {
+                geometryByLabel[instance.ShapeGeometryLabel] = reader.ShapeGeometry(instance.ShapeGeometryLabel);
+            }
+
+            if (instance.StyleLabel > 0 && !styleColors.ContainsKey(instance.StyleLabel)
+                && ResolveSurfaceStyleColor(store.Model, instance.StyleLabel) is { } styleColor)
+            {
+                styleColors[instance.StyleLabel] = styleColor;
+            }
+        }
+
+        // Parse each distinct triangulation once, then decode instances in
+        // parallel; results keep the instance order for deterministic scenes.
+        var parsedByLabel = new System.Collections.Concurrent.ConcurrentDictionary<int, Lazy<XbimShapeTriangulation?>>();
+        var results = new IfcRenderMesh?[renderableInstances.Count];
+        var decoded = 0;
+        Parallel.For(
+            0,
+            renderableInstances.Count,
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = Environment.ProcessorCount,
+                CancellationToken = cancellationToken,
+            },
+            index =>
+            {
+                var instance = renderableInstances[index];
+                var triangulation = parsedByLabel.GetOrAdd(
+                    instance.ShapeGeometryLabel,
+                    label => new Lazy<XbimShapeTriangulation?>(() => ParseShapeTriangulation(geometryByLabel[label]))).Value;
+                if (triangulation is null)
+                {
+                    return;
+                }
+
+                document.EntityById.TryGetValue(instance.IfcProductLabel, out var entity);
+                IfcRenderColor? styleColor = instance.StyleLabel > 0 && styleColors.TryGetValue(instance.StyleLabel, out var resolved)
+                    ? resolved
+                    : null;
+                var mesh = BuildMeshFromTriangulation(triangulation, instance, entity?.Type, styleColor);
+                if (mesh is null || !mesh.IsRenderable)
+                {
+                    return;
+                }
+
+                var isSpace = entity is not null
+                    && string.Equals(entity.Type, "IFCSPACE", StringComparison.OrdinalIgnoreCase);
+                results[index] = mesh with { IsSpace = isSpace };
+
+                var done = Interlocked.Increment(ref decoded);
+                if (done % 500 == 0)
+                {
+                    progress?.Report($"Decoded {done:N0} xBIM shape instance(s)...");
+                }
+            });
+
+        var meshes = new List<IfcRenderMesh>(renderableInstances.Count);
         var bounds = IfcRenderBounds.Empty;
         var productOrigins = new Dictionary<int, IfcPreviewVertex>();
         var triangleCount = 0;
-        var decoded = 0;
-        foreach (var instance in instances)
+        for (var index = 0; index < results.Length; index++)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            if (!ShouldRenderInstance(instance))
+            var mesh = results[index];
+            if (mesh is null)
             {
                 continue;
             }
 
-            document.EntityById.TryGetValue(instance.IfcProductLabel, out var entity);
-
-            var geometry = reader.ShapeGeometry(instance.ShapeGeometryLabel);
-            var mesh = DecodeShapeGeometry(geometry, instance, entity?.Type);
-            if (mesh is null || !mesh.IsRenderable)
-            {
-                continue;
-            }
-
-            var isSpace = entity is not null
-                && string.Equals(entity.Type, "IFCSPACE", StringComparison.OrdinalIgnoreCase);
-            mesh = mesh with { IsSpace = isSpace };
-
+            var instance = renderableInstances[index];
             if (!productOrigins.ContainsKey(instance.IfcProductLabel))
             {
                 var transform = instance.Transformation;
@@ -325,17 +380,8 @@ public sealed class XbimGeometryBackend : IIfcGeometryBackend
             }
 
             meshes.Add(mesh);
-            decoded++;
-            triangleCount += mesh.Indices.Count / 3;
-            foreach (var vertex in mesh.Vertices)
-            {
-                bounds = bounds.Include(vertex.X, vertex.Y, vertex.Z);
-            }
-
-            if (decoded % 500 == 0)
-            {
-                progress?.Report($"Decoded {decoded:N0} xBIM shape instance(s)...");
-            }
+            triangleCount += mesh.Indices.Length / 3;
+            bounds = bounds.Include(mesh.Bounds);
         }
 
         if (meshes.Count == 0)
@@ -403,21 +449,13 @@ public sealed class XbimGeometryBackend : IIfcGeometryBackend
         var adjustedRootLabel = rootPlacements.Count == 1 ? rootPlacements[0] : (int?)null;
         var placementCache = new Dictionary<int, XbimMatrix3D>();
 
-        var meshes = new List<IfcRenderMesh>();
-        var bounds = IfcRenderBounds.Empty;
-        var productOrigins = new Dictionary<int, IfcPreviewVertex>();
-        var triangleCount = 0;
-        var instanceCount = 0;
-        var limitReached = false;
-
+        // Collect the work list sequentially (placement resolution shares a cache
+        // and model enumeration stays single-threaded), then decode in parallel.
+        var styledItemColors = BuildStyledItemColors(model);
+        var workItems = new List<(IIfcTriangulatedFaceSet FaceSet, XbimMatrix3D Transform, int ProductLabel, string? ProductType, bool IsSpace, IfcRenderColor? StyleColor)>();
         foreach (var product in model.Instances.OfType<IIfcProduct>())
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (limitReached)
-            {
-                break;
-            }
-
             if (product is IIfcFeatureElement || product.Representation?.Representations is null)
             {
                 continue;
@@ -428,54 +466,78 @@ public sealed class XbimGeometryBackend : IIfcGeometryBackend
                 continue;
             }
 
-            var transform = GetPlacementMatrix(product.ObjectPlacement, adjustedRootLabel, placementCache);
-
             document.EntityById.TryGetValue(product.EntityLabel, out var entity);
             var isSpace = entity is not null
                 && string.Equals(entity.Type, "IFCSPACE", StringComparison.OrdinalIgnoreCase);
-
+            XbimMatrix3D? transform = null;
             foreach (var representation in product.Representation.Representations)
             {
                 foreach (var faceSet in representation.Items.OfType<IIfcTriangulatedFaceSet>())
                 {
-                    instanceCount++;
-                    var mesh = DecodeTriangulatedFaceSet(faceSet, transform, product.EntityLabel, entity?.Type);
-                    if (mesh is null || !mesh.IsRenderable)
-                    {
-                        continue;
-                    }
-
-                    mesh = mesh with { IsSpace = isSpace };
-
-                    if (!productOrigins.ContainsKey(product.EntityLabel))
-                    {
-                        productOrigins[product.EntityLabel] = new IfcPreviewVertex(transform.OffsetX, transform.OffsetY, transform.OffsetZ);
-                    }
-
-                    meshes.Add(mesh);
-                    triangleCount += mesh.Indices.Count / 3;
-                    foreach (var vertex in mesh.Vertices)
-                    {
-                        bounds = bounds.Include(vertex.X, vertex.Y, vertex.Z);
-                    }
-
-                    if (meshes.Count % 500 == 0)
-                    {
-                        progress?.Report($"Decoded {meshes.Count:N0} triangulated mesh(es)...");
-                    }
-
-                    if (request.Limit is int limit && limit > 0 && meshes.Count >= limit)
-                    {
-                        limitReached = true;
-                        break;
-                    }
-                }
-
-                if (limitReached)
-                {
-                    break;
+                    transform ??= GetPlacementMatrix(product.ObjectPlacement, adjustedRootLabel, placementCache);
+                    IfcRenderColor? styleColor = styledItemColors.TryGetValue(faceSet.EntityLabel, out var resolved)
+                        ? resolved
+                        : null;
+                    workItems.Add((faceSet, transform.Value, product.EntityLabel, entity?.Type, isSpace, styleColor));
                 }
             }
+        }
+
+        if (request.Limit is int limit && limit > 0 && workItems.Count > limit)
+        {
+            workItems.RemoveRange(limit, workItems.Count - limit);
+        }
+
+        var instanceCount = workItems.Count;
+        var results = new IfcRenderMesh?[workItems.Count];
+        var decoded = 0;
+        Parallel.For(
+            0,
+            workItems.Count,
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = Environment.ProcessorCount,
+                CancellationToken = cancellationToken,
+            },
+            index =>
+            {
+                var item = workItems[index];
+                var mesh = DecodeTriangulatedFaceSet(item.FaceSet, item.Transform, item.ProductLabel, item.ProductType, item.StyleColor);
+                if (mesh is null || !mesh.IsRenderable)
+                {
+                    return;
+                }
+
+                results[index] = mesh with { IsSpace = item.IsSpace };
+
+                var done = Interlocked.Increment(ref decoded);
+                if (done % 500 == 0)
+                {
+                    progress?.Report($"Decoded {done:N0} triangulated mesh(es)...");
+                }
+            });
+
+        var meshes = new List<IfcRenderMesh>(workItems.Count);
+        var bounds = IfcRenderBounds.Empty;
+        var productOrigins = new Dictionary<int, IfcPreviewVertex>();
+        var triangleCount = 0;
+        for (var index = 0; index < results.Length; index++)
+        {
+            var mesh = results[index];
+            if (mesh is null)
+            {
+                continue;
+            }
+
+            var item = workItems[index];
+            if (!productOrigins.ContainsKey(item.ProductLabel))
+            {
+                productOrigins[item.ProductLabel] = new IfcPreviewVertex(item.Transform.OffsetX, item.Transform.OffsetY, item.Transform.OffsetZ);
+            }
+
+            meshes.Add(mesh);
+            triangleCount += mesh.Indices.Length / 3;
+            bounds = bounds.Include(mesh.Bounds);
         }
 
         if (meshes.Count == 0)
@@ -528,7 +590,8 @@ public sealed class XbimGeometryBackend : IIfcGeometryBackend
         IIfcTriangulatedFaceSet faceSet,
         XbimMatrix3D transform,
         int productLabel,
-        string? productType)
+        string? productType,
+        IfcRenderColor? styleColor = null)
     {
         var coordList = faceSet.Coordinates?.CoordList;
         if (coordList is null || coordList.Count == 0 || faceSet.CoordIndex.Count == 0)
@@ -536,8 +599,10 @@ public sealed class XbimGeometryBackend : IIfcGeometryBackend
             return null;
         }
 
-        var points = new (double X, double Y, double Z)[coordList.Count];
-        var index = 0;
+        var vertexCount = coordList.Count;
+        var positions = new double[vertexCount * 3];
+        var bounds = IfcRenderBounds.Empty;
+        var offset = 0;
         foreach (var coordinate in coordList)
         {
             if (coordinate.Count < 3)
@@ -546,14 +611,18 @@ public sealed class XbimGeometryBackend : IIfcGeometryBackend
             }
 
             var transformed = transform.Transform(new XbimPoint3D(coordinate[0], coordinate[1], coordinate[2]));
-            points[index++] = (transformed.X, transformed.Y, transformed.Z);
+            positions[offset++] = transformed.X;
+            positions[offset++] = transformed.Y;
+            positions[offset++] = transformed.Z;
+            bounds = bounds.Include(transformed.X, transformed.Y, transformed.Z);
         }
 
         var pnIndex = faceSet.PnIndex is { Count: > 0 }
             ? faceSet.PnIndex.Select(value => (int)(long)value.Value - 1).ToArray()
             : null;
 
-        var indices = new List<int>(faceSet.CoordIndex.Count * 3);
+        var indices = new int[faceSet.CoordIndex.Count * 3];
+        var indexCursor = 0;
         foreach (var triangle in faceSet.CoordIndex)
         {
             if (triangle.Count < 3)
@@ -574,61 +643,66 @@ public sealed class XbimGeometryBackend : IIfcGeometryBackend
                     pointIndex = pnIndex[pointIndex];
                 }
 
-                if (pointIndex < 0 || pointIndex >= points.Length)
+                if (pointIndex < 0 || pointIndex >= vertexCount)
                 {
                     return null;
                 }
 
-                indices.Add(pointIndex);
+                indices[indexCursor++] = pointIndex;
             }
         }
 
-        if (indices.Count == 0)
+        if (indexCursor == 0)
         {
             return null;
         }
 
-        // Averaged vertex normals from accumulated face normals.
-        var normals = new (double X, double Y, double Z)[points.Length];
-        for (var i = 0; i < indices.Count; i += 3)
+        if (indexCursor < indices.Length)
         {
-            var a = points[indices[i]];
-            var b = points[indices[i + 1]];
-            var c = points[indices[i + 2]];
-            var abX = b.X - a.X;
-            var abY = b.Y - a.Y;
-            var abZ = b.Z - a.Z;
-            var acX = c.X - a.X;
-            var acY = c.Y - a.Y;
-            var acZ = c.Z - a.Z;
+            Array.Resize(ref indices, indexCursor);
+        }
+
+        // Averaged vertex normals from accumulated face normals.
+        var accumulated = new double[vertexCount * 3];
+        for (var i = 0; i < indices.Length; i += 3)
+        {
+            var a = indices[i] * 3;
+            var b = indices[i + 1] * 3;
+            var c = indices[i + 2] * 3;
+            var abX = positions[b] - positions[a];
+            var abY = positions[b + 1] - positions[a + 1];
+            var abZ = positions[b + 2] - positions[a + 2];
+            var acX = positions[c] - positions[a];
+            var acY = positions[c + 1] - positions[a + 1];
+            var acZ = positions[c + 2] - positions[a + 2];
             var nx = abY * acZ - abZ * acY;
             var ny = abZ * acX - abX * acZ;
             var nz = abX * acY - abY * acX;
             for (var corner = 0; corner < 3; corner++)
             {
-                var vertexIndex = indices[i + corner];
-                normals[vertexIndex] = (normals[vertexIndex].X + nx, normals[vertexIndex].Y + ny, normals[vertexIndex].Z + nz);
+                var vertexOffset = indices[i + corner] * 3;
+                accumulated[vertexOffset] += nx;
+                accumulated[vertexOffset + 1] += ny;
+                accumulated[vertexOffset + 2] += nz;
             }
         }
 
-        var vertices = new List<IfcRenderVertex>(points.Length);
-        for (var i = 0; i < points.Length; i++)
+        var normals = new float[vertexCount * 3];
+        for (var i = 0; i < vertexCount; i++)
         {
-            var normal = normals[i];
-            var length = Math.Sqrt(normal.X * normal.X + normal.Y * normal.Y + normal.Z * normal.Z);
+            var vertexOffset = i * 3;
+            var nx = accumulated[vertexOffset];
+            var ny = accumulated[vertexOffset + 1];
+            var nz = accumulated[vertexOffset + 2];
+            var length = Math.Sqrt(nx * nx + ny * ny + nz * nz);
             if (length < 1e-12)
             {
-                normal = (0d, 0d, 1d);
-                length = 1d;
+                (nx, ny, nz, length) = (0d, 0d, 1d, 1d);
             }
 
-            vertices.Add(new IfcRenderVertex(
-                points[i].X,
-                points[i].Y,
-                points[i].Z,
-                (float)(normal.X / length),
-                (float)(normal.Y / length),
-                (float)(normal.Z / length)));
+            normals[vertexOffset] = (float)(nx / length);
+            normals[vertexOffset + 1] = (float)(ny / length);
+            normals[vertexOffset + 2] = (float)(nz / length);
         }
 
         return new IfcRenderMesh(
@@ -636,12 +710,15 @@ public sealed class XbimGeometryBackend : IIfcGeometryBackend
             faceSet.EntityLabel,
             0,
             0,
-            ColorFor(0, 0, productLabel, productType),
-            vertices,
-            indices);
+            styleColor ?? ColorFor(0, 0, productLabel, productType),
+            positions,
+            normals,
+            indices,
+            bounds);
     }
 
-    private static IfcRenderMesh? DecodeShapeGeometry(IXbimShapeGeometryData geometry, IXbimShapeInstanceData instance, string? productType)    {
+    private static XbimShapeTriangulation? ParseShapeTriangulation(IXbimShapeGeometryData geometry)
+    {
         if (geometry.Format != (byte)XbimGeometryType.PolyhedronBinary || geometry.ShapeData.Length == 0)
         {
             return null;
@@ -649,26 +726,126 @@ public sealed class XbimGeometryBackend : IIfcGeometryBackend
 
         using var stream = new MemoryStream(geometry.ShapeData);
         using var reader = new BinaryReader(stream);
-        var triangulation = reader.ReadShapeTriangulation()
-            .Transform(XbimMatrix3D.FromArray(instance.Transformation));
+        return reader.ReadShapeTriangulation();
+    }
+
+    private static IfcRenderMesh? BuildMeshFromTriangulation(
+        XbimShapeTriangulation baseTriangulation,
+        IXbimShapeInstanceData instance,
+        string? productType,
+        IfcRenderColor? styleColor = null)
+    {
+        var triangulation = baseTriangulation.Transform(XbimMatrix3D.FromArray(instance.Transformation));
         triangulation.ToPointsWithNormalsAndIndices(out var points, out var indices);
         if (points.Count == 0 || indices.Count == 0)
         {
             return null;
         }
 
-        var vertices = points
-            .Select(point => new IfcRenderVertex(point[0], point[1], point[2], (float)point[3], (float)point[4], (float)point[5]))
-            .ToList();
+        var positions = new double[points.Count * 3];
+        var normals = new float[points.Count * 3];
+        var bounds = IfcRenderBounds.Empty;
+        for (var i = 0; i < points.Count; i++)
+        {
+            var point = points[i];
+            var offset = i * 3;
+            positions[offset] = point[0];
+            positions[offset + 1] = point[1];
+            positions[offset + 2] = point[2];
+            normals[offset] = (float)point[3];
+            normals[offset + 1] = (float)point[4];
+            normals[offset + 2] = (float)point[5];
+            bounds = bounds.Include(point[0], point[1], point[2]);
+        }
 
         return new IfcRenderMesh(
             instance.IfcProductLabel,
             instance.ShapeGeometryLabel,
             instance.StyleLabel,
             instance.IfcTypeId,
-            ColorFor(instance.StyleLabel, instance.IfcTypeId, instance.IfcProductLabel, productType),
-            vertices,
-            indices);
+            styleColor ?? ColorFor(instance.StyleLabel, instance.IfcTypeId, instance.IfcProductLabel, productType),
+            positions,
+            normals,
+            indices.ToArray(),
+            bounds);
+    }
+
+    /// <summary>
+    /// Resolves the authored IFC surface style color (incl. transparency) for a
+    /// style label coming from the xBIM GeometryStore. Returns null when the
+    /// label does not reference a usable IfcSurfaceStyle, in which case the
+    /// hash-based fallback color applies.
+    /// </summary>
+    private static IfcRenderColor? ResolveSurfaceStyleColor(Xbim.Common.IModel model, int styleLabel)
+    {
+        try
+        {
+            return model.Instances[styleLabel] is IIfcSurfaceStyle surfaceStyle
+                ? ColorFromSurfaceStyle(surfaceStyle)
+                : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static IfcRenderColor? ColorFromSurfaceStyle(IIfcSurfaceStyle surfaceStyle)
+    {
+        var shading = surfaceStyle.Styles.OfType<IIfcSurfaceStyleShading>().FirstOrDefault();
+        if (shading?.SurfaceColour is not { } colour)
+        {
+            return null;
+        }
+
+        var alpha = shading.Transparency.HasValue
+            ? (float)Math.Clamp(1d - (double)shading.Transparency.Value, 0d, 1d)
+            : 1f;
+        return new IfcRenderColor(
+            (float)Math.Clamp((double)colour.Red, 0d, 1d),
+            (float)Math.Clamp((double)colour.Green, 0d, 1d),
+            (float)Math.Clamp((double)colour.Blue, 0d, 1d),
+            alpha);
+    }
+
+    private static IfcRenderColor? ResolveStyleAssignment(IIfcStyleAssignmentSelect style)
+    {
+        return style switch
+        {
+            IIfcSurfaceStyle surfaceStyle => ColorFromSurfaceStyle(surfaceStyle),
+            IIfcPresentationStyleAssignment assignment => assignment.Styles
+                .OfType<IIfcSurfaceStyle>()
+                .Select(ColorFromSurfaceStyle)
+                .FirstOrDefault(color => color is not null),
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// Maps representation item labels to their authored IfcStyledItem colors.
+    /// Used by the direct tessellation fast path, which bypasses the
+    /// GeometryStore style plumbing.
+    /// </summary>
+    private static Dictionary<int, IfcRenderColor> BuildStyledItemColors(Xbim.Common.IModel model)
+    {
+        var colors = new Dictionary<int, IfcRenderColor>();
+        foreach (var styledItem in model.Instances.OfType<IIfcStyledItem>())
+        {
+            if (styledItem.Item is null || colors.ContainsKey(styledItem.Item.EntityLabel))
+            {
+                continue;
+            }
+
+            var color = styledItem.Styles
+                .Select(ResolveStyleAssignment)
+                .FirstOrDefault(value => value is not null);
+            if (color is not null)
+            {
+                colors[styledItem.Item.EntityLabel] = color.Value;
+            }
+        }
+
+        return colors;
     }
 
     private static bool ShouldRenderInstance(IXbimShapeInstanceData instance)

@@ -48,23 +48,40 @@ public static class IfcRenderSceneTransform
         foreach (var mesh in scene.Meshes)
         {
             var next = mesh;
-            if (mesh.ProductId == productId && mesh.Vertices.Count > 0)
+            if (mesh.ProductId == productId && mesh.Positions.Length > 0)
             {
-                var vertices = new List<IfcRenderVertex>(mesh.Vertices.Count);
-                foreach (var vertex in mesh.Vertices)
+                var positions = new double[mesh.Positions.Length];
+                var normals = hasRotation ? new float[mesh.Normals.Length] : mesh.Normals;
+                var meshBounds = IfcRenderBounds.Empty;
+                for (var offset = 0; offset + 2 < mesh.Positions.Length; offset += 3)
                 {
-                    vertices.Add(TransformVertex(vertex, pivot, cos, sin, hasRotation, moveDeltaX, moveDeltaY, moveDeltaZ));
+                    var x = mesh.Positions[offset];
+                    var y = mesh.Positions[offset + 1];
+                    if (hasRotation)
+                    {
+                        var localX = x - pivot.X;
+                        var localY = y - pivot.Y;
+                        x = pivot.X + localX * cos - localY * sin;
+                        y = pivot.Y + localX * sin + localY * cos;
+                        var normalX = mesh.Normals[offset];
+                        var normalY = mesh.Normals[offset + 1];
+                        normals[offset] = (float)(normalX * cos - normalY * sin);
+                        normals[offset + 1] = (float)(normalX * sin + normalY * cos);
+                        normals[offset + 2] = mesh.Normals[offset + 2];
+                    }
+
+                    positions[offset] = x + moveDeltaX;
+                    positions[offset + 1] = y + moveDeltaY;
+                    positions[offset + 2] = mesh.Positions[offset + 2] + moveDeltaZ;
+                    meshBounds = meshBounds.Include(positions[offset], positions[offset + 1], positions[offset + 2]);
                 }
 
-                next = mesh with { Vertices = vertices };
+                next = mesh with { Positions = positions, Normals = normals, Bounds = meshBounds };
                 changed = true;
             }
 
             meshes.Add(next);
-            foreach (var vertex in next.Vertices)
-            {
-                bounds = bounds.Include(vertex.X, vertex.Y, vertex.Z);
-            }
+            bounds = bounds.Include(next.Bounds);
         }
 
         if (!changed)
@@ -100,74 +117,38 @@ public static class IfcRenderSceneTransform
         var bounds = IfcRenderBounds.Empty;
         foreach (var mesh in scene.Meshes)
         {
-            if (mesh.ProductId != productId)
+            if (mesh.ProductId == productId)
             {
-                continue;
-            }
-
-            foreach (var vertex in mesh.Vertices)
-            {
-                bounds = bounds.Include(vertex.X, vertex.Y, vertex.Z);
+                bounds = bounds.Include(mesh.Bounds);
             }
         }
 
         return bounds.Center;
     }
-
-    private static IfcRenderVertex TransformVertex(
-        IfcRenderVertex vertex,
-        IfcPreviewVertex pivot,
-        double cos,
-        double sin,
-        bool hasRotation,
-        double moveDeltaX,
-        double moveDeltaY,
-        double moveDeltaZ)
-    {
-        var x = vertex.X;
-        var y = vertex.Y;
-        var normalX = vertex.NormalX;
-        var normalY = vertex.NormalY;
-        if (hasRotation)
-        {
-            var localX = vertex.X - pivot.X;
-            var localY = vertex.Y - pivot.Y;
-            x = pivot.X + localX * cos - localY * sin;
-            y = pivot.Y + localX * sin + localY * cos;
-            normalX = (float)(vertex.NormalX * cos - vertex.NormalY * sin);
-            normalY = (float)(vertex.NormalX * sin + vertex.NormalY * cos);
-        }
-
-        return new IfcRenderVertex(
-            x + moveDeltaX,
-            y + moveDeltaY,
-            vertex.Z + moveDeltaZ,
-            normalX,
-            normalY,
-            vertex.NormalZ);
-    }
 }
 
+/// <summary>
+/// Triangle mesh with flat interleaved arrays: <see cref="Positions"/> holds
+/// world-space xyz per vertex (double precision for large coordinates),
+/// <see cref="Normals"/> the matching xyz normals. <see cref="Bounds"/> is
+/// computed once at decode time so consumers never re-scan the vertices.
+/// </summary>
 public sealed record IfcRenderMesh(
     int ProductId,
     int ShapeGeometryId,
     int StyleId,
     int IfcTypeId,
     IfcRenderColor Color,
-    IReadOnlyList<IfcRenderVertex> Vertices,
-    IReadOnlyList<int> Indices,
+    double[] Positions,
+    float[] Normals,
+    int[] Indices,
+    IfcRenderBounds Bounds,
     bool IsSpace = false)
 {
-    public bool IsRenderable => ProductId > 0 && Vertices.Count > 0 && Indices.Count >= 3;
-}
+    public int VertexCount => Positions.Length / 3;
 
-public readonly record struct IfcRenderVertex(
-    double X,
-    double Y,
-    double Z,
-    float NormalX,
-    float NormalY,
-    float NormalZ);
+    public bool IsRenderable => ProductId > 0 && Positions.Length >= 3 && Indices.Length >= 3;
+}
 
 public readonly record struct IfcRenderColor(float R, float G, float B, float A)
 {
@@ -229,6 +210,38 @@ public readonly record struct IfcRenderBounds(
             Math.Max(MaxX, x),
             Math.Max(MaxY, y),
             Math.Max(MaxZ, z));
+    }
+
+    public IfcRenderBounds Include(IfcRenderBounds other)
+    {
+        if (other.IsEmpty)
+        {
+            return this;
+        }
+
+        if (IsEmpty)
+        {
+            return other;
+        }
+
+        return new IfcRenderBounds(
+            Math.Min(MinX, other.MinX),
+            Math.Min(MinY, other.MinY),
+            Math.Min(MinZ, other.MinZ),
+            Math.Max(MaxX, other.MaxX),
+            Math.Max(MaxY, other.MaxY),
+            Math.Max(MaxZ, other.MaxZ));
+    }
+
+    public static IfcRenderBounds FromPositions(double[] positions)
+    {
+        var bounds = Empty;
+        for (var offset = 0; offset + 2 < positions.Length; offset += 3)
+        {
+            bounds = bounds.Include(positions[offset], positions[offset + 1], positions[offset + 2]);
+        }
+
+        return bounds;
     }
 
     private static bool IsFinite(double value)
