@@ -11,6 +11,7 @@ public sealed class NativeDockFactory(MainWindowViewModel workspace) : Factory
 {
     public override IRootDock CreateLayout()
     {
+        var models = Tool("models", "Models", workspace.Models, 0.24);
         var structure = Tool("structure", "Structure", workspace.Structure, 0.44);
         var types = Tool("types", "Types", workspace.Types, 0.28);
         var notes = Tool("notes", "Notes", workspace.Notes, 0.28);
@@ -20,7 +21,7 @@ public sealed class NativeDockFactory(MainWindowViewModel workspace) : Factory
         modelDock.Title = "Model";
         modelDock.Alignment = Alignment.Left;
         modelDock.Proportion = 0.22;
-        modelDock.VisibleDockables = CreateList<IDockable>(structure, types, notes);
+        modelDock.VisibleDockables = CreateList<IDockable>(models, structure, types, notes);
         modelDock.ActiveDockable = structure;
         modelDock.DefaultDockable = structure;
         modelDock.FocusedDockable = structure;

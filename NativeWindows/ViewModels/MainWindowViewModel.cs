@@ -83,6 +83,8 @@ public sealed class IfcDocumentSessionViewModel : ReactiveViewModel
 {
     private IfcDocument document;
     private bool isDirty;
+    private bool isVisibleInViewport = true;
+    private bool isActive;
 
     public IfcDocumentSessionViewModel(IfcDocument document, string? sourcePath)
     {
@@ -120,6 +122,31 @@ public sealed class IfcDocumentSessionViewModel : ReactiveViewModel
         }
     }
 
+    public bool IsVisibleInViewport
+    {
+        get => isVisibleInViewport;
+        set => this.RaiseAndSetIfChanged(ref isVisibleInViewport, value);
+    }
+
+    /// <summary>
+    /// Mirrors whether this session is the active (editable) IFC. Setting it to
+    /// true (e.g. via the Models panel radio button) requests activation from
+    /// the main window, which keeps the flags of all sessions consistent.
+    /// </summary>
+    public bool IsActive
+    {
+        get => isActive;
+        set
+        {
+            if (SetProperty(ref isActive, value) && value)
+            {
+                ActivateRequested?.Invoke(this, EventArgs.Empty);
+            }
+        }
+    }
+
+    public event EventHandler? ActivateRequested;
+
     public string FileName => Document.FileName;
 
     public string Schema => Document.Schema;
@@ -156,6 +183,7 @@ public sealed class MainWindowViewModel : ReactiveViewModel
     private string activeEntityCount = "0 entities";
     private string sessionSummary = "0 files";
     private bool isBusy;
+    private bool isForeignInspection;
     private NativeUserPreferences currentPreferences;
     private double textScale = 1.0;
 
@@ -171,8 +199,10 @@ public sealed class MainWindowViewModel : ReactiveViewModel
         Workspaces.Add(new WorkspacePreset("graph-builder", "Graph + Builder", "Relationship graph and body builder"));
         selectedWorkspace = Workspaces[0];
 
+        Documents.CollectionChanged += OnDocumentsChanged;
         Structure = new StructurePanelViewModel(this);
         Types = new TypesPanelViewModel(this);
+        Models = new ModelsPanelViewModel(this);
         Viewport = new ViewportPanelViewModel(this, geometryBackend);
         Viewport.AntiAliasing = currentPreferences.AntiAliasing;
         Viewport.HideSpaces = currentPreferences.HideSpaces;
@@ -216,6 +246,8 @@ public sealed class MainWindowViewModel : ReactiveViewModel
     public StructurePanelViewModel Structure { get; }
 
     public TypesPanelViewModel Types { get; }
+
+    public ModelsPanelViewModel Models { get; }
 
     public ViewportPanelViewModel Viewport { get; }
 
@@ -389,6 +421,11 @@ public sealed class MainWindowViewModel : ReactiveViewModel
         {
             if (SetProperty(ref activeSession, value))
             {
+                foreach (var session in Documents)
+                {
+                    session.IsActive = ReferenceEquals(session, value);
+                }
+
                 RefreshForActiveDocument();
                 this.RaisePropertyChanged(nameof(WindowTitle));
             }
@@ -452,6 +489,45 @@ public sealed class MainWindowViewModel : ReactiveViewModel
         await OpenPathAsync(path, setBusy: true);
     }
 
+    /// <summary>
+    /// Routes a viewport pick to its owning session. Picks on the active IFC
+    /// behave like any selection; picks on other files only populate the
+    /// Inspector read-only so the active editing context never changes.
+    /// </summary>
+    public void SelectPickedProduct(string sessionId, int entityId)
+    {
+        var session = Documents.FirstOrDefault(value => value.Id == sessionId);
+        if (session is null)
+        {
+            return;
+        }
+
+        if (ReferenceEquals(session, ActiveSession))
+        {
+            SelectEntityById(entityId, "viewport");
+            return;
+        }
+
+        var document = session.Document;
+        if (!document.EntityById.TryGetValue(entityId, out var entity))
+        {
+            return;
+        }
+
+        IsForeignInspection = true;
+        var details = IfcSelectionProjector.Project(document, entity);
+        Inspector.SetSelection(document, details, bookmarked: false);
+        Viewport.SetSelection(document, entity);
+        StatusText = $"viewport: #{entity.Id} {entity.TypeName()} {entity.DisplayName} — {document.FileName} (read-only, not the active IFC)";
+        Log($"viewport.inspect('{document.FileName}', {entity.Id})");
+    }
+
+    public bool IsForeignInspection
+    {
+        get => isForeignInspection;
+        private set => this.RaiseAndSetIfChanged(ref isForeignInspection, value);
+    }
+
     public void SelectEntityById(int entityId, string source = "selection", bool updateViewport = true)
     {
         var session = ActiveSession;
@@ -460,6 +536,8 @@ public sealed class MainWindowViewModel : ReactiveViewModel
         {
             return;
         }
+
+        IsForeignInspection = false;
 
         session.SelectedEntityId = entity.Id;
         var details = IfcSelectionProjector.Project(document, entity);
@@ -493,6 +571,12 @@ public sealed class MainWindowViewModel : ReactiveViewModel
 
     public void ToggleBookmark()
     {
+        if (IsForeignInspection)
+        {
+            StatusText = "The inspected element belongs to a non-active IFC — switch the active IFC to bookmark it.";
+            return;
+        }
+
         var session = ActiveSession;
         var selectedId = session?.SelectedEntityId ?? 0;
         if (session is null || selectedId == 0)
@@ -900,8 +984,55 @@ public sealed class MainWindowViewModel : ReactiveViewModel
         SessionSummary = $"{Documents.Count:N0} {(Documents.Count == 1 ? "file" : "files")}";
     }
 
+    private void OnDocumentsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs args)
+    {
+        if (args.NewItems is not null)
+        {
+            foreach (IfcDocumentSessionViewModel session in args.NewItems)
+            {
+                session.ActivateRequested += OnSessionActivateRequested;
+                session.PropertyChanged += OnSessionPropertyChanged;
+            }
+        }
+
+        if (args.OldItems is not null)
+        {
+            foreach (IfcDocumentSessionViewModel session in args.OldItems)
+            {
+                session.ActivateRequested -= OnSessionActivateRequested;
+                session.PropertyChanged -= OnSessionPropertyChanged;
+            }
+        }
+    }
+
+    private void OnSessionActivateRequested(object? sender, EventArgs args)
+    {
+        if (sender is IfcDocumentSessionViewModel session)
+        {
+            ActiveSession = session;
+        }
+    }
+
+    private void OnSessionPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
+    {
+        if (args.PropertyName == nameof(IfcDocumentSessionViewModel.IsVisibleInViewport)
+            && sender is IfcDocumentSessionViewModel session)
+        {
+            Viewport.RefreshComposition();
+            StatusText = session.IsVisibleInViewport
+                ? $"{session.FileName} shown in viewport."
+                : $"{session.FileName} hidden in viewport.";
+        }
+    }
+
     private bool StageDraft(IfcDocument draftDocument, int selectedId, string message)
     {
+        if (IsForeignInspection)
+        {
+            StatusText = "The inspected element belongs to a non-active IFC — switch the active IFC to edit it.";
+            return false;
+        }
+
         var session = ActiveSession;
         if (session is null || ReferenceEquals(session.Document, draftDocument))
         {
@@ -959,7 +1090,7 @@ public sealed class MainWindowViewModel : ReactiveViewModel
         Draft.SetSession(session);
         if (refreshViewport)
         {
-            Viewport.SetDocument(document, selectedId);
+            Viewport.SetSessions(Documents.ToList(), session, selectedId);
         }
 
         Graph.SetDocument(document);
@@ -1325,10 +1456,26 @@ public sealed class ViewportPanelViewModel(MainWindowViewModel owner, IIfcGeomet
     private double nearPlane;
     private double farPlane;
     private CancellationTokenSource? renderSceneCancellation;
-    private long renderSceneLoadVersion;
-    private object? lastRenderStore;
-    private long lastGeometryVersion = -1;
-    private (int ProductId, Vector3 MoveDeltaWorld, float RotateZRadians)? pendingTransformPatch;
+    private readonly List<IfcDocumentSessionViewModel> sceneLoadQueue = [];
+    private bool sceneLoaderRunning;
+    private IReadOnlyList<IfcDocumentSessionViewModel> sessions = [];
+    private IfcDocumentSessionViewModel? activeSession;
+    private readonly Dictionary<string, SessionSceneEntry> sessionScenes = [];
+    private IReadOnlyList<IfcRenderSessionSlot> renderSlots = [];
+    private string? selectedSessionId;
+    private int selectedEntityId;
+    private (string SessionId, int EntityId, Vector3 MoveDeltaWorld, float RotateZRadians)? pendingTransformPatch;
+
+    private sealed class SessionSceneEntry
+    {
+        public IfcRenderScene Scene = IfcRenderScene.Empty();
+
+        public object? Store;
+
+        public long GeometryVersion = -1;
+
+        public int MaxEntityId;
+    }
 
     public ObservableCollection<IfcViewportItem> Items { get; } = [];
 
@@ -1426,42 +1573,141 @@ public sealed class ViewportPanelViewModel(MainWindowViewModel owner, IIfcGeomet
         }
     }
 
+    /// <summary>
+    /// Single-document entry point kept for focused flows and tests; wraps the
+    /// document in a transient session list.
+    /// </summary>
     public void SetDocument(IfcDocument document, int? selectedProductId = null)
     {
+        var session = sessions.FirstOrDefault(value => ReferenceEquals(value.Document, document))
+            ?? new IfcDocumentSessionViewModel(document, sourcePath: null);
+        SetSessions([session], session, selectedProductId);
+    }
+
+    /// <summary>
+    /// Shows all visible sessions in one composite scene. Per-session scenes are
+    /// cached by xBIM store + geometry version, so switching the active IFC or
+    /// editing one file never re-tessellates the others.
+    /// </summary>
+    public void SetSessions(
+        IReadOnlyList<IfcDocumentSessionViewModel> allSessions,
+        IfcDocumentSessionViewModel? active,
+        int? selectedProductId = null)
+    {
+        sessions = allSessions.ToList();
+        activeSession = active;
+
+        var liveIds = sessions.Select(session => session.Id).ToHashSet();
+        foreach (var staleKey in sessionScenes.Keys.Where(key => !liveIds.Contains(key)).ToList())
+        {
+            sessionScenes.Remove(staleKey);
+        }
+
         Title = "Viewport";
+        if (active is null)
+        {
+            Summary = "No model.";
+            Items.Clear();
+            Meshes.Clear();
+            selectedSessionId = null;
+            selectedEntityId = 0;
+            CanTransformSelection = false;
+            Recompose();
+            return;
+        }
+
+        var document = active.Document;
         Summary = IfcNavigationProjector.GetDocumentViewportSummary(document);
-        var items = geometryBackend.ProjectDocument(document);
-        MainWindowViewModel.ReplaceItems(Items, items);
+        MainWindowViewModel.ReplaceItems(Items, geometryBackend.ProjectDocument(document));
         Meshes.Clear();
         var retainedSelection = selectedProductId is int id && document.EntityById.ContainsKey(id)
             ? id
             : 0;
-        SelectedProductId = retainedSelection;
+        selectedSessionId = retainedSelection > 0 ? active.Id : null;
+        selectedEntityId = retainedSelection;
         CanTransformSelection = retainedSelection > 0 && document.PlacementsByEntity.ContainsKey(retainedSelection);
-        var sameStore = document.XbimStore is not null && ReferenceEquals(document.XbimStore, lastRenderStore);
-        if (pendingTransformPatch is { } patch && sameStore && !RenderScene.IsEmpty)
+
+        if (pendingTransformPatch is { } patch
+            && patch.SessionId == active.Id
+            && sessionScenes.TryGetValue(active.Id, out var patchEntry)
+            && patchEntry.Store is not null
+            && ReferenceEquals(patchEntry.Store, document.XbimStore)
+            && !patchEntry.Scene.IsEmpty)
         {
             // A committed move/rotate of a single product: patch the cached scene
             // in place instead of re-tessellating the whole model.
-            RenderScene = IfcRenderSceneTransform.TransformProduct(
-                RenderScene,
-                patch.ProductId,
+            patchEntry.Scene = IfcRenderSceneTransform.TransformProduct(
+                patchEntry.Scene,
+                patch.EntityId,
                 patch.MoveDeltaWorld.X,
                 patch.MoveDeltaWorld.Y,
                 patch.MoveDeltaWorld.Z,
                 patch.RotateZRadians);
-            lastGeometryVersion = document.GeometryVersion;
-            Summary = RenderScene.Status;
+            patchEntry.GeometryVersion = document.GeometryVersion;
+            patchEntry.MaxEntityId = MaxEntityId(document);
+            Recompose();
             return;
         }
 
-        if (!RenderScene.IsEmpty && sameStore && document.GeometryVersion == lastGeometryVersion)
+        RefreshComposition();
+    }
+
+    /// <summary>
+    /// Re-evaluates which visible sessions still need scene builds and refreshes
+    /// the composite. Called on session changes and visibility toggles.
+    /// </summary>
+    public void RefreshComposition()
+    {
+        var stale = new List<IfcDocumentSessionViewModel>();
+        foreach (var session in sessions)
         {
-            Summary = RenderScene.Status;
-            return;
+            if (!session.IsVisibleInViewport)
+            {
+                continue;
+            }
+
+            // An empty cached scene still counts as valid: documents without
+            // geometry would otherwise rebuild on every composition refresh.
+            if (sessionScenes.TryGetValue(session.Id, out var entry)
+                && ReferenceEquals(entry.Store, session.Document.XbimStore)
+                && entry.GeometryVersion == session.Document.GeometryVersion)
+            {
+                continue;
+            }
+
+            stale.Add(session);
         }
 
-        BeginLoadRenderScene(document, IfcRenderSceneRequest.FullModel);
+        Recompose();
+        if (stale.Count > 0)
+        {
+            BeginLoadSessionScenes(stale);
+        }
+    }
+
+    private void Recompose()
+    {
+        var inputs = sessions
+            .Select(session => new IfcCompositeRenderScene.SessionSceneInput(
+                session.Id,
+                sessionScenes.TryGetValue(session.Id, out var entry) ? entry.Scene : IfcRenderScene.Empty(),
+                sessionScenes.TryGetValue(session.Id, out var sized) ? sized.MaxEntityId : MaxEntityId(session.Document),
+                session.IsVisibleInViewport,
+                session.FileName))
+            .ToList();
+        var (scene, slots) = IfcCompositeRenderScene.Compose(inputs);
+        renderSlots = slots;
+        RenderScene = scene;
+        SelectedProductId = IfcCompositeRenderScene.ToRenderId(renderSlots, selectedSessionId, selectedEntityId);
+        if (!scene.IsEmpty)
+        {
+            Summary = scene.Status;
+        }
+    }
+
+    private static int MaxEntityId(IfcDocument document)
+    {
+        return document.EntityById.Count == 0 ? 0 : document.EntityById.Keys.Max();
     }
 
     public void SetSelection(IfcDocument document, IfcEntity entity)
@@ -1470,8 +1716,14 @@ public sealed class ViewportPanelViewModel(MainWindowViewModel owner, IIfcGeomet
         Summary = RenderScene.IsEmpty
             ? $"Selected #{entity.Id}. {geometryBackend.Status}"
             : $"Selected #{entity.Id}. {RenderScene.Status}";
-        SelectedProductId = entity.Id;
-        CanTransformSelection = document.PlacementsByEntity.ContainsKey(entity.Id);
+        var session = sessions.FirstOrDefault(value => ReferenceEquals(value.Document, document)) ?? activeSession;
+        selectedSessionId = session?.Id;
+        selectedEntityId = entity.Id;
+        var renderId = IfcCompositeRenderScene.ToRenderId(renderSlots, selectedSessionId, entity.Id);
+        SelectedProductId = renderId > 0 ? renderId : entity.Id;
+        CanTransformSelection = session is not null
+            && ReferenceEquals(session, activeSession)
+            && document.PlacementsByEntity.ContainsKey(entity.Id);
         var items = geometryBackend.ProjectSelection(document, entity.Id);
         MainWindowViewModel.ReplaceItems(Items, items);
         Meshes.Clear();
@@ -1481,6 +1733,8 @@ public sealed class ViewportPanelViewModel(MainWindowViewModel owner, IIfcGeomet
     {
         Title = typeCount.Type;
         Summary = IfcNavigationProjector.GetTypeViewportSummary(typeCount);
+        selectedSessionId = null;
+        selectedEntityId = 0;
         SelectedProductId = 0;
         CanTransformSelection = false;
         var items = document.EntitiesByType.TryGetValue(typeCount.Type, out var entities)
@@ -1490,9 +1744,15 @@ public sealed class ViewportPanelViewModel(MainWindowViewModel owner, IIfcGeomet
         Meshes.Clear();
     }
 
-    public void SelectProduct(int productId)
+    public void SelectProduct(int renderId)
     {
-        owner.SelectEntityById(productId, "viewport");
+        if (IfcCompositeRenderScene.Resolve(renderSlots, renderId) is { } resolved)
+        {
+            owner.SelectPickedProduct(resolved.SessionId, resolved.EntityId);
+            return;
+        }
+
+        owner.SelectEntityById(renderId, "viewport");
     }
 
     public void SetInteractionMode(ViewportInteractionMode mode)
@@ -1500,13 +1760,22 @@ public sealed class ViewportPanelViewModel(MainWindowViewModel owner, IIfcGeomet
         InteractionMode = mode;
     }
 
-    public bool CommitProductTransform(int productId, Vector3 moveDeltaWorld, float rotateZRadians)
+    public bool CommitProductTransform(int renderId, Vector3 moveDeltaWorld, float rotateZRadians)
     {
+        var resolved = IfcCompositeRenderScene.Resolve(renderSlots, renderId)
+            ?? (activeSession is { } fallbackSession ? (fallbackSession.Id, renderId) : default);
+        if (resolved == default || activeSession is null || resolved.SessionId != activeSession.Id)
+        {
+            // Only the active IFC is editable; foreign selections never show the
+            // transform gizmo, so this is a safety net.
+            return false;
+        }
+
         CancelRenderSceneLoad();
-        pendingTransformPatch = (productId, moveDeltaWorld, rotateZRadians);
+        pendingTransformPatch = (resolved.SessionId, resolved.EntityId, moveDeltaWorld, rotateZRadians);
         try
         {
-            return owner.CommitProductTransform(productId, moveDeltaWorld, rotateZRadians);
+            return owner.CommitProductTransform(resolved.EntityId, moveDeltaWorld, rotateZRadians);
         }
         finally
         {
@@ -1519,47 +1788,79 @@ public sealed class ViewportPanelViewModel(MainWindowViewModel owner, IIfcGeomet
         renderSceneCancellation?.Cancel();
     }
 
-    private void BeginLoadRenderScene(IfcDocument document, IfcRenderSceneRequest request)
+    private void BeginLoadSessionScenes(IReadOnlyList<IfcDocumentSessionViewModel> staleSessions)
     {
-        CancelRenderSceneLoad();
+        // Queue instead of cancel+restart: when another file is opened while a
+        // build is running, the in-flight result stays usable and the new file
+        // is simply appended.
+        foreach (var session in staleSessions)
+        {
+            if (!sceneLoadQueue.Contains(session))
+            {
+                sceneLoadQueue.Add(session);
+            }
+        }
+
+        Summary = RenderScene.IsEmpty
+            ? "Generating xBIM render scene..."
+            : $"Generating xBIM render scene(s) for {sceneLoadQueue.Count:N0} file(s)... keeping {RenderScene.Meshes.Count:N0} current mesh(es) visible.";
+        if (sceneLoaderRunning)
+        {
+            return;
+        }
+
         renderSceneCancellation?.Dispose();
         renderSceneCancellation = new CancellationTokenSource();
-        var token = renderSceneCancellation.Token;
-        var version = Interlocked.Increment(ref renderSceneLoadVersion);
-        if (RenderScene.IsEmpty)
-        {
-            RenderScene = IfcRenderScene.Empty("Generating xBIM render scene...");
-        }
-        else
-        {
-            Summary = $"Generating xBIM render scene... keeping {RenderScene.Meshes.Count:N0} current mesh(es) visible.";
-        }
-
         var progress = new Progress<string>(message => Summary = message);
-        _ = LoadRenderSceneAsync(document, request, token, version, progress);
+        _ = LoadSessionScenesAsync(renderSceneCancellation.Token, progress);
     }
 
-    private async Task LoadRenderSceneAsync(
-        IfcDocument document,
-        IfcRenderSceneRequest request,
-        CancellationToken cancellationToken,
-        long version,
-        IProgress<string> progress)
+    private async Task LoadSessionScenesAsync(CancellationToken cancellationToken, IProgress<string> progress)
     {
+        sceneLoaderRunning = true;
         try
         {
-            Views.ViewportPreviewControl.LogViewport($"scene build start: doc='{document.FileName}' entities={document.Entities.Count}");
-            var scene = await geometryBackend.BuildRenderSceneAsync(document, request, cancellationToken, progress);
-            Views.ViewportPreviewControl.LogViewport($"scene build done: {scene.Status}");
-            if (cancellationToken.IsCancellationRequested || version != renderSceneLoadVersion)
+            while (sceneLoadQueue.Count > 0)
             {
-                return;
-            }
+                cancellationToken.ThrowIfCancellationRequested();
+                var session = sceneLoadQueue[0];
+                sceneLoadQueue.RemoveAt(0);
 
-            RenderScene = scene;
-            lastRenderStore = document.XbimStore;
-            lastGeometryVersion = document.GeometryVersion;
-            Summary = scene.Status;
+                // Re-check at execution time: the session may have been closed or
+                // already carry a valid cached scene.
+                if (!sessions.Any(value => ReferenceEquals(value, session))
+                    || (sessionScenes.TryGetValue(session.Id, out var existing)
+                        && ReferenceEquals(existing.Store, session.Document.XbimStore)
+                        && existing.GeometryVersion == session.Document.GeometryVersion))
+                {
+                    continue;
+                }
+
+                var document = session.Document;
+                Views.ViewportPreviewControl.LogViewport($"scene build start: doc='{document.FileName}' entities={document.Entities.Count}");
+                var scene = await geometryBackend.BuildRenderSceneAsync(document, IfcRenderSceneRequest.FullModel, cancellationToken, progress);
+                Views.ViewportPreviewControl.LogViewport($"scene build done: {scene.Status}");
+                cancellationToken.ThrowIfCancellationRequested();
+
+                // Only store the scene when it still matches the session's current
+                // state; an edit during the build invalidates the result and the
+                // session re-queues on the next composition refresh.
+                if (ReferenceEquals(document.XbimStore, session.Document.XbimStore)
+                    && document.GeometryVersion == session.Document.GeometryVersion)
+                {
+                    sessionScenes[session.Id] = new SessionSceneEntry
+                    {
+                        Scene = scene,
+                        Store = document.XbimStore,
+                        GeometryVersion = document.GeometryVersion,
+                        MaxEntityId = MaxEntityId(document),
+                    };
+
+                    // Publish after every finished file so multi-IFC sessions appear
+                    // progressively instead of all-at-once.
+                    Recompose();
+                }
+            }
         }
         catch (OperationCanceledException)
         {
@@ -1568,15 +1869,52 @@ public sealed class ViewportPanelViewModel(MainWindowViewModel owner, IIfcGeomet
         catch (Exception exception)
         {
             Views.ViewportPreviewControl.LogViewport($"scene build failed: {exception}");
-            if (!cancellationToken.IsCancellationRequested && version == renderSceneLoadVersion)
+            if (!cancellationToken.IsCancellationRequested)
             {
-                RenderScene = IfcRenderScene.Empty($"xBIM render scene failed: {exception.Message}");
                 Summary = $"xBIM render scene failed: {exception.Message}";
                 owner.StatusText = $"xBIM render scene failed: {exception.Message}";
                 owner.Log($"viewport.scene.error('{exception.Message.Replace("'", string.Empty, StringComparison.Ordinal)}')");
             }
         }
+        finally
+        {
+            sceneLoaderRunning = false;
+        }
     }
+}
+
+/// <summary>
+/// Dockable list of all loaded IFC files: pick the active (editable) one via
+/// radio button, toggle per-file viewport visibility, and add further files.
+/// Dock panels can be floated, so this also serves as the "separate window"
+/// model manager.
+/// </summary>
+public sealed class ModelsPanelViewModel : ReactiveViewModel
+{
+    private readonly MainWindowViewModel owner;
+
+    public ModelsPanelViewModel(MainWindowViewModel owner)
+    {
+        this.owner = owner;
+        owner.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName is nameof(MainWindowViewModel.ActiveSession) or nameof(MainWindowViewModel.SessionSummary))
+            {
+                this.RaisePropertyChanged(nameof(ActiveHint));
+                this.RaisePropertyChanged(nameof(SessionSummary));
+            }
+        };
+    }
+
+    public ObservableCollection<IfcDocumentSessionViewModel> Documents => owner.Documents;
+
+    public ReactiveCommand<Unit, Unit> AddIfcCommand => owner.AddIfcCommand;
+
+    public string SessionSummary => owner.SessionSummary;
+
+    public string ActiveHint => owner.ActiveSession is { } active
+        ? $"Edits apply to: {active.FileName}"
+        : "No active IFC.";
 }
 
 public sealed class InspectorPanelViewModel : ReactiveViewModel

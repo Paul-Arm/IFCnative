@@ -20,6 +20,8 @@ internal sealed class NativeTestRunner
         Run("xBIM geometry backend projects sample meshes", XbimGeometryBackendProjectsSampleMeshes);
         Run("xBIM GeometryStore builds finite render scene", XbimGeometryStoreBuildsFiniteRenderScene);
         Run("viewport selection highlights without scene rebuild", ViewportSelectionHighlightsWithoutSceneRebuild);
+        Run("viewport composes multiple IFC sessions", ViewportComposesMultipleIfcSessions);
+        Run("foreign viewport pick inspects read-only", ForeignViewportPickInspectsReadOnly);
         Run("structure tree reveals viewport selection through filters", StructureTreeRevealsViewportSelectionThroughFilters);
         Run("spatial tree nests hosted element relationships", SpatialTreeNestsHostedElementRelationships);
         Run("xBIM geometry dirty handling preserves pset edits only", XbimGeometryDirtyHandlingPreservesPsetEditsOnly);
@@ -192,6 +194,77 @@ internal sealed class NativeTestRunner
 
         var selectedScene = backend.BuildRenderSceneAsync(document, IfcRenderSceneRequest.ForProduct(40)).GetAwaiter().GetResult();
         True(!selectedScene.IsEmpty && selectedScene.Meshes.All(value => value.ProductId == 40), "product scene should use ShapeInstancesOfEntity filtering");
+    }
+
+    private static void ViewportComposesMultipleIfcSessions()
+    {
+        WithTempDirectory(temp =>
+        {
+            var owner = new MainWindowViewModel(new TestFileDialogs(), new NativeUserPreferencesStore(Path.Combine(temp, "preferences.json")), loadSample: false);
+            var backend = new StaticSceneBackend();
+            var viewport = new ViewportPanelViewModel(owner, backend);
+            var documentA = Sample();
+            var documentB = Sample();
+            var sessionA = new IfcDocumentSessionViewModel(documentA, null);
+            var sessionB = new IfcDocumentSessionViewModel(documentB, null);
+
+            viewport.SetSessions([sessionA, sessionB], sessionB);
+            Equal(2, viewport.RenderScene.Meshes.Count, "composite scene should contain one mesh per visible session");
+            Equal(2, backend.SceneBuilds, "each session should build exactly once");
+
+            var baseB = documentA.EntityById.Keys.Max() + 1;
+            viewport.SetSelection(documentB, documentB.EntityById[40]);
+            Equal(baseB + 40, viewport.SelectedProductId, "selection in the second file should use its offset render id range");
+            True(viewport.CanTransformSelection, "active session selection should stay transformable");
+
+            viewport.SetSelection(documentA, documentA.EntityById[40]);
+            Equal(40, viewport.SelectedProductId, "selection in the first file should use the unshifted render id");
+            True(!viewport.CanTransformSelection, "foreign session selection must never be transformable");
+
+            // Switching the active session must not re-tessellate either file.
+            viewport.SetSessions([sessionA, sessionB], sessionA);
+            Equal(2, backend.SceneBuilds, "switching the active session should reuse cached scenes");
+
+            sessionA.IsVisibleInViewport = false;
+            viewport.RefreshComposition();
+            Equal(1, viewport.RenderScene.Meshes.Count, "hidden sessions should drop out of the composite scene");
+            Equal(2, backend.SceneBuilds, "visibility toggles should not rebuild scenes");
+        });
+    }
+
+    private static void ForeignViewportPickInspectsReadOnly()
+    {
+        WithTempDirectory(temp =>
+        {
+            var owner = new MainWindowViewModel(new TestFileDialogs(), new NativeUserPreferencesStore(Path.Combine(temp, "preferences.json")), loadSample: false);
+            var documentA = Sample();
+            var documentB = Sample();
+            var sessionA = new IfcDocumentSessionViewModel(documentA, null);
+            var sessionB = new IfcDocumentSessionViewModel(documentB, null);
+            owner.Documents.Add(sessionA);
+            owner.Documents.Add(sessionB);
+            owner.ActiveSession = sessionB;
+            True(sessionB.IsActive && !sessionA.IsActive, "active flags should follow the active session");
+
+            sessionA.IsActive = true;
+            True(ReferenceEquals(owner.ActiveSession, sessionA), "models panel radio activation should switch the active session");
+            True(!sessionB.IsActive, "previous active session should drop its flag");
+            owner.ActiveSession = sessionB;
+
+            owner.SelectPickedProduct(sessionA.Id, 40);
+            True(owner.IsForeignInspection, "picking another file should enter read-only inspection");
+            True(ReferenceEquals(owner.ActiveSession, sessionB), "picking another file must not switch the active session");
+            Equal("#40", owner.Inspector.EntityId, "inspector should show the foreign entity");
+
+            owner.SaveEntityEdit("Hacked", "Nope", string.Empty);
+            True(owner.StatusText.Contains("non-active", StringComparison.OrdinalIgnoreCase), "edits during foreign inspection must be rejected");
+            Equal("Sample Inspection Block", documentA.EntityById[40].Name, "foreign document must stay unchanged");
+            Equal("Sample Inspection Block", documentB.EntityById[40].Name, "active document must stay unchanged");
+
+            owner.SelectPickedProduct(sessionB.Id, 40);
+            True(!owner.IsForeignInspection, "picking the active file should restore normal selection");
+            Equal(40, sessionB.SelectedEntityId, "active session should record the picked entity");
+        });
     }
 
     private static void ViewportSelectionHighlightsWithoutSceneRebuild()
@@ -626,6 +699,58 @@ END-ISO-10303-21;
         {
             SceneBuilds++;
             return Task.FromResult(IfcRenderScene.Empty("counted"));
+        }
+    }
+
+    private sealed class StaticSceneBackend : IIfcGeometryBackend
+    {
+        public int SceneBuilds { get; private set; }
+
+        public string Name => "static geometry";
+
+        public string Status => "static";
+
+        public IfcGeometryValidationResult ValidateDocument(IfcDocument document)
+        {
+            return new IfcGeometryValidationResult(Name, [], []);
+        }
+
+        public IReadOnlyList<IfcViewportItem> ProjectDocument(IfcDocument document, int limit = 250)
+        {
+            return [new IfcViewportItem(40, "sample")];
+        }
+
+        public IReadOnlyList<IfcViewportItem> ProjectSelection(IfcDocument document, int entityId, int limit = 80)
+        {
+            return [new IfcViewportItem(entityId, $"selected #{entityId}")];
+        }
+
+        public IReadOnlyList<IfcPreviewMesh> BuildPreviewMeshes(IfcDocument document, IReadOnlyList<IfcViewportItem> items, int limit = 48)
+        {
+            return [];
+        }
+
+        public Task<IfcRenderScene> BuildRenderSceneAsync(
+            IfcDocument document,
+            IfcRenderSceneRequest request,
+            CancellationToken cancellationToken = default,
+            IProgress<string>? progress = null)
+        {
+            SceneBuilds++;
+            double[] positions = [0, 0, 0, 1, 0, 0, 0, 1, 0];
+            float[] normals = [0, 0, 1, 0, 0, 1, 0, 0, 1];
+            int[] indices = [0, 1, 2];
+            var bounds = IfcRenderBounds.FromPositions(positions);
+            var mesh = new IfcRenderMesh(40, 1, 0, 0, IfcRenderColor.Default, positions, normals, indices, bounds);
+            var scene = new IfcRenderScene(
+                document.FileName,
+                [mesh],
+                bounds,
+                1,
+                1,
+                "static scene",
+                new Dictionary<int, IfcPreviewVertex> { [40] = new(0, 0, 0) });
+            return Task.FromResult(scene);
         }
     }
 

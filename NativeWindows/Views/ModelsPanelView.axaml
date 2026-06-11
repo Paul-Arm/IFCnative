@@ -1,0 +1,58 @@
+<UserControl x:Class="IFCnative.NativeWindows.Views.ModelsPanelView"
+             xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Grid RowDefinitions="Auto,*,Auto" Margin="8" RowSpacing="8">
+    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+      <StackPanel Spacing="2">
+        <TextBlock Classes="sectionTitle" Text="Loaded Models" />
+        <TextBlock Classes="caption" Text="{Binding SessionSummary}" />
+      </StackPanel>
+      <Button Grid.Column="1"
+              VerticalAlignment="Top"
+              Content="Add IFC..."
+              Command="{Binding AddIfcCommand}"
+              ToolTip.Tip="Load another IFC into the session (Ctrl+Shift+O)" />
+    </Grid>
+
+    <ScrollViewer Grid.Row="1">
+      <ItemsControl ItemsSource="{Binding Documents}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate>
+            <Border Margin="0,2"
+                    Padding="8,6"
+                    CornerRadius="4"
+                    BorderThickness="1"
+                    BorderBrush="#343A30"
+                    Background="#20231E">
+              <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+                <StackPanel Orientation="Vertical" Spacing="4" VerticalAlignment="Center">
+                  <RadioButton GroupName="activeIfcModel"
+                               IsChecked="{Binding IsActive, Mode=TwoWay}"
+                               Content="Active"
+                               ToolTip.Tip="Make this the active (editable) IFC" />
+                  <CheckBox IsChecked="{Binding IsVisibleInViewport, Mode=TwoWay}"
+                            Content="Visible"
+                            ToolTip.Tip="Show this IFC in the 3D viewport" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                  <TextBlock Text="{Binding FileName}"
+                             FontWeight="SemiBold"
+                             TextTrimming="CharacterEllipsis"
+                             ToolTip.Tip="{Binding SourcePath}" />
+                  <TextBlock Classes="caption"
+                             Text="{Binding Meta}"
+                             TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+              </Grid>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </ScrollViewer>
+
+    <TextBlock Grid.Row="2"
+               Classes="caption"
+               Text="{Binding ActiveHint}"
+               TextWrapping="Wrap" />
+  </Grid>
+</UserControl>

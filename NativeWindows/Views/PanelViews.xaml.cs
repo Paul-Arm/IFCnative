@@ -54,6 +54,11 @@ public partial class TypesPanelView : ReactiveUserControl<TypesPanelViewModel>
     public TypesPanelView() => InitializeComponent();
 }
 
+public partial class ModelsPanelView : ReactiveUserControl<ModelsPanelViewModel>
+{
+    public ModelsPanelView() => InitializeComponent();
+}
+
 public partial class ViewportPanelView : ReactiveUserControl<ViewportPanelViewModel>
 {
     public ViewportPanelView() => InitializeComponent();
