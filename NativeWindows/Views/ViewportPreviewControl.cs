@@ -3344,14 +3344,13 @@ void main()
             normal = -normal;
         }
 
-        // Hemisphere ambient + key + fill + headlight: cheap, stable, no pitch
-        // black faces and no blown-out highlights.
+        // Hemisphere ambient + one key light; the raised ambient stands in
+        // for the dropped fill/headlight terms (overdraw makes every
+        // per-fragment ALU op expensive on large models).
         float sky = normal.z * 0.5 + 0.5;
-        vec3 ambient = mix(vec3(0.27, 0.27, 0.26), vec3(0.48, 0.49, 0.48), sky);
-        float key = max(dot(normal, normalize(vec3(0.38, 0.26, 0.89))), 0.0) * 0.46;
-        float fill = max(dot(normal, normalize(vec3(-0.50, -0.40, 0.20))), 0.0) * 0.15;
-        float head = max(dot(normal, viewDirection), 0.0) * 0.10;
-        color = vColor.rgb * min(ambient + vec3(key + fill + head), vec3(1.08));
+        vec3 ambient = mix(vec3(0.31, 0.31, 0.30), vec3(0.53, 0.54, 0.53), sky);
+        float key = max(dot(normal, vec3(0.37922, 0.25947, 0.88818)), 0.0) * 0.50;
+        color = vColor.rgb * min(ambient + vec3(key), vec3(1.06));
     }
 
     if (uSelectedProductId > 0 && abs(vProductId - float(uSelectedProductId)) < 0.5)
@@ -3425,11 +3424,9 @@ void main()
         }
 
         float sky = normal.z * 0.5 + 0.5;
-        vec3 ambient = mix(vec3(0.27, 0.27, 0.26), vec3(0.48, 0.49, 0.48), sky);
-        float key = max(dot(normal, normalize(vec3(0.38, 0.26, 0.89))), 0.0) * 0.46;
-        float fill = max(dot(normal, normalize(vec3(-0.50, -0.40, 0.20))), 0.0) * 0.15;
-        float head = max(dot(normal, viewDirection), 0.0) * 0.10;
-        color = vColor.rgb * min(ambient + vec3(key + fill + head), vec3(1.08));
+        vec3 ambient = mix(vec3(0.31, 0.31, 0.30), vec3(0.53, 0.54, 0.53), sky);
+        float key = max(dot(normal, vec3(0.37922, 0.25947, 0.88818)), 0.0) * 0.50;
+        color = vColor.rgb * min(ambient + vec3(key), vec3(1.06));
     }
 
     if (uSelectedProductId > 0 && abs(vProductId - float(uSelectedProductId)) < 0.5)
