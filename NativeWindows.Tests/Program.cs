@@ -35,6 +35,7 @@ internal sealed class NativeTestRunner
         Run("IFC file loader reads and writes ifcZIP archives", IfcFileLoaderReadsAndWritesIfcZipArchives);
         Run("xBIM editor commits directly to the in-memory store", XbimEditorCommitsDirectlyToInMemoryStore);
         Run("main window commits inspector edits through xBIM", MainWindowCommitsInspectorEditsThroughXbim);
+        Run("main window batch pset edits span the selection", MainWindowBatchPsetEditsSpanSelection);
         Run("relationship graph supports filter and depth", RelationshipGraphSupportsFilterAndDepth);
         Run("diagnostics projector supports text and severity filters", DiagnosticsProjectorSupportsFilters);
         Run("main window commits diagnostic repairs through xBIM", MainWindowCommitsDiagnosticRepairsThroughXbim);
@@ -608,6 +609,79 @@ END-ISO-10303-21;
 
             owner.OpenLog();
             True(owner.Console.LogText.Contains("status:", StringComparison.OrdinalIgnoreCase), "log panel should contain copyable status text");
+        });
+    }
+
+    private static void MainWindowBatchPsetEditsSpanSelection()
+    {
+        WithTempDirectory(temp =>
+        {
+            var preferences = new NativeUserPreferencesStore(Path.Combine(temp, "preferences.json"));
+            var owner = new MainWindowViewModel(new TestFileDialogs(), preferences);
+
+            // An element (#40) and its spatial parent (#30) form a deterministic
+            // multi-selection; both are IfcObjects that accept property sets.
+            const int first = 40;
+            const int second = 30;
+
+            owner.SetBatchSelection(new[] { first, second });
+            owner.AddPsetToBatchSelection("Pset_BatchTest");
+
+            var afterAdd = owner.ActiveSession!.Document;
+            True(afterAdd.PropertySetsByEntity[first].Any(set => set.Name == "Pset_BatchTest"), "batch add should reach the first object");
+            True(afterAdd.PropertySetsByEntity[second].Any(set => set.Name == "Pset_BatchTest"), "batch add should reach the second object");
+            True(owner.ActiveSession!.SelectedEntityIds.Count == 2, "batch selection should survive the commit refresh");
+
+            // Adding a value to a cell the object does not yet have appends the property.
+            var setId = afterAdd.PropertySetsByEntity[first].First(set => set.Name == "Pset_BatchTest").Id;
+            owner.EditBatchPropertyCell(first, setId, null, "TestProp", "Hello", "IfcLabel");
+
+            var afterCell = owner.ActiveSession!.Document;
+            var added = afterCell.PropertySetsByEntity[first].First(set => set.Name == "Pset_BatchTest");
+            True(added.Values.Any(value => value.Name == "TestProp" && value.Value.Contains("Hello", StringComparison.Ordinal)), "cell add should append the property value");
+
+            // Editing the same cell again updates the existing property in place.
+            var propertyId = added.Values.First(value => value.Name == "TestProp").Id;
+            owner.EditBatchPropertyCell(first, added.Id, propertyId, "TestProp", "World", "IfcLabel");
+
+            var afterUpdate = owner.ActiveSession!.Document;
+            var updated = afterUpdate.PropertySetsByEntity[first].First(set => set.Name == "Pset_BatchTest");
+            True(updated.Values.First(value => value.Name == "TestProp").Value.Contains("World", StringComparison.Ordinal), "cell update should overwrite the property value");
+
+            // Batch "add property": appends to every selected object's set.
+            owner.AddPropertyToBatchBlock("Pset_BatchTest", "BatchProp", "7", "IfcInteger");
+            var afterBatchProp = owner.ActiveSession!.Document;
+            True(afterBatchProp.PropertySetsByEntity[first].First(set => set.Name == "Pset_BatchTest").Values.Any(value => value.Name == "BatchProp"), "batch add property should reach the first object");
+            True(afterBatchProp.PropertySetsByEntity[second].First(set => set.Name == "Pset_BatchTest").Values.Any(value => value.Name == "BatchProp"), "batch add property should reach the second object");
+
+            // Inspector "add property": appends to a single set.
+            var setId2 = afterBatchProp.PropertySetsByEntity[first].First(set => set.Name == "Pset_BatchTest").Id;
+            owner.AddPropertyToSet(setId2, "InspectorProp", "hi", "IfcText");
+            var afterInspectorProp = owner.ActiveSession!.Document;
+            True(afterInspectorProp.PropertySetById[setId2].Values.Any(value => value.Name == "InspectorProp"), "inspector add property should append to the set");
+
+            // Retype an existing property while preserving its value.
+            var target = afterInspectorProp.PropertySetsByEntity[first].First(set => set.Name == "Pset_BatchTest").Values.First(value => value.Name == "TestProp");
+            owner.RetypeProperties(new[] { target.Id }, "IfcText");
+            var afterRetype = owner.ActiveSession!.Document;
+            var retyped = afterRetype.PropertySetsByEntity[first].First(set => set.Name == "Pset_BatchTest").Values.First(value => value.Name == "TestProp");
+            Equal("IfcText", retyped.ValueType, "retype should change the measure type");
+            True(retyped.Value.Contains("World", StringComparison.Ordinal), "retype should preserve the value");
+
+            // Rename a whole row (right-click property → rename), keeping the value.
+            owner.EditPropertyRow(new[] { retyped.Id }, "RenamedProp", null);
+            var afterRename = owner.ActiveSession!.Document;
+            var renamedSet = afterRename.PropertySetsByEntity[first].First(set => set.Name == "Pset_BatchTest");
+            True(renamedSet.Values.Any(value => value.Name == "RenamedProp"), "row rename should change the property name");
+            True(renamedSet.Values.All(value => value.Name != "TestProp"), "the old property name should be gone after rename");
+            True(renamedSet.Values.First(value => value.Name == "RenamedProp").Value.Contains("World", StringComparison.Ordinal), "rename should preserve the value");
+
+            // Retyping a non-numeric value to IfcInteger must not throw (falls back to 0).
+            var renamedProp = renamedSet.Values.First(value => value.Name == "RenamedProp");
+            owner.RetypeProperties(new[] { renamedProp.Id }, "IfcInteger");
+            var afterIntCast = owner.ActiveSession!.Document;
+            var intCast = afterIntCast.PropertySetsByEntity[first].First(set => set.Name == "Pset_BatchTest").Values.First(value => value.Name == "RenamedProp");
+            Equal("IfcInteger", intCast.ValueType, "a non-numeric value should still convert to IfcInteger without crashing");
         });
     }
 

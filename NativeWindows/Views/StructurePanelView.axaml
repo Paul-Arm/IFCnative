@@ -33,8 +33,10 @@
     <ListBox Grid.Row="1"
              x:Name="TreeListBox"
              Classes="fileTree"
+             SelectionMode="Multiple"
              ItemsSource="{Binding Rows}"
-             SelectedItem="{Binding SelectedRow}">
+             SelectedItem="{Binding SelectedRow}"
+             SelectionChanged="OnTreeSelectionChanged">
       <ListBox.ItemTemplate>
         <DataTemplate>
           <Grid Height="{DynamicResource FileTreeRowHeight}"

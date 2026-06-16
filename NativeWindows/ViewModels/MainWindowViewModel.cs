@@ -5,6 +5,7 @@ using System.Runtime.CompilerServices;
 using System.Reactive;
 using System.Threading;
 using Avalonia.Media;
+using Avalonia.Threading;
 using Dock.Model.Controls;
 using Dock.Model.Core;
 using IFCnative.NativeWindows.Docking;
@@ -104,6 +105,12 @@ public sealed class IfcDocumentSessionViewModel : ReactiveViewModel
     public HashSet<int> Bookmarks { get; } = [];
 
     public int SelectedEntityId { get; set; }
+
+    /// <summary>
+    /// Entities targeted by batch operations (the tree multi-selection). Persisted
+    /// on the session so it survives the document re-projection after each edit.
+    /// </summary>
+    public List<int> SelectedEntityIds { get; } = [];
 
     public IfcDocument Document
     {
@@ -215,6 +222,7 @@ public sealed class MainWindowViewModel : ReactiveViewModel
         Viewport.NearPlane = currentPreferences.NearPlane;
         Viewport.FarPlane = currentPreferences.FarPlane;
         Inspector = new InspectorPanelViewModel(this);
+        PsetBatch = new PsetBatchPanelViewModel(this);
         Draft = new DraftPanelViewModel(this);
         Graph = new GraphPanelViewModel(this);
         Diagnostics = new DiagnosticsPanelViewModel(this);
@@ -256,6 +264,8 @@ public sealed class MainWindowViewModel : ReactiveViewModel
     public ViewportPanelViewModel Viewport { get; }
 
     public InspectorPanelViewModel Inspector { get; }
+
+    public PsetBatchPanelViewModel PsetBatch { get; }
 
     public DraftPanelViewModel Draft { get; }
 
@@ -572,6 +582,15 @@ public sealed class MainWindowViewModel : ReactiveViewModel
         if (source != "tree")
         {
             Structure.SelectEntity(entityId);
+
+            // An explicit external single pick (viewport / bookmark / graph)
+            // collapses the batch selection to the picked element. The generic
+            // "selection" source comes from a document refresh, which restores
+            // the previous multi-selection itself, so it must not touch it here.
+            if (source != "selection")
+            {
+                Structure.SetMultiSelection([entityId]);
+            }
         }
 
         Graph.SetSelection(document, entity);
@@ -723,6 +742,195 @@ public sealed class MainWindowViewModel : ReactiveViewModel
         }
 
         StageDraft(XbimDocumentEditor.AddBaseQuantitySet(session.Document, selectedId, width, depth, height), selectedId, $"Staged xBIM base Qto for #{selectedId}.");
+    }
+
+    /// <summary>
+    /// Records the entities targeted by batch operations and refreshes the batch
+    /// Pset panel. Invalid ids (no longer in the document) are dropped.
+    /// </summary>
+    public void SetBatchSelection(IReadOnlyList<int> entityIds)
+    {
+        var session = ActiveSession;
+        if (session is null)
+        {
+            return;
+        }
+
+        var document = session.Document;
+        session.SelectedEntityIds.Clear();
+        session.SelectedEntityIds.AddRange(entityIds.Where(id => document.EntityById.ContainsKey(id)).Distinct());
+        PsetBatch.SetSelection(document, session.SelectedEntityIds);
+    }
+
+    /// <summary>
+    /// Adds an empty property set with the given name to every selected object
+    /// that does not already carry it, in a single transaction.
+    /// </summary>
+    public void AddPsetToBatchSelection(string psetName)
+    {
+        var session = ActiveSession;
+        var name = psetName?.Trim() ?? string.Empty;
+        if (session is null || name.Length == 0)
+        {
+            return;
+        }
+
+        var document = session.Document;
+        var selected = session.SelectedEntityIds.Where(id => document.EntityById.ContainsKey(id)).ToList();
+        if (selected.Count == 0)
+        {
+            StatusText = "Select one or more objects in the tree first.";
+            return;
+        }
+
+        var targets = selected.Where(id => !HasPropertySetNamed(document, id, name)).ToList();
+        if (targets.Count == 0)
+        {
+            StatusText = $"All {selected.Count:N0} selected objects already have Pset '{name}'.";
+            return;
+        }
+
+        StageDraft(
+            XbimDocumentEditor.AddEmptyPropertySetToEntities(document, targets, name),
+            targets[0],
+            $"Staged xBIM Pset '{name}' for {targets.Count:N0} object(s).");
+    }
+
+    /// <summary>
+    /// Commits a single cell edit from the batch panel. When the object already
+    /// owns the property its value is updated; otherwise the property is appended
+    /// to that object's set.
+    /// </summary>
+    public void EditBatchPropertyCell(int entityId, int setId, int? propertyId, string propertyName, string value, string? valueType)
+    {
+        var session = ActiveSession;
+        if (session is null)
+        {
+            return;
+        }
+
+        var document = session.Document;
+        var draft = propertyId is int existing
+            ? XbimDocumentEditor.UpdatePropertyValue(document, existing, value, valueType)
+            : XbimDocumentEditor.AddPropertyToSet(document, setId, propertyName, value, string.IsNullOrWhiteSpace(valueType) ? "IfcLabel" : valueType!);
+        StageDraft(draft, entityId, $"Staged xBIM batch edit of '{propertyName}' on #{entityId}.");
+    }
+
+    private static bool HasPropertySetNamed(IfcDocument document, int entityId, string name)
+    {
+        return document.PropertySetsByEntity.TryGetValue(entityId, out var sets)
+            && sets.Any(set => string.Equals(set.Name?.Trim(), name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Appends a new property to a single property set (Inspector "add property").
+    /// Refuses duplicates so the set keeps unique property names.
+    /// </summary>
+    public void AddPropertyToSet(int setId, string propertyName, string value, string valueType = "IfcLabel")
+    {
+        var session = ActiveSession;
+        var name = propertyName?.Trim() ?? string.Empty;
+        if (session is null || setId == 0 || name.Length == 0)
+        {
+            return;
+        }
+
+        var document = session.Document;
+        if (document.PropertySetById.TryGetValue(setId, out var set)
+            && set.Values.Any(value => string.Equals(value.Name?.Trim(), name, StringComparison.OrdinalIgnoreCase)))
+        {
+            StatusText = $"Property '{name}' already exists in this set.";
+            return;
+        }
+
+        StageDraft(
+            XbimDocumentEditor.AddPropertyToSet(document, setId, name, value, string.IsNullOrWhiteSpace(valueType) ? "IfcLabel" : valueType!),
+            session.SelectedEntityId,
+            $"Staged xBIM property '{name}' for set #{setId}.");
+    }
+
+    /// <summary>
+    /// Adds a new property to every selected object's set of the given name (batch
+    /// "add property"). Sets that already carry the property are skipped.
+    /// </summary>
+    public void AddPropertyToBatchBlock(string psetName, string propertyName, string value, string valueType = "IfcLabel")
+    {
+        var session = ActiveSession;
+        var pset = psetName?.Trim() ?? string.Empty;
+        var name = propertyName?.Trim() ?? string.Empty;
+        if (session is null || pset.Length == 0 || name.Length == 0)
+        {
+            return;
+        }
+
+        var document = session.Document;
+        var setIds = new List<int>();
+        foreach (var entityId in session.SelectedEntityIds)
+        {
+            if (!document.PropertySetsByEntity.TryGetValue(entityId, out var sets))
+            {
+                continue;
+            }
+
+            foreach (var set in sets)
+            {
+                if (!string.Equals(set.Name?.Trim(), pset, StringComparison.OrdinalIgnoreCase)
+                    || set.Values.Any(value => string.Equals(value.Name?.Trim(), name, StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
+                setIds.Add(set.Id);
+            }
+        }
+
+        setIds = setIds.Distinct().ToList();
+        if (setIds.Count == 0)
+        {
+            StatusText = $"Property '{name}' is already present on every '{pset}' set in the selection.";
+            return;
+        }
+
+        StageDraft(
+            XbimDocumentEditor.AddPropertyToSets(document, setIds, name, value, string.IsNullOrWhiteSpace(valueType) ? "IfcLabel" : valueType!),
+            session.SelectedEntityIds.FirstOrDefault(),
+            $"Staged xBIM property '{name}' for {setIds.Count:N0} '{pset}' set(s).");
+    }
+
+    /// <summary>
+    /// Changes the measure type of one or more properties while preserving their
+    /// current values (batch panel right-click on a value / click on a property).
+    /// </summary>
+    public void RetypeProperties(IReadOnlyList<int> propertyIds, string valueType)
+    {
+        var session = ActiveSession;
+        if (session is null || propertyIds.Count == 0 || string.IsNullOrWhiteSpace(valueType))
+        {
+            return;
+        }
+
+        StageDraft(
+            XbimDocumentEditor.RetypeProperties(session.Document, propertyIds, valueType.Trim()),
+            session.SelectedEntityIds.FirstOrDefault(),
+            $"Staged xBIM type change to {valueType.Trim()} for {propertyIds.Count:N0} value(s).");
+    }
+
+    /// <summary>
+    /// Renames and/or retypes a whole batch row (every selected object's property
+    /// of that name) in one transaction. Pass null to leave name or type as-is.
+    /// </summary>
+    public void EditPropertyRow(IReadOnlyList<int> propertyIds, string? newName, string? valueType)
+    {
+        var session = ActiveSession;
+        if (session is null || propertyIds.Count == 0)
+        {
+            return;
+        }
+
+        StageDraft(
+            XbimDocumentEditor.RenameAndRetypeProperties(session.Document, propertyIds, newName, valueType),
+            session.SelectedEntityIds.FirstOrDefault(),
+            $"Staged xBIM property row edit for {propertyIds.Count:N0} value(s).");
     }
 
     public void AddResource(string kind, string name, string identification)
@@ -1213,24 +1421,44 @@ public sealed class MainWindowViewModel : ReactiveViewModel
             ?? document.SpatialRoots.FirstOrDefault()?.Entity.Id
             ?? document.Entities.FirstOrDefault()?.Id;
 
-        Structure.SetDocument(document, session.Bookmarks);
-        Types.SetDocument(document);
-        Diagnostics.SetDocument(document);
-        Draft.SetSession(session);
-        if (refreshViewport)
-        {
-            Viewport.SetSessions(Documents.ToList(), session, selectedId);
-        }
+        // Capture the batch multi-selection before the rebuild wipes the tree
+        // selection, then restore it once the new rows exist.
+        var restoreBatchIds = session.SelectedEntityIds
+            .Where(id => document.EntityById.ContainsKey(id))
+            .Distinct()
+            .ToList();
 
-        Graph.SetDocument(document);
-        Builder.SetDocument(document);
-        if (selectedId is not null)
+        Structure.BeginProgrammaticUpdate();
+        try
         {
-            SelectEntityById(selectedId.Value, updateViewport: refreshViewport);
+            Structure.SetDocument(document, session.Bookmarks);
+            Types.SetDocument(document);
+            Diagnostics.SetDocument(document);
+            Draft.SetSession(session);
+            if (refreshViewport)
+            {
+                Viewport.SetSessions(Documents.ToList(), session, selectedId);
+            }
+
+            Graph.SetDocument(document);
+            Builder.SetDocument(document);
+            if (selectedId is not null)
+            {
+                SelectEntityById(selectedId.Value, updateViewport: refreshViewport);
+            }
+            else
+            {
+                Inspector.Clear();
+            }
+
+            List<int> batchIds = restoreBatchIds.Count > 0
+                ? restoreBatchIds
+                : selectedId is int single ? new List<int> { single } : new List<int>();
+            Structure.SetMultiSelection(batchIds);
         }
-        else
+        finally
         {
-            Inspector.Clear();
+            Structure.EndProgrammaticUpdate();
         }
 
         this.RaisePropertyChanged(nameof(WindowTitle));
@@ -1299,6 +1527,7 @@ public sealed class MainWindowViewModel : ReactiveViewModel
 public sealed class StructurePanelViewModel(MainWindowViewModel owner) : ReactiveViewModel
 {
     private readonly Dictionary<int, bool> expansionByEntityId = [];
+    private readonly HashSet<int> selectedEntityIds = [];
     private IfcDocument? document;
     private IReadOnlyList<IfcTreeNode> currentRoots = [];
     private string searchText = string.Empty;
@@ -1306,6 +1535,15 @@ public sealed class StructurePanelViewModel(MainWindowViewModel owner) : Reactiv
     private IfcFileTreeRowViewModel? selectedBookmark;
     private bool isSelectingProgrammatically;
     private bool isPinnedSectionExpanded;
+    private int programmaticDepth;
+
+    /// <summary>
+    /// Raised when the view should re-apply the multi-selection to the tree
+    /// ListBox by entity id (rows are recreated on every rebuild, so selection
+    /// cannot be preserved by reference). The view applies it while
+    /// <see cref="IsProgrammaticUpdate"/> is set so it does not echo back.
+    /// </summary>
+    public event EventHandler<IReadOnlyList<int>>? MultiSelectionApplyRequested;
 
     public ObservableCollection<IfcFileTreeRowViewModel> Rows { get; } = [];
 
@@ -1340,11 +1578,72 @@ public sealed class StructurePanelViewModel(MainWindowViewModel owner) : Reactiv
         {
             if (SetProperty(ref selectedRow, value) && value is not null)
             {
-                if (!isSelectingProgrammatically)
+                if (!isSelectingProgrammatically && !IsProgrammaticUpdate)
                 {
                     owner.SelectEntityById(value.Node.Entity.Id, "tree");
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// True while the view model is mutating the tree or its selection
+    /// programmatically; the view suppresses selection echoes during this window.
+    /// Reference counted so nested rebuilds/restores stay guarded.
+    /// </summary>
+    public bool IsProgrammaticUpdate => programmaticDepth > 0;
+
+    internal void BeginProgrammaticUpdate() => programmaticDepth++;
+
+    internal void EndProgrammaticUpdate() => programmaticDepth = Math.Max(0, programmaticDepth - 1);
+
+    /// <summary>Currently multi-selected entity ids (drives the batch Pset panel).</summary>
+    public IReadOnlyCollection<int> SelectedEntityIds => selectedEntityIds;
+
+    /// <summary>Called by the view when the user changes the tree selection.</summary>
+    public void OnUserSelectionChanged(IReadOnlyList<int> entityIds)
+    {
+        if (IsProgrammaticUpdate)
+        {
+            return;
+        }
+
+        selectedEntityIds.Clear();
+        foreach (var id in entityIds)
+        {
+            selectedEntityIds.Add(id);
+        }
+
+        owner.SetBatchSelection(entityIds);
+    }
+
+    /// <summary>
+    /// Programmatically sets the multi-selection (e.g. restoring it after a
+    /// document refresh or following an external single pick), re-applies the
+    /// tree highlight, and notifies the owner so the batch panel follows.
+    /// </summary>
+    public void SetMultiSelection(IReadOnlyList<int> entityIds)
+    {
+        selectedEntityIds.Clear();
+        foreach (var id in entityIds)
+        {
+            selectedEntityIds.Add(id);
+        }
+
+        ReapplyMultiSelectionVisual();
+        owner.SetBatchSelection(entityIds);
+    }
+
+    private void ReapplyMultiSelectionVisual()
+    {
+        BeginProgrammaticUpdate();
+        try
+        {
+            MultiSelectionApplyRequested?.Invoke(this, selectedEntityIds.ToList());
+        }
+        finally
+        {
+            EndProgrammaticUpdate();
         }
     }
 
@@ -1490,6 +1789,7 @@ public sealed class StructurePanelViewModel(MainWindowViewModel owner) : Reactiv
 
         expansionByEntityId[row.Node.Entity.Id] = !row.IsExpanded;
         RebuildRows();
+        ReapplyMultiSelectionVisual();
     }
 
     private void ApplySearch()
@@ -1503,6 +1803,7 @@ public sealed class StructurePanelViewModel(MainWindowViewModel owner) : Reactiv
 
         currentRoots = IfcNavigationProjector.Search(document, SearchText);
         RebuildRows();
+        ReapplyMultiSelectionVisual();
     }
 
     private void RebuildRows()
@@ -1513,7 +1814,17 @@ public sealed class StructurePanelViewModel(MainWindowViewModel owner) : Reactiv
             AddRows(rows, currentRoots[index], depth: 0, isLast: index == currentRoots.Count - 1, ancestorContinues: []);
         }
 
-        MainWindowViewModel.ReplaceItems(Rows, rows);
+        // Replacing the items clears the ListBox selection; guard so the empty
+        // transition is not echoed back as a user selection change.
+        BeginProgrammaticUpdate();
+        try
+        {
+            MainWindowViewModel.ReplaceItems(Rows, rows);
+        }
+        finally
+        {
+            EndProgrammaticUpdate();
+        }
     }
 
     private void AddRows(
@@ -2289,6 +2600,11 @@ public sealed class InspectorPanelViewModel : ReactiveViewModel
         owner.SaveProperty(row.ToPropertyDetails(), row.ValueDraft, row.CanEditValueType ? row.ValueTypeDraft : null);
     }
 
+    public void AddPropertyToTable(IfcPropertySetTableViewModel table)
+    {
+        owner.AddPropertyToSet(table.Id, table.NewPropertyName, table.NewPropertyValue, table.NewPropertyType);
+    }
+
     public void SetSelection(IfcDocument document, IfcSelectionDetails details, bool bookmarked)
     {
         var entity = details.Entity;
@@ -2352,16 +2668,29 @@ public sealed class InspectorPanelViewModel : ReactiveViewModel
     }
 }
 
-public sealed class IfcPropertySetTableViewModel
+public sealed class IfcPropertySetTableViewModel : ReactiveViewModel
 {
+    private readonly InspectorPanelViewModel owner;
+    private string newPropertyName = string.Empty;
+    private string newPropertyValue = string.Empty;
+    private string newPropertyType = "IfcLabel";
+
     public IfcPropertySetTableViewModel(InspectorPanelViewModel owner, IfcPropertySetTableDetails details)
     {
+        this.owner = owner;
         Id = details.Id;
         Kind = details.Kind;
         Name = details.Name;
         Meta = details.Meta;
         Rows = new ObservableCollection<IfcPropertyTableRowViewModel>(
             details.Rows.Select(row => new IfcPropertyTableRowViewModel(owner, row)));
+        // Quantity sets carry IfcPhysicalQuantity, not IfcProperty — only true
+        // property sets can take a new IfcPropertySingleValue.
+        CanAddProperty = string.Equals(Kind, "Pset", StringComparison.OrdinalIgnoreCase);
+        // Defer: committing rebuilds the inspector, tearing down this button's
+        // visual tree while its click is still being dispatched.
+        AddPropertyCommand = ReactiveCommand.Create(
+            () => Dispatcher.UIThread.Post(() => owner.AddPropertyToTable(this), DispatcherPriority.Background));
     }
 
     public int Id { get; }
@@ -2371,6 +2700,30 @@ public sealed class IfcPropertySetTableViewModel
     public string Name { get; }
 
     public string Meta { get; }
+
+    public bool CanAddProperty { get; }
+
+    public IReadOnlyList<string> ValueTypeOptions => PsetValueTypes.Common;
+
+    public string NewPropertyName
+    {
+        get => newPropertyName;
+        set => this.RaiseAndSetIfChanged(ref newPropertyName, value);
+    }
+
+    public string NewPropertyValue
+    {
+        get => newPropertyValue;
+        set => this.RaiseAndSetIfChanged(ref newPropertyValue, value);
+    }
+
+    public string NewPropertyType
+    {
+        get => newPropertyType;
+        set => this.RaiseAndSetIfChanged(ref newPropertyType, value ?? "IfcLabel");
+    }
+
+    public ReactiveCommand<Unit, Unit> AddPropertyCommand { get; }
 
     public ObservableCollection<IfcPropertyTableRowViewModel> Rows { get; }
 }

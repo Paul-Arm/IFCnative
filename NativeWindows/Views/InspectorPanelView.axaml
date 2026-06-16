@@ -129,7 +129,7 @@
               <ItemsControl.ItemTemplate>
                 <DataTemplate>
                   <Border Classes="surface" BorderThickness="1,1,1,1" Padding="0">
-                    <Grid RowDefinitions="Auto,*">
+                    <Grid RowDefinitions="Auto,*,Auto">
                       <Border Background="#20271F" BorderBrush="#3A4035" BorderThickness="0,0,0,1" Padding="8">
                         <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
                           <Border Background="#2F7D68" Padding="7,3" CornerRadius="4" VerticalAlignment="Center">
@@ -191,6 +191,31 @@
                           </DataTemplate>
                         </ItemsControl.ItemTemplate>
                       </ItemsControl>
+
+                      <Border Grid.Row="2"
+                              BorderBrush="#343A30"
+                              BorderThickness="0,1,0,0"
+                              Padding="8,6"
+                              IsVisible="{Binding CanAddProperty}">
+                        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
+                          <TextBox Grid.Column="0"
+                                   MinHeight="28"
+                                   Watermark="New property"
+                                   Text="{Binding NewPropertyName}" />
+                          <ComboBox Grid.Column="1"
+                                    MinHeight="28"
+                                    MinWidth="118"
+                                    FontSize="{DynamicResource FontSizeCaption}"
+                                    ItemsSource="{Binding ValueTypeOptions}"
+                                    SelectedItem="{Binding NewPropertyType, Mode=TwoWay}"
+                                    ToolTip.Tip="Data type" />
+                          <Button Grid.Column="2"
+                                  Classes="primary"
+                                  Content="Add"
+                                  Command="{Binding AddPropertyCommand}"
+                                  ToolTip.Tip="Add a new property to this set" />
+                        </Grid>
+                      </Border>
                     </Grid>
                   </Border>
                 </DataTemplate>

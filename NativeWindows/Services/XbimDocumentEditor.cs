@@ -294,6 +294,135 @@ public static class XbimDocumentEditor
         });
     }
 
+    /// <summary>
+    /// Batch-adds an empty property set with the given name to each product, in a
+    /// single transaction. Products that cannot be resolved are skipped. The
+    /// caller is responsible for filtering out products that already carry a set
+    /// of that name (see <see cref="IfcDocument.PropertySetsByEntity"/>).
+    /// </summary>
+    public static IfcDocument AddEmptyPropertySetToEntities(IfcDocument document, IReadOnlyList<int> productIds, string psetName)
+    {
+        var name = string.IsNullOrWhiteSpace(psetName) ? "Pset_IFCnative" : psetName.Trim();
+        return Edit(document, "Add property set", store =>
+        {
+            foreach (var productId in productIds)
+            {
+                var product = GetEntity(store, productId);
+                if (product is null)
+                {
+                    continue;
+                }
+
+                var pset = CreatePropertySet(store, name, []);
+                AttachPropertySet(store, product, pset, $"{ReadName(product, "Product")} {name}");
+            }
+        });
+    }
+
+    /// <summary>
+    /// Appends a single <c>IfcPropertySingleValue</c> to an existing property set.
+    /// Used by the batch editor when a selected object has the set but not yet the
+    /// edited property. Quantity sets (no <c>HasProperties</c>) are left untouched.
+    /// </summary>
+    public static IfcDocument AddPropertyToSet(IfcDocument document, int propertySetId, string propertyName, string rawValue, string valueTypeName = "IfcLabel")
+    {
+        return Edit(document, "Add property to set", store => AppendSingleValueProperty(store, propertySetId, propertyName, rawValue, valueTypeName));
+    }
+
+    /// <summary>Batch variant: appends the same property to several sets in one transaction.</summary>
+    public static IfcDocument AddPropertyToSets(IfcDocument document, IReadOnlyList<int> propertySetIds, string propertyName, string rawValue, string valueTypeName = "IfcLabel")
+    {
+        return Edit(document, "Add property to sets", store =>
+        {
+            foreach (var propertySetId in propertySetIds)
+            {
+                AppendSingleValueProperty(store, propertySetId, propertyName, rawValue, valueTypeName);
+            }
+        });
+    }
+
+    /// <summary>
+    /// Re-wraps each property's existing nominal value in a new measure type,
+    /// keeping the underlying value. Non-single-value properties are skipped.
+    /// </summary>
+    public static IfcDocument RetypeProperties(IfcDocument document, IReadOnlyList<int> propertyIds, string valueTypeName)
+    {
+        return Edit(document, "Change property type", store =>
+        {
+            var valueType = (string.IsNullOrWhiteSpace(valueTypeName)
+                ? null
+                : TryResolveSchemaType(store, "MeasureResource", valueTypeName.Trim()))
+                ?? ResolveSchemaType(store, "MeasureResource", "IfcLabel");
+            foreach (var propertyId in propertyIds)
+            {
+                var property = GetEntity(store, propertyId);
+                if (property is null || !HasProperty(property, "NominalValue"))
+                {
+                    continue;
+                }
+
+                var current = GetPropertyValue(property, "NominalValue");
+                var raw = current?.ToString() ?? string.Empty;
+                SetProperty(property, "NominalValue", CreateMeasureValue(valueType, raw));
+            }
+        });
+    }
+
+    /// <summary>
+    /// Renames and/or retypes several properties in one transaction (batch row
+    /// edit). A null/blank name leaves the name untouched; a null/blank type
+    /// leaves the type untouched. Values are preserved.
+    /// </summary>
+    public static IfcDocument RenameAndRetypeProperties(IfcDocument document, IReadOnlyList<int> propertyIds, string? newName, string? valueTypeName)
+    {
+        return Edit(document, "Edit property row", store =>
+        {
+            var trimmedName = string.IsNullOrWhiteSpace(newName) ? null : newName.Trim();
+            var valueType = string.IsNullOrWhiteSpace(valueTypeName)
+                ? null
+                : TryResolveSchemaType(store, "MeasureResource", valueTypeName.Trim()) ?? ResolveSchemaType(store, "MeasureResource", "IfcLabel");
+
+            foreach (var propertyId in propertyIds)
+            {
+                var property = GetEntity(store, propertyId);
+                if (property is null)
+                {
+                    continue;
+                }
+
+                if (trimmedName is not null && HasProperty(property, "Name"))
+                {
+                    SetProperty(property, "Name", trimmedName);
+                }
+
+                if (valueType is not null && HasProperty(property, "NominalValue"))
+                {
+                    var current = GetPropertyValue(property, "NominalValue");
+                    SetProperty(property, "NominalValue", CreateMeasureValue(valueType, current?.ToString() ?? string.Empty));
+                }
+            }
+        });
+    }
+
+    private static void AppendSingleValueProperty(IfcStore store, int propertySetId, string propertyName, string rawValue, string valueTypeName)
+    {
+        var pset = GetEntity(store, propertySetId);
+        var properties = GetPropertyValue(pset, "HasProperties");
+        if (pset is null || properties is null)
+        {
+            return;
+        }
+
+        var property = New(store, ResolveSchemaType(store, "PropertyResource", "IfcPropertySingleValue"));
+        SetProperty(property, "Name", string.IsNullOrWhiteSpace(propertyName) ? "Property" : propertyName.Trim());
+        var measureType = (string.IsNullOrWhiteSpace(valueTypeName)
+            ? null
+            : TryResolveSchemaType(store, "MeasureResource", valueTypeName.Trim()))
+            ?? ResolveSchemaType(store, "MeasureResource", "IfcLabel");
+        SetProperty(property, "NominalValue", CreateMeasureValue(measureType, rawValue));
+        AddToCollection(properties, property);
+    }
+
     public static IfcDocument UpdatePlacement(IfcDocument document, int productId, string xText, string yText, string zText)
     {
         return Edit(document, "Update placement", store =>
@@ -1161,26 +1290,38 @@ public static class XbimDocumentEditor
     private static object CreateMeasureValue(Type type, string rawValue)
     {
         var text = UnwrapStepValue(rawValue);
-        if (type.Name.Contains("Boolean", StringComparison.OrdinalIgnoreCase)
-            || type.Name.Contains("Logical", StringComparison.OrdinalIgnoreCase))
+        var name = type.Name;
+
+        if (name.Contains("Boolean", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Logical", StringComparison.OrdinalIgnoreCase))
         {
             return Activator.CreateInstance(type, ParseBoolean(text))!;
         }
 
-        if (type.Name.Contains("Integer", StringComparison.OrdinalIgnoreCase)
-            && int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var integer))
+        // Numeric/measure value types only accept a numeric constructor argument —
+        // an unparseable value (e.g. a label retyped to IfcInteger) must fall back
+        // to a number, never the string constructor (which would throw).
+        if (name.Contains("Integer", StringComparison.OrdinalIgnoreCase))
         {
+            var integer = int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedInt)
+                ? parsedInt
+                : double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsedDouble)
+                    ? (int)parsedDouble
+                    : 0;
             return Activator.CreateInstance(type, integer)!;
         }
 
-        if ((type.Name.Contains("Real", StringComparison.OrdinalIgnoreCase)
-                || type.Name.Contains("Measure", StringComparison.OrdinalIgnoreCase)
-                || type.Name.Contains("Length", StringComparison.OrdinalIgnoreCase)
-                || type.Name.Contains("Area", StringComparison.OrdinalIgnoreCase)
-                || type.Name.Contains("Volume", StringComparison.OrdinalIgnoreCase)
-                || type.Name.Contains("Count", StringComparison.OrdinalIgnoreCase))
-            && double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var number))
+        if (name.Contains("Real", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Measure", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Number", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Length", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Area", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Volume", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Count", StringComparison.OrdinalIgnoreCase))
         {
+            var number = double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)
+                ? parsed
+                : 0d;
             return Activator.CreateInstance(type, number)!;
         }
 

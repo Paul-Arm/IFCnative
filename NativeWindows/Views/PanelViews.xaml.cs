@@ -28,6 +28,7 @@ public partial class StructurePanelView : ReactiveUserControl<StructurePanelView
         if (activeViewModel is not null)
         {
             activeViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            activeViewModel.MultiSelectionApplyRequested -= OnMultiSelectionApplyRequested;
         }
 
         activeViewModel = DataContext as StructurePanelViewModel;
@@ -35,6 +36,7 @@ public partial class StructurePanelView : ReactiveUserControl<StructurePanelView
         if (activeViewModel is not null)
         {
             activeViewModel.PropertyChanged += OnViewModelPropertyChanged;
+            activeViewModel.MultiSelectionApplyRequested += OnMultiSelectionApplyRequested;
         }
     }
 
@@ -48,6 +50,37 @@ public partial class StructurePanelView : ReactiveUserControl<StructurePanelView
                     () => this.FindControl<ListBox>("TreeListBox")?.ScrollIntoView(selectedRow),
                     DispatcherPriority.Background);
             }
+        }
+    }
+
+    private void OnTreeSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (activeViewModel is null || activeViewModel.IsProgrammaticUpdate || sender is not ListBox listBox)
+        {
+            return;
+        }
+
+        var ids = listBox.SelectedItems?
+            .OfType<IfcFileTreeRowViewModel>()
+            .Select(row => row.Node.Entity.Id)
+            .ToList() ?? [];
+        activeViewModel.OnUserSelectionChanged(ids);
+    }
+
+    private void OnMultiSelectionApplyRequested(object? sender, IReadOnlyList<int> entityIds)
+    {
+        if (this.FindControl<ListBox>("TreeListBox") is not { } listBox || listBox.SelectedItems is not { } selectedItems)
+        {
+            return;
+        }
+
+        var wanted = entityIds as ISet<int> ?? entityIds.ToHashSet();
+        var rows = activeViewModel?.Rows.Where(row => wanted.Contains(row.Node.Entity.Id)).ToList() ?? [];
+
+        selectedItems.Clear();
+        foreach (var row in rows)
+        {
+            selectedItems.Add(row);
         }
     }
 }
@@ -172,6 +205,118 @@ public partial class InspectorPanelView : ReactiveUserControl<InspectorPanelView
         {
             row.SaveIfChanged();
         }
+    }
+}
+
+public partial class PsetBatchPanelView : ReactiveUserControl<PsetBatchPanelViewModel>
+{
+    public PsetBatchPanelView() => InitializeComponent();
+
+    private void OnCellLostFocus(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Control { DataContext: PsetBatchCellViewModel cell })
+        {
+            cell.SaveIfChanged();
+        }
+    }
+
+    private void OnCellKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter && sender is Control { DataContext: PsetBatchCellViewModel cell })
+        {
+            cell.SaveIfChanged();
+            e.Handled = true;
+        }
+    }
+
+    // Right-click a value: a context menu to set that property's measure type.
+    private void OnCellContextRequested(object? sender, ContextRequestedEventArgs e)
+    {
+        if (sender is not Control { DataContext: PsetBatchCellViewModel cell } control)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        var typeRoot = new MenuItem { Header = "Set value type" };
+        foreach (var type in PsetValueTypes.Common)
+        {
+            var option = type;
+            var item = new MenuItem { Header = option };
+            // Defer: setting the type rebuilds this panel, which would tear down
+            // the menu's visual tree while the click is still being dispatched.
+            item.Click += (_, _) => Dispatcher.UIThread.Post(() => cell.SetType(option), DispatcherPriority.Background);
+            typeRoot.Items.Add(item);
+        }
+
+        var menu = new ContextMenu();
+        menu.Items.Add(typeRoot);
+        menu.Open(control);
+    }
+
+    // Right-click the property name: a menu to rename the row or set its type.
+    private void OnPropertyLabelContextRequested(object? sender, ContextRequestedEventArgs e)
+    {
+        if (sender is not Control { DataContext: PsetBatchPropertyViewModel row } control)
+        {
+            return;
+        }
+
+        e.Handled = true;
+
+        var renameItem = new MenuItem { Header = "Rename property…" };
+        // Defer so the context menu fully closes before the rename popup opens.
+        renameItem.Click += (_, _) => Dispatcher.UIThread.Post(() => ShowRenameFlyout(control, row), DispatcherPriority.Background);
+
+        var typeRoot = new MenuItem { Header = "Set value type" };
+        foreach (var type in PsetValueTypes.Common)
+        {
+            var option = type;
+            var item = new MenuItem { Header = option };
+            item.Click += (_, _) => Dispatcher.UIThread.Post(() => row.ApplyRowEdit(row.Name, option), DispatcherPriority.Background);
+            typeRoot.Items.Add(item);
+        }
+
+        var menu = new ContextMenu();
+        menu.Items.Add(renameItem);
+        menu.Items.Add(typeRoot);
+        menu.Open(control);
+    }
+
+    private static void ShowRenameFlyout(Control control, PsetBatchPropertyViewModel row)
+    {
+        var nameBox = new TextBox { Text = row.Name, Watermark = "Property name", MinWidth = 200 };
+        var apply = new Button
+        {
+            Content = "Rename",
+            Classes = { "primary" },
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+        };
+
+        var flyout = new Flyout
+        {
+            Content = new StackPanel
+            {
+                Spacing = 6,
+                Children =
+                {
+                    new TextBlock { Text = "Rename property (whole row)", Classes = { "caption" } },
+                    nameBox,
+                    apply,
+                },
+            },
+        };
+
+        apply.Click += (_, _) =>
+        {
+            var newName = nameBox.Text ?? string.Empty;
+            flyout.Hide();
+            // Defer: the rename rebuilds the panel and tears down this popup.
+            Dispatcher.UIThread.Post(() => row.ApplyRowEdit(newName, null), DispatcherPriority.Background);
+        };
+
+        flyout.ShowAt(control);
+        Dispatcher.UIThread.Post(() => nameBox.Focus(), DispatcherPriority.Background);
     }
 }
 
