@@ -79,6 +79,54 @@ test("catalog parser imports central class and property tables", () => {
   assert.equal(ub?.propertyRules.length, 1);
 });
 
+test("catalog parser groups monitoring objects by property set", () => {
+  const catalog = parseCatalogWorkbook(
+    createMonitoringWorkbook(),
+    "monitoring.xlsx",
+  );
+
+  assert.equal(catalog.kind, "monitoring");
+  // One object class per Merkmalsgruppe (pset), not per IFC element.
+  assert.equal(catalog.objectTypes.length, 3);
+  // Display names drop the (e)Pset_ prefix and a trailing plural "N".
+  assert.deepEqual(
+    catalog.objectTypes.map((objectType) => objectType.name).sort(),
+    ["Bauwerk", "Kanal", "Maßnahme"],
+  );
+
+  const bauwerk = catalog.objectTypes.find(
+    (objectType) => objectType.name === "Bauwerk",
+  );
+  assert.ok(bauwerk);
+  assert.equal(bauwerk.code, "MON - BW");
+  assert.equal(bauwerk.ifcClass, "IFCBUILDING");
+  assert.equal(bauwerk.propertyRules.length, 1);
+  assert.equal(bauwerk.propertyRules[0].psetName, "ePset_Bauwerk");
+  assert.equal(bauwerk.propertyRules[0].propertyName, "_Bauwerksnummer_BW");
+  assert.equal(bauwerk.propertyRules[0].valueType, "IFCREAL");
+  assert.equal(bauwerk.propertyRules[0].requirement, "required");
+  assert.equal(bauwerk.propertyRules[0].tradeMarkers["TM MEKO"], true);
+
+  const kanal = catalog.objectTypes.find(
+    (objectType) => objectType.name === "Kanal",
+  );
+  assert.ok(kanal);
+  assert.equal(kanal.code, "MON - K");
+  assert.equal(kanal.ifcClass, "IFCELEMENTPROXY");
+  assert.equal(kanal.propertyRules[0].valueType, "IFCTEXT");
+});
+
+test("catalog parser honours an explicit monitoring kind override", () => {
+  // The diagnostics fixture would otherwise auto-detect as diagnostik.
+  const catalog = parseCatalogWorkbook(
+    createMonitoringWorkbook(),
+    "monitoring.xlsx",
+    "diagnostik",
+  );
+  assert.equal(catalog.kind, "diagnostik");
+  assert.equal(catalog.objectTypes.length, 0);
+});
+
 test("catalog validation can quick-fix missing psets and classification", () => {
   const catalog = parseCatalogWorkbook(createCatalogWorkbook(), "catalog.xlsx");
   const objectType = catalog.objectTypes[0];
@@ -366,6 +414,111 @@ function createCatalogWorkbookWithStaleClassSheet() {
   XLSX.utils.book_append_sheet(
     workbook,
     masterSheet,
+    "Alle Merkmale (Propertys)",
+  );
+  return XLSX.write(workbook, {
+    bookType: "xlsx",
+    type: "array",
+  }) as ArrayBuffer;
+}
+
+function createMonitoringWorkbook() {
+  const workbook = XLSX.utils.book_new();
+  const propertySheet = XLSX.utils.aoa_to_sheet([
+    [
+      "Element",
+      "Merkmal (Property) Ausgabe",
+      "Rohtext für Attribuierung",
+      "Merkmal (Property) Allplan",
+      "Merkmalsgruppe (Kategorie: PropertySet)",
+      "Herkunft",
+      "TM MEKO",
+      "TM INSP",
+      "TM INSD",
+      "LoI 100",
+      "LoI 200",
+      "LoI 300",
+      "LoI 400",
+      "LoI 500",
+      "Datentyp IFC",
+      "IFC-Klasse",
+      "Format",
+      "Format Allplan",
+      "Eintrag",
+      "Beispiel*",
+    ],
+    [
+      "Building",
+      "_Bauwerksnummer",
+      "Bauwerksnummer",
+      "_Bauwerksnummer_BW",
+      "ePset_Bauwerk",
+      "Nibli",
+      "X",
+      "X",
+      "X",
+      "X",
+      "X",
+      "X",
+      "X",
+      "X",
+      "IfcReal",
+      "IfcBuilding",
+      "-",
+      "Ganzzahl",
+      "erforderlich",
+      "05387",
+    ],
+    [
+      "Building",
+      "_ID",
+      "ID",
+      "_ID_MAßN",
+      "ePset_MaßnahmeN",
+      "Nibli",
+      "X",
+      "X",
+      "X",
+      "X",
+      "X",
+      "X",
+      "X",
+      "X",
+      "IfcText",
+      "IfcBuilding",
+      "-",
+      "Text",
+      "erforderlich",
+      "",
+    ],
+    [
+      "Sensor",
+      "_ID",
+      "ID",
+      "_ID_K",
+      "ePset_KanalN",
+      "Nibli",
+      "X",
+      "X",
+      "X",
+      "-",
+      "X",
+      "X",
+      "X",
+      "X",
+      "IfcText",
+      "IfcElementProxy",
+      "-",
+      "Text",
+      "erforderlich",
+      "",
+    ],
+    // Trailing changelog noise without an Element must be ignored.
+    ["", "Update zur vorherigen Version", "", "", "", "", "", "", ""],
+  ]);
+  XLSX.utils.book_append_sheet(
+    workbook,
+    propertySheet,
     "Alle Merkmale (Propertys)",
   );
   return XLSX.write(workbook, {

@@ -1,8 +1,11 @@
 import { useMemo, useState } from "react";
 
 import {
+    CATALOG_KINDS,
+    catalogKindLabel,
     catalogObjectLabel,
     normalizeCatalogToken,
+    type CatalogKind,
     type CatalogValidationFinding,
     type IfcObjectCatalog,
     type NativeIfcDocument,
@@ -16,22 +19,36 @@ import {
     LabeledInput,
     PanelHeader,
     PanelShell,
+    SegmentedControl,
 } from "./ui";
+
+const CATALOG_KIND_LABELS = CATALOG_KINDS.map(catalogKindLabel);
+
+function catalogKindFromLabel(label: string): CatalogKind {
+  return (
+    CATALOG_KINDS.find((kind) => catalogKindLabel(kind) === label) ??
+    "diagnostik"
+  );
+}
 
 export function CatalogPanel({
   catalog,
+  catalogKind,
   document,
   importing,
   selectedCatalogObjectId,
   selectedId,
+  onChangeCatalogKind,
   onImportCatalog,
   onSelectCatalogObject,
 }: {
   catalog: IfcObjectCatalog | null;
+  catalogKind: CatalogKind;
   document: NativeIfcDocument;
   importing: boolean;
   selectedCatalogObjectId: string;
   selectedId: number;
+  onChangeCatalogKind(kind: CatalogKind): void;
   onImportCatalog(): Promise<void>;
   onSelectCatalogObject(id: string): void;
 }) {
@@ -63,10 +80,12 @@ export function CatalogPanel({
         title="Objektkatalog"
         description={
           catalog
-            ? `${catalog.objectTypes.length.toLocaleString()} Klassen / ${countProperties(catalog).toLocaleString()} Property-Regeln`
+            ? `${catalogKindLabel(catalog.kind)}: ${catalog.objectTypes.length.toLocaleString()} Klassen / ${countProperties(catalog).toLocaleString()} Property-Regeln`
             : "Kein Katalog geladen."
         }
-        meta={catalog ? <Badge tone="success">geladen</Badge> : null}
+        meta={
+          catalog ? <Badge tone="success">{catalogKindLabel(catalog.kind)}</Badge> : null
+        }
         actions={
           <Button
             disabled={importing}
@@ -76,6 +95,21 @@ export function CatalogPanel({
           />
         }
       />
+
+      <div className="grid gap-1 px-1 pb-1">
+        <span className="text-xs font-medium text-muted-foreground">
+          Katalogtyp
+        </span>
+        <SegmentedControl
+          options={CATALOG_KIND_LABELS}
+          value={catalogKindLabel(catalogKind)}
+          onChange={(label) => onChangeCatalogKind(catalogKindFromLabel(label))}
+        />
+        <span className="text-[11px] text-muted-foreground">
+          Wird beim nächsten Import verwendet (Diagnostik = openSIM BWD,
+          Monitoring = openSIM MON).
+        </span>
+      </div>
 
       {catalog ? (
         <PanelShell scroll>

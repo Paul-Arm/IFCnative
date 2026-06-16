@@ -19,10 +19,10 @@ export type MosaicViewId =
   | "builder"
   | "catalog"
   | "catalog-review"
+  | "pset-batch"
   | "resource-references"
   | "resource-controls"
   | "object-info"
-  | "console"
   | "diagnostics"
   | "recent"
   | "notes";

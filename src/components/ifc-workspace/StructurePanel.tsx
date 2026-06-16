@@ -26,6 +26,7 @@ export function StructurePanel({
   onCenterCamera,
   onRemove,
   onSelect,
+  onSelectMany,
 }: {
   document: NativeIfcDocument;
   expanded: Set<number>;
@@ -35,6 +36,7 @@ export function StructurePanel({
   onCenterCamera(id: number): void;
   onRemove(id: number): void;
   onSelect(id: number, source?: string): void;
+  onSelectMany(ids: number[]): void;
   onToggle(id: number): void;
 }) {
   const treeModel = useMemo(
@@ -46,9 +48,11 @@ export function StructurePanel({
   const typeByIdRef = useRef(treeModel.typeById);
   const onCenterCameraRef = useRef(onCenterCamera);
   const onSelectRef = useRef(onSelect);
+  const onSelectManyRef = useRef(onSelectMany);
   const onRemoveRef = useRef(onRemove);
   onCenterCameraRef.current = onCenterCamera;
   onSelectRef.current = onSelect;
+  onSelectManyRef.current = onSelectMany;
   onRemoveRef.current = onRemove;
 
   const initialPaths = treeModel.paths.length
@@ -63,12 +67,15 @@ export function StructurePanel({
     initialExpandedPaths: treeModel.expandedPaths,
     initialVisibleRowCount: 18,
     onSelectionChange: (paths) => {
-      const path = paths[0];
-      if (!path) return;
-      const id = idByPathRef.current.get(path);
-      if (typeof id === "number") {
-        onSelectRef.current(id, "tree");
+      const ids: number[] = [];
+      for (const path of paths) {
+        const id = idByPathRef.current.get(path);
+        if (typeof id === "number" && !ids.includes(id)) {
+          ids.push(id);
+        }
       }
+      if (ids.length === 0) return;
+      onSelectManyRef.current(ids);
     },
     paths: initialPaths,
     renderRowDecoration: ({ item }) => {

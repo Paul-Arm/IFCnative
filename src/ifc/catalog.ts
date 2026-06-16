@@ -1,5 +1,13 @@
 export type CatalogRequirement = "required" | "optional" | "unknown";
 
+export type CatalogKind = "diagnostik" | "monitoring";
+
+export const CATALOG_KINDS: CatalogKind[] = ["diagnostik", "monitoring"];
+
+export function catalogKindLabel(kind: CatalogKind) {
+  return kind === "monitoring" ? "Monitoring" : "Diagnostik";
+}
+
 export type CatalogFindingSeverity = "info" | "warning" | "error";
 
 export type CatalogFindingKind =
@@ -37,6 +45,7 @@ export interface CatalogObjectType {
 export interface IfcObjectCatalog {
   fileName: string;
   importedAt: string;
+  kind: CatalogKind;
   objectTypes: CatalogObjectType[];
   diagnostics: string[];
 }

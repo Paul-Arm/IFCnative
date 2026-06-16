@@ -1,6 +1,7 @@
 import * as XLSX from "xlsx";
 
 import {
+    type CatalogKind,
     type CatalogObjectType,
     type CatalogPropertyRule,
     type IfcObjectCatalog,
@@ -46,11 +47,65 @@ const MASTER_ELEMENT_CLASSES: Record<string, string> = {
   proxy: "IFCBUILDINGELEMENTPROXY",
 };
 
+// The Monitoring (MON) catalog has a single property sheet with a different
+// column layout than the diagnostics catalog. Object classes are not listed in
+// dedicated sheets; they are derived from the "Element" column instead.
+const MONITORING_PROPERTY_SHEET = "Alle Merkmale (Propertys)";
+
+const MONITORING_COLUMNS = {
+  element: 0,
+  propertyOutput: 1,
+  propertyAttribute: 3,
+  pset: 4,
+  valueType: 14,
+  ifcClass: 15,
+  format: 16,
+  requirement: 18,
+};
+
+const MONITORING_TRADE_COLUMNS = [
+  { index: 6, label: "TM MEKO" },
+  { index: 7, label: "TM INSP" },
+  { index: 8, label: "TM INSD" },
+];
+
+const MONITORING_LOI_COLUMNS = [
+  { index: 9, label: "LoI 100" },
+  { index: 10, label: "LoI 200" },
+  { index: 11, label: "LoI 300" },
+  { index: 12, label: "LoI 400" },
+  { index: 13, label: "LoI 500" },
+];
+
 export function parseCatalogWorkbook(
   arrayBuffer: ArrayBuffer,
   fileName: string,
+  kind?: CatalogKind,
 ): IfcObjectCatalog {
   const workbook = XLSX.read(arrayBuffer, { cellDates: false });
+  const resolvedKind = kind ?? detectCatalogKind(workbook);
+  if (resolvedKind === "monitoring") {
+    return parseMonitoringCatalog(workbook, fileName);
+  }
+  return parseDiagnostikCatalog(workbook, fileName);
+}
+
+export function detectCatalogKind(workbook: XLSX.WorkBook): CatalogKind {
+  if (workbook.Sheets[MASTER_CLASS_SHEET]) {
+    return "diagnostik";
+  }
+  const header = readSheetRows(workbook, MONITORING_PROPERTY_SHEET)[0] ?? [];
+  const tokens = header.map(normalizeCatalogToken);
+  const looksMonitoring =
+    tokens.includes("ifc-klasse") &&
+    tokens.some((token) => token.includes("allplan"));
+  return looksMonitoring ? "monitoring" : "diagnostik";
+}
+
+function parseDiagnostikCatalog(
+  workbook: XLSX.WorkBook,
+  fileName: string,
+): IfcObjectCatalog {
   const diagnostics: string[] = [];
   let objectTypes: CatalogObjectType[] = [];
   const masterRows = readSheetRows(workbook, MASTER_PROPERTY_SHEET);
@@ -97,8 +152,128 @@ export function parseCatalogWorkbook(
     diagnostics,
     fileName,
     importedAt: new Date().toISOString(),
+    kind: "diagnostik",
     objectTypes,
   };
+}
+
+function parseMonitoringCatalog(
+  workbook: XLSX.WorkBook,
+  fileName: string,
+): IfcObjectCatalog {
+  const diagnostics: string[] = [];
+  const rows = readSheetRows(workbook, MONITORING_PROPERTY_SHEET);
+  const objectTypes = parseMonitoringObjectTypes(rows);
+
+  if (objectTypes.length === 0) {
+    diagnostics.push(
+      `No monitoring object elements found. Expected an "Element" column in "${MONITORING_PROPERTY_SHEET}".`,
+    );
+  } else {
+    diagnostics.push(
+      `Imported ${objectTypes.length.toLocaleString()} monitoring object elements from "${MONITORING_PROPERTY_SHEET}".`,
+    );
+  }
+
+  const propertyRuleCount = objectTypes.reduce(
+    (total, objectType) => total + objectType.propertyRules.length,
+    0,
+  );
+  diagnostics.push(
+    `Indexed ${propertyRuleCount.toLocaleString()} object-bound property rules.`,
+  );
+
+  return {
+    diagnostics,
+    fileName,
+    importedAt: new Date().toISOString(),
+    kind: "monitoring",
+    objectTypes,
+  };
+}
+
+function parseMonitoringObjectTypes(rows: unknown[][]): CatalogObjectType[] {
+  if (rows.length < 2) {
+    return [];
+  }
+  // Group by Merkmalsgruppe (PropertySet). Each property set in the monitoring
+  // catalog becomes one selectable object class (Bauwerk, Messanlage, Sensor,
+  // ...) rather than collapsing everything onto the two IFC elements.
+  const groups = new Map<
+    string,
+    { psetName: string; ifcClass: string; rules: CatalogPropertyRule[] }
+  >();
+  for (let index = 1; index < rows.length; index += 1) {
+    const row = rows[index];
+    const psetName = cleanCell(row[MONITORING_COLUMNS.pset]);
+    const propertyName =
+      cleanCell(row[MONITORING_COLUMNS.propertyAttribute]) ||
+      cleanCell(row[MONITORING_COLUMNS.propertyOutput]);
+    if (!looksLikePropertyRule(psetName, propertyName)) {
+      continue;
+    }
+    const key = normalizeCatalogToken(psetName);
+    let group = groups.get(key);
+    if (!group) {
+      group = {
+        psetName,
+        ifcClass: normalizeIfcClass(
+          cleanCell(row[MONITORING_COLUMNS.ifcClass]) ||
+            "IfcBuildingElementProxy",
+        ),
+        rules: [],
+      };
+      groups.set(key, group);
+    }
+    group.rules.push({
+      format: cleanCell(row[MONITORING_COLUMNS.format]),
+      id: "",
+      loiMarkers: readMarkers(row, MONITORING_LOI_COLUMNS),
+      propertyName,
+      psetName,
+      requirement: normalizeCatalogRequirement(row[MONITORING_COLUMNS.requirement]),
+      sourceRow: index + 1,
+      sourceSheet: MONITORING_PROPERTY_SHEET,
+      tradeMarkers: readMarkers(row, MONITORING_TRADE_COLUMNS),
+      unit: "",
+      valueType: normalizeIfcValueType(row[MONITORING_COLUMNS.valueType]),
+    });
+  }
+
+  return [...groups.values()].map((group) => {
+    const id = makeCatalogId(`mon ${group.psetName}`);
+    return {
+      code: `MON - ${monitoringObjectCode(group.rules[0]?.propertyName, group.psetName)}`,
+      id,
+      ifcClass: group.ifcClass,
+      name: monitoringObjectName(group.psetName),
+      propertyRules: group.rules.map((rule, ruleIndex) => ({
+        ...rule,
+        id: `${id}:monitoring:${ruleIndex + 1}`,
+      })),
+      sheetName: MONITORING_PROPERTY_SHEET,
+      version: "",
+    };
+  });
+}
+
+// "ePset_MessanlageN" -> "Messanlage": drop the (e)Pset_ prefix and a trailing
+// plural "N", keep the rest readable.
+function monitoringObjectName(psetName: string) {
+  const cleaned = psetName
+    .replace(/^e?pset[_\s-]*/i, "")
+    .replace(/_/g, " ")
+    .trim()
+    .replace(/N$/, "")
+    .trim();
+  return cleaned || psetName;
+}
+
+// Use the property-name suffix as the short code ("_Bauwerksnummer_BW" -> "BW",
+// "_Bauteilbereich_SEN_PO" -> "PO"); fall back to the cleaned set name.
+function monitoringObjectCode(propertyName: string | undefined, psetName: string) {
+  const suffix = String(propertyName ?? "").match(/_([^_]+)$/)?.[1];
+  return (suffix || monitoringObjectName(psetName)).toUpperCase() || "OBJ";
 }
 
 function parseMasterObjectTypes(

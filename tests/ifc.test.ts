@@ -1555,6 +1555,7 @@ test("diagnostics assistant summarizes objectives and procedure catalog entries"
     diagnostics: [],
     fileName: "catalog.xlsx",
     importedAt: "2026-06-04T00:00:00.000Z",
+    kind: "diagnostik",
     objectTypes: [
       catalogObject(
         "bwd-dfk",

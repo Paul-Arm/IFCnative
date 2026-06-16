@@ -48,6 +48,7 @@ import {
     addNativeMaterialProfileSetUsage,
     addNativeMaterialStyle,
     addNativeMaterialWithProperties,
+    addNativePropertySetValues,
     addNativePropertyToSet,
     addNativeQuantitySet,
     addNativeRelationship,
@@ -57,6 +58,7 @@ import {
     applyDiagnosticObjectInfo,
     applyDiagnosticProcedureFromCatalog,
     buildObjectInfoIndex,
+    catalogObjectLabel,
     createNativeSampleDocument,
     duplicateNativePropertySet,
     findCatalogObject,
@@ -83,6 +85,7 @@ import {
     viewerWorldDeltaToIfcPlacementDelta,
     viewerWorldDirectionToIfcPlacementDirection,
     viewerWorldPointToIfcPlacementPoint,
+    type CatalogKind,
     type CatalogObjectType,
     type CatalogValidationFinding,
     type DiagnosticObjectInfoDraft,
@@ -119,7 +122,7 @@ import {
     ResourceReferencesPanel,
 } from "./ifc-workspace/InspectorPanel";
 import { ObjectInfoPanel } from "./ifc-workspace/ObjectInfoPanel";
-import { ConsolePanel } from "./ifc-workspace/ReviewPanels";
+import { PsetBatchPanel } from "./ifc-workspace/PsetBatchPanel";
 import { StructurePanel } from "./ifc-workspace/StructurePanel";
 import type {
     BodyElementDraft,
@@ -168,6 +171,7 @@ interface WorkspaceDocumentSession {
   graphPinned: Set<number>;
   graphPositions: Map<number, Point>;
   selectedId: number;
+  selectedIds: Set<number>;
   sourceIfcBytes: ArrayBuffer | null;
   sourceIfcFile: File | null;
   treeExpanded: Set<number>;
@@ -216,6 +220,7 @@ function createWorkspaceDocumentSession(
     graphPositions: options?.graphPositions ?? new Map(),
     id: options?.id ?? createWorkspaceDocumentId(document.fileName),
     selectedId,
+    selectedIds: new Set(),
     sourceIfcBytes: sourceBytes,
     sourceIfcFile: sourceFile,
     treeExpanded: new Set(),
@@ -305,11 +310,9 @@ export default function IfcWorkspace() {
     useState<ViewerEditBodyRequest | null>(null);
   const [loadingIfcName, setLoadingIfcName] = useState("");
   const [catalog, setCatalog] = useState<IfcObjectCatalog | null>(null);
+  const [catalogKind, setCatalogKind] = useState<CatalogKind>("diagnostik");
   const [catalogImporting, setCatalogImporting] = useState(false);
   const [selectedCatalogObjectId, setSelectedCatalogObjectId] = useState("");
-  const [consoleLines, setConsoleLines] = useState<string[]>(() => [
-    `${new Date().toLocaleTimeString()}  ui.boot({ shell: 'vite-react' });`,
-  ]);
   const [recentIfcFiles, setRecentIfcFiles] = useState(loadRecentIfcFiles);
   const [notes, setNotes] = useState(loadNotes);
   const [coordinateClipboard, setCoordinateClipboard] =
@@ -332,6 +335,7 @@ export default function IfcWorkspace() {
     documentSessions[0];
   const document = activeSession.document;
   const selectedId = activeSession.selectedId;
+  const selectedIds = activeSession.selectedIds;
   const graphAnchorId = activeSession.graphAnchorId;
   const treeExpanded = activeSession.treeExpanded;
   const graphPinned = activeSession.graphPinned;
@@ -357,6 +361,21 @@ export default function IfcWorkspace() {
       selectedId: applyStateAction(session.selectedId, action),
     }));
   };
+
+  const setSelectedIds = (action: SetStateAction<Set<number>>) => {
+    updateActiveSession((session) => ({
+      ...session,
+      selectedIds: applyStateAction(session.selectedIds, action),
+    }));
+  };
+
+  // Objects targeted by batch operations: the explicit multi-selection from the
+  // tree, or the single active object when nothing else is selected.
+  const batchSelectionIds = useMemo(() => {
+    const ids = [...selectedIds].filter((id) => document.entityById.has(id));
+    return ids.length > 0 ? ids : document.entityById.has(selectedId) ? [selectedId] : [];
+  }, [document, selectedId, selectedIds]);
+
 
   const setGraphAnchorId = (action: SetStateAction<number>) => {
     updateActiveSession((session) => ({
@@ -488,10 +507,9 @@ export default function IfcWorkspace() {
   }, [document.entities, normalizedSearch, searchMatchedEntities]);
 
   const logAction = (code: string) => {
-    setConsoleLines((current) => [
-      ...current.slice(-180),
-      `${new Date().toLocaleTimeString()}  ${code}`,
-    ]);
+    if (import.meta.env.DEV) {
+      console.debug(`${new Date().toLocaleTimeString()}  ${code}`);
+    }
   };
 
   const selectWorkspace = (id: string) => {
@@ -704,6 +722,7 @@ export default function IfcWorkspace() {
       return;
     }
     setSelectedId(resolvedId);
+    setSelectedIds(new Set([resolvedId]));
     if (source === "graph") {
       setGraphAnchorId(resolvedId);
       setGraphFocusRequest(null);
@@ -712,6 +731,26 @@ export default function IfcWorkspace() {
     logAction(
       `${source}.selectEntity({ id: ${resolvedId}, class: '${entity?.type ?? "UNKNOWN"}' });`,
     );
+  };
+
+  // Multi-selection from the tree (Ctrl/Shift-click). Keeps the active object
+  // when it is still part of the selection so the inspector does not jump.
+  const selectEntities = (ids: number[]) => {
+    const valid = ids.filter((id) => activeSession.document.entityById.has(id));
+    if (valid.length === 0) {
+      return;
+    }
+    const nextPrimary = valid.includes(selectedId)
+      ? selectedId
+      : valid[valid.length - 1];
+    updateActiveSession((session) => ({
+      ...session,
+      selectedId: nextPrimary,
+      selectedIds: new Set(valid),
+    }));
+    if (valid.length > 1) {
+      logAction(`tree.selectMany({ count: ${valid.length} });`);
+    }
   };
 
   const revealGraphWarningEntity = (id: number) => {
@@ -842,12 +881,16 @@ export default function IfcWorkspace() {
         return;
       }
       setCatalogImporting(true);
-      logAction(`ui.importCatalog.start({ file: '${asset.name}' });`);
+      logAction(
+        `ui.importCatalog.start({ file: '${asset.name}', kind: '${catalogKind}' });`,
+      );
       const { parseCatalogWorkbook } = await import("@/ifc/catalogExcel");
       const parsed = parseCatalogWorkbook(
         await asset.file.arrayBuffer(),
         asset.name,
+        catalogKind,
       );
+      setCatalogKind(parsed.kind);
       const suggested = suggestCatalogObjectForEntity(
         viewerDocument,
         selectedId,
@@ -861,7 +904,7 @@ export default function IfcWorkspace() {
         addMosaicView(addMosaicView(current, "catalog"), "catalog-review"),
       );
       logAction(
-        `ui.importCatalog({ file: '${asset.name}', classes: ${parsed.objectTypes.length} });`,
+        `ui.importCatalog({ file: '${asset.name}', kind: '${parsed.kind}', classes: ${parsed.objectTypes.length} });`,
       );
     } catch (error) {
       logAction(`ui.error(${JSON.stringify(String(error))});`);
@@ -1271,6 +1314,132 @@ export default function IfcWorkspace() {
       selectedId,
       `Add empty Pset '${psetName}' to #${selectedId}`,
       `addEmptyPset({ objectId: ${selectedId}, name: '${psetName}' });`,
+    );
+  };
+
+  const findEntityPsetByName = (
+    sourceDocument: NativeIfcDocument,
+    entityId: number,
+    psetName: string,
+  ) => {
+    const token = psetName.trim().toLowerCase();
+    return (sourceDocument.propertySetsByEntity.get(entityId) ?? []).find(
+      (set) => set.name.trim().toLowerCase() === token,
+    );
+  };
+
+  const addPsetToSelection = (psetName: string) => {
+    const name = psetName.trim();
+    if (!name || batchSelectionIds.length === 0) {
+      return;
+    }
+    let next = document;
+    let added = 0;
+    for (const id of batchSelectionIds) {
+      if (findEntityPsetByName(next, id, name)) {
+        continue;
+      }
+      next = addNativeEmptyPropertySet(next, id, name);
+      added += 1;
+    }
+    if (next === document) {
+      logAction(
+        `psetBatch.addPset.skip({ name: ${JSON.stringify(name)}, reason: 'all-present' });`,
+      );
+      return;
+    }
+    commitDocument(
+      next,
+      selectedId,
+      `Add Pset '${name}' to ${added.toLocaleString()} objects`,
+      `psetBatch.addPset({ name: ${JSON.stringify(name)}, added: ${added}, selected: ${batchSelectionIds.length} });`,
+    );
+  };
+
+  // Add the catalog class currently selected in the Objektkatalog window to the
+  // batch selection: one pset per Merkmalsgruppe (with its catalog properties)
+  // on each selected object.
+  const addCatalogObjectToSelection = () => {
+    if (!activeCatalogObject || batchSelectionIds.length === 0) {
+      return;
+    }
+    const groups = new Map<
+      string,
+      { name: string; properties: Map<string, { name: string; valueType: string }> }
+    >();
+    for (const rule of activeCatalogObject.propertyRules) {
+      const key = rule.psetName.trim().toLowerCase();
+      if (!key) {
+        continue;
+      }
+      let group = groups.get(key);
+      if (!group) {
+        group = { name: rule.psetName, properties: new Map() };
+        groups.set(key, group);
+      }
+      if (!group.properties.has(rule.propertyName)) {
+        group.properties.set(rule.propertyName, {
+          name: rule.propertyName,
+          valueType: rule.valueType,
+        });
+      }
+    }
+    if (groups.size === 0) {
+      return;
+    }
+    let next = document;
+    let addedPsets = 0;
+    for (const id of batchSelectionIds) {
+      for (const group of groups.values()) {
+        if (findEntityPsetByName(next, id, group.name)) {
+          continue;
+        }
+        next = addNativePropertySetValues(
+          next,
+          id,
+          group.name,
+          [...group.properties.values()].map((property) => ({
+            name: property.name,
+            value: "",
+            valueType: property.valueType,
+          })),
+        );
+        addedPsets += 1;
+      }
+    }
+    if (next === document) {
+      logAction(
+        `psetBatch.addCatalogObject.skip({ object: '${activeCatalogObject.id}', reason: 'all-present' });`,
+      );
+      return;
+    }
+    commitDocument(
+      next,
+      selectedId,
+      `Add catalog class '${catalogObjectLabel(activeCatalogObject)}' (${groups.size.toLocaleString()} psets) to ${batchSelectionIds.length.toLocaleString()} objects`,
+      `psetBatch.addCatalogObject({ object: '${activeCatalogObject.id}', psets: ${groups.size}, addedPsets: ${addedPsets} });`,
+    );
+  };
+
+  const editPsetCellValue = (
+    entityId: number,
+    setId: number,
+    propertyId: number | undefined,
+    propertyName: string,
+    value: string,
+  ) => {
+    const next =
+      propertyId != null
+        ? updateNativePropertyValue(document, propertyId, { value })
+        : addNativePropertyToSet(document, setId, propertyName, value);
+    if (next === document) {
+      return;
+    }
+    commitDocument(
+      next,
+      selectedId,
+      `Edit ${propertyName} on #${entityId}`,
+      `psetBatch.editValue({ id: ${entityId}, set: ${setId}, property: ${JSON.stringify(propertyName)} });`,
     );
   };
 
@@ -2016,6 +2185,7 @@ export default function IfcWorkspace() {
           onCenterCamera={(id) => centerViewerCamera(id, "tree")}
           onRemove={(id) => deleteEntity(id, "tree")}
           onSelect={selectEntity}
+          onSelectMany={selectEntities}
           onToggle={(id) => {
             setTreeExpanded((current) =>
               current.has(id)
@@ -2283,10 +2453,12 @@ export default function IfcWorkspace() {
           <TileContent>
             <CatalogPanel
               catalog={catalog}
+              catalogKind={catalogKind}
               document={viewerDocument}
               importing={catalogImporting}
               selectedCatalogObjectId={activeCatalogObjectId}
               selectedId={selectedId}
+              onChangeCatalogKind={setCatalogKind}
               onImportCatalog={importCatalog}
               onSelectCatalogObject={setSelectedCatalogObjectId}
             />
@@ -2303,6 +2475,23 @@ export default function IfcWorkspace() {
             />
           </TileContent>
         );
+      case "pset-batch":
+        return (
+          <TileContent>
+            <PsetBatchPanel
+              document={document}
+              selectedIds={batchSelectionIds}
+              catalogObjectLabel={
+                activeCatalogObject
+                  ? catalogObjectLabel(activeCatalogObject)
+                  : null
+              }
+              onAddEmptyPset={addPsetToSelection}
+              onAddCatalogObject={addCatalogObjectToSelection}
+              onEditValue={editPsetCellValue}
+            />
+          </TileContent>
+        );
       case "object-info":
         return (
           <TileContent>
@@ -2312,15 +2501,6 @@ export default function IfcWorkspace() {
               index={objectInfoIndex}
               selectedId={selectedId}
               onSelectEntity={selectEntity}
-            />
-          </TileContent>
-        );
-      case "console":
-        return (
-          <TileContent>
-            <ConsolePanel
-              lines={consoleLines}
-              onClear={() => setConsoleLines([])}
             />
           </TileContent>
         );
@@ -2578,15 +2758,9 @@ export default function IfcWorkspace() {
               label="Hinzufügen"
               onPress={() => void addIfcFiles()}
             />
-            <Button label="Beispiel" onPress={loadSample} />
           </div>
           <div className="mx-1 h-5 w-px bg-border/70" />
           <div className="flex items-center gap-1">
-            <Button
-              disabled={catalogImporting}
-              label={catalog ? "Katalog neu laden" : "Katalog importieren"}
-              onPress={() => void importCatalog()}
-            />
             <Button
               disabled={Boolean(loadingIfcName)}
               label="IFC exportieren"
