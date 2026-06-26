@@ -1,6 +1,10 @@
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import jwt from "@fastify/jwt";
 import multipart from "@fastify/multipart";
+import fastifyStatic from "@fastify/static";
 
 import { hashPassword, verifyPassword } from "../auth/passwords";
 import { CommitService } from "../domain/commitService";
@@ -46,6 +50,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   app.register(jwt, { secret: jwtSecret });
   app.register(multipart, { limits: { fileSize: 512 * 1024 * 1024 } });
+
+  // Serve the standalone web portal (client-less access) from server/public.
+  app.register(fastifyStatic, {
+    root: join(dirname(fileURLToPath(import.meta.url)), "../../public"),
+    prefix: "/",
+  });
 
   // Accept raw IFC/STEP request bodies as strings.
   app.addContentTypeParser(
