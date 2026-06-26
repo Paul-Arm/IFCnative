@@ -1119,6 +1119,165 @@ test("removing an entity cascades hierarchy children and referencing relationshi
   );
 });
 
+test("removing one element keeps siblings that share its relationships", () => {
+  // Real-world IFC files group many siblings into a single relationship:
+  // one IfcRelContainedInSpatialStructure per storey, one shared material,
+  // one shared pset. Deleting a single element must not drag the siblings out.
+  const document = parseNativeIfcText(
+    [
+      "ISO-10303-21;",
+      "HEADER;",
+      "FILE_DESCRIPTION((''),'2;1');",
+      "FILE_SCHEMA(('IFC4'));",
+      "ENDSEC;",
+      "DATA;",
+      "#1= IFCPROJECT('0IFCnative000000000001',$,'Project',$,$,$,$,$,$);",
+      "#10= IFCBUILDINGSTOREY('0IFCnative000000000010',$,'Level 1',$,$,$,$,$,.ELEMENT.,0.);",
+      "#20= IFCWALL('0IFCnative000000000020',$,'Wall A',$,$,$,$,$,.STANDARD.);",
+      "#21= IFCWALL('0IFCnative000000000021',$,'Wall B',$,$,$,$,$,.STANDARD.);",
+      "#30= IFCRELCONTAINEDINSPATIALSTRUCTURE('0IFCnative000000000030',$,$,$,(#20,#21),#10);",
+      "#40= IFCMATERIAL('Concrete');",
+      "#41= IFCRELASSOCIATESMATERIAL('0IFCnative000000000041',$,$,$,(#20,#21),#40);",
+      "#50= IFCPROPERTYSET('0IFCnative000000000050',$,'Pset_Common',$,(#52));",
+      "#52= IFCPROPERTYSINGLEVALUE('IsExternal',$,IFCBOOLEAN(.T.),$);",
+      "#51= IFCRELDEFINESBYPROPERTIES('0IFCnative000000000051',$,$,$,(#20,#21),#50);",
+      "ENDSEC;",
+      "END-ISO-10303-21;",
+    ].join("\n"),
+    "siblings.ifc",
+  );
+
+  const removed = removeNativeEntity(document, 20);
+
+  // The deleted wall is gone, but its sibling and the shared resources survive.
+  assert.equal(removed.entityById.has(20), false);
+  assert.equal(removed.entityById.has(21), true);
+  assert.equal(removed.entityById.has(40), true);
+  assert.equal(removed.entityById.has(50), true);
+
+  // Shared relationships are KEPT, with only the deleted member pruned out, so
+  // the sibling stays spatially contained (i.e. still visible in the tree).
+  const containment = removed.relationships.find(
+    (relationship) => relationship.id === 30,
+  );
+  assert.ok(containment);
+  assert.deepEqual(containment.targetIds, [21]);
+
+  const material = removed.relationships.find(
+    (relationship) => relationship.id === 41,
+  );
+  assert.ok(material);
+  assert.deepEqual(material.sourceIds, [21]);
+
+  const properties = removed.relationships.find(
+    (relationship) => relationship.id === 51,
+  );
+  assert.ok(properties);
+  assert.deepEqual(properties.sourceIds, [21]);
+
+  const siblingRelationshipTypes = (
+    removed.relationshipsByEntity.get(21) ?? []
+  ).map((relationship) => relationship.type);
+  assert.ok(
+    siblingRelationshipTypes.includes("IFCRELCONTAINEDINSPATIALSTRUCTURE"),
+  );
+  assert.ok(siblingRelationshipTypes.includes("IFCRELASSOCIATESMATERIAL"));
+});
+
+test("removing an element garbage-collects its exclusive resources but keeps shared ones", () => {
+  const document = parseNativeIfcText(
+    [
+      "ISO-10303-21;",
+      "HEADER;",
+      "FILE_DESCRIPTION((''),'2;1');",
+      "FILE_SCHEMA(('IFC4'));",
+      "ENDSEC;",
+      "DATA;",
+      "#1= IFCPROJECT('0IFCnative000000000001',$,'Project',$,$,$,$,$,$);",
+      "#10= IFCBUILDINGSTOREY('0IFCnative000000000010',$,'Level 1',$,$,#80,$,$,.ELEMENT.,0.);",
+      "#20= IFCWALL('0IFCnative000000000020',$,'Wall A',$,$,#71,$,$,.STANDARD.);",
+      "#21= IFCWALL('0IFCnative000000000021',$,'Wall B',$,$,$,$,$,.STANDARD.);",
+      "#30= IFCRELCONTAINEDINSPATIALSTRUCTURE('0IFCnative000000000030',$,$,$,(#20,#21),#10);",
+      // Shared origin point used by both the wall and the storey placement.
+      "#76= IFCCARTESIANPOINT((0.,0.,0.));",
+      "#80= IFCLOCALPLACEMENT($,#81);",
+      "#81= IFCAXIS2PLACEMENT3D(#76,$,$);",
+      // Placement that belongs only to wall #20.
+      "#71= IFCLOCALPLACEMENT($,#75);",
+      "#75= IFCAXIS2PLACEMENT3D(#76,$,$);",
+      // Catalog material, associated only with the deleted wall.
+      "#40= IFCMATERIAL('Concrete');",
+      "#41= IFCRELASSOCIATESMATERIAL('0IFCnative000000000041',$,$,$,(#20),#40);",
+      // Pset shared by both walls.
+      "#50= IFCPROPERTYSET('0IFCnative000000000050',$,'Pset_Shared',$,(#52));",
+      "#52= IFCPROPERTYSINGLEVALUE('IsExternal',$,IFCBOOLEAN(.T.),$);",
+      "#51= IFCRELDEFINESBYPROPERTIES('0IFCnative000000000051',$,$,$,(#20,#21),#50);",
+      // Pset that belongs only to wall #20.
+      "#60= IFCPROPERTYSET('0IFCnative000000000060',$,'Pset_Only20',$,(#62));",
+      "#62= IFCPROPERTYSINGLEVALUE('LoadBearing',$,IFCBOOLEAN(.F.),$);",
+      "#61= IFCRELDEFINESBYPROPERTIES('0IFCnative000000000061',$,$,$,(#20),#60);",
+      "ENDSEC;",
+      "END-ISO-10303-21;",
+    ].join("\n"),
+    "orphans.ifc",
+  );
+
+  const removed = removeNativeEntity(document, 20);
+
+  assert.equal(removed.entityById.has(20), false);
+  assert.equal(removed.entityById.has(21), true);
+
+  // Exclusive resources of the deleted wall are cleaned up …
+  assert.equal(removed.entityById.has(60), false, "exclusive pset removed");
+  assert.equal(removed.entityById.has(62), false, "exclusive pset value removed");
+  assert.equal(removed.entityById.has(71), false, "exclusive placement removed");
+  assert.equal(removed.entityById.has(75), false, "exclusive axis removed");
+
+  // … while shared resources, catalog items and structural anchors survive.
+  assert.equal(removed.entityById.has(50), true, "shared pset kept");
+  assert.equal(removed.entityById.has(52), true, "shared pset value kept");
+  assert.equal(removed.entityById.has(76), true, "shared origin point kept");
+  assert.equal(removed.entityById.has(40), true, "catalog material kept");
+  assert.equal(removed.entityById.has(10), true, "storey kept");
+
+  // No dangling references remain in the surviving entities.
+  assert.ok(
+    removed.diagnostics.every((line) => !line.includes("references missing")),
+  );
+});
+
+test("removing the only child keeps its parent in the hierarchy", () => {
+  const document = parseNativeIfcText(
+    [
+      "ISO-10303-21;",
+      "HEADER;",
+      "FILE_DESCRIPTION((''),'2;1');",
+      "FILE_SCHEMA(('IFC4'));",
+      "ENDSEC;",
+      "DATA;",
+      "#1= IFCPROJECT('0IFCnative000000000001',$,'Project',$,$,$,$,$,$);",
+      "#15= IFCELEMENTASSEMBLY('0IFCnative000000000015',$,'Assembly',$,$,$,$,$,$,$);",
+      "#20= IFCBEAM('0IFCnative000000000020',$,'Only Beam',$,$,$,$,$,$);",
+      // The assembly is connected to its single child via this one relationship.
+      "#30= IFCRELAGGREGATES('0IFCnative000000000030',$,$,$,#15,(#20));",
+      "ENDSEC;",
+      "END-ISO-10303-21;",
+    ].join("\n"),
+    "parent.ifc",
+  );
+
+  const removed = removeNativeEntity(document, 20);
+
+  // The child is gone and its now-empty aggregation relationship is dropped …
+  assert.equal(removed.entityById.has(20), false);
+  assert.equal(
+    removed.relationships.some((relationship) => relationship.id === 30),
+    false,
+  );
+  // … but the parent assembly must NOT be garbage-collected with it.
+  assert.equal(removed.entityById.has(15), true);
+});
+
 test("native document diagnostics validate references, containment and relationship endpoints", () => {
   const sample = createNativeSampleDocument();
   assert.ok(

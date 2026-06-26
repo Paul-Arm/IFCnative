@@ -1,6 +1,6 @@
 {
   "name": "ifcnative",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Desktop IFC builder and viewer built with Vite, React, and Electron.",
   "main": "dist-electron/main.js",
   "engines": {

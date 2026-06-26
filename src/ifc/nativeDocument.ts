@@ -2852,13 +2852,195 @@ export function removeNativeEntity(
     return document;
   }
 
-  const next = cloneDocumentEntities(document).filter(
-    (current) => !removedIds.has(current.id),
-  );
+  const survivors: NativeIfcEntity[] = [];
+  for (const current of cloneDocumentEntities(document)) {
+    if (removedIds.has(current.id)) {
+      continue;
+    }
+    // A relationship that merely references a deleted entity (spatial
+    // containment, aggregation, material/type/property assignment, …) is
+    // usually SHARED across many siblings. Drop only the deleted member(s)
+    // from such a relationship; remove the relationship itself only when one
+    // of its required ends becomes empty. Removing the whole relationship
+    // would orphan every sibling and make them disappear from the tree.
+    if (
+      current.type.startsWith("IFCREL") &&
+      pruneRelationshipMembers(current, removedIds) === "drop"
+    ) {
+      removedIds.add(current.id);
+      continue;
+    }
+    survivors.push(current);
+  }
+
+  // Garbage-collect resources that ONLY hung off the removed entities — their
+  // own property sets, quantities, property values, geometric representation
+  // and placements. Anything still referenced by a surviving entity (shared
+  // psets/materials, the storey, …) is kept automatically by reference count.
+  collectOrphanedResources(document, survivors, removedIds);
+
+  const next = survivors.filter((current) => !removedIds.has(current.id));
   return parseNativeIfcText(
     serializeEntities(document, next),
     document.fileName,
   );
+}
+
+/**
+ * Structural / catalog anchors that must never be auto-deleted just because the
+ * element that referenced them is gone, even when they end up unreferenced.
+ */
+const ORPHAN_PROTECTED_TYPES = new Set([
+  "IFCPROJECT",
+  "IFCPROJECTLIBRARY",
+  "IFCSITE",
+  "IFCBUILDING",
+  "IFCBUILDINGSTOREY",
+  "IFCSPACE",
+  "IFCSPATIALZONE",
+  "IFCSPATIALELEMENT",
+  "IFCSPATIALSTRUCTUREELEMENT",
+  "IFCEXTERNALSPATIALELEMENT",
+  // Group/system containers behave like parents: keep them when their last
+  // assigned member is deleted instead of dissolving the container.
+  "IFCGROUP",
+  "IFCSYSTEM",
+  "IFCZONE",
+  "IFCBUILDINGSYSTEM",
+  "IFCDISTRIBUTIONSYSTEM",
+]);
+
+function isOrphanProtected(type: string): boolean {
+  return (
+    // Relationships are roots (nothing references them) — they are only ever
+    // removed by the degenerate-end check above, never as "orphans".
+    type.startsWith("IFCREL") ||
+    ORPHAN_PROTECTED_TYPES.has(type) ||
+    // Catalog/library resources are shared definitions; keep them even when the
+    // last element using them is deleted (a material/type stays in the catalog).
+    isTypeObject(type) ||
+    type.startsWith("IFCMATERIAL") ||
+    type.endsWith("STYLE") ||
+    type.endsWith("PROFILEDEF")
+  );
+}
+
+/**
+ * Reference-counted cleanup of entities that became unreachable after a delete.
+ * Seeds from everything the removed entities pointed at and removes any reached
+ * entity that no surviving entity still references (transitively), so an
+ * element's exclusive psets/quantities/geometry/placement go away with it while
+ * shared resources and structural anchors are preserved. Adds collected ids to
+ * `removedIds` in place.
+ */
+function collectOrphanedResources(
+  document: NativeIfcDocument,
+  survivors: NativeIfcEntity[],
+  removedIds: Set<number>,
+) {
+  const survivorById = new Map(survivors.map((entity) => [entity.id, entity]));
+
+  // Parents/containers in the decomposition & spatial hierarchy must never be
+  // collected as a side effect of deleting a child — even when the only thing
+  // connecting them was that single (now-removed) aggregation/nesting/
+  // containment relationship. Deleting a part must not delete its assembly,
+  // deleting the last element of a storey must not delete the storey.
+  const hierarchyParentIds = new Set<number>();
+  for (const relationship of document.relationships) {
+    if (HIERARCHY_RELATIONSHIP_TYPES.has(relationship.type)) {
+      for (const parentId of relationship.sourceIds) {
+        hierarchyParentIds.add(parentId);
+      }
+    }
+  }
+
+  // Live incoming-reference counts among the surviving entities (their args
+  // were already pruned of deleted members above).
+  const incomingCount = new Map<number, number>();
+  for (const entity of survivors) {
+    for (const ref of readUniqueReferencesFromArgs(entity.args)) {
+      incomingCount.set(ref, (incomingCount.get(ref) ?? 0) + 1);
+    }
+  }
+
+  // Seed candidates from everything the removed entities referenced.
+  const queue: number[] = [];
+  for (const entity of document.entities) {
+    if (removedIds.has(entity.id)) {
+      queue.push(...readUniqueReferencesFromArgs(entity.args));
+    }
+  }
+
+  while (queue.length > 0) {
+    const candidateId = queue.shift();
+    if (candidateId === undefined || removedIds.has(candidateId)) {
+      continue;
+    }
+    const candidate = survivorById.get(candidateId);
+    if (
+      !candidate ||
+      (incomingCount.get(candidateId) ?? 0) > 0 ||
+      hierarchyParentIds.has(candidateId) ||
+      isOrphanProtected(candidate.type)
+    ) {
+      continue;
+    }
+    // Unreferenced, non-protected resource → collect it and re-check whatever
+    // it pointed at, which may now be orphaned in turn.
+    removedIds.add(candidateId);
+    for (const ref of readUniqueReferencesFromArgs(candidate.args)) {
+      incomingCount.set(ref, (incomingCount.get(ref) ?? 0) - 1);
+      queue.push(ref);
+    }
+  }
+}
+
+/**
+ * Removes references to deleted entities from a relationship's member lists.
+ * Mutates `entity.args` in place and returns whether the relationship should
+ * be kept (`"keep"`) or dropped because it lost every member on a required
+ * end (`"drop"`).
+ */
+function pruneRelationshipMembers(
+  entity: NativeIfcEntity,
+  removedIds: Set<number>,
+): "keep" | "drop" {
+  const [sourceIds, targetIds] = relationshipEnds(entity);
+  const touchesRemoved =
+    sourceIds.some((id) => removedIds.has(id)) ||
+    targetIds.some((id) => removedIds.has(id));
+  if (!touchesRemoved) {
+    return "keep";
+  }
+
+  const remainingSources = sourceIds.filter((id) => !removedIds.has(id));
+  const remainingTargets = targetIds.filter((id) => !removedIds.has(id));
+  if (
+    (sourceIds.length > 0 && remainingSources.length === 0) ||
+    (targetIds.length > 0 && remainingTargets.length === 0)
+  ) {
+    return "drop";
+  }
+
+  entity.args = entity.args.map((arg) => pruneRefArg(arg, removedIds));
+  return "keep";
+}
+
+/**
+ * Strips references to deleted entities from a single STEP argument when it is
+ * a bare reference (`#42`) or a flat reference list (`(#1,#2,#3)`). Other
+ * argument shapes are left untouched so positional / nested data is preserved.
+ */
+function pruneRefArg(arg: string, removedIds: Set<number>): string {
+  const trimmed = arg.trim();
+  if (/^#\d+$/.test(trimmed)) {
+    return removedIds.has(Number(trimmed.slice(1))) ? "$" : arg;
+  }
+  if (/^\(\s*#\d+(\s*,\s*#\d+)*\s*\)$/.test(trimmed)) {
+    const kept = readReferences(trimmed).filter((id) => !removedIds.has(id));
+    return `(${kept.map((id) => `#${id}`).join(",")})`;
+  }
+  return arg;
 }
 
 export function updateNativeRelationship(
@@ -3127,6 +3309,15 @@ function collectCascadeRemovalIds(document: NativeIfcDocument, rootId: number) {
 
     removedIds.add(currentId);
 
+    // Cascade ONLY downward through the decomposition/spatial hierarchy:
+    // deleting a storey removes the elements it contains, deleting an assembly
+    // removes its parts. We deliberately do NOT follow arbitrary incoming
+    // references here. A single grouping relationship (e.g. one
+    // IfcRelContainedInSpatialStructure listing every wall on a storey, or a
+    // shared IfcRelAssociatesMaterial) references many siblings at once;
+    // pulling those relationships into the removal set would drag every
+    // sibling along and make them vanish. Such relationships are instead
+    // pruned member-by-member in removeNativeEntity.
     for (const relationship of document.relationshipsByEntity.get(currentId) ??
       []) {
       if (
@@ -3138,12 +3329,6 @@ function collectCascadeRemovalIds(document: NativeIfcDocument, rootId: number) {
             queue.push(childId);
           }
         }
-      }
-    }
-
-    for (const incoming of document.incomingRefs.get(currentId) ?? []) {
-      if (!removedIds.has(incoming.id)) {
-        queue.push(incoming.id);
       }
     }
   }
