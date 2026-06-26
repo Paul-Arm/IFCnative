@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 
 import type {
+  GuidDiffSummary,
+  VersionManifestEntry,
+} from "../../../src/ifc/versioning/entityDiffByGuid";
+import type {
   Branch,
   Commit,
   Member,
@@ -9,6 +13,12 @@ import type {
   Repository,
   User,
 } from "./types";
+
+interface EntityObject {
+  type: string;
+  name: string;
+  payload: string;
+}
 
 /**
  * In-memory Repository for local dev and tests. Not persistent — production
@@ -21,6 +31,11 @@ export class MemoryRepository implements Repository {
   private models = new Map<string, Model>();
   private branches = new Map<string, Branch>();
   private commits = new Map<string, Commit>();
+  /** content-addressable entity payloads, deduped across all commits. */
+  private entityObjects = new Map<string, EntityObject>();
+  /** per-commit manifest: ordered (globalId, entityHash) references. */
+  private commitEntities = new Map<string, { globalId: string; hash: string }[]>();
+  private diffCache = new Map<string, GuidDiffSummary>();
 
   private now(): string {
     // Tests need determinism-free timestamps; ISO string is fine here.
@@ -161,5 +176,51 @@ export class MemoryRepository implements Repository {
           (branchName === undefined || c.branchName === branchName),
       )
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async saveManifest(
+    commitId: string,
+    entries: VersionManifestEntry[],
+  ): Promise<void> {
+    const refs: { globalId: string; hash: string }[] = [];
+    for (const entry of entries) {
+      if (!this.entityObjects.has(entry.hash)) {
+        this.entityObjects.set(entry.hash, {
+          type: entry.type,
+          name: entry.name,
+          payload: entry.payload ?? "",
+        });
+      }
+      refs.push({ globalId: entry.globalId, hash: entry.hash });
+    }
+    this.commitEntities.set(commitId, refs);
+  }
+
+  async getManifest(commitId: string): Promise<VersionManifestEntry[]> {
+    const refs = this.commitEntities.get(commitId) ?? [];
+    return refs.map((ref) => {
+      const object = this.entityObjects.get(ref.hash);
+      return {
+        globalId: ref.globalId,
+        hash: ref.hash,
+        type: object?.type ?? "",
+        name: object?.name ?? "",
+      };
+    });
+  }
+
+  async getCachedDiff(
+    fromCommitId: string,
+    toCommitId: string,
+  ): Promise<GuidDiffSummary | null> {
+    return this.diffCache.get(`${fromCommitId}->${toCommitId}`) ?? null;
+  }
+
+  async saveCachedDiff(
+    fromCommitId: string,
+    toCommitId: string,
+    summary: GuidDiffSummary,
+  ): Promise<void> {
+    this.diffCache.set(`${fromCommitId}->${toCommitId}`, summary);
   }
 }

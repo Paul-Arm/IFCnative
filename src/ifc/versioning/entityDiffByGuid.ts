@@ -3,8 +3,8 @@ import {
   type NativeIfcDocument,
 } from "../nativeDocument";
 import {
+  canonicalEntityPayload,
   createHashContext,
-  entityContentHash,
   ifcGlobalId,
   sha256Hex,
 } from "./entityHash";
@@ -25,6 +25,13 @@ export interface VersionManifestEntry {
   type: string;
   name: string;
   hash: string;
+  /**
+   * Canonical, express-id-free payload that `hash` is computed from. Enables
+   * content-addressable dedup of entity payloads in a persistent store. Not
+   * required for diffing (which only compares hashes), so it may be omitted
+   * when a manifest is reconstructed from storage.
+   */
+  payload?: string;
 }
 
 export interface VersionManifest {
@@ -49,11 +56,13 @@ export function buildVersionManifest(doc: NativeIfcDocument): VersionManifest {
     if (entries.has(gid)) {
       duplicates.add(gid);
     }
+    const payload = canonicalEntityPayload(entity, ctx);
     entries.set(gid, {
       globalId: gid,
       type: entity.type,
       name: entity.name,
-      hash: entityContentHash(entity, ctx),
+      hash: sha256Hex(payload),
+      payload,
     });
   }
 

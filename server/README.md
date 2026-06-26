@@ -21,10 +21,18 @@ layer in `../src/ifc` — it reuses `parseNativeIfcText` and the GlobalId diff i
 
 ## Storage
 
-- **Object store** (raw IFC + manifests): Azure Blob Storage in production
+- **Object store** (raw IFC blobs): Azure Blob Storage in production
   (`STORAGE=azure`), filesystem for local dev/tests. See `src/storage/`.
-- **Metadata** (projects, commits, members): `MemoryRepository` for dev/tests.
-  Swap in a Postgres / Azure SQL implementation of `Repository` for production.
+- **Metadata + manifests** (projects, commits, members, the deduped entity
+  store, diff cache): Postgres via `SqlRepository` when `DATABASE_URL` is set,
+  otherwise the non-persistent `MemoryRepository`. Schema in
+  `src/repository/sql/schema.ts`; the same SQL is exercised in tests via PGlite.
+  - **Entity dedup**: each commit's manifest is `{globalId -> entityHash}` in
+    `commit_entities`; the canonical entity payloads live once in
+    `entity_objects` (shared across commits), so a commit touching 10 of 50k
+    entities stores ~10 new payloads, not 50k.
+  - **Diff cache**: computed diffs are stored in `diffs_cache`; since commits
+    are immutable the cache never goes stale.
 
 ## Run
 
@@ -33,16 +41,17 @@ cd server
 npm install
 # local dev (filesystem store):
 npm run dev
-# production with Azure Blob:
+# production with Azure Blob + Postgres:
 STORAGE=azure \
 AZURE_STORAGE_CONNECTION_STRING="..." \
 AZURE_STORAGE_CONTAINER="ifc-versions" \
+DATABASE_URL="postgres://user:pass@host:5432/ifcvcs" \
 JWT_SECRET="..." NODE_ENV=production npm start
 ```
 
 Config (`src/config.ts`): `PORT` (8787), `HOST`, `JWT_SECRET`, `STORAGE`
 (`filesystem`|`azure`), `DATA_DIR`, `AZURE_STORAGE_CONNECTION_STRING`,
-`AZURE_STORAGE_CONTAINER`.
+`AZURE_STORAGE_CONTAINER`, `DATABASE_URL` (Postgres; in-memory if unset).
 
 ## API (MVP)
 
@@ -69,5 +78,5 @@ npm test   # service + HTTP (fastify.inject), no DB or Azure needed
 
 ## Not yet (later phases)
 
-Branches UI / three-way merge with per-entity conflict detection, entity payload
-dedup + diff cache, Postgres repository, public REST docs (Swagger), client SDK.
+Branches UI / three-way merge with per-entity conflict detection, public REST
+docs (Swagger), client SDK, and React-client diff integration.

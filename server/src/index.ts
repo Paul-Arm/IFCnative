@@ -1,6 +1,9 @@
 import { loadConfig } from "./config";
 import { buildApp } from "./http/app";
 import { MemoryRepository } from "./repository/memoryRepository";
+import { createPgClient } from "./repository/sql/pgClient";
+import { SqlRepository } from "./repository/sqlRepository";
+import type { Repository } from "./repository/types";
 import { AzureBlobObjectStore } from "./storage/azureBlobObjectStore";
 import { FilesystemObjectStore } from "./storage/filesystemObjectStore";
 import type { ObjectStore } from "./storage/objectStore";
@@ -25,9 +28,15 @@ async function main(): Promise<void> {
     store = new FilesystemObjectStore(config.dataDir);
   }
 
-  // NOTE: MemoryRepository is non-persistent. Replace with a Postgres /
-  // Azure SQL implementation of Repository for production deployments.
-  const repo = new MemoryRepository();
+  // Postgres when DATABASE_URL is set, else the non-persistent in-memory repo.
+  let repo: Repository;
+  if (config.databaseUrl) {
+    const sqlRepo = new SqlRepository(createPgClient(config.databaseUrl));
+    await sqlRepo.migrate();
+    repo = sqlRepo;
+  } else {
+    repo = new MemoryRepository();
+  }
 
   const app = buildApp({ repo, store, jwtSecret: config.jwtSecret });
 

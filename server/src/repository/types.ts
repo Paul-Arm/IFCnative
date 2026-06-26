@@ -7,6 +7,11 @@
  * layer only holds metadata (projects, models, commits, branches, members).
  */
 
+import type {
+  GuidDiffSummary,
+  VersionManifestEntry,
+} from "../../../src/ifc/versioning/entityDiffByGuid";
+
 export type Role = "owner" | "maintainer" | "contributor" | "viewer";
 
 /** Roles permitted to push commits / mutate a project. */
@@ -64,7 +69,6 @@ export interface Commit {
   parentCommitId: string | null;
   manifestHash: string;
   blobKey: string;
-  manifestKey: string;
   schema: string;
   authorId: string;
   message: string;
@@ -104,4 +108,22 @@ export interface Repository {
   createCommit(commit: Commit): Promise<Commit>;
   getCommit(id: string): Promise<Commit | null>;
   listCommits(modelId: string, branchName?: string): Promise<Commit[]>;
+
+  // Version manifests (content-addressable, deduped entity store)
+  saveManifest(
+    commitId: string,
+    entries: VersionManifestEntry[],
+  ): Promise<void>;
+  getManifest(commitId: string): Promise<VersionManifestEntry[]>;
+
+  // Diff cache (commits are immutable, so cached diffs never go stale)
+  getCachedDiff(
+    fromCommitId: string,
+    toCommitId: string,
+  ): Promise<GuidDiffSummary | null>;
+  saveCachedDiff(
+    fromCommitId: string,
+    toCommitId: string,
+    summary: GuidDiffSummary,
+  ): Promise<void>;
 }

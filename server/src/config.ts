@@ -6,6 +6,7 @@ export interface ServerConfig {
   dataDir: string;
   azureConnectionString: string | undefined;
   azureContainer: string;
+  databaseUrl: string | undefined;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
@@ -22,5 +23,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     dataDir: env.DATA_DIR ?? "./.ifc-vcs-data",
     azureConnectionString: env.AZURE_STORAGE_CONNECTION_STRING,
     azureContainer: env.AZURE_STORAGE_CONTAINER ?? "ifc-versions",
+    databaseUrl: env.DATABASE_URL,
   };
 }

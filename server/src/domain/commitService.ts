@@ -13,34 +13,34 @@ import type { Commit, Model, Repository } from "../repository/types";
 
 /**
  * The versioning core: turns an uploaded IFC file into a content-addressable
- * commit (raw blob + GlobalId manifest in the object store, metadata in the
- * repository) and computes semantic diffs between commits by GlobalId.
+ * commit and computes semantic diffs between commits by GlobalId.
+ *
+ * - Raw IFC text -> object store (Azure Blob in prod), for perfect round-trip.
+ * - Version manifest {globalId -> entityHash} -> repository, where entity
+ *   payloads are deduped across commits (entity_objects).
+ * - Diffs are cached in the repository (commits are immutable).
  */
 
-interface SerializedManifest {
-  manifestHash: string;
-  entityCount: number;
-  entries: VersionManifestEntry[];
-}
+const EMPTY_MANIFEST: VersionManifest = {
+  manifestHash: "",
+  entries: new Map(),
+  duplicateGlobalIds: [],
+  entityCount: 0,
+};
 
-function serializeManifest(manifest: VersionManifest): SerializedManifest {
-  return {
-    manifestHash: manifest.manifestHash,
-    entityCount: manifest.entityCount,
-    entries: [...manifest.entries.values()],
-  };
-}
-
-function deserializeManifest(data: SerializedManifest): VersionManifest {
-  const entries = new Map<string, VersionManifestEntry>();
-  for (const entry of data.entries) {
-    entries.set(entry.globalId, entry);
+function manifestFromEntries(
+  entries: VersionManifestEntry[],
+  manifestHash: string,
+): VersionManifest {
+  const map = new Map<string, VersionManifestEntry>();
+  for (const entry of entries) {
+    map.set(entry.globalId, entry);
   }
   return {
-    manifestHash: data.manifestHash,
-    entityCount: data.entityCount,
-    entries,
+    manifestHash,
+    entries: map,
     duplicateGlobalIds: [],
+    entityCount: map.size,
   };
 }
 
@@ -68,17 +68,6 @@ export class CommitService {
     return `models/${modelId}/commits/${commitId}.ifc`;
   }
 
-  private manifestKey(modelId: string, manifestHash: string): string {
-    return `models/${modelId}/manifests/${manifestHash}.json`;
-  }
-
-  private async loadManifest(commit: Commit): Promise<VersionManifest> {
-    const buffer = await this.store.get(commit.manifestKey);
-    return deserializeManifest(
-      JSON.parse(buffer.toString("utf8")) as SerializedManifest,
-    );
-  }
-
   async createCommit(input: CreateCommitInput): Promise<CreateCommitResult> {
     const { model, branchName, ifcText, authorId, message } = input;
 
@@ -98,34 +87,17 @@ export class CommitService {
       ? await this.repo.getCommit(branch.headCommitId)
       : null;
 
-    let diff: GuidDiffSummary;
-    if (parentCommit) {
-      const parentManifest = await this.loadManifest(parentCommit);
-      diff = diffManifests(parentManifest, manifest);
-    } else {
-      diff = diffManifests(
-        {
-          manifestHash: "",
-          entries: new Map(),
-          duplicateGlobalIds: [],
-          entityCount: 0,
-        },
-        manifest,
-      );
-    }
+    const parentManifest = parentCommit
+      ? manifestFromEntries(
+          await this.repo.getManifest(parentCommit.id),
+          parentCommit.manifestHash,
+        )
+      : EMPTY_MANIFEST;
+    const diff = diffManifests(parentManifest, manifest);
 
     const commitId = randomUUID();
     const blobKey = this.blobKey(model.id, commitId);
-    const manifestKey = this.manifestKey(model.id, manifest.manifestHash);
-
     await this.store.put(blobKey, ifcText, "application/x-step");
-    if (!(await this.store.exists(manifestKey))) {
-      await this.store.put(
-        manifestKey,
-        JSON.stringify(serializeManifest(manifest)),
-        "application/json",
-      );
-    }
 
     const commit: Commit = {
       id: commitId,
@@ -134,7 +106,6 @@ export class CommitService {
       parentCommitId: parentCommit?.id ?? null,
       manifestHash: manifest.manifestHash,
       blobKey,
-      manifestKey,
       schema: doc.schema,
       authorId,
       message,
@@ -146,17 +117,27 @@ export class CommitService {
     };
 
     await this.repo.createCommit(commit);
+    await this.repo.saveManifest(commitId, [...manifest.entries.values()]);
     await this.repo.setBranchHead(branch.id, commit.id);
 
     return { commit, diff };
   }
 
   async getDiff(from: Commit, to: Commit): Promise<GuidDiffSummary> {
-    const [fromManifest, toManifest] = await Promise.all([
-      this.loadManifest(from),
-      this.loadManifest(to),
+    const cached = await this.repo.getCachedDiff(from.id, to.id);
+    if (cached) {
+      return cached;
+    }
+    const [fromEntries, toEntries] = await Promise.all([
+      this.repo.getManifest(from.id),
+      this.repo.getManifest(to.id),
     ]);
-    return diffManifests(fromManifest, toManifest);
+    const summary = diffManifests(
+      manifestFromEntries(fromEntries, from.manifestHash),
+      manifestFromEntries(toEntries, to.manifestHash),
+    );
+    await this.repo.saveCachedDiff(from.id, to.id, summary);
+    return summary;
   }
 
   async downloadIfc(commit: Commit): Promise<Buffer> {
