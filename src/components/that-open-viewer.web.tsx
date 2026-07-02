@@ -1,3 +1,12 @@
+import {
+    Box,
+    Copy,
+    LocateFixed,
+    Maximize,
+    MousePointer2,
+    Move,
+    RotateCw,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -60,6 +69,10 @@ export default function ThatOpenViewer({
   const [pickerActive, setPickerActive] = useState(false);
   const [lastPick, setLastPick] = useState<ViewerCoordinatePick | null>(null);
   const [copyStatus, setCopyStatus] = useState("");
+  const [loadProgress, setLoadProgress] = useState<{
+    fileName: string;
+    percent: number;
+  } | null>(null);
   const activeModel = useMemo(
     () => models.find((model) => model.documentId === activeDocumentId),
     [activeDocumentId, models],
@@ -69,10 +82,6 @@ export default function ThatOpenViewer({
   const hasVisibleModels = models.length > 0;
   const showDeferredActiveModel =
     !activeModelLoaded && Boolean(activeModelDeferredReason);
-  const largeLoadWarning = useMemo(
-    () => describeLargeIfcWarning(models),
-    [models],
-  );
   const modelLoadSignature = useMemo(
     () =>
       models
@@ -83,7 +92,6 @@ export default function ThatOpenViewer({
         .join("|"),
     [models],
   );
-  const lastWarningRef = useRef("");
 
   activeDocumentIdRef.current = activeDocumentId;
   modelsRef.current = models;
@@ -147,6 +155,7 @@ export default function ThatOpenViewer({
         },
         isCoordinatePickerActive: () => pickerActiveRef.current,
         onCoordinatePickerUsed: () => setPickerActive(false),
+        onProgress: (progress) => setLoadProgress(progress),
         onSelect: (id, source, globalId, documentId) =>
           onSelectRef.current(id, source, globalId, documentId),
         onStatus: setStatus,
@@ -184,12 +193,6 @@ export default function ThatOpenViewer({
     let cancelled = false;
     setError("");
     setStatus("Converting IFC with ThatOpen...");
-    if (largeLoadWarning && lastWarningRef.current !== largeLoadWarning) {
-      lastWarningRef.current = largeLoadWarning;
-      onLogRef.current?.(
-        `viewer.largeFileWarning(${JSON.stringify(largeLoadWarning)});`,
-      );
-    }
     const frameId = requestAnimationFrame(() => {
       void runtime
         .syncModels(modelsRef.current, { fitAfterLoad: true })
@@ -197,6 +200,7 @@ export default function ThatOpenViewer({
           if (cancelled) {
             return;
           }
+          setLoadProgress(null);
           setModelReady((value) => value + 1);
           const documentId = activeDocumentIdRef.current;
           await runtime.highlight(
@@ -208,6 +212,7 @@ export default function ThatOpenViewer({
           if (cancelled) {
             return;
           }
+          setLoadProgress(null);
           const message = stringifyError(reason);
           setError(message);
           setStatus("ThatOpen IFC load failed");
@@ -219,7 +224,7 @@ export default function ThatOpenViewer({
       cancelled = true;
       cancelAnimationFrame(frameId);
     };
-  }, [largeLoadWarning, modelLoadSignature, runtimeReady]);
+  }, [modelLoadSignature, runtimeReady]);
 
   useEffect(() => {
     const runtime = runtimeRef.current;
@@ -304,87 +309,108 @@ export default function ThatOpenViewer({
 
   return (
     <div className="ifcnative-thatopen-shell">
-      <div className="ifcnative-thatopen-toolbar">
-        <div className="ifcnative-thatopen-actions">
+      <div
+        ref={containerRef}
+        className={`ifcnative-thatopen-viewport${pickerActive ? " is-picking" : ""}`}
+      >
+        <div className="ifcnative-thatopen-viewport-toolbar">
           <button
-            className="ifcnative-thatopen-button"
-            disabled={!hasVisibleModels}
-            type="button"
-            onClick={() => void runtimeRef.current?.fit()}
-          >
-            Fit
-          </button>
-          <button
-            className="ifcnative-thatopen-button"
-            disabled={!hasVisibleModels}
-            type="button"
-            onClick={() => void runtimeRef.current?.resetCamera()}
-          >
-            Reset
-          </button>
-          <button
-            className={`ifcnative-thatopen-button${pickerActive ? " is-active" : ""}`}
-            disabled={!hasVisibleModels}
+            aria-label="Auswählen"
+            className={`ifcnative-thatopen-tool${!moveGizmoActive && !pickerActive ? " is-active" : ""}`}
+            title="Auswählen"
             type="button"
             onClick={() => {
-              setCopyStatus("");
-              setPickerActive((current) => !current);
+              setMoveGizmoActive(false);
+              setPickerActive(false);
             }}
           >
-            {pickerActive ? "Picker aktiv" : "Koordinaten wählen"}
+            <MousePointer2 aria-hidden size={16} />
           </button>
           <button
-            className={`ifcnative-thatopen-button${moveGizmoActive && moveGizmoMode === "translate" ? " is-active" : ""}`}
+            aria-label="Verschieben (Gizmo)"
+            className={`ifcnative-thatopen-tool${moveGizmoActive && moveGizmoMode === "translate" ? " is-active" : ""}`}
             disabled={!activeModelVisible}
+            title="Verschieben (Gizmo)"
             type="button"
             onClick={() => {
+              setPickerActive(false);
               setMoveGizmoMode("translate");
               setMoveGizmoActive((current) =>
                 moveGizmoMode === "translate" ? !current : true,
               );
             }}
           >
-            {moveGizmoActive && moveGizmoMode === "translate"
-              ? "Move-Gizmo aktiv"
-              : "Move-Gizmo"}
+            <Move aria-hidden size={16} />
           </button>
           <button
-            className={`ifcnative-thatopen-button${moveGizmoActive && moveGizmoMode === "rotate" ? " is-active" : ""}`}
+            aria-label="Rotieren (Gizmo)"
+            className={`ifcnative-thatopen-tool${moveGizmoActive && moveGizmoMode === "rotate" ? " is-active" : ""}`}
             disabled={!activeModelVisible}
+            title="Rotieren (Gizmo)"
             type="button"
             onClick={() => {
+              setPickerActive(false);
               setMoveGizmoMode("rotate");
               setMoveGizmoActive((current) =>
                 moveGizmoMode === "rotate" ? !current : true,
               );
             }}
           >
-            {moveGizmoActive && moveGizmoMode === "rotate"
-              ? "Rotate-Gizmo aktiv"
-              : "Rotate-Gizmo"}
+            <RotateCw aria-hidden size={16} />
           </button>
-          {showDeferredActiveModel ? (
-            <button
-              className="ifcnative-thatopen-button is-primary"
-              type="button"
-              onClick={onLoadActiveModel}
-            >
-              3D laden
-            </button>
-          ) : null}
+          <div aria-hidden className="ifcnative-thatopen-tool-divider" />
           <button
-            className="ifcnative-thatopen-button"
-            disabled={!lastPick}
+            aria-label="Koordinaten picken"
+            className={`ifcnative-thatopen-tool${pickerActive ? " is-active" : ""}`}
+            disabled={!hasVisibleModels}
+            title="Koordinaten picken"
             type="button"
-            onClick={() => lastPick && void copyPick(lastPick)}
+            onClick={() => {
+              setCopyStatus("");
+              setPickerActive((current) => !current);
+            }}
           >
-            Koordinaten kopieren
+            <LocateFixed aria-hidden size={16} />
+          </button>
+          <button
+            aria-label="Auf Modell zoomen"
+            className="ifcnative-thatopen-tool"
+            disabled={!hasVisibleModels}
+            title="Auf Modell zoomen"
+            type="button"
+            onClick={() => void runtimeRef.current?.fit()}
+          >
+            <Maximize aria-hidden size={16} />
+          </button>
+          <button
+            aria-label="Kamera zurücksetzen"
+            className="ifcnative-thatopen-tool"
+            disabled={!hasVisibleModels}
+            title="Kamera zurücksetzen"
+            type="button"
+            onClick={() => void runtimeRef.current?.resetCamera()}
+          >
+            <Box aria-hidden size={16} />
           </button>
         </div>
+        {pickerActive ? (
+          <div className="ifcnative-thatopen-picker-hint">
+            Punkt im Modell anklicken
+          </div>
+        ) : null}
         {lastPick ? (
           <div className="ifcnative-thatopen-coordinate-readout">
             <span>{formatCoordinatePickLabel(lastPick)}</span>
             {copyStatus ? <strong>{copyStatus}</strong> : null}
+            <button
+              aria-label="Koordinaten kopieren"
+              className="ifcnative-thatopen-coordinate-close"
+              title="Koordinaten kopieren"
+              type="button"
+              onClick={() => void copyPick(lastPick)}
+            >
+              <Copy aria-hidden size={12} />
+            </button>
             <button
               aria-label="Koordinatenanzeige schließen"
               className="ifcnative-thatopen-coordinate-close"
@@ -396,17 +422,18 @@ export default function ThatOpenViewer({
             </button>
           </div>
         ) : null}
-        {largeLoadWarning ? (
-          <div className="ifcnative-thatopen-warning">{largeLoadWarning}</div>
-        ) : null}
-      </div>
-      <div
-        ref={containerRef}
-        className={`ifcnative-thatopen-viewport${pickerActive ? " is-picking" : ""}`}
-      >
-        {pickerActive ? (
-          <div className="ifcnative-thatopen-picker-hint">
-            Punkt im Modell anklicken
+        {loadProgress ? (
+          <div className="ifcnative-thatopen-progress">
+            <div className="ifcnative-thatopen-progress-label">
+              <span>{loadProgress.fileName}</span>
+              <strong>{loadProgress.percent}%</strong>
+            </div>
+            <div className="ifcnative-thatopen-progress-track">
+              <div
+                className="ifcnative-thatopen-progress-fill"
+                style={{ width: `${loadProgress.percent}%` }}
+              />
+            </div>
           </div>
         ) : null}
         {showDeferredActiveModel ? (
@@ -422,27 +449,6 @@ export default function ThatOpenViewer({
       </div>
     </div>
   );
-}
-
-const LARGE_IFC_WARNING_BYTES = 120 * 1024 * 1024;
-
-function describeLargeIfcWarning(models: ThatOpenViewerModel[]) {
-  const estimatedBytes = models.reduce(
-    (total, model) =>
-      total + (model.ifcBytes?.byteLength ?? model.ifcText.length),
-    0,
-  );
-  if (estimatedBytes < LARGE_IFC_WARNING_BYTES) {
-    return "";
-  }
-  return `Große IFC-Auswahl (${formatByteSize(estimatedBytes)}): Viewer lädt alle sichtbaren Modelle vollständig; Konvertierung kann spürbar dauern.`;
-}
-
-function formatByteSize(bytes: number) {
-  if (bytes >= 1024 * 1024 * 1024) {
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-  }
-  return `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
 }
 
 function formatFragmentConversionProgress(
@@ -471,6 +477,7 @@ async function createThatOpenRuntime(
     onMoveSelected(delta: ViewerMoveDelta): void;
     onRotateSelected(rotation: ViewerRotationChange): void;
     onPickCoordinates(pick: ViewerCoordinatePick): void;
+    onProgress(progress: { fileName: string; percent: number } | null): void;
     onSelect(
       id: number,
       source?: string,
@@ -525,7 +532,10 @@ async function createThatOpenRuntime(
     settings?: { autoCoordinate?: boolean };
   };
   if (coreWithSettings.settings) {
-    coreWithSettings.settings.autoCoordinate = true;
+    // We apply each model's own coordination matrix explicitly on load so
+    // scene coordinates equal IFC world coordinates. The built-in
+    // autoCoordinate (align to first loaded model) would fight with that.
+    coreWithSettings.settings.autoCoordinate = false;
   }
   const viewCube = createThatOpenViewCube(THREE, container, world.camera);
   const moveGizmo = createMoveGizmo(
@@ -694,7 +704,23 @@ async function createThatOpenRuntime(
   canvas.addEventListener("pointerdown", trackPointerDown, { capture: true });
   canvas.addEventListener("click", selectFromPointer, { capture: true });
 
-  async function syncModels(
+  // Serialize reloads: two quick commits would otherwise run syncModels
+  // concurrently and can leave an orphaned model instance in the scene.
+  let syncQueue: Promise<unknown> = Promise.resolve();
+
+  function syncModels(
+    nextModels: ThatOpenViewerModel[],
+    options?: { fitAfterLoad?: boolean },
+  ) {
+    const run = syncQueue.then(
+      () => syncModelsInternal(nextModels, options),
+      () => syncModelsInternal(nextModels, options),
+    );
+    syncQueue = run.catch(() => undefined);
+    return run;
+  }
+
+  async function syncModelsInternal(
     nextModels: ThatOpenViewerModel[],
     options?: { fitAfterLoad?: boolean },
   ) {
@@ -702,6 +728,9 @@ async function createThatOpenRuntime(
       nextModels.map((model) => model.documentId),
     );
     coordinateCursor.hide();
+    // Release any gizmo preview clone before models are disposed/reloaded so
+    // no hidden element or orphaned preview mesh survives the reload.
+    await moveGizmo.updateSelection(0, null);
     for (const [documentId, loaded] of modelsByDocumentId) {
       if (!nextDocumentIds.has(documentId)) {
         loaded.model.object.removeFromParent();
@@ -728,6 +757,7 @@ async function createThatOpenRuntime(
       callbacks.onStatus(
         `Converting ${nextModel.fileName} to ThatOpen fragments in worker...`,
       );
+      callbacks.onProgress({ fileName: nextModel.fileName, percent: 0 });
       const modelId = `${toModelId(nextModel.fileName)}-${++loadCounter}`;
       const converted = await convertIfcToFragmentsInWorker(
         {
@@ -738,8 +768,16 @@ async function createThatOpenRuntime(
             nextModel.ifcFile || nextModel.ifcBytes ? "" : nextModel.ifcText,
           wasmPath: resolvePublicAssetUrl("wasm/"),
         },
-        (progress) =>
-          callbacks.onStatus(formatFragmentConversionProgress(progress)),
+        (progress) => {
+          callbacks.onStatus(formatFragmentConversionProgress(progress));
+          callbacks.onProgress({
+            fileName: nextModel.fileName,
+            percent: Math.min(
+              99,
+              Math.max(0, Math.round(progress.progress * 100)),
+            ),
+          });
+        },
       );
       callbacks.onLog(
         `viewer.convert({ engine: 'worker', file: '${nextModel.fileName}', ms: ${Math.round(converted.elapsedMs)} });`,
@@ -748,6 +786,24 @@ async function createThatOpenRuntime(
         camera: world.camera.three,
         modelId,
       });
+      // Re-apply the coordination matrix stored during import so scene
+      // coordinates equal IFC world coordinates even when the vertex data
+      // was rebased to the origin (georeferenced models).
+      const coordinationMatrix = await model
+        .getCoordinationMatrix()
+        .catch(() => null);
+      if (coordinationMatrix) {
+        model.object.applyMatrix4(coordinationMatrix);
+        model.object.updateMatrixWorld(true);
+        const offset = new THREE.Vector3().setFromMatrixPosition(
+          coordinationMatrix,
+        );
+        if (offset.lengthSq() > 0.000001) {
+          callbacks.onLog(
+            `viewer.coordination.applied({ file: '${nextModel.fileName}', x: ${formatCoordinate(offset.x)}, y: ${formatCoordinate(offset.y)}, z: ${formatCoordinate(offset.z)} });`,
+          );
+        }
+      }
       const fitModelItems = await getCameraFitLocalIds(model);
       const fitItems =
         fitModelItems.ignored > 0 ? fitModelItems.localIds : undefined;
@@ -771,6 +827,7 @@ async function createThatOpenRuntime(
       );
     }
     await fragments.core.update(true);
+    callbacks.onProgress(null);
     if (options?.fitAfterLoad ?? true) {
       await fit();
     }
@@ -1015,6 +1072,7 @@ interface EditableFragmentsLike {
 
 interface EditableFragmentModelLike {
   modelId: string;
+  object?: import("three").Object3D;
   setVisible?(localIds: number[] | undefined, visible: boolean): Promise<void>;
 }
 
@@ -1066,6 +1124,31 @@ function createMoveGizmo(
   const dragStart = new THREE.Vector3();
   const dragStartRotation = new THREE.Euler();
 
+  // Gizmo operations arrive concurrently (reload, fit, highlight, selection
+  // effects). Serialize them so overlapping loadEditable/disposeEditable calls
+  // cannot orphan a preview clone in the scene (invisible-ghost bug).
+  let operationQueue: Promise<unknown> = Promise.resolve();
+  const enqueue = <T,>(task: () => Promise<T>): Promise<T> => {
+    const run = operationQueue.then(task, task);
+    operationQueue = run.catch(() => undefined);
+    return run;
+  };
+
+  const removeOrphanEditMeshes = () => {
+    const sweep = (parent: import("three").Object3D | undefined) => {
+      if (!parent) {
+        return;
+      }
+      for (const child of [...parent.children]) {
+        if (child.name === "IFCnativeEditableElement" && child !== editMeshes) {
+          child.removeFromParent();
+        }
+      }
+    };
+    sweep(scene);
+    sweep(selectedModel?.object);
+  };
+
   const disposeEditable = async (restoreVisible: boolean) => {
     const model = selectedModel;
     const localId = selectedLocalId;
@@ -1073,10 +1156,15 @@ function createMoveGizmo(
     helper.visible = false;
     if (editMeshes) {
       editMeshes.removeFromParent();
-      editElement?.disposeMeshes(editMeshes);
+      try {
+        editElement?.disposeMeshes(editMeshes);
+      } catch {
+        // The owning model may already be disposed after a reload.
+      }
       editMeshes = null;
       editElement = null;
     }
+    removeOrphanEditMeshes();
     if (restoreVisible && model && Number.isFinite(localId) && localId > 0) {
       await model.setVisible?.([localId], true).catch(() => undefined);
       await fragments.update(true).catch(() => undefined);
@@ -1102,7 +1190,10 @@ function createMoveGizmo(
     editElement = element;
     editMeshes = await element.getMeshes();
     editMeshes.name = "IFCnativeEditableElement";
-    scene.add(editMeshes);
+    // Parent the preview under the model object so any coordination
+    // transform (georeferenced models) applies to the clone as well.
+    (model.object ?? scene).add(editMeshes);
+    removeOrphanEditMeshes();
     controls.setMode(mode);
     controls.attach(editMeshes);
     helper.visible = true;
@@ -1110,7 +1201,7 @@ function createMoveGizmo(
     onSceneChange();
   };
 
-  const updateSelection = async (
+  const updateSelectionInternal = async (
     localId: number,
     model: EditableFragmentModelLike | null,
   ) => {
@@ -1130,14 +1221,20 @@ function createMoveGizmo(
     }
   };
 
-  const setEnabled = async (nextEnabled: boolean) => {
-    enabled = nextEnabled;
-    if (!enabled) {
-      await disposeEditable(true);
-      return;
-    }
-    await updateSelection(selectedLocalId, selectedModel);
-  };
+  const updateSelection = (
+    localId: number,
+    model: EditableFragmentModelLike | null,
+  ) => enqueue(() => updateSelectionInternal(localId, model));
+
+  const setEnabled = (nextEnabled: boolean) =>
+    enqueue(async () => {
+      enabled = nextEnabled;
+      if (!enabled) {
+        await disposeEditable(true);
+        return;
+      }
+      await updateSelectionInternal(selectedLocalId, selectedModel);
+    });
 
   const setMode = (nextMode: MoveGizmoMode) => {
     mode = nextMode;
@@ -1162,50 +1259,64 @@ function createMoveGizmo(
   };
 
   const commitCurrentTransform = async () => {
-    if (!editElement || !editMeshes || !selectedModel || selectedLocalId <= 0) {
-      onSceneChange();
-      return;
-    }
-    const delta = editMeshes.position.clone().sub(dragStart);
-    const rotation = {
-      x: editMeshes.rotation.x - dragStartRotation.x,
-      y: editMeshes.rotation.y - dragStartRotation.y,
-      z: editMeshes.rotation.z - dragStartRotation.z,
-    };
-    const rotationChange = readRotationChange(THREE, editMeshes, rotation);
-    const changed =
-      mode === "translate"
-        ? delta.lengthSq() >= 0.000001
-        : Math.abs(rotation.x) + Math.abs(rotation.y) + Math.abs(rotation.z) >=
-          0.000001;
-    if (!changed) {
-      onSceneChange();
-      return;
-    }
+    const commit = await enqueue(async (): Promise<MoveGizmoCommit | null> => {
+      if (
+        !editElement ||
+        !editMeshes ||
+        !selectedModel ||
+        selectedLocalId <= 0
+      ) {
+        onSceneChange();
+        return null;
+      }
+      const delta = editMeshes.position.clone().sub(dragStart);
+      const rotation = {
+        x: editMeshes.rotation.x - dragStartRotation.x,
+        y: editMeshes.rotation.y - dragStartRotation.y,
+        z: editMeshes.rotation.z - dragStartRotation.z,
+      };
+      const rotationChange = readRotationChange(THREE, editMeshes, rotation);
+      const changed =
+        mode === "translate"
+          ? delta.lengthSq() >= 0.000001
+          : Math.abs(rotation.x) +
+              Math.abs(rotation.y) +
+              Math.abs(rotation.z) >=
+            0.000001;
+      if (!changed) {
+        onSceneChange();
+        return null;
+      }
 
-    const element = editElement;
-    const meshes = editMeshes;
-    const model = selectedModel;
-    const localId = selectedLocalId;
-    controls.detach();
-    helper.visible = false;
-    meshes.removeFromParent();
-    element.disposeMeshes(meshes);
-    editElement = null;
-    editMeshes = null;
-    await model.setVisible?.([localId], true).catch(() => undefined);
-    await fragments.update(true).catch(() => undefined);
-    await onTransformCommitted({
-      localId,
-      mode,
-      ...(mode === "translate"
-        ? { delta: { x: delta.x, y: delta.y, z: delta.z } }
-        : { rotation, rotationChange }),
+      const element = editElement;
+      const meshes = editMeshes;
+      const model = selectedModel;
+      const localId = selectedLocalId;
+      controls.detach();
+      helper.visible = false;
+      meshes.removeFromParent();
+      element.disposeMeshes(meshes);
+      editElement = null;
+      editMeshes = null;
+      removeOrphanEditMeshes();
+      await model.setVisible?.([localId], true).catch(() => undefined);
+      await fragments.update(true).catch(() => undefined);
+      return {
+        localId,
+        mode,
+        ...(mode === "translate"
+          ? { delta: { x: delta.x, y: delta.y, z: delta.z } }
+          : { rotation, rotationChange }),
+      };
     });
+    if (!commit) {
+      return;
+    }
+    await onTransformCommitted(commit);
     onLog(
-      mode === "translate"
-        ? `viewer.moveGizmo.delta({ dx: ${formatCoordinate(delta.x)}, dy: ${formatCoordinate(delta.y)}, dz: ${formatCoordinate(delta.z)} });`
-        : `viewer.rotateGizmo.delta({ rx: ${formatCoordinate(rotation.x)}, ry: ${formatCoordinate(rotation.y)}, rz: ${formatCoordinate(rotation.z)} });`,
+      commit.mode === "translate"
+        ? `viewer.moveGizmo.delta({ dx: ${formatCoordinate(commit.delta?.x ?? 0)}, dy: ${formatCoordinate(commit.delta?.y ?? 0)}, dz: ${formatCoordinate(commit.delta?.z ?? 0)} });`
+        : `viewer.rotateGizmo.delta({ rx: ${formatCoordinate(commit.rotation?.x ?? 0)}, ry: ${formatCoordinate(commit.rotation?.y ?? 0)}, rz: ${formatCoordinate(commit.rotation?.z ?? 0)} });`,
     );
     onSceneChange();
   };
@@ -1249,7 +1360,7 @@ function createMoveGizmo(
     controls.detach();
     controls.dispose();
     helper.removeFromParent();
-    void disposeEditable(true);
+    void enqueue(() => disposeEditable(true));
   };
 
   return {
@@ -1759,6 +1870,11 @@ async function readItemData(
 
 async function getCameraFitLocalIds(model: FitFragmentModelLike) {
   const localIds = await model.getLocalIds().catch(() => []);
+  // Scanning item attributes for origin markers requires fetching data for
+  // every item; skip it for large models and fit to everything instead.
+  if (localIds.length > 4000) {
+    return { ignored: 0, localIds: new Set<number>() };
+  }
   const fitLocalIds = new Set<number>();
   let ignored = 0;
   const chunkSize = 1500;

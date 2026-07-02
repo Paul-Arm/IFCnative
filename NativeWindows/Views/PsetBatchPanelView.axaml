@@ -67,7 +67,12 @@
           <DataTemplate>
             <Border Classes="surface" Padding="0">
               <StackPanel>
-                <Border Background="#1D201B" BorderBrush="#343A30" BorderThickness="0,0,0,1" Padding="8,5">
+                <Border Background="#1D201B"
+                        BorderBrush="#343A30"
+                        BorderThickness="0,0,0,1"
+                        Padding="8,5"
+                        ContextRequested="OnBlockHeaderContextRequested"
+                        ToolTip.Tip="Right-click to delete this Pset from the selected objects">
                   <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                     <TextBlock FontWeight="SemiBold"
                                VerticalAlignment="Center"

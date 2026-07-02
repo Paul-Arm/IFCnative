@@ -106,6 +106,22 @@ public sealed class PsetBatchPanelViewModel : ReactiveViewModel
         }
     }
 
+    internal void DeletePropertyCells(IReadOnlyList<(int SetId, int PropertyId)> cells)
+    {
+        if (cells.Count > 0)
+        {
+            owner.DeleteBatchProperties(cells);
+        }
+    }
+
+    internal void DeletePsetColumns(IReadOnlyList<(int EntityId, int SetId)> columns)
+    {
+        if (columns.Count > 0)
+        {
+            owner.DeleteBatchPset(columns);
+        }
+    }
+
     private void AddEmptyPset()
     {
         var name = NewPsetName.Trim();
@@ -215,6 +231,7 @@ public sealed class PsetBatchPanelViewModel : ReactiveViewModel
                 var propertyName = pair.Key;
                 var accumulator = pair.Value;
                 var valueType = accumulator.ValueType.Length == 0 ? "IfcLabel" : accumulator.ValueType;
+                var isQuantity = !string.Equals(block.Kind, "Pset", StringComparison.OrdinalIgnoreCase);
                 var cells = columns.Select(column =>
                 {
                     var present = accumulator.Cells.TryGetValue(column.EntityId, out var cellData);
@@ -225,7 +242,8 @@ public sealed class PsetBatchPanelViewModel : ReactiveViewModel
                         present ? cellData.PropertyId : null,
                         propertyName,
                         valueType,
-                        present ? cellData.Value : string.Empty);
+                        present ? cellData.Value : string.Empty,
+                        isQuantity);
                 }).ToList();
 
                 var distinct = cells.Select(cell => cell.OriginalValue).Distinct(StringComparer.Ordinal).Count() > 1;
@@ -330,6 +348,12 @@ public sealed class PsetBatchBlockViewModel : ReactiveViewModel
     public IReadOnlyList<PsetBatchColumnViewModel> Columns { get; }
 
     public IReadOnlyList<PsetBatchPropertyViewModel> Properties { get; }
+
+    /// <summary>Header right-click "delete": detaches this Pset from every selected object carrying it.</summary>
+    public void DeleteFromSelection()
+    {
+        owner.DeletePsetColumns(Columns.Select(column => (column.EntityId, column.SetId)).ToList());
+    }
 }
 
 public sealed record PsetBatchColumnViewModel(int EntityId, int SetId, string Label, string Title);
@@ -381,6 +405,17 @@ public sealed class PsetBatchPropertyViewModel(
 
         owner.EditPropertyRow(propertyIds, nameChanged ? newName.Trim() : Name, typeChanged ? newType : null);
     }
+
+    /// <summary>Right-click "delete row": removes the property from every selected object.</summary>
+    public void DeleteRow()
+    {
+        var cells = Cells
+            .Where(cell => cell.PropertyId is not null)
+            .Select(cell => (cell.SetId, cell.PropertyId!.Value))
+            .Distinct()
+            .ToList();
+        owner.DeletePropertyCells(cells);
+    }
 }
 
 public sealed class PsetBatchCellViewModel : ReactiveViewModel
@@ -397,7 +432,8 @@ public sealed class PsetBatchCellViewModel : ReactiveViewModel
         int? propertyId,
         string propertyName,
         string valueType,
-        string value)
+        string value,
+        bool isQuantity = false)
     {
         this.owner = owner;
         EntityId = entityId;
@@ -407,6 +443,7 @@ public sealed class PsetBatchCellViewModel : ReactiveViewModel
         ValueType = valueType;
         OriginalValue = value;
         valueDraft = value;
+        IsQuantity = isQuantity;
     }
 
     public int EntityId { get; }
@@ -416,6 +453,9 @@ public sealed class PsetBatchCellViewModel : ReactiveViewModel
     public int? PropertyId { get; }
 
     public string PropertyName { get; }
+
+    /// <summary>Quantity (Qto) cells have no measure type to change.</summary>
+    public bool IsQuantity { get; }
 
     /// <summary>
     /// Measure type used when this cell's value is first written. For cells that
@@ -467,6 +507,15 @@ public sealed class PsetBatchCellViewModel : ReactiveViewModel
         else
         {
             ValueType = valueType;
+        }
+    }
+
+    /// <summary>Right-click "delete": removes this object's property from its set.</summary>
+    public void DeleteProperty()
+    {
+        if (PropertyId is int propertyId)
+        {
+            owner.DeletePropertyCells([(SetId, propertyId)]);
         }
     }
 }

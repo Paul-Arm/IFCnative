@@ -238,20 +238,34 @@ public partial class PsetBatchPanelView : ReactiveUserControl<PsetBatchPanelView
         }
 
         e.Handled = true;
-        var typeRoot = new MenuItem { Header = "Set value type" };
-        foreach (var type in PsetValueTypes.Common)
+        var menu = new ContextMenu();
+        if (!cell.IsQuantity)
         {
-            var option = type;
-            var item = new MenuItem { Header = option };
-            // Defer: setting the type rebuilds this panel, which would tear down
-            // the menu's visual tree while the click is still being dispatched.
-            item.Click += (_, _) => Dispatcher.UIThread.Post(() => cell.SetType(option), DispatcherPriority.Background);
-            typeRoot.Items.Add(item);
+            var typeRoot = new MenuItem { Header = "Set value type" };
+            foreach (var type in PsetValueTypes.Common)
+            {
+                var option = type;
+                var item = new MenuItem { Header = option };
+                // Defer: setting the type rebuilds this panel, which would tear down
+                // the menu's visual tree while the click is still being dispatched.
+                item.Click += (_, _) => Dispatcher.UIThread.Post(() => cell.SetType(option), DispatcherPriority.Background);
+                typeRoot.Items.Add(item);
+            }
+
+            menu.Items.Add(typeRoot);
         }
 
-        var menu = new ContextMenu();
-        menu.Items.Add(typeRoot);
-        menu.Open(control);
+        if (cell.PropertyId is not null)
+        {
+            var deleteItem = new MenuItem { Header = "Delete property here" };
+            deleteItem.Click += (_, _) => Dispatcher.UIThread.Post(() => cell.DeleteProperty(), DispatcherPriority.Background);
+            menu.Items.Add(deleteItem);
+        }
+
+        if (menu.Items.Count > 0)
+        {
+            menu.Open(control);
+        }
     }
 
     // Right-click the property name: a menu to rename the row or set its type.
@@ -277,9 +291,29 @@ public partial class PsetBatchPanelView : ReactiveUserControl<PsetBatchPanelView
             typeRoot.Items.Add(item);
         }
 
+        var deleteItem = new MenuItem { Header = "Delete property (whole row)" };
+        deleteItem.Click += (_, _) => Dispatcher.UIThread.Post(() => row.DeleteRow(), DispatcherPriority.Background);
+
         var menu = new ContextMenu();
         menu.Items.Add(renameItem);
         menu.Items.Add(typeRoot);
+        menu.Items.Add(deleteItem);
+        menu.Open(control);
+    }
+
+    // Right-click the Pset header: delete the whole Pset from the selection.
+    private void OnBlockHeaderContextRequested(object? sender, ContextRequestedEventArgs e)
+    {
+        if (sender is not Control { DataContext: PsetBatchBlockViewModel block } control)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        var deleteItem = new MenuItem { Header = "Delete Pset from selected object(s)" };
+        deleteItem.Click += (_, _) => Dispatcher.UIThread.Post(() => block.DeleteFromSelection(), DispatcherPriority.Background);
+        var menu = new ContextMenu();
+        menu.Items.Add(deleteItem);
         menu.Open(control);
     }
 

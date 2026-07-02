@@ -1,5 +1,5 @@
 import { mkdir, readFile, writeFile, access } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import { type ObjectStore, toBuffer } from "./objectStore";
 
@@ -16,9 +16,11 @@ export class FilesystemObjectStore implements ObjectStore {
   }
 
   private pathFor(key: string): string {
-    // Disallow path traversal out of the root.
+    // Disallow path traversal out of the root. Compare via path.relative so the
+    // check is correct on Windows (backslash separators) as well as POSIX.
     const target = resolve(join(this.rootDir, key));
-    if (target !== this.rootDir && !target.startsWith(this.rootDir + "/")) {
+    const rel = relative(this.rootDir, target);
+    if (rel !== "" && (rel.startsWith("..") || isAbsolute(rel))) {
       throw new Error(`Invalid object key: ${key}`);
     }
     return target;

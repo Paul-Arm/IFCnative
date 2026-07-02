@@ -458,6 +458,36 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return reply.send({ diff: await commits.getDiff(from, to) });
   });
 
+  // Field-level detail for a single changed entity (what actually changed).
+  app.get("/projects/:slug/models/:model/diff/entity", async (request, reply) => {
+    const { slug, model: modelSlug } = request.params as {
+      slug: string;
+      model: string;
+    };
+    const resolved = await resolveModel(slug, modelSlug, reply);
+    if (!resolved) return reply;
+    const { project, model } = resolved;
+    const user = await optionalUser(request);
+    const member = user ? await repo.getMember(project.id, user.id) : null;
+    if (model.visibility !== "public" && !member) {
+      return reply.code(403).send({ error: "Private model" });
+    }
+    const query = request.query as { from?: string; to?: string; globalId?: string };
+    if (!query.from || !query.to || !query.globalId) {
+      return reply
+        .code(400)
+        .send({ error: "from, to and globalId are required" });
+    }
+    const from = await repo.getCommit(query.from);
+    const to = await repo.getCommit(query.to);
+    if (!from || !to || from.modelId !== model.id || to.modelId !== model.id) {
+      return reply.code(404).send({ error: "Commit not found" });
+    }
+    return reply.send({
+      detail: await commits.getEntityDiff(from, to, query.globalId),
+    });
+  });
+
   app.get("/health", async () => ({ status: "ok" }));
 
   return app;

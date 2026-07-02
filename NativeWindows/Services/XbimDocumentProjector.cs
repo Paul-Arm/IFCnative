@@ -867,6 +867,13 @@ public static class XbimDocumentProjector
             return values.Count == 0 ? fallback : string.Join(", ", values);
         }
 
+        // Dot-decimal like the underlying IFC: culture-formatted numbers ("1,5")
+        // would not round-trip through the editor's invariant-first parsing.
+        if (value is double number)
+        {
+            return number.ToString("G15", CultureInfo.InvariantCulture);
+        }
+
         var display = value.ToString();
         return string.IsNullOrWhiteSpace(display) ? fallback : display.Trim();
     }

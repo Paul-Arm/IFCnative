@@ -350,6 +350,235 @@ export function getNativePlacement(
   };
 }
 
+interface NativeVector3 {
+  x: number;
+  y: number;
+  z: number;
+}
+
+interface NativePlacementFrame {
+  origin: NativeVector3;
+  xAxis: NativeVector3;
+  yAxis: NativeVector3;
+  zAxis: NativeVector3;
+}
+
+const IDENTITY_PLACEMENT_FRAME: NativePlacementFrame = {
+  origin: { x: 0, y: 0, z: 0 },
+  xAxis: { x: 1, y: 0, z: 0 },
+  yAxis: { x: 0, y: 1, z: 0 },
+  zAxis: { x: 0, y: 0, z: 1 },
+};
+
+function crossVectors(a: NativeVector3, b: NativeVector3): NativeVector3 {
+  return {
+    x: a.y * b.z - a.z * b.y,
+    y: a.z * b.x - a.x * b.z,
+    z: a.x * b.y - a.y * b.x,
+  };
+}
+
+function dotVectors(a: NativeVector3, b: NativeVector3) {
+  return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+function readDirectionVector(
+  document: NativeIfcDocument,
+  reference: string | undefined,
+  fallback: NativeVector3,
+): NativeVector3 {
+  const directionId = readReferences(reference ?? "")[0];
+  const direction = directionId
+    ? document.entityById.get(directionId)
+    : undefined;
+  if (direction?.type !== "IFCDIRECTION") {
+    return fallback;
+  }
+  const [x, y, z] = parseCoordinateTuple(direction.args[0]);
+  return normalizeDirection({ x, y, z }, fallback);
+}
+
+function readAxis2Placement3dFrame(
+  document: NativeIfcDocument,
+  axisPlacementId: number | undefined,
+): NativePlacementFrame | undefined {
+  const axisPlacement = axisPlacementId
+    ? document.entityById.get(axisPlacementId)
+    : undefined;
+  if (axisPlacement?.type !== "IFCAXIS2PLACEMENT3D") {
+    return undefined;
+  }
+  const pointId = readReferences(axisPlacement.args[0] ?? "")[0];
+  const point = pointId ? document.entityById.get(pointId) : undefined;
+  const [x, y, z] =
+    point?.type === "IFCCARTESIANPOINT"
+      ? parseCoordinateTuple(point.args[0])
+      : [0, 0, 0];
+  const zAxis = readDirectionVector(document, axisPlacement.args[1], {
+    x: 0,
+    y: 0,
+    z: 1,
+  });
+  const refDirection = readDirectionVector(document, axisPlacement.args[2], {
+    x: 1,
+    y: 0,
+    z: 0,
+  });
+  const projection = dotVectors(refDirection, zAxis);
+  const orthogonalHelper =
+    Math.abs(zAxis.z) < 0.9 ? { x: 0, y: 0, z: 1 } : { x: 1, y: 0, z: 0 };
+  const xAxis = normalizeDirection(
+    {
+      x: refDirection.x - projection * zAxis.x,
+      y: refDirection.y - projection * zAxis.y,
+      z: refDirection.z - projection * zAxis.z,
+    },
+    normalizeDirection(crossVectors(orthogonalHelper, zAxis), {
+      x: 1,
+      y: 0,
+      z: 0,
+    }),
+  );
+  const yAxis = crossVectors(zAxis, xAxis);
+  return { origin: { x, y, z }, xAxis, yAxis, zAxis };
+}
+
+function transformFramePoint(
+  frame: NativePlacementFrame,
+  point: NativeVector3,
+): NativeVector3 {
+  return {
+    x:
+      frame.origin.x +
+      frame.xAxis.x * point.x +
+      frame.yAxis.x * point.y +
+      frame.zAxis.x * point.z,
+    y:
+      frame.origin.y +
+      frame.xAxis.y * point.x +
+      frame.yAxis.y * point.y +
+      frame.zAxis.y * point.z,
+    z:
+      frame.origin.z +
+      frame.xAxis.z * point.x +
+      frame.yAxis.z * point.y +
+      frame.zAxis.z * point.z,
+  };
+}
+
+function rotateFrameDirection(
+  frame: NativePlacementFrame,
+  direction: NativeVector3,
+): NativeVector3 {
+  return {
+    x:
+      frame.xAxis.x * direction.x +
+      frame.yAxis.x * direction.y +
+      frame.zAxis.x * direction.z,
+    y:
+      frame.xAxis.y * direction.x +
+      frame.yAxis.y * direction.y +
+      frame.zAxis.y * direction.z,
+    z:
+      frame.xAxis.z * direction.x +
+      frame.yAxis.z * direction.y +
+      frame.zAxis.z * direction.z,
+  };
+}
+
+function composeFrames(
+  parent: NativePlacementFrame,
+  child: NativePlacementFrame,
+): NativePlacementFrame {
+  return {
+    origin: transformFramePoint(parent, child.origin),
+    xAxis: rotateFrameDirection(parent, child.xAxis),
+    yAxis: rotateFrameDirection(parent, child.yAxis),
+    zAxis: rotateFrameDirection(parent, child.zAxis),
+  };
+}
+
+function getLocalPlacementWorldFrame(
+  document: NativeIfcDocument,
+  placementId: number | undefined,
+): NativePlacementFrame {
+  const chain: number[] = [];
+  const visited = new Set<number>();
+  let currentId = placementId;
+  while (currentId && !visited.has(currentId) && chain.length < 64) {
+    visited.add(currentId);
+    const placement = document.entityById.get(currentId);
+    if (placement?.type !== "IFCLOCALPLACEMENT") {
+      break;
+    }
+    chain.unshift(currentId);
+    currentId = readReferences(placement.args[0] ?? "")[0];
+  }
+  let frame = IDENTITY_PLACEMENT_FRAME;
+  for (const id of chain) {
+    const placement = document.entityById.get(id);
+    const axisPlacementId = readReferences(placement?.args[1] ?? "")[0];
+    const local = readAxis2Placement3dFrame(document, axisPlacementId);
+    if (local) {
+      frame = composeFrames(frame, local);
+    }
+  }
+  return frame;
+}
+
+export interface NativeWorldPlacementSummary extends NativePlacementSummary {
+  worldX: number;
+  worldY: number;
+  worldZ: number;
+}
+
+export function getNativePlacementWorld(
+  document: NativeIfcDocument,
+  entityId: number,
+): NativeWorldPlacementSummary | undefined {
+  const placement = getNativePlacement(document, entityId);
+  if (!placement) {
+    return undefined;
+  }
+  const parentFrame = getLocalPlacementWorldFrame(
+    document,
+    placement.relativeTo,
+  );
+  const world = transformFramePoint(parentFrame, {
+    x: placement.x,
+    y: placement.y,
+    z: placement.z,
+  });
+  return {
+    ...placement,
+    worldX: world.x,
+    worldY: world.y,
+    worldZ: world.z,
+  };
+}
+
+export function nativeWorldToLocalPlacementPoint(
+  document: NativeIfcDocument,
+  entityId: number,
+  world: { x: number; y: number; z: number },
+): { x: number; y: number; z: number } | undefined {
+  const placement = getNativePlacement(document, entityId);
+  if (!placement) {
+    return undefined;
+  }
+  const frame = getLocalPlacementWorldFrame(document, placement.relativeTo);
+  const delta = {
+    x: world.x - frame.origin.x,
+    y: world.y - frame.origin.y,
+    z: world.z - frame.origin.z,
+  };
+  return {
+    x: dotVectors(delta, frame.xAxis),
+    y: dotVectors(delta, frame.yAxis),
+    z: dotVectors(delta, frame.zAxis),
+  };
+}
+
 export function getNativeBodyRepresentation(
   document: NativeIfcDocument,
   entityId: number,
@@ -693,20 +922,34 @@ export function addNativeElement(
 
   if (parentId && document.entityById.has(parentId)) {
     const relId = nextId;
+    const useContainment = Boolean(
+      parent && isSpatial(parent.type) && !isSpatial(productType),
+    );
     next.push({
-      args: [
-        quote(createIfcGuid(relId)),
-        "$",
-        "$",
-        "$",
-        `#${parentId}`,
-        `(#${id})`,
-      ],
+      args: useContainment
+        ? [
+            quote(createIfcGuid(relId)),
+            "$",
+            "$",
+            "$",
+            `(#${id})`,
+            `#${parentId}`,
+          ]
+        : [
+            quote(createIfcGuid(relId)),
+            "$",
+            "$",
+            "$",
+            `#${parentId}`,
+            `(#${id})`,
+          ],
       description: "",
       globalId: createIfcGuid(relId),
       id: relId,
       name: "",
-      type: "IFCRELAGGREGATES",
+      type: useContainment
+        ? "IFCRELCONTAINEDINSPATIALSTRUCTURE"
+        : "IFCRELAGGREGATES",
     });
   }
 

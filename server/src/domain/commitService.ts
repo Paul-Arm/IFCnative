@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 
-import { parseNativeIfcText } from "../../../src/ifc/nativeDocument";
+import {
+  parseNativeIfcText,
+  type NativeIfcDocument,
+} from "../../../src/ifc/nativeDocument";
 import {
   buildVersionManifest,
   diffManifests,
@@ -8,6 +11,10 @@ import {
   type VersionManifest,
   type VersionManifestEntry,
 } from "../../../src/ifc/versioning/entityDiffByGuid";
+import {
+  diffEntityFields,
+  type EntityFieldDiff,
+} from "../../../src/ifc/versioning/entityFieldDiff";
 import type { ObjectStore } from "../storage/objectStore";
 import type { Commit, Model, Repository } from "../repository/types";
 
@@ -64,8 +71,33 @@ export class CommitService {
     private readonly store: ObjectStore,
   ) {}
 
+  /**
+   * Small LRU of parsed documents keyed by commit id. Commits are immutable, so
+   * a parsed doc is valid forever; expanding several entities of one diff reuses
+   * the same two parses instead of re-reading and re-parsing per entity.
+   */
+  private readonly parseCache = new Map<string, NativeIfcDocument>();
+  private static readonly PARSE_CACHE_LIMIT = 8;
+
   private blobKey(modelId: string, commitId: string): string {
     return `models/${modelId}/commits/${commitId}.ifc`;
+  }
+
+  private async loadDocument(commit: Commit): Promise<NativeIfcDocument> {
+    const cached = this.parseCache.get(commit.id);
+    if (cached) {
+      return cached;
+    }
+    const buffer = await this.store.get(commit.blobKey);
+    const doc = parseNativeIfcText(buffer.toString("utf8"));
+    if (this.parseCache.size >= CommitService.PARSE_CACHE_LIMIT) {
+      const oldest = this.parseCache.keys().next().value;
+      if (oldest !== undefined) {
+        this.parseCache.delete(oldest);
+      }
+    }
+    this.parseCache.set(commit.id, doc);
+    return doc;
   }
 
   async createCommit(input: CreateCommitInput): Promise<CreateCommitResult> {
@@ -138,6 +170,23 @@ export class CommitService {
     );
     await this.repo.saveCachedDiff(from.id, to.id, summary);
     return summary;
+  }
+
+  /**
+   * Field-level "what changed" detail for a single GlobalId between two commits.
+   * Loads (and caches) both raw IFC versions, then compares the entity's
+   * attributes, placement, geometry and property/quantity sets.
+   */
+  async getEntityDiff(
+    from: Commit,
+    to: Commit,
+    globalId: string,
+  ): Promise<EntityFieldDiff> {
+    const [beforeDoc, afterDoc] = await Promise.all([
+      this.loadDocument(from),
+      this.loadDocument(to),
+    ]);
+    return diffEntityFields(beforeDoc, afterDoc, globalId);
   }
 
   async downloadIfc(commit: Commit): Promise<Buffer> {

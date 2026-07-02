@@ -234,13 +234,13 @@ export function BuilderPanel({
               label="Position"
               options={[
                 {
-                  detail: "Viewer-Weltpunkt",
-                  label: "Am Picker-Punkt",
+                  detail: "Absolut im Modell (Viewer-Weltpunkt)",
+                  label: "Weltposition",
                   value: "world",
                 },
                 {
-                  detail: "Koordinaten unverändert lassen",
-                  label: "Nur Geometrie",
+                  detail: "X/Y/Z als lokaler Versatz zum Parent",
+                  label: "Relativ zum Parent",
                   value: "parent",
                 },
               ]}

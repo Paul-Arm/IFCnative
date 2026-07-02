@@ -73,10 +73,27 @@
       th { color: var(--muted); font-weight: 500; }
       .chip { font-size: 12px; padding: 1px 6px; border-radius: 10px; }
       .add { color: var(--add); } .del { color: var(--del); } .mod { color: var(--mod); }
+      .diff-summary { display: flex; gap: 14px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+      .diff-summary .stat { font-size: 13px; }
+      .diff-summary .stat b { font-variant-numeric: tabular-nums; }
       .diff-cols { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 10px; }
       .diff-col h3 { margin: 0 0 6px; font-size: 13px; }
-      .diff-col ul { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow: auto; }
+      .diff-col ul { list-style: none; margin: 0; padding: 0; max-height: 360px; overflow: auto; }
       .diff-col li { padding: 5px 7px; border-radius: 5px; background: var(--panel2); margin-bottom: 4px; font-size: 12px; }
+      .diff-col li.expandable { cursor: pointer; }
+      .diff-col li.expandable:hover { outline: 1px solid var(--border); }
+      .diff-col li.open { background: #283042; }
+      .ent-head { display: flex; gap: 6px; align-items: baseline; }
+      .ent-head .caret { color: var(--muted); transition: transform .1s; }
+      .diff-col li.open .ent-head .caret { transform: rotate(90deg); }
+      .ent-detail { margin-top: 6px; border-top: 1px solid var(--border); padding-top: 6px; }
+      .ent-detail table { width: 100%; }
+      .ent-detail th, .ent-detail td { padding: 3px 4px; border-bottom: 1px solid var(--border); font-size: 11px; vertical-align: top; }
+      .ent-detail .grp { color: var(--muted); font-weight: 600; padding-top: 8px; }
+      .ent-detail .before { color: var(--del); text-decoration: line-through; opacity: .85; word-break: break-all; }
+      .ent-detail .after { color: var(--add); word-break: break-all; }
+      .ent-detail .arrow { color: var(--muted); }
+      .ent-detail .loading, .ent-detail .empty { color: var(--muted); font-style: italic; }
       .stack > * + * { margin-top: 14px; }
       .err { color: var(--del); }
       .ok { color: var(--add); }
@@ -334,13 +351,76 @@
         }
       }
 
+      function esc(s) {
+        return String(s == null ? "" : s)
+          .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+
       function renderDiffList(title, items, cls) {
         const li = items
-          .map((i) => '<li><span class="' + cls + '">' + i.type + "</span> " +
-            (i.name || "") + ' <span class="muted">' + i.globalId + "</span></li>")
+          .map((i) =>
+            '<li class="expandable" data-gid="' + esc(i.globalId) + '">' +
+              '<div class="ent-head">' +
+                '<span class="caret">▸</span>' +
+                '<span class="' + cls + '">' + esc(i.type) + "</span> " +
+                "<span>" + esc(i.name || "") + "</span> " +
+                '<span class="muted">' + esc(i.globalId) + "</span>" +
+              "</div>" +
+            "</li>")
           .join("");
         return '<div class="diff-col"><h3 class="' + cls + '">' + title + " (" + items.length +
           ")</h3><ul>" + (li || '<li class="muted">none</li>') + "</ul></div>";
+      }
+
+      function renderEntityDetail(detail) {
+        if (!detail.changes.length) {
+          return '<div class="empty">No named field changes — difference is in geometry or references only.</div>';
+        }
+        let rows = "";
+        let lastGroup = null;
+        for (const c of detail.changes) {
+          if (c.group !== lastGroup) {
+            rows += '<tr><td class="grp" colspan="2">' + esc(c.group) + "</td></tr>";
+            lastGroup = c.group;
+          }
+          const before = c.before == null
+            ? '<span class="muted">—</span>'
+            : '<span class="before">' + esc(c.before) + "</span>";
+          const after = c.after == null
+            ? '<span class="muted">—</span>'
+            : '<span class="after">' + esc(c.after) + "</span>";
+          rows += "<tr><td>" + esc(c.field) + "</td><td>" +
+            before + ' <span class="arrow">→</span> ' + after + "</td></tr>";
+        }
+        return "<table><tbody>" + rows + "</tbody></table>";
+      }
+
+      async function onDiffClick(ev) {
+        const li = ev.target.closest("li[data-gid]");
+        if (!li || !li.dataset.gid) return;
+        if (li.classList.contains("open")) {
+          li.classList.remove("open");
+          const existing = li.querySelector(".ent-detail");
+          if (existing) existing.remove();
+          return;
+        }
+        li.classList.add("open");
+        const box = document.createElement("div");
+        box.className = "ent-detail";
+        box.innerHTML = '<span class="loading">Loading…</span>';
+        li.appendChild(box);
+        try {
+          const url =
+            "/projects/" + state.project.slug + "/models/" + state.model.slug +
+            "/diff/entity?from=" + encodeURIComponent(state.from) +
+            "&to=" + encodeURIComponent(state.to) +
+            "&globalId=" + encodeURIComponent(li.dataset.gid);
+          const data = await api(url);
+          box.innerHTML = renderEntityDetail(data.detail);
+        } catch (e) {
+          box.innerHTML = '<span class="err">' + esc(e.message) + "</span>";
+        }
       }
 
       async function compare() {
@@ -355,7 +435,16 @@
           $("diffMsg").innerHTML = d.identical
             ? '<span class="ok">Versions are semantically identical</span>'
             : "";
+          const summary =
+            '<div class="diff-summary">' +
+              '<span class="stat add">+<b>' + d.added.length + "</b> added</span>" +
+              '<span class="stat mod">~<b>' + d.modified.length + "</b> modified</span>" +
+              '<span class="stat del">-<b>' + d.removed.length + "</b> removed</span>" +
+              '<span class="stat muted"><b>' + d.unchanged + "</b> unchanged</span>" +
+              '<span class="stat muted" style="margin-left:auto">Click an entry for field-level changes</span>' +
+            "</div>";
           $("diffOut").innerHTML =
+            summary +
             '<div class="diff-cols">' +
             renderDiffList("Added", d.added, "add") +
             renderDiffList("Modified", d.modified, "mod") +
@@ -387,6 +476,7 @@
       };
       $("commitBtn").onclick = commitVersion;
       $("compareBtn").onclick = compare;
+      $("diffOut").addEventListener("click", onDiffClick);
 
       (async function init() {
         await loadMe();

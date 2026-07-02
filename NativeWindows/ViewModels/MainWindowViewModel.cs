@@ -927,10 +927,168 @@ public sealed class MainWindowViewModel : ReactiveViewModel
             return;
         }
 
+        // A rename must not collide with a sibling property — sets keep unique
+        // property names (a duplicate would also merge rows in the batch panel).
+        if (!string.IsNullOrWhiteSpace(newName))
+        {
+            var name = newName.Trim();
+            var targets = propertyIds.ToHashSet();
+            var conflict = session.Document.PropertySetById.Values.Any(set =>
+                set.Values.Any(value => targets.Contains(value.Id))
+                && set.Values.Any(value => !targets.Contains(value.Id)
+                    && string.Equals(value.Name?.Trim(), name, StringComparison.OrdinalIgnoreCase)));
+            if (conflict)
+            {
+                StatusText = $"Rename skipped: a property named '{name}' already exists in one of the affected sets.";
+                return;
+            }
+        }
+
         StageDraft(
             XbimDocumentEditor.RenameAndRetypeProperties(session.Document, propertyIds, newName, valueType),
             session.SelectedEntityIds.FirstOrDefault(),
             $"Staged xBIM property row edit for {propertyIds.Count:N0} value(s).");
+    }
+
+    /// <summary>
+    /// Deletes property values from their sets (batch panel: single cell or whole
+    /// row). Property instances that no other set references are removed from the
+    /// model as well.
+    /// </summary>
+    public void DeleteBatchProperties(IReadOnlyList<(int SetId, int PropertyId)> cells)
+    {
+        var session = ActiveSession;
+        if (session is null || cells.Count == 0)
+        {
+            return;
+        }
+
+        var usage = CountPropertyUsage(session.Document);
+        var occurrences = new Dictionary<int, int>();
+        foreach (var (_, propertyId) in cells)
+        {
+            occurrences[propertyId] = occurrences.GetValueOrDefault(propertyId) + 1;
+        }
+
+        var deletable = occurrences
+            .Where(pair => usage.GetValueOrDefault(pair.Key) <= pair.Value)
+            .Select(pair => pair.Key)
+            .ToList();
+
+        StageDraft(
+            XbimDocumentEditor.DeleteProperties(session.Document, cells, deletable),
+            session.SelectedEntityIds.FirstOrDefault(),
+            $"Staged xBIM delete of {cells.Count:N0} property value(s).");
+    }
+
+    /// <summary>
+    /// Detaches a property set from the given objects (batch panel block delete).
+    /// Defining relationships, sets and property instances that end up unused are
+    /// deleted with it.
+    /// </summary>
+    public void DeleteBatchPset(IReadOnlyList<(int EntityId, int SetId)> targets)
+    {
+        var session = ActiveSession;
+        if (session is null || targets.Count == 0)
+        {
+            return;
+        }
+
+        var document = session.Document;
+        var removedBySet = targets
+            .GroupBy(target => target.SetId)
+            .ToDictionary(group => group.Key, group => group.Select(target => target.EntityId).ToHashSet());
+
+        var removals = new HashSet<(int RelationshipId, int EntityId)>();
+        var deleteRelationshipIds = new List<int>();
+        var orphanedSetIds = new List<int>();
+
+        foreach (var (setId, removedEntities) in removedBySet)
+        {
+            var relations = document.RelationshipById.Values
+                .Where(relation => relation.Type.Equals("IFCRELDEFINESBYPROPERTIES", StringComparison.OrdinalIgnoreCase)
+                    && relation.SourceIds.Contains(setId))
+                .ToList();
+
+            var remainingReferences = 0;
+            foreach (var relation in relations)
+            {
+                foreach (var entityId in relation.TargetIds)
+                {
+                    if (removedEntities.Contains(entityId))
+                    {
+                        removals.Add((relation.Id, entityId));
+                    }
+                    else
+                    {
+                        remainingReferences++;
+                    }
+                }
+
+                if (relation.TargetIds.All(removedEntities.Contains))
+                {
+                    deleteRelationshipIds.Add(relation.Id);
+                }
+            }
+
+            if (relations.Count > 0 && remainingReferences == 0)
+            {
+                orphanedSetIds.Add(setId);
+            }
+        }
+
+        if (removals.Count == 0)
+        {
+            StatusText = "No defining relationship found for the selected Pset.";
+            return;
+        }
+
+        // Only delete property instances whose every owning set is going away.
+        var usage = CountPropertyUsage(document);
+        var orphanedSets = orphanedSetIds.ToHashSet();
+        var occurrences = new Dictionary<int, int>();
+        foreach (var setId in orphanedSets)
+        {
+            if (!document.PropertySetById.TryGetValue(setId, out var set))
+            {
+                continue;
+            }
+
+            foreach (var value in set.Values)
+            {
+                occurrences[value.Id] = occurrences.GetValueOrDefault(value.Id) + 1;
+            }
+        }
+
+        var deletableProperties = occurrences
+            .Where(pair => usage.GetValueOrDefault(pair.Key) <= pair.Value)
+            .Select(pair => pair.Key)
+            .ToList();
+
+        var plan = new PsetDetachPlan(
+            removals.ToList(),
+            deleteRelationshipIds.Distinct().ToList(),
+            orphanedSetIds,
+            deletableProperties);
+
+        StageDraft(
+            XbimDocumentEditor.DetachPropertySets(document, plan),
+            session.SelectedEntityIds.FirstOrDefault(),
+            $"Staged xBIM Pset delete for {targets.Count:N0} object(s).");
+    }
+
+    private static Dictionary<int, int> CountPropertyUsage(IfcDocument document)
+    {
+        var usage = new Dictionary<int, int>();
+        foreach (var set in document.PropertySetById.Values)
+        {
+            foreach (var value in set.Values)
+            {
+                usage[value.Id] = usage.GetValueOrDefault(value.Id) + 1;
+            }
+        }
+
+        return usage;
     }
 
     public void AddResource(string kind, string name, string identification)

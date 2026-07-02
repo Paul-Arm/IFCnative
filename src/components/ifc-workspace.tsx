@@ -373,9 +373,12 @@ export default function IfcWorkspace() {
   // tree, or the single active object when nothing else is selected.
   const batchSelectionIds = useMemo(() => {
     const ids = [...selectedIds].filter((id) => document.entityById.has(id));
-    return ids.length > 0 ? ids : document.entityById.has(selectedId) ? [selectedId] : [];
+    return ids.length > 0
+      ? ids
+      : document.entityById.has(selectedId)
+        ? [selectedId]
+        : [];
   }, [document, selectedId, selectedIds]);
-
 
   const setGraphAnchorId = (action: SetStateAction<number>) => {
     updateActiveSession((session) => ({
@@ -1141,6 +1144,22 @@ export default function IfcWorkspace() {
     );
   };
 
+  const addChildElement = (parentId: number, type: string, name: string) => {
+    if (!document.entityById.has(parentId)) {
+      return;
+    }
+    const addedId = getNextNativeEntityId(document);
+    const next = addNativeElement(document, parentId, type, name);
+    commitDocument(
+      next,
+      addedId,
+      `Create ${type} '${name}' under #${parentId}`,
+      `tree.addChildElement({ parentId: ${parentId}, class: '${type}', name: ${JSON.stringify(name)}, id: ${addedId} });`,
+      undefined,
+      { reloadViewer: true },
+    );
+  };
+
   const addBodyElement = (options: BodyElementDraft) => {
     const parentId = options.parentId ?? selectedId;
     const addedId = getNextNativeEntityId(document);
@@ -1365,7 +1384,10 @@ export default function IfcWorkspace() {
     }
     const groups = new Map<
       string,
-      { name: string; properties: Map<string, { name: string; valueType: string }> }
+      {
+        name: string;
+        properties: Map<string, { name: string; valueType: string }>;
+      }
     >();
     for (const rule of activeCatalogObject.propertyRules) {
       const key = rule.psetName.trim().toLowerCase();
@@ -2182,6 +2204,7 @@ export default function IfcWorkspace() {
           filteredEntities={filteredEntities}
           search={search}
           selectedId={selectedId}
+          onAddChild={addChildElement}
           onCenterCamera={(id) => centerViewerCamera(id, "tree")}
           onRemove={(id) => deleteEntity(id, "tree")}
           onSelect={selectEntity}
@@ -2264,7 +2287,6 @@ export default function IfcWorkspace() {
           "info",
           "edit",
           "placement",
-          "geometry",
           "psets",
           "object-info",
           "relations",

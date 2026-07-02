@@ -6,6 +6,7 @@ import * as WebIFC from "web-ifc";
 import { createMinimalIfcProject } from "../src/ifc/builder";
 import type { IfcObjectCatalog } from "../src/ifc/catalog";
 import {
+    ifcPlacementPointToViewerWorldPoint,
     viewerWorldDeltaToIfcPlacementDelta,
     viewerWorldDirectionToIfcPlacementDirection,
     viewerWorldPointToIfcPlacementPoint,
@@ -59,6 +60,8 @@ import {
     duplicateNativePropertySet,
     getNativeBodyRepresentation,
     getNativePlacement,
+    getNativePlacementWorld,
+    nativeWorldToLocalPlacementPoint,
     parseNativeIfcText,
     quote,
     removeNativeEntity,
@@ -394,7 +397,10 @@ test("native document edits keep indexes live", async () => {
   assert.ok(
     withElement.relationshipsByEntity
       .get(wall.id)
-      ?.some((relationship) => relationship.type === "IFCRELAGGREGATES"),
+      ?.some(
+        (relationship) =>
+          relationship.type === "IFCRELCONTAINEDINSPATIALSTRUCTURE",
+      ),
   );
 
   const withPset = addNativePropertySet(
@@ -1201,7 +1207,7 @@ test("native document removes relationships without removing endpoints", () => {
   assert.ok(wall);
   const relationship = withElement.relationshipsByEntity
     .get(wall.id)
-    ?.find((item) => item.type === "IFCRELAGGREGATES");
+    ?.find((item) => item.type === "IFCRELCONTAINEDINSPATIALSTRUCTURE");
   assert.ok(relationship);
 
   const withoutRelationship = removeNativeRelationship(
@@ -2657,6 +2663,233 @@ test("viewer-world picked points are converted to IFC placement axes", () => {
   );
 });
 
+test("ifc placement points map back to viewer world points", () => {
+  const viewerPoint = { x: -1456.5366, y: 15.1184, z: -395.765 };
+  const roundTrip = ifcPlacementPointToViewerWorldPoint(
+    viewerWorldPointToIfcPlacementPoint(viewerPoint),
+  );
+  assert.deepEqual(roundTrip, viewerPoint);
+});
+
+test("tree child creation uses containment for elements and aggregation for spatial children", () => {
+  const sample = createNativeSampleDocument();
+  const building = sample.entities.find(
+    (entity) => entity.type === "IFCBUILDING",
+  );
+  const storey = sample.entities.find(
+    (entity) => entity.type === "IFCBUILDINGSTOREY",
+  );
+  assert.ok(building);
+  assert.ok(storey);
+
+  // Spatial child under spatial parent -> IFCRELAGGREGATES.
+  const withStorey = addNativeElement(
+    sample,
+    building.id,
+    "IFCBUILDINGSTOREY",
+    "Level1",
+  );
+  const newStorey = withStorey.entities.find(
+    (entity) => entity.type === "IFCBUILDINGSTOREY" && entity.name === "Level1",
+  );
+  assert.ok(newStorey);
+  assert.ok(
+    withStorey.relationshipsByEntity
+      .get(newStorey.id)
+      ?.some((relationship) => relationship.type === "IFCRELAGGREGATES"),
+  );
+
+  // Element under spatial parent -> IFCRELCONTAINEDINSPATIALSTRUCTURE.
+  const withDoor = addNativeElement(withStorey, storey.id, "IFCDOOR", "Tür");
+  const door = withDoor.entities.find((entity) => entity.type === "IFCDOOR");
+  assert.ok(door);
+  const doorRelationship = withDoor.relationshipsByEntity
+    .get(door.id)
+    ?.find(
+      (relationship) =>
+        relationship.type === "IFCRELCONTAINEDINSPATIALSTRUCTURE",
+    );
+  assert.ok(doorRelationship);
+  assert.ok(doorRelationship.sourceIds.includes(storey.id));
+  assert.ok(doorRelationship.targetIds.includes(door.id));
+
+  // Element part under element parent -> IFCRELAGGREGATES.
+  const withPart = addNativeElement(
+    withDoor,
+    door.id,
+    "IFCBUILDINGELEMENTPROXY",
+    "Türgriff",
+  );
+  const part = withPart.entities.find(
+    (entity) => entity.type === "IFCBUILDINGELEMENTPROXY",
+  );
+  assert.ok(part);
+  assert.ok(
+    withPart.relationshipsByEntity
+      .get(part.id)
+      ?.some((relationship) => relationship.type === "IFCRELAGGREGATES"),
+  );
+
+  // All created nodes show up in the spatial tree.
+  const treeIds = new Set<number>();
+  const collect = (nodes: typeof withPart.spatialRoots) => {
+    for (const node of nodes) {
+      treeIds.add(node.id);
+      collect(node.children);
+    }
+  };
+  collect(withPart.spatialRoots);
+  assert.ok(treeIds.has(newStorey.id));
+  assert.ok(treeIds.has(door.id));
+  assert.ok(treeIds.has(part.id));
+});
+
+test("world placement accumulates rotated parent frames and round-trips writes", () => {
+  const sample = createNativeSampleDocument();
+  const block = sample.entities.find(
+    (entity) => entity.type === "IFCBUILTELEMENT",
+  );
+  assert.ok(block);
+
+  const withChild = addNativeBodyElement(sample, {
+    depth: 1,
+    height: 1,
+    name: "World Placement Child",
+    parentId: block.id,
+    type: "IFCBUILTELEMENT",
+    width: 1,
+    x: 1,
+    y: 0,
+    z: 0,
+  });
+  const child = withChild.entities.find(
+    (entity) => entity.name === "World Placement Child",
+  );
+  assert.ok(child);
+
+  // Rotate the parent block 90 degrees about Z (X axis becomes +Y).
+  const rotated = updateNativePlacementRotation(withChild, block.id, {
+    axis: { x: 0, y: 0, z: 1 },
+    refDirection: { x: 0, y: 1, z: 0 },
+  });
+
+  const parentWorld = getNativePlacementWorld(rotated, block.id);
+  const childWorld = getNativePlacementWorld(rotated, child.id);
+  assert.ok(parentWorld);
+  assert.ok(childWorld);
+  assert.equal(roundCoordinate(childWorld.worldX - parentWorld.worldX), 0);
+  assert.equal(roundCoordinate(childWorld.worldY - parentWorld.worldY), 1);
+  assert.equal(roundCoordinate(childWorld.worldZ - parentWorld.worldZ), 0);
+
+  // Reading back the current world position yields the stored local point.
+  const roundTripLocal = nativeWorldToLocalPlacementPoint(rotated, child.id, {
+    x: childWorld.worldX,
+    y: childWorld.worldY,
+    z: childWorld.worldZ,
+  });
+  assert.ok(roundTripLocal);
+  assert.equal(roundCoordinate(roundTripLocal.x), 1);
+  assert.equal(roundCoordinate(roundTripLocal.y), 0);
+  assert.equal(roundCoordinate(roundTripLocal.z), 0);
+
+  // Writing a world target through the local conversion lands on the target.
+  const target = {
+    x: childWorld.worldX + 5,
+    y: childWorld.worldY - 2,
+    z: childWorld.worldZ + 3,
+  };
+  const local = nativeWorldToLocalPlacementPoint(rotated, child.id, target);
+  assert.ok(local);
+  const moved = updateNativePlacement(rotated, child.id, {
+    x: String(local.x),
+    y: String(local.y),
+    z: String(local.z),
+  });
+  const movedWorld = getNativePlacementWorld(moved, child.id);
+  assert.ok(movedWorld);
+  assert.equal(roundCoordinate(movedWorld.worldX), roundCoordinate(target.x));
+  assert.equal(roundCoordinate(movedWorld.worldY), roundCoordinate(target.y));
+  assert.equal(roundCoordinate(movedWorld.worldZ), roundCoordinate(target.z));
+});
+
+test("picked viewer point on a moved element spawns a world body at the same spot", async () => {
+  const sample = createNativeSampleDocument();
+  const block = sample.entities.find(
+    (entity) => entity.type === "IFCBUILTELEMENT",
+  );
+  assert.ok(block);
+
+  // Move the block via the placement panel path (world input -> local write).
+  const worldTarget = { x: 6, y: 4, z: 0 };
+  const local = nativeWorldToLocalPlacementPoint(sample, block.id, worldTarget);
+  assert.ok(local);
+  const moved = updateNativePlacement(sample, block.id, {
+    x: String(local.x),
+    y: String(local.y),
+    z: String(local.z),
+  });
+
+  const api = new WebIFC.IfcAPI();
+  await api.Init();
+  const movedModelID = api.OpenModel(
+    new TextEncoder().encode(serializeNativeIfcDocument(moved)),
+  );
+  const blockBounds = streamElementWorldBounds(api, movedModelID, block.id);
+  api.CloseModel(movedModelID);
+
+  // The rendered (viewer) position must match the absolute IFC placement.
+  assert.deepEqual(
+    [
+      roundCoordinate((blockBounds.min[0] + blockBounds.max[0]) / 2),
+      roundCoordinate(blockBounds.min[1]),
+      roundCoordinate((blockBounds.min[2] + blockBounds.max[2]) / 2),
+    ],
+    [worldTarget.x, worldTarget.z, -worldTarget.y],
+  );
+
+  // Simulate picking the top center of the moved block in the viewer.
+  const pick = {
+    x: (blockBounds.min[0] + blockBounds.max[0]) / 2,
+    y: blockBounds.max[1],
+    z: (blockBounds.min[2] + blockBounds.max[2]) / 2,
+  };
+  const ifcPoint = viewerWorldPointToIfcPlacementPoint(pick);
+  const withBody = addNativeBodyElement(moved, {
+    depth: 1,
+    height: 1,
+    name: "Picked Spawn Body",
+    parentId: block.id,
+    placementMode: "world",
+    profile: "rectangle",
+    type: "IFCBUILTELEMENT",
+    width: 1,
+    x: ifcPoint.x,
+    y: ifcPoint.y,
+    z: ifcPoint.z,
+  });
+  const created = withBody.entities.find(
+    (entity) => entity.name === "Picked Spawn Body",
+  );
+  assert.ok(created);
+
+  const bodyModelID = api.OpenModel(
+    new TextEncoder().encode(serializeNativeIfcDocument(withBody)),
+  );
+  const createdBounds = streamElementWorldBounds(api, bodyModelID, created.id);
+  api.CloseModel(bodyModelID);
+
+  // The created body sits centered on the picked point (profile is centered).
+  assert.equal(
+    roundCoordinate((createdBounds.min[0] + createdBounds.max[0]) / 2),
+    roundCoordinate(pick.x),
+  );
+  assert.equal(roundCoordinate(createdBounds.min[1]), roundCoordinate(pick.y));
+  assert.equal(
+    roundCoordinate((createdBounds.min[2] + createdBounds.max[2]) / 2),
+    roundCoordinate(pick.z),
+  );
+});
+
 function readEntitySummaries(api: WebIFC.IfcAPI, modelID: number) {
   const entities: IfcEntitySummary[] = [];
   const counts: Array<{ typeName: string; typeCode: number; count: number }> =
@@ -2700,39 +2933,60 @@ function streamGeometryWorldCenter(api: WebIFC.IfcAPI, modelID: number) {
   const min = [Infinity, Infinity, Infinity];
   const max = [-Infinity, -Infinity, -Infinity];
   api.StreamAllMeshes(modelID, (mesh) => {
-    for (let index = 0; index < mesh.geometries.size(); index += 1) {
-      const placed = mesh.geometries.get(index);
-      const matrix = placed.flatTransformation;
-      const geometry = api.GetGeometry(modelID, placed.geometryExpressID);
-      const vertices = api.GetVertexArray(
-        geometry.GetVertexData(),
-        geometry.GetVertexDataSize(),
-      );
-      for (
-        let vertexIndex = 0;
-        vertexIndex < vertices.length;
-        vertexIndex += 6
-      ) {
-        const x = vertices[vertexIndex];
-        const y = vertices[vertexIndex + 1];
-        const z = vertices[vertexIndex + 2];
-        const worldX =
-          matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12];
-        const worldY =
-          matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13];
-        const worldZ =
-          matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14];
-        min[0] = Math.min(min[0], worldX);
-        min[1] = Math.min(min[1], worldY);
-        min[2] = Math.min(min[2], worldZ);
-        max[0] = Math.max(max[0], worldX);
-        max[1] = Math.max(max[1], worldY);
-        max[2] = Math.max(max[2], worldZ);
-      }
-      geometry.delete();
-    }
+    accumulateMeshWorldBounds(api, modelID, mesh, min, max);
   });
   return [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2];
+}
+
+function streamElementWorldBounds(
+  api: WebIFC.IfcAPI,
+  modelID: number,
+  expressID: number,
+) {
+  const min = [Infinity, Infinity, Infinity];
+  const max = [-Infinity, -Infinity, -Infinity];
+  api.StreamAllMeshes(modelID, (mesh) => {
+    if (mesh.expressID !== expressID) {
+      return;
+    }
+    accumulateMeshWorldBounds(api, modelID, mesh, min, max);
+  });
+  assert.ok(Number.isFinite(min[0]), `No geometry streamed for #${expressID}`);
+  return { max, min };
+}
+
+function accumulateMeshWorldBounds(
+  api: WebIFC.IfcAPI,
+  modelID: number,
+  mesh: WebIFC.FlatMesh,
+  min: number[],
+  max: number[],
+) {
+  for (let index = 0; index < mesh.geometries.size(); index += 1) {
+    const placed = mesh.geometries.get(index);
+    const matrix = placed.flatTransformation;
+    const geometry = api.GetGeometry(modelID, placed.geometryExpressID);
+    const vertices = api.GetVertexArray(
+      geometry.GetVertexData(),
+      geometry.GetVertexDataSize(),
+    );
+    for (let vertexIndex = 0; vertexIndex < vertices.length; vertexIndex += 6) {
+      const x = vertices[vertexIndex];
+      const y = vertices[vertexIndex + 1];
+      const z = vertices[vertexIndex + 2];
+      const worldX = matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12];
+      const worldY = matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13];
+      const worldZ =
+        matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14];
+      min[0] = Math.min(min[0], worldX);
+      min[1] = Math.min(min[1], worldY);
+      min[2] = Math.min(min[2], worldZ);
+      max[0] = Math.max(max[0], worldX);
+      max[1] = Math.max(max[1], worldY);
+      max[2] = Math.max(max[2], worldZ);
+    }
+    geometry.delete();
+  }
 }
 
 function roundCoordinate(value: number) {

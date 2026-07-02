@@ -118,6 +118,8 @@ async function convertIfcToFragmentsOnMainThread(
     path: request.wasmPath,
   };
   importer.webIfcSettings = {
+    // Rebase for float32 precision; the transform is re-applied at load time
+    // via model.getCoordinationMatrix() so viewer world == IFC world.
     COORDINATE_TO_ORIGIN: true,
   };
   importer.addAllAttributes();

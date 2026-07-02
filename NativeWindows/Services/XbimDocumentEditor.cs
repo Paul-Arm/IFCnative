@@ -13,6 +13,17 @@ namespace IFCnative.NativeWindows.Services;
 public sealed record IfcCreatableClass(string Name, bool IsProduct, bool IsSpatial, bool IsObjectDefinition);
 
 /// <summary>
+/// Instructions for detaching property sets from products. Computed from the
+/// document projection (which knows all defining relationships), executed
+/// mechanically inside one transaction by <see cref="XbimDocumentEditor.DetachPropertySets"/>.
+/// </summary>
+public sealed record PsetDetachPlan(
+    IReadOnlyList<(int RelationshipId, int EntityId)> Removals,
+    IReadOnlyList<int> DeleteRelationshipIds,
+    IReadOnlyList<int> DeleteSetIds,
+    IReadOnlyList<int> DeletePropertyIds);
+
+/// <summary>
 /// Everything the Builder needs to create one element. World coordinates are
 /// optional; when present the placement is computed relative to the resolved
 /// parent so the element lands at that world position.
@@ -238,21 +249,39 @@ public static class XbimDocumentEditor
         return Edit(document, "Update property value", store =>
         {
             var property = GetEntity(store, propertyValueId);
-            if (property is null || !HasProperty(property, "NominalValue"))
+            if (property is null)
             {
                 return;
             }
 
-            var current = GetPropertyValue(property, "NominalValue");
-            var requestedType = string.IsNullOrWhiteSpace(valueTypeName)
-                ? null
-                : TryResolveSchemaType(store, "MeasureResource", valueTypeName.Trim());
-            var valueType = requestedType
-                ?? current?.GetType()
-                ?? ResolveSchemaType(store, "MeasureResource", "IfcLabel");
-            SetProperty(property, "NominalValue", CreateMeasureValue(valueType, rawValue));
+            if (HasProperty(property, "NominalValue"))
+            {
+                var current = GetPropertyValue(property, "NominalValue");
+                var requestedType = string.IsNullOrWhiteSpace(valueTypeName)
+                    ? null
+                    : TryResolveSchemaType(store, "MeasureResource", valueTypeName.Trim());
+                var valueType = requestedType
+                    ?? current?.GetType()
+                    ?? ResolveSchemaType(store, "MeasureResource", "IfcLabel");
+                SetProperty(property, "NominalValue", CreateMeasureValue(valueType, rawValue));
+                return;
+            }
+
+            // Physical quantities carry their value in a typed member instead of
+            // NominalValue; without this branch a Qto cell edit is a silent no-op.
+            foreach (var quantityProperty in QuantityValueProperties)
+            {
+                if (HasProperty(property, quantityProperty))
+                {
+                    SetProperty(property, quantityProperty, ParseDouble(rawValue, 0));
+                    return;
+                }
+            }
         });
     }
+
+    private static readonly string[] QuantityValueProperties =
+        ["LengthValue", "AreaValue", "VolumeValue", "CountValue", "WeightValue", "TimeValue"];
 
     public static IfcDocument AddCommonPropertySet(IfcDocument document, int productId, string referenceText, string statusText)
     {
@@ -362,8 +391,7 @@ public static class XbimDocumentEditor
                 }
 
                 var current = GetPropertyValue(property, "NominalValue");
-                var raw = current?.ToString() ?? string.Empty;
-                SetProperty(property, "NominalValue", CreateMeasureValue(valueType, raw));
+                SetProperty(property, "NominalValue", CreateMeasureValue(valueType, ReadNominalText(current)));
             }
         });
     }
@@ -398,7 +426,76 @@ public static class XbimDocumentEditor
                 if (valueType is not null && HasProperty(property, "NominalValue"))
                 {
                     var current = GetPropertyValue(property, "NominalValue");
-                    SetProperty(property, "NominalValue", CreateMeasureValue(valueType, current?.ToString() ?? string.Empty));
+                    SetProperty(property, "NominalValue", CreateMeasureValue(valueType, ReadNominalText(current)));
+                }
+            }
+        });
+    }
+
+    /// <summary>
+    /// Removes property values from their owning sets (batch panel delete). The
+    /// instances in <paramref name="deletableInstanceIds"/> are additionally
+    /// deleted from the model — the caller passes only instances that no other
+    /// set still references.
+    /// </summary>
+    public static IfcDocument DeleteProperties(
+        IfcDocument document,
+        IReadOnlyList<(int SetId, int PropertyId)> cells,
+        IReadOnlyList<int> deletableInstanceIds)
+    {
+        return Edit(document, "Delete properties", store =>
+        {
+            foreach (var (setId, propertyId) in cells)
+            {
+                var pset = GetEntity(store, setId);
+                var property = GetEntity(store, propertyId);
+                if (pset is null || property is null)
+                {
+                    continue;
+                }
+
+                RemoveFromCollection(GetPropertyValue(pset, "HasProperties"), property);
+                RemoveFromCollection(GetPropertyValue(pset, "Quantities"), property);
+            }
+
+            foreach (var instanceId in deletableInstanceIds)
+            {
+                var instance = GetEntity(store, instanceId);
+                if (instance is not null)
+                {
+                    store.Delete(instance);
+                }
+            }
+        });
+    }
+
+    /// <summary>
+    /// Detaches property sets from products per the caller-computed plan: each
+    /// removal takes a product out of a defining relationship; relationships,
+    /// sets and property instances that end up orphaned are deleted.
+    /// </summary>
+    public static IfcDocument DetachPropertySets(IfcDocument document, PsetDetachPlan plan)
+    {
+        return Edit(document, "Delete property set", store =>
+        {
+            foreach (var (relationshipId, entityId) in plan.Removals)
+            {
+                var relation = GetEntity(store, relationshipId);
+                var product = GetEntity(store, entityId);
+                if (relation is not null && product is not null)
+                {
+                    RemoveFromCollection(GetPropertyValue(relation, "RelatedObjects"), product);
+                }
+            }
+
+            foreach (var instanceId in plan.DeleteRelationshipIds
+                .Concat(plan.DeleteSetIds)
+                .Concat(plan.DeletePropertyIds))
+            {
+                var instance = GetEntity(store, instanceId);
+                if (instance is not null)
+                {
+                    store.Delete(instance);
                 }
             }
         });
@@ -1295,7 +1392,9 @@ public static class XbimDocumentEditor
         if (name.Contains("Boolean", StringComparison.OrdinalIgnoreCase)
             || name.Contains("Logical", StringComparison.OrdinalIgnoreCase))
         {
-            return Activator.CreateInstance(type, ParseBoolean(text))!;
+            // Explicit object[]: a bare bool argument would bind to the
+            // CreateInstance(Type, nonPublic) overload and always yield false.
+            return Activator.CreateInstance(type, [(object)ParseBoolean(text)])!;
         }
 
         // Numeric/measure value types only accept a numeric constructor argument —
@@ -1305,7 +1404,7 @@ public static class XbimDocumentEditor
         {
             var integer = int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedInt)
                 ? parsedInt
-                : double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsedDouble)
+                : TryParseNumber(text, out var parsedDouble)
                     ? (int)parsedDouble
                     : 0;
             return Activator.CreateInstance(type, integer)!;
@@ -1319,9 +1418,7 @@ public static class XbimDocumentEditor
             || name.Contains("Volume", StringComparison.OrdinalIgnoreCase)
             || name.Contains("Count", StringComparison.OrdinalIgnoreCase))
         {
-            var number = double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)
-                ? parsed
-                : 0d;
+            var number = TryParseNumber(text, out var parsed) ? parsed : 0d;
             return Activator.CreateInstance(type, number)!;
         }
 
@@ -1581,9 +1678,48 @@ public static class XbimDocumentEditor
 
     private static double ParseDouble(string value, double fallback)
     {
+        return TryParseNumber(value, out var parsed) ? parsed : fallback;
+    }
+
+    /// <summary>
+    /// IFC is dot-decimal, but UI input arrives in the user's locale — accept
+    /// invariant first, then comma-decimal ("1,5" / "1.234,5").
+    /// </summary>
+    private static bool TryParseNumber(string value, out double result)
+    {
         var text = UnwrapStepValue(value);
-        return double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)
-            ? parsed
-            : fallback;
+        if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out result))
+        {
+            return true;
+        }
+
+        if (text.Contains(','))
+        {
+            var normalized = text.Replace(".", string.Empty, StringComparison.Ordinal).Replace(',', '.');
+            return double.TryParse(normalized, NumberStyles.Float, CultureInfo.InvariantCulture, out result);
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Renders an existing nominal value as text that round-trips through
+    /// <see cref="CreateMeasureValue"/> — doubles must not pass through the
+    /// culture-sensitive ToString (a German "1,5" would parse back as 0).
+    /// </summary>
+    private static string ReadNominalText(object? value)
+    {
+        if (value is IExpressValueType express)
+        {
+            value = express.Value;
+        }
+
+        return value switch
+        {
+            null => string.Empty,
+            double number => number.ToString("G15", CultureInfo.InvariantCulture),
+            bool boolean => boolean ? "true" : "false",
+            _ => value.ToString() ?? string.Empty,
+        };
     }
 }
