@@ -29,6 +29,10 @@ async function convertIfcToFragments(
       path: request.wasmPath,
     };
     importer.webIfcSettings = {
+      // Rebase far-from-origin (georeferenced) models so vertex data stays
+      // within float32 precision. The rebase transform is stored in the
+      // fragments file and re-applied to model.object at load time, so
+      // viewer world coordinates still equal IFC world coordinates.
       COORDINATE_TO_ORIGIN: true,
     };
     importer.addAllAttributes();

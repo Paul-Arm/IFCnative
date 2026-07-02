@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>IFC Version Control</title>
+    <style>
+      :root {
+        --bg: #0f1115;
+        --panel: #181b22;
+        --panel2: #20242e;
+        --border: #2a2f3a;
+        --text: #e6e9ef;
+        --muted: #99a1b3;
+        --accent: #5b8cff;
+        --add: #3fb950;
+        --del: #f85149;
+        --mod: #d29922;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 20px;
+        background: var(--panel);
+        border-bottom: 1px solid var(--border);
+      }
+      header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+      header h1 span { color: var(--accent); }
+      main { display: grid; grid-template-columns: 260px 1fr; gap: 16px; padding: 16px; }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 14px;
+      }
+      .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; }
+      .list { list-style: none; margin: 0; padding: 0; }
+      .list li {
+        padding: 8px 10px;
+        border-radius: 6px;
+        cursor: pointer;
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .list li:hover { background: var(--panel2); }
+      .list li.active { background: var(--accent); color: #fff; }
+      .badge { font-size: 11px; color: var(--muted); }
+      input, select, button, textarea {
+        font: inherit;
+        color: var(--text);
+        background: var(--panel2);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 7px 9px;
+      }
+      input, select { width: 100%; margin: 4px 0; }
+      button { cursor: pointer; background: var(--accent); border-color: var(--accent); color: #fff; }
+      button.ghost { background: var(--panel2); border-color: var(--border); color: var(--text); }
+      button:disabled { opacity: .5; cursor: not-allowed; }
+      .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      .muted { color: var(--muted); }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); font-size: 13px; }
+      th { color: var(--muted); font-weight: 500; }
+      .chip { font-size: 12px; padding: 1px 6px; border-radius: 10px; }
+      .add { color: var(--add); } .del { color: var(--del); } .mod { color: var(--mod); }
+      .diff-summary { display: flex; gap: 14px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+      .diff-summary .stat { font-size: 13px; }
+      .diff-summary .stat b { font-variant-numeric: tabular-nums; }
+      .diff-cols { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 10px; }
+      .diff-col h3 { margin: 0 0 6px; font-size: 13px; }
+      .diff-col ul { list-style: none; margin: 0; padding: 0; max-height: 360px; overflow: auto; }
+      .diff-col li { padding: 5px 7px; border-radius: 5px; background: var(--panel2); margin-bottom: 4px; font-size: 12px; }
+      .diff-col li.expandable { cursor: pointer; }
+      .diff-col li.expandable:hover { outline: 1px solid var(--border); }
+      .diff-col li.open { background: #283042; }
+      .ent-head { display: flex; gap: 6px; align-items: baseline; }
+      .ent-head .caret { color: var(--muted); transition: transform .1s; }
+      .diff-col li.open .ent-head .caret { transform: rotate(90deg); }
+      .ent-detail { margin-top: 6px; border-top: 1px solid var(--border); padding-top: 6px; }
+      .ent-detail table { width: 100%; }
+      .ent-detail th, .ent-detail td { padding: 3px 4px; border-bottom: 1px solid var(--border); font-size: 11px; vertical-align: top; }
+      .ent-detail .grp { color: var(--muted); font-weight: 600; padding-top: 8px; }
+      .ent-detail .before { color: var(--del); text-decoration: line-through; opacity: .85; word-break: break-all; }
+      .ent-detail .after { color: var(--add); word-break: break-all; }
+      .ent-detail .arrow { color: var(--muted); }
+      .ent-detail .loading, .ent-detail .empty { color: var(--muted); font-style: italic; }
+      .stack > * + * { margin-top: 14px; }
+      .err { color: var(--del); }
+      .ok { color: var(--add); }
+      a { color: var(--accent); }
+      .hidden { display: none; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>IFC <span>Version Control</span></h1>
+      <div id="authBar" class="row"></div>
+    </header>
+
+    <main>
+      <aside class="panel" id="projectsPanel">
+        <h2>Projects</h2>
+        <ul class="list" id="projectsList"></ul>
+        <div id="newProject" class="stack" style="margin-top: 12px">
+          <input id="projName" placeholder="New project name" />
+          <button id="projCreate" class="ghost">Create project</button>
+        </div>
+      </aside>
+
+      <section class="stack">
+        <div id="loginPanel" class="panel">
+          <h2>Sign in</h2>
+          <div class="row" style="max-width: 460px">
+            <input id="email" placeholder="email" autocomplete="username" />
+            <input id="password" type="password" placeholder="password" autocomplete="current-password" />
+          </div>
+          <div class="row">
+            <button id="loginBtn">Log in</button>
+            <button id="registerBtn" class="ghost">Register</button>
+            <span id="authMsg" class="muted"></span>
+          </div>
+          <p class="muted">Public models can be browsed below without signing in.</p>
+        </div>
+
+        <div id="modelsPanel" class="panel hidden">
+          <h2>Models — <span id="modelsProject"></span></h2>
+          <ul class="list" id="modelsList"></ul>
+          <div class="row" style="margin-top: 12px">
+            <input id="modelName" placeholder="New model name" style="max-width: 240px" />
+            <select id="modelVis" style="max-width: 140px">
+              <option value="private">private</option>
+              <option value="public">public</option>
+            </select>
+            <button id="modelCreate" class="ghost">Create model</button>
+          </div>
+        </div>
+
+        <div id="modelPanel" class="panel hidden">
+          <h2>History — <span id="modelTitle"></span></h2>
+
+          <div class="row" id="uploadRow">
+            <input id="ifcFile" type="file" accept=".ifc,.step,.stp" style="max-width: 260px" />
+            <input id="commitMsg" placeholder="Commit message" style="max-width: 240px" />
+            <button id="commitBtn">Commit version</button>
+            <span id="commitMsgOut" class="muted"></span>
+          </div>
+
+          <table style="margin-top: 12px">
+            <thead>
+              <tr><th>from</th><th>to</th><th>commit</th><th>message</th><th>changes</th><th>schema</th><th></th></tr>
+            </thead>
+            <tbody id="historyBody"></tbody>
+          </table>
+
+          <div class="row" style="margin-top: 10px">
+            <button id="compareBtn" class="ghost">Compare selected</button>
+            <span id="diffMsg" class="muted"></span>
+          </div>
+          <div id="diffOut"></div>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const state = {
+        token: localStorage.getItem("ifcvcs_token") || null,
+        user: null,
+        project: null,
+        model: null,
+        commits: [],
+        from: null,
+        to: null,
+      };
+
+      const $ = (id) => document.getElementById(id);
+
+      async function api(path, opts = {}) {
+        const headers = Object.assign({}, opts.headers || {});
+        if (state.token) headers.authorization = "Bearer " + state.token;
+        if (opts.json !== undefined) {
+          headers["content-type"] = "application/json";
+          opts.body = JSON.stringify(opts.json);
+        }
+        const res = await fetch(path, { ...opts, headers });
+        const text = await res.text();
+        const data = text ? JSON.parse(text) : {};
+        if (!res.ok) throw new Error(data.error || res.status);
+        return data;
+      }
+
+      function setToken(token, user) {
+        state.token = token;
+        state.user = user;
+        if (token) localStorage.setItem("ifcvcs_token", token);
+        else localStorage.removeItem("ifcvcs_token");
+        renderAuth();
+      }
+
+      function renderAuth() {
+        const bar = $("authBar");
+        if (state.user) {
+          bar.innerHTML =
+            '<span class="muted">' + state.user.email + "</span> " +
+            '<button class="ghost" id="logoutBtn">Log out</button>';
+          $("logoutBtn").onclick = () => { setToken(null, null); location.reload(); };
+          $("loginPanel").classList.add("hidden");
+        } else {
+          bar.innerHTML = "";
+          $("loginPanel").classList.remove("hidden");
+        }
+      }
+
+      async function doAuth(kind) {
+        try {
+          const data = await api("/auth/" + kind, {
+            method: "POST",
+            json: { email: $("email").value, password: $("password").value },
+          });
+          setToken(data.token, data.user);
+          $("authMsg").textContent = "";
+          loadProjects();
+        } catch (e) {
+          $("authMsg").innerHTML = '<span class="err">' + e.message + "</span>";
+        }
+      }
+
+      async function loadMe() {
+        if (!state.token) return;
+        try {
+          const data = await api("/me");
+          state.user = data.user;
+        } catch {
+          setToken(null, null);
+        }
+        renderAuth();
+      }
+
+      async function loadProjects() {
+        const list = $("projectsList");
+        if (!state.token) { list.innerHTML = '<li class="muted">Sign in to see your projects</li>'; return; }
+        const data = await api("/projects");
+        list.innerHTML = "";
+        for (const p of data.projects) {
+          const li = document.createElement("li");
+          li.textContent = p.name;
+          li.dataset.slug = p.slug;
+          if (state.project && state.project.slug === p.slug) li.classList.add("active");
+          li.onclick = () => selectProject(p.slug);
+          list.appendChild(li);
+        }
+        if (!data.projects.length) list.innerHTML = '<li class="muted">No projects yet</li>';
+      }
+
+      async function selectProject(slug) {
+        const data = await api("/projects/" + slug);
+        state.project = data.project;
+        state.model = null;
+        $("modelsProject").textContent = data.project.name;
+        $("modelsPanel").classList.remove("hidden");
+        $("modelPanel").classList.add("hidden");
+        loadProjects();
+        loadModels();
+      }
+
+      async function loadModels() {
+        const data = await api("/projects/" + state.project.slug + "/models");
+        const list = $("modelsList");
+        list.innerHTML = "";
+        for (const m of data.models) {
+          const li = document.createElement("li");
+          li.innerHTML = m.name + ' <span class="badge">' + m.visibility + "</span>";
+          li.onclick = () => selectModel(m.slug);
+          list.appendChild(li);
+        }
+        if (!data.models.length) list.innerHTML = '<li class="muted">No models yet</li>';
+      }
+
+      async function selectModel(slug) {
+        const data = await api("/projects/" + state.project.slug + "/models/" + slug);
+        state.model = data.model;
+        state.from = state.to = null;
+        $("modelTitle").textContent = state.project.name + " / " + data.model.name;
+        $("modelPanel").classList.remove("hidden");
+        $("uploadRow").style.display = state.token ? "" : "none";
+        $("diffOut").innerHTML = "";
+        loadHistory();
+      }
+
+      async function loadHistory() {
+        const data = await api(
+          "/projects/" + state.project.slug + "/models/" + state.model.slug + "/commits"
+        );
+        state.commits = data.commits;
+        const body = $("historyBody");
+        body.innerHTML = "";
+        for (const c of data.commits) {
+          const tr = document.createElement("tr");
+          const short = c.id.slice(0, 8);
+          tr.innerHTML =
+            '<td><input type="radio" name="from" value="' + c.id + '"></td>' +
+            '<td><input type="radio" name="to" value="' + c.id + '"></td>' +
+            "<td><code>" + short + "</code></td>" +
+            "<td>" + (c.message || '<span class="muted">—</span>') + "</td>" +
+            '<td><span class="add">+' + c.added + '</span> <span class="mod">~' + c.modified +
+            '</span> <span class="del">-' + c.removed + "</span></td>" +
+            "<td>" + c.schema + "</td>" +
+            '<td><a href="/projects/' + state.project.slug + "/models/" + state.model.slug +
+            "/commits/" + c.id + '/file">download</a></td>';
+          body.appendChild(tr);
+        }
+        body.querySelectorAll('input[name=from]').forEach((el) => (el.onchange = () => (state.from = el.value)));
+        body.querySelectorAll('input[name=to]').forEach((el) => (el.onchange = () => (state.to = el.value)));
+      }
+
+      async function commitVersion() {
+        const file = $("ifcFile").files[0];
+        if (!file) { $("commitMsgOut").textContent = "Choose an .ifc file"; return; }
+        const text = await file.text();
+        $("commitBtn").disabled = true;
+        $("commitMsgOut").textContent = "Uploading…";
+        try {
+          const url =
+            "/projects/" + state.project.slug + "/models/" + state.model.slug +
+            "/commits?branch=" + encodeURIComponent(state.model.defaultBranch) +
+            "&message=" + encodeURIComponent($("commitMsg").value);
+          const data = await api(url, {
+            method: "POST",
+            headers: { "content-type": "application/x-step" },
+            body: text,
+          });
+          const d = data.diff;
+          $("commitMsgOut").innerHTML =
+            '<span class="ok">committed</span> +' + d.added.length + " ~" +
+            d.modified.length + " -" + d.removed.length;
+          $("commitMsg").value = "";
+          loadHistory();
+        } catch (e) {
+          $("commitMsgOut").innerHTML = '<span class="err">' + e.message + "</span>";
+        } finally {
+          $("commitBtn").disabled = false;
+        }
+      }
+
+      function esc(s) {
+        return String(s == null ? "" : s)
+          .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+
+      function renderDiffList(title, items, cls) {
+        const li = items
+          .map((i) =>
+            '<li class="expandable" data-gid="' + esc(i.globalId) + '">' +
+              '<div class="ent-head">' +
+                '<span class="caret">▸</span>' +
+                '<span class="' + cls + '">' + esc(i.type) + "</span> " +
+                "<span>" + esc(i.name || "") + "</span> " +
+                '<span class="muted">' + esc(i.globalId) + "</span>" +
+              "</div>" +
+            "</li>")
+          .join("");
+        return '<div class="diff-col"><h3 class="' + cls + '">' + title + " (" + items.length +
+          ")</h3><ul>" + (li || '<li class="muted">none</li>') + "</ul></div>";
+      }
+
+      function renderEntityDetail(detail) {
+        if (!detail.changes.length) {
+          return '<div class="empty">No named field changes — difference is in geometry or references only.</div>';
+        }
+        let rows = "";
+        let lastGroup = null;
+        for (const c of detail.changes) {
+          if (c.group !== lastGroup) {
+            rows += '<tr><td class="grp" colspan="2">' + esc(c.group) + "</td></tr>";
+            lastGroup = c.group;
+          }
+          const before = c.before == null
+            ? '<span class="muted">—</span>'
+            : '<span class="before">' + esc(c.before) + "</span>";
+          const after = c.after == null
+            ? '<span class="muted">—</span>'
+            : '<span class="after">' + esc(c.after) + "</span>";
+          rows += "<tr><td>" + esc(c.field) + "</td><td>" +
+            before + ' <span class="arrow">→</span> ' + after + "</td></tr>";
+        }
+        return "<table><tbody>" + rows + "</tbody></table>";
+      }
+
+      async function onDiffClick(ev) {
+        const li = ev.target.closest("li[data-gid]");
+        if (!li || !li.dataset.gid) return;
+        if (li.classList.contains("open")) {
+          li.classList.remove("open");
+          const existing = li.querySelector(".ent-detail");
+          if (existing) existing.remove();
+          return;
+        }
+        li.classList.add("open");
+        const box = document.createElement("div");
+        box.className = "ent-detail";
+        box.innerHTML = '<span class="loading">Loading…</span>';
+        li.appendChild(box);
+        try {
+          const url =
+            "/projects/" + state.project.slug + "/models/" + state.model.slug +
+            "/diff/entity?from=" + encodeURIComponent(state.from) +
+            "&to=" + encodeURIComponent(state.to) +
+            "&globalId=" + encodeURIComponent(li.dataset.gid);
+          const data = await api(url);
+          box.innerHTML = renderEntityDetail(data.detail);
+        } catch (e) {
+          box.innerHTML = '<span class="err">' + esc(e.message) + "</span>";
+        }
+      }
+
+      async function compare() {
+        if (!state.from || !state.to) { $("diffMsg").textContent = "Pick a 'from' and 'to' commit"; return; }
+        $("diffMsg").textContent = "Diffing…";
+        try {
+          const data = await api(
+            "/projects/" + state.project.slug + "/models/" + state.model.slug +
+            "/diff?from=" + state.from + "&to=" + state.to
+          );
+          const d = data.diff;
+          $("diffMsg").innerHTML = d.identical
+            ? '<span class="ok">Versions are semantically identical</span>'
+            : "";
+          const summary =
+            '<div class="diff-summary">' +
+              '<span class="stat add">+<b>' + d.added.length + "</b> added</span>" +
+              '<span class="stat mod">~<b>' + d.modified.length + "</b> modified</span>" +
+              '<span class="stat del">-<b>' + d.removed.length + "</b> removed</span>" +
+              '<span class="stat muted"><b>' + d.unchanged + "</b> unchanged</span>" +
+              '<span class="stat muted" style="margin-left:auto">Click an entry for field-level changes</span>' +
+            "</div>";
+          $("diffOut").innerHTML =
+            summary +
+            '<div class="diff-cols">' +
+            renderDiffList("Added", d.added, "add") +
+            renderDiffList("Modified", d.modified, "mod") +
+            renderDiffList("Removed", d.removed, "del") +
+            "</div>";
+        } catch (e) {
+          $("diffMsg").innerHTML = '<span class="err">' + e.message + "</span>";
+        }
+      }
+
+      $("loginBtn").onclick = () => doAuth("login");
+      $("registerBtn").onclick = () => doAuth("register");
+      $("projCreate").onclick = async () => {
+        const name = $("projName").value.trim();
+        if (!name) return;
+        await api("/projects", { method: "POST", json: { name } });
+        $("projName").value = "";
+        loadProjects();
+      };
+      $("modelCreate").onclick = async () => {
+        const name = $("modelName").value.trim();
+        if (!name) return;
+        await api("/projects/" + state.project.slug + "/models", {
+          method: "POST",
+          json: { name, visibility: $("modelVis").value },
+        });
+        $("modelName").value = "";
+        loadModels();
+      };
+      $("commitBtn").onclick = commitVersion;
+      $("compareBtn").onclick = compare;
+      $("diffOut").addEventListener("click", onDiffClick);
+
+      (async function init() {
+        await loadMe();
+        renderAuth();
+        loadProjects();
+      })();
+    </script>
+  </body>
+</html>

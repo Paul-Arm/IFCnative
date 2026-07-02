@@ -214,6 +214,111 @@ export const ENTITY_TYPES = [
   "IFCSITE",
 ];
 
+export interface StructureChildOption {
+  label: string;
+  value: string;
+}
+
+export interface StructureChildGroup {
+  label: string;
+  options: StructureChildOption[];
+}
+
+const STRUCTURE_SPATIAL_OPTIONS: Record<string, StructureChildOption[]> = {
+  IFCBUILDING: [{ label: "Geschoss (Storey)", value: "IFCBUILDINGSTOREY" }],
+  IFCBUILDINGSTOREY: [{ label: "Raum (Space)", value: "IFCSPACE" }],
+  IFCPROJECT: [
+    { label: "Gelände (Site)", value: "IFCSITE" },
+    { label: "Gebäude (Building)", value: "IFCBUILDING" },
+  ],
+  IFCSITE: [
+    { label: "Gebäude (Building)", value: "IFCBUILDING" },
+    { label: "Teilgelände (Site)", value: "IFCSITE" },
+  ],
+};
+
+const STRUCTURE_BUILDING_ELEMENT_OPTIONS: StructureChildOption[] = [
+  { label: "Wand", value: "IFCWALL" },
+  { label: "Decke / Platte", value: "IFCSLAB" },
+  { label: "Träger", value: "IFCBEAM" },
+  { label: "Stütze", value: "IFCCOLUMN" },
+  { label: "Tür", value: "IFCDOOR" },
+  { label: "Fenster", value: "IFCWINDOW" },
+  { label: "Bauelement (generisch)", value: "IFCBUILTELEMENT" },
+  { label: "Element-Proxy", value: "IFCBUILDINGELEMENTPROXY" },
+];
+
+const STRUCTURE_TECHNICAL_OPTIONS: StructureChildOption[] = [
+  { label: "Sensor", value: "IFCSENSOR" },
+  { label: "Aktor", value: "IFCACTUATOR" },
+];
+
+const STRUCTURE_ELEMENT_PART_OPTIONS: StructureChildOption[] = [
+  { label: "Teil-Element (generisch)", value: "IFCBUILTELEMENT" },
+  { label: "Element-Proxy", value: "IFCBUILDINGELEMENTPROXY" },
+  { label: "Träger", value: "IFCBEAM" },
+  { label: "Stütze", value: "IFCCOLUMN" },
+];
+
+const STRUCTURE_ELEMENT_PARENT_TYPES = new Set([
+  "IFCBEAM",
+  "IFCBUILDINGELEMENTPROXY",
+  "IFCBUILTELEMENT",
+  "IFCCOLUMN",
+  "IFCDOOR",
+  "IFCSLAB",
+  "IFCWALL",
+  "IFCWINDOW",
+]);
+
+/**
+ * Valid child element types that can be created under a tree node,
+ * grouped for the structure tree context menu. Follows the IFC spatial
+ * decomposition rules (Project -> Site -> Building -> Storey -> Space,
+ * elements contained in spatial structures, parts aggregated in elements).
+ */
+export function structureChildGroupsForParent(
+  parentType: string,
+): StructureChildGroup[] {
+  const type = parentType.trim().toUpperCase();
+  if (type === "IFCPROJECT") {
+    return [
+      {
+        label: "Räumliche Struktur",
+        options: STRUCTURE_SPATIAL_OPTIONS.IFCPROJECT,
+      },
+    ];
+  }
+  if (type === "IFCSITE" || type === "IFCBUILDING") {
+    return [
+      { label: "Räumliche Struktur", options: STRUCTURE_SPATIAL_OPTIONS[type] },
+      { label: "Bauteile", options: STRUCTURE_BUILDING_ELEMENT_OPTIONS },
+    ];
+  }
+  if (type === "IFCBUILDINGSTOREY") {
+    return [
+      { label: "Räumliche Struktur", options: STRUCTURE_SPATIAL_OPTIONS[type] },
+      { label: "Bauteile", options: STRUCTURE_BUILDING_ELEMENT_OPTIONS },
+      { label: "Technik", options: STRUCTURE_TECHNICAL_OPTIONS },
+    ];
+  }
+  if (type === "IFCSPACE") {
+    return [
+      { label: "Bauteile", options: STRUCTURE_BUILDING_ELEMENT_OPTIONS },
+      { label: "Technik", options: STRUCTURE_TECHNICAL_OPTIONS },
+    ];
+  }
+  if (STRUCTURE_ELEMENT_PARENT_TYPES.has(type)) {
+    return [
+      {
+        label: "Teil-Elemente (Aggregation)",
+        options: STRUCTURE_ELEMENT_PART_OPTIONS,
+      },
+    ];
+  }
+  return [];
+}
+
 export const RELATION_TYPES = [
   "IFCRELAGGREGATES",
   "IFCRELCONTAINEDINSPATIALSTRUCTURE",

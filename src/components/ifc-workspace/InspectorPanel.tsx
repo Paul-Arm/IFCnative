@@ -20,11 +20,14 @@ import {
 import {
     catalogObjectLabel,
     getNativeBodyRepresentation,
-    getNativePlacement,
+    getNativePlacementWorld,
+    ifcPlacementPointToViewerWorldPoint,
+    nativeWorldToLocalPlacementPoint,
     quote,
     relationshipTypesForEntities,
     splitTopLevel,
     unquote,
+    viewerWorldPointToIfcPlacementPoint,
     type CatalogObjectType,
     type CatalogPropertyRule,
     type CatalogValidationFinding,
@@ -244,20 +247,12 @@ export function InspectorPanel({
   }
   if (mode === "placement") {
     return (
-      <PlacementPanel
-        document={document}
-        selectedId={selectedId}
-        onMove={onMovePlacement}
-      />
-    );
-  }
-  if (mode === "geometry") {
-    return (
-      <GeometryPanel
+      <PlacementGeometryPanel
         document={document}
         entity={entity}
         selectedId={selectedId}
         onAssignBodyToSelected={onAssignBodyToSelected}
+        onMove={onMovePlacement}
       />
     );
   }
@@ -680,118 +675,66 @@ function EditPanel({
   );
 }
 
-function PlacementPanel({
-  document,
-  selectedId,
-  onMove,
-}: {
-  document: NativeIfcDocument;
-  selectedId: number;
-  onMove(x: string, y: string, z: string): void;
-}) {
-  const placement = getNativePlacement(document, selectedId);
-  const [x, setX] = useState("0");
-  const [y, setY] = useState("0");
-  const [z, setZ] = useState("0");
+type PlacementCoordinateSpace = "welt" | "viewer";
 
-  useEffect(() => {
-    if (!placement) {
-      setX("0");
-      setY("0");
-      setZ("0");
-      return;
-    }
-    setX(String(placement.x));
-    setY(String(placement.y));
-    setZ(String(placement.z));
-  }, [placement?.pointId, placement?.x, placement?.y, placement?.z]);
-
-  if (!placement) {
-    return (
-      <EmptyBlock title="No editable local placement">
-        Select a product with IFCLOCALPLACEMENT → IFCAXIS2PLACEMENT3D →
-        IFCCARTESIANPOINT to edit a numeric XYZ move.
-      </EmptyBlock>
-    );
+function formatPlacementCoordinate(value: number) {
+  if (!Number.isFinite(value)) {
+    return "0";
   }
-
-  return (
-    <PanelShell scroll>
-      <PanelHeader
-        eyebrow={`Auswahl #${selectedId}`}
-        title="Placement"
-        description={`Point #${placement.pointId}: ${placement.x}, ${placement.y}, ${placement.z}`}
-        meta={<Badge tone="neutral">XYZ</Badge>}
-      />
-      <InfoSection title="Selected placement">
-        <InfoRow label="Product" value={`#${placement.productId}`} />
-        <InfoRow label="Placement" value={`#${placement.placementId}`} />
-        <InfoRow label="Axis" value={`#${placement.axisPlacementId}`} />
-        <InfoRow label="Point" value={`#${placement.pointId}`} />
-        <InfoRow
-          label="Relative to"
-          value={placement.relativeTo ? `#${placement.relativeTo}` : "$"}
-        />
-      </InfoSection>
-      <InfoSection title="Move">
-        <TextLine>
-          Edits update the placement cartesian point directly in the active IFC.
-        </TextLine>
-        <ResponsiveRow>
-          <ResponsiveField>
-            <LabeledInput
-              label="X"
-              keyboardType="numeric"
-              value={x}
-              onChangeText={setX}
-            />
-          </ResponsiveField>
-          <ResponsiveField>
-            <LabeledInput
-              label="Y"
-              keyboardType="numeric"
-              value={y}
-              onChangeText={setY}
-            />
-          </ResponsiveField>
-          <ResponsiveField>
-            <LabeledInput
-              label="Z"
-              keyboardType="numeric"
-              value={z}
-              onChangeText={setZ}
-            />
-          </ResponsiveField>
-        </ResponsiveRow>
-        <Button
-          label="Stage Placement Move"
-          primary
-          onPress={() => onMove(x, y, z)}
-        />
-      </InfoSection>
-    </PanelShell>
-  );
+  const rounded = Math.round(value * 1e6) / 1e6;
+  return String(Object.is(rounded, -0) ? 0 : rounded);
 }
 
-function GeometryPanel({
+function readPlacementCoordinate(value: string) {
+  const parsed = Number(value.trim().replace(",", "."));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function PlacementGeometryPanel({
   document,
   entity,
   selectedId,
   onAssignBodyToSelected,
+  onMove,
 }: {
   document: NativeIfcDocument;
   entity: NativeIfcEntity;
   selectedId: number;
   onAssignBodyToSelected(options: BodyElementDraft): void;
+  onMove(x: string, y: string, z: string): void;
 }) {
+  const placement = getNativePlacementWorld(document, selectedId);
   const body = getNativeBodyRepresentation(document, selectedId);
-  const placement = getNativePlacement(document, selectedId);
+  const [space, setSpace] = useState<PlacementCoordinateSpace>("welt");
+  const [x, setX] = useState("0");
+  const [y, setY] = useState("0");
+  const [z, setZ] = useState("0");
   const [profile, setProfile] = useState<NativeBodyProfile>(
     body.profile ?? "rectangle",
   );
   const [width, setWidth] = useState(formatEditableNumber(body.width, "1"));
   const [depth, setDepth] = useState(formatEditableNumber(body.depth, "1"));
   const [height, setHeight] = useState(formatEditableNumber(body.height, "1"));
+
+  const displayPoint = useMemo(() => {
+    if (!placement) {
+      return { x: 0, y: 0, z: 0 };
+    }
+    const world = {
+      x: placement.worldX,
+      y: placement.worldY,
+      z: placement.worldZ,
+    };
+    return space === "viewer"
+      ? ifcPlacementPointToViewerWorldPoint(world)
+      : world;
+  }, [placement?.worldX, placement?.worldY, placement?.worldZ, space]);
+
+  useEffect(() => {
+    setX(formatPlacementCoordinate(displayPoint.x));
+    setY(formatPlacementCoordinate(displayPoint.y));
+    setZ(formatPlacementCoordinate(displayPoint.z));
+  }, [placement?.pointId, displayPoint.x, displayPoint.y, displayPoint.z]);
 
   useEffect(() => {
     setProfile(body.profile ?? "rectangle");
@@ -808,18 +751,32 @@ function GeometryPanel({
     body.width,
   ]);
 
-  const representationSummary = body.hasRepresentation
-    ? [
-        body.shapeId ? `Shape #${body.shapeId}` : undefined,
-        body.bodyRepresentationId
-          ? `Body #${body.bodyRepresentationId}`
-          : undefined,
-        body.solidId ? `Solid #${body.solidId}` : undefined,
-        body.profileId ? `Profile #${body.profileId}` : undefined,
-      ]
-        .filter(Boolean)
-        .join(" / ") || "Representation assigned"
-    : "No Representation";
+  const applyMove = () => {
+    if (!placement) {
+      return;
+    }
+    const input = {
+      x: readPlacementCoordinate(x),
+      y: readPlacementCoordinate(y),
+      z: readPlacementCoordinate(z),
+    };
+    const worldTarget =
+      space === "viewer" ? viewerWorldPointToIfcPlacementPoint(input) : input;
+    const local = nativeWorldToLocalPlacementPoint(
+      document,
+      selectedId,
+      worldTarget,
+    );
+    if (!local) {
+      return;
+    }
+    onMove(
+      formatPlacementCoordinate(local.x),
+      formatPlacementCoordinate(local.y),
+      formatPlacementCoordinate(local.z),
+    );
+  };
+
   const bodyDraft: BodyElementDraft = {
     depth,
     height,
@@ -836,8 +793,12 @@ function GeometryPanel({
     <PanelShell scroll>
       <PanelHeader
         eyebrow={`Auswahl #${selectedId}`}
-        title="Geometry"
-        description={representationSummary}
+        title="Placement & Geometrie"
+        description={
+          placement
+            ? `Welt: ${formatPlacementCoordinate(placement.worldX)}, ${formatPlacementCoordinate(placement.worldY)}, ${formatPlacementCoordinate(placement.worldZ)}`
+            : "Keine editierbare Platzierung"
+        }
         meta={
           <Badge
             tone={
@@ -852,27 +813,134 @@ function GeometryPanel({
           </Badge>
         }
       />
-      <InfoSection title="Representation">
-        <InfoRow label="Product" value={`#${body.productId} ${entity.type}`} />
-        <InfoRow
-          label="ObjectPlacement"
-          value={
-            placement
-              ? `#${placement.placementId} / Point #${placement.pointId}`
-              : "$"
+
+      {placement ? (
+        <InfoSection title="Position">
+          <SegmentedControl
+            options={["welt", "viewer"]}
+            value={space}
+            onChange={(value) => setSpace(value as PlacementCoordinateSpace)}
+          />
+          <TextLine>
+            {space === "viewer"
+              ? "Viewer-Koordinaten (Y = Höhe), wie im 3D-Fenster gepickt."
+              : "IFC-Weltkoordinaten (Z = Höhe), absolut im Modell."}
+          </TextLine>
+          <ResponsiveRow>
+            <ResponsiveField>
+              <LabeledInput
+                label="X"
+                keyboardType="numeric"
+                value={x}
+                onChangeText={setX}
+              />
+            </ResponsiveField>
+            <ResponsiveField>
+              <LabeledInput
+                label={space === "viewer" ? "Y (Höhe)" : "Y"}
+                keyboardType="numeric"
+                value={y}
+                onChangeText={setY}
+              />
+            </ResponsiveField>
+            <ResponsiveField>
+              <LabeledInput
+                label={space === "viewer" ? "Z" : "Z (Höhe)"}
+                keyboardType="numeric"
+                value={z}
+                onChangeText={setZ}
+              />
+            </ResponsiveField>
+          </ResponsiveRow>
+          <TextLine>
+            Lokal
+            {placement.relativeTo
+              ? ` (relativ zu #${placement.relativeTo})`
+              : ""}
+            : {formatPlacementCoordinate(placement.x)},{" "}
+            {formatPlacementCoordinate(placement.y)},{" "}
+            {formatPlacementCoordinate(placement.z)}
+          </TextLine>
+          <Button label="Position übernehmen" primary onPress={applyMove} />
+        </InfoSection>
+      ) : (
+        <EmptyBlock title="Keine editierbare Platzierung">
+          Produkt mit IFCLOCALPLACEMENT → IFCAXIS2PLACEMENT3D →
+          IFCCARTESIANPOINT auswählen, um die Position zu bearbeiten.
+        </EmptyBlock>
+      )}
+
+      <InfoSection title="Abmessungen">
+        <ResponsiveRow>
+          <ResponsiveField>
+            <DropdownField
+              label="Profil"
+              options={[
+                { label: "Rechteck", value: "rectangle" },
+                { label: "Zylinder", value: "cylinder" },
+              ]}
+              value={profile}
+              onChange={(value) => setProfile(value as NativeBodyProfile)}
+            />
+          </ResponsiveField>
+          <ResponsiveField>
+            <LabeledInput
+              label={profile === "cylinder" ? "Durchmesser X" : "Breite X"}
+              keyboardType="numeric"
+              value={width}
+              onChangeText={setWidth}
+            />
+          </ResponsiveField>
+          <ResponsiveField>
+            <LabeledInput
+              label={profile === "cylinder" ? "Durchmesser Y" : "Tiefe Y"}
+              keyboardType="numeric"
+              value={depth}
+              onChangeText={setDepth}
+            />
+          </ResponsiveField>
+          <ResponsiveField>
+            <LabeledInput
+              label="Höhe Z"
+              keyboardType="numeric"
+              value={height}
+              onChangeText={setHeight}
+            />
+          </ResponsiveField>
+        </ResponsiveRow>
+        {body.message ? <TextLine>{body.message}</TextLine> : null}
+        <Button
+          disabled={!body.canAssign}
+          label={
+            body.hasRepresentation
+              ? "Geometrie aktualisieren"
+              : "Geometrie zuweisen"
           }
+          primary
+          onPress={() => onAssignBodyToSelected(bodyDraft)}
         />
+      </InfoSection>
+
+      <CollapsibleSection
+        title="IFC-Referenzen"
+        meta={`Produkt #${selectedId} ${entity.type}`}
+      >
+        {placement ? (
+          <>
+            <InfoRow label="Placement" value={`#${placement.placementId}`} />
+            <InfoRow label="Axis" value={`#${placement.axisPlacementId}`} />
+            <InfoRow label="Point" value={`#${placement.pointId}`} />
+            <InfoRow
+              label="Relative to"
+              value={placement.relativeTo ? `#${placement.relativeTo}` : "$"}
+            />
+          </>
+        ) : (
+          <InfoRow label="Placement" value="$" />
+        )}
         <InfoRow
-          label="ProductDefinitionShape"
+          label="Shape"
           value={body.shapeId ? `#${body.shapeId}` : "$"}
-        />
-        <InfoRow
-          label="ShapeRepresentations"
-          value={
-            body.representationIds.length
-              ? body.representationIds.map((id) => `#${id}`).join(", ")
-              : "$"
-          }
         />
         <InfoRow
           label="Body"
@@ -892,54 +960,7 @@ function GeometryPanel({
               : "$"
           }
         />
-        {body.message ? <TextLine>{body.message}</TextLine> : null}
-      </InfoSection>
-
-      <InfoSection title="Dimensions">
-        <ResponsiveRow>
-          <ResponsiveField>
-            <DropdownField
-              label="Profile"
-              options={[
-                { label: "Rectangle", value: "rectangle" },
-                { label: "Cylinder", value: "cylinder" },
-              ]}
-              value={profile}
-              onChange={(value) => setProfile(value as NativeBodyProfile)}
-            />
-          </ResponsiveField>
-          <ResponsiveField>
-            <LabeledInput
-              label={profile === "cylinder" ? "Diameter X" : "Width X"}
-              keyboardType="numeric"
-              value={width}
-              onChangeText={setWidth}
-            />
-          </ResponsiveField>
-          <ResponsiveField>
-            <LabeledInput
-              label={profile === "cylinder" ? "Diameter Y" : "Depth Y"}
-              keyboardType="numeric"
-              value={depth}
-              onChangeText={setDepth}
-            />
-          </ResponsiveField>
-          <ResponsiveField>
-            <LabeledInput
-              label="Height Z"
-              keyboardType="numeric"
-              value={height}
-              onChangeText={setHeight}
-            />
-          </ResponsiveField>
-        </ResponsiveRow>
-        <Button
-          disabled={!body.canAssign}
-          label={body.hasRepresentation ? "Update Geometry" : "Assign Geometry"}
-          primary
-          onPress={() => onAssignBodyToSelected(bodyDraft)}
-        />
-      </InfoSection>
+      </CollapsibleSection>
     </PanelShell>
   );
 }

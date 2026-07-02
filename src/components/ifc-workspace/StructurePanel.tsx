@@ -1,5 +1,5 @@
 import { FileTree, useFileTree } from "@pierre/trees/react";
-import { Crosshair, Trash2 } from "lucide-react";
+import { Crosshair, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 
@@ -8,6 +8,8 @@ import type {
     NativeIfcEntity,
     NativeIfcTreeNode,
 } from "@/ifc";
+
+import { structureChildGroupsForParent } from "./constants";
 
 interface StructureTreeModel {
   paths: string[];
@@ -23,6 +25,7 @@ export function StructurePanel({
   filteredEntities,
   search,
   selectedId,
+  onAddChild,
   onCenterCamera,
   onRemove,
   onSelect,
@@ -33,6 +36,7 @@ export function StructurePanel({
   filteredEntities: NativeIfcEntity[];
   search: string;
   selectedId: number;
+  onAddChild(parentId: number, type: string, name: string): void;
   onCenterCamera(id: number): void;
   onRemove(id: number): void;
   onSelect(id: number, source?: string): void;
@@ -46,10 +50,12 @@ export function StructurePanel({
 
   const idByPathRef = useRef(treeModel.idByPath);
   const typeByIdRef = useRef(treeModel.typeById);
+  const onAddChildRef = useRef(onAddChild);
   const onCenterCameraRef = useRef(onCenterCamera);
   const onSelectRef = useRef(onSelect);
   const onSelectManyRef = useRef(onSelectMany);
   const onRemoveRef = useRef(onRemove);
+  onAddChildRef.current = onAddChild;
   onCenterCameraRef.current = onCenterCamera;
   onSelectRef.current = onSelect;
   onSelectManyRef.current = onSelectMany;
@@ -220,6 +226,7 @@ export function StructurePanel({
       if (typeof id !== "number") return null;
       const typeName = typeByIdRef.current.get(id);
       const isProtected = typeName === "IFCPROJECT";
+      const childGroups = structureChildGroupsForParent(typeName ?? "");
 
       const menu = (
         <div
@@ -248,6 +255,39 @@ export function StructurePanel({
               </kbd>
             </button>
           </div>
+          {childGroups.length ? (
+            <div className="mb-1 max-h-72 min-w-[210px] overflow-y-auto rounded-md border border-border bg-popover p-1 text-sm shadow-md">
+              <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Neues Element anlegen
+              </div>
+              {childGroups.map((group) => (
+                <div key={group.label}>
+                  <div className="mt-1 border-t border-border/50 px-2 pb-0.5 pt-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/80">
+                    {group.label}
+                  </div>
+                  {group.options.map((option) => (
+                    <button
+                      key={`${group.label}-${option.value}`}
+                      type="button"
+                      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-foreground hover:bg-muted/70"
+                      onClick={() => {
+                        context.close({ restoreFocus: false });
+                        onAddChildRef.current(id, option.value, option.label);
+                      }}
+                    >
+                      <Plus aria-hidden className="size-3.5 shrink-0" />
+                      <span className="min-w-0 flex-1 truncate">
+                        {option.label}
+                      </span>
+                      <span className="shrink-0 text-[10px] uppercase text-muted-foreground">
+                        {option.value.replace(/^IFC/, "")}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </div>
+          ) : null}
           {isProtected ? (
             <div className="rounded-md border border-border bg-popover px-3 py-2 text-xs text-muted-foreground shadow-md">
               IFCPROJECT kann nicht gelöscht werden.
