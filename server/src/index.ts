@@ -41,14 +41,12 @@ async function main(): Promise<void> {
   const app = buildApp({ repo, store, jwtSecret: config.jwtSecret });
 
   await app.listen({ port: config.port, host: config.host });
-  // eslint-disable-next-line no-console
   console.log(
     `IFC VCS server listening on http://${config.host}:${config.port} (storage: ${config.storage})`,
   );
 }
 
 main().catch((error) => {
-  // eslint-disable-next-line no-console
   console.error(error);
   process.exit(1);
 });

@@ -18,6 +18,8 @@ export const MOSAIC_VIEW_IDS: MosaicViewId[] = [
   "diagnostics",
   "recent",
   "notes",
+  "portal",
+  "portal-settings",
 ];
 
 export const DEFAULT_MOSAIC_LAYOUT: MosaicNode<MosaicViewId> = {
@@ -182,6 +184,8 @@ export const MOSAIC_TITLES: Record<MosaicViewId, string> = {
   inspector: "Inspector",
   notes: "Notizen",
   "object-info": "Objektinfo: IDs",
+  portal: "MKP Portal",
+  "portal-settings": "Portal-Einstellungen",
   "pset-batch": "Pset Batch",
   recent: "Kuerzlich verwendet",
   "resource-references": "Klassifikation & Dokumente",

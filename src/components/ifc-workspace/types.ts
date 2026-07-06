@@ -24,7 +24,9 @@ export type MosaicViewId =
   | "object-info"
   | "diagnostics"
   | "recent"
-  | "notes";
+  | "notes"
+  | "portal"
+  | "portal-settings";
 
 export interface Point {
   x: number;

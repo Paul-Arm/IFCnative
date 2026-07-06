@@ -1,5 +1,12 @@
 import type { MosaicNode } from "react-mosaic-component";
 
+import { normalizePortalMapping } from "@/portal/mapping";
+import {
+    createDefaultPortalSettings,
+    type PortalSettings,
+    type PortalTokens,
+} from "@/portal/types";
+
 import {
     BUILT_IN_WORKSPACES,
     DEFAULT_WORKSPACE_ID,
@@ -7,6 +14,8 @@ import {
     type WorkspaceDefinition,
 } from "./constants";
 import type { MosaicViewId } from "./types";
+
+export { createDefaultPortalSettings } from "@/portal/types";
 
 export interface RecentIfcFileEntry {
   documentId?: string;
@@ -23,6 +32,8 @@ export interface RecentIfcFileEntry {
 const ACTIVE_WORKSPACE_STORAGE_KEY = "ifcnative:active-workspace:v1";
 const CUSTOM_WORKSPACES_STORAGE_KEY = "ifcnative:custom-workspaces:v1";
 const NOTES_STORAGE_KEY = "ifcnative:notes:v1";
+const PORTAL_SETTINGS_STORAGE_KEY = "ifcnative:portal-settings:v1";
+const PORTAL_TOKENS_STORAGE_KEY = "ifcnative:portal-auth:v1";
 const RECENT_IFC_STORAGE_KEY = "ifcnative:recent-ifc:v1";
 const MAX_RECENT_IFC_FILES = 16;
 
@@ -121,8 +132,10 @@ export function cloneMosaicNode<T extends string | number>(
   }
   return {
     direction: node.direction,
-    first: cloneMosaicNode(node.first),
-    second: cloneMosaicNode(node.second),
+    // In einem Parent-Knoten sind first/second nie null; das ?? beruhigt nur
+    // den Typchecker (cloneMosaicNode ist für null-Eingaben null-durchlässig).
+    first: cloneMosaicNode(node.first) ?? node.first,
+    second: cloneMosaicNode(node.second) ?? node.second,
     splitPercentage: node.splitPercentage,
   };
 }
@@ -133,6 +146,87 @@ export function loadNotes() {
 
 export function saveNotes(notes: string) {
   writeLocalStorage(NOTES_STORAGE_KEY, notes);
+}
+
+export function loadPortalSettings(): PortalSettings {
+  const defaults = createDefaultPortalSettings();
+  const parsed = readJson<unknown>(PORTAL_SETTINGS_STORAGE_KEY, null);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return defaults;
+  }
+  const candidate = parsed as Record<string, unknown>;
+  const psetOptions =
+    candidate.psetOptions && typeof candidate.psetOptions === "object"
+      ? (candidate.psetOptions as Record<string, unknown>)
+      : {};
+  return {
+    assetBaseUrl: readStringOr(candidate.assetBaseUrl, defaults.assetBaseUrl),
+    bauwerkId: readNullableId(candidate.bauwerkId),
+    bauwerkName: readStringOr(candidate.bauwerkName, defaults.bauwerkName),
+    bauwerkNummer: readStringOr(candidate.bauwerkNummer, defaults.bauwerkNummer),
+    bwdBaseUrl: readStringOr(candidate.bwdBaseUrl, defaults.bwdBaseUrl),
+    clientId: readStringOr(candidate.clientId, defaults.clientId),
+    mapping: normalizePortalMapping(candidate.mapping ?? defaults.mapping),
+    monitoringBaseUrl: readStringOr(
+      candidate.monitoringBaseUrl,
+      defaults.monitoringBaseUrl,
+    ),
+    projektId: readNullableId(candidate.projektId),
+    projektName: readStringOr(candidate.projektName, defaults.projektName),
+    psetOptions: {
+      writeCatalogPsets: readBooleanOr(
+        psetOptions.writeCatalogPsets,
+        defaults.psetOptions.writeCatalogPsets,
+      ),
+      writeLinkPset: readBooleanOr(
+        psetOptions.writeLinkPset,
+        defaults.psetOptions.writeLinkPset,
+      ),
+      writeRecordPsets: readBooleanOr(
+        psetOptions.writeRecordPsets,
+        defaults.psetOptions.writeRecordPsets,
+      ),
+    },
+    tokenUrl: readStringOr(candidate.tokenUrl, defaults.tokenUrl),
+    useMockData: readBooleanOr(candidate.useMockData, defaults.useMockData),
+  };
+}
+
+export function savePortalSettings(settings: PortalSettings) {
+  writeJson(PORTAL_SETTINGS_STORAGE_KEY, settings);
+}
+
+export function loadPortalTokens(): PortalTokens | null {
+  const parsed = readJson<unknown>(PORTAL_TOKENS_STORAGE_KEY, null);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+  const candidate = parsed as Partial<PortalTokens>;
+  if (
+    typeof candidate.accessToken !== "string" ||
+    !candidate.accessToken ||
+    typeof candidate.refreshToken !== "string" ||
+    !candidate.refreshToken
+  ) {
+    return null;
+  }
+  return {
+    accessToken: candidate.accessToken,
+    obtainedAt:
+      typeof candidate.obtainedAt === "number" &&
+      Number.isFinite(candidate.obtainedAt)
+        ? candidate.obtainedAt
+        : 0,
+    refreshToken: candidate.refreshToken,
+  };
+}
+
+export function savePortalTokens(tokens: PortalTokens | null) {
+  if (!tokens) {
+    removeLocalStorage(PORTAL_TOKENS_STORAGE_KEY);
+    return;
+  }
+  writeJson(PORTAL_TOKENS_STORAGE_KEY, tokens);
 }
 
 export function loadRecentIfcFiles(): RecentIfcFileEntry[] {
@@ -230,6 +324,18 @@ function sanitizeMosaicNode(
   };
 }
 
+function readStringOr(value: unknown, fallback: string): string {
+  return typeof value === "string" ? value : fallback;
+}
+
+function readBooleanOr(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function readNullableId(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 function readJson<T>(key: string, fallback: T): T {
   const value = readLocalStorage(key);
   if (!value) {
@@ -263,6 +369,17 @@ function writeLocalStorage(key: string, value: string) {
   }
   try {
     window.localStorage.setItem(key, value);
+  } catch {
+    // Local persistence is a convenience feature; the workspace can continue.
+  }
+}
+
+function removeLocalStorage(key: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.removeItem(key);
   } catch {
     // Local persistence is a convenience feature; the workspace can continue.
   }

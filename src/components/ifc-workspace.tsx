@@ -122,6 +122,8 @@ import {
     ResourceReferencesPanel,
 } from "./ifc-workspace/InspectorPanel";
 import { ObjectInfoPanel } from "./ifc-workspace/ObjectInfoPanel";
+import { PortalPanel } from "./ifc-workspace/PortalPanel";
+import { PortalSettingsPanel } from "./ifc-workspace/PortalSettingsPanel";
 import { PsetBatchPanel } from "./ifc-workspace/PsetBatchPanel";
 import { StructurePanel } from "./ifc-workspace/StructurePanel";
 import type {
@@ -141,12 +143,16 @@ import {
     loadActiveWorkspaceId,
     loadCustomWorkspaces,
     loadNotes,
+    loadPortalSettings,
+    loadPortalTokens,
     loadRecentIfcFiles,
     mergeRecentIfcFile,
     resolveWorkspace,
     saveActiveWorkspaceId,
     saveCustomWorkspaces,
     saveNotes,
+    savePortalSettings,
+    savePortalTokens,
     saveRecentIfcFiles,
     type RecentIfcFileEntry,
 } from "./ifc-workspace/workspaceStorage";
@@ -315,6 +321,8 @@ export default function IfcWorkspace() {
   const [selectedCatalogObjectId, setSelectedCatalogObjectId] = useState("");
   const [recentIfcFiles, setRecentIfcFiles] = useState(loadRecentIfcFiles);
   const [notes, setNotes] = useState(loadNotes);
+  const [portalSettings, setPortalSettings] = useState(loadPortalSettings);
+  const [portalTokens, setPortalTokens] = useState(loadPortalTokens);
   const [coordinateClipboard, setCoordinateClipboard] =
     useState<CoordinateClipboard | null>(null);
   const [detachedViews, setDetachedViews] = useState<Set<MosaicViewId>>(
@@ -1045,6 +1053,20 @@ export default function IfcWorkspace() {
   useEffect(() => {
     saveNotes(notes);
   }, [notes]);
+
+  useEffect(() => {
+    savePortalSettings(portalSettings);
+  }, [portalSettings]);
+
+  useEffect(() => {
+    savePortalTokens(portalTokens);
+  }, [portalTokens]);
+
+  // Portal-Importe laufen asynchron (Netz-Roundtrip) und übernehmen ihr
+  // Ergebnis gegen den zum Anwendungszeitpunkt aktuellen Stand statt gegen
+  // den Klick-Zeitpunkt — sonst gingen zwischenzeitliche Änderungen verloren.
+  const portalApplyTargetRef = useRef({ document, selectedId });
+  portalApplyTargetRef.current = { document, selectedId };
 
   const emergencyStateRef = useRef({
     activeWorkspaceId,
@@ -2566,6 +2588,40 @@ export default function IfcWorkspace() {
         return (
           <TileContent>
             <NotesPanel notes={notes} onNotesChange={setNotes} />
+          </TileContent>
+        );
+      case "portal":
+        return (
+          <TileContent>
+            <PortalPanel
+              document={document}
+              getApplyTarget={() => portalApplyTargetRef.current}
+              selectedId={selectedId}
+              settings={portalSettings}
+              tokens={portalTokens}
+              onApplyImport={(nextDocument, summary) =>
+                commitDocument(
+                  nextDocument,
+                  portalApplyTargetRef.current.selectedId,
+                  summary,
+                  `portal.applyImport({ summary: '${summary.replace(/'/g, "\\'")}' });`,
+                  undefined,
+                  { reloadViewer: true },
+                )
+              }
+              onSelectEntity={(id) => selectEntity(id, "portal")}
+              onSettingsChange={setPortalSettings}
+              onTokensChange={setPortalTokens}
+            />
+          </TileContent>
+        );
+      case "portal-settings":
+        return (
+          <TileContent>
+            <PortalSettingsPanel
+              settings={portalSettings}
+              onSettingsChange={setPortalSettings}
+            />
           </TileContent>
         );
     }
