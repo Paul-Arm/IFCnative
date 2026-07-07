@@ -499,7 +499,12 @@ export function DropdownField({
             {selected.label}
           </SelectValue>
         </SelectTrigger>
-        <SelectContent align="start" className="max-h-72">
+        {/* Ausgeklappt breiter als der Trigger: Breite folgt dem Inhalt,
+            mindestens aber der Trigger-Breite. */}
+        <SelectContent
+          align="start"
+          className="max-h-72 w-auto max-w-96 min-w-(--anchor-width)"
+        >
           {normalized.map((option) => (
             <SelectItem key={option.value} value={option.value}>
               <span className="flex min-w-0 flex-col">

@@ -11,6 +11,7 @@ import {
 import { normalizeIfcClass } from "@/ifc";
 import {
   IFC_CLASS_CHOICES,
+  PORTAL_VERFAHREN_MAPPING_MODELS,
   createProxyPresetMapping,
   parseFreecadMapping,
   serializeFreecadMapping,
@@ -43,21 +44,61 @@ export interface PortalSettingsPanelProps {
 }
 
 const MAPPING_COLUMNS: DataTableColumn[] = [
-  { header: "API-Modell", key: "model", minWidth: 150 },
+  { header: "API-Modell", key: "model", minWidth: 140 },
   { header: "Ziel", key: "target", minWidth: 130 },
-  { header: "IFC-Klasse", key: "ifcClass", minWidth: 190 },
-  { header: "ObjectType", key: "objectType", minWidth: 150 },
+  { header: "Werte", key: "writeProperties", minWidth: 60 },
+  { header: "IFC-Klasse", key: "ifcClass", minWidth: 180 },
+  { header: "ObjectType", key: "objectType", minWidth: 140 },
 ];
 
 const MODE_OPTIONS = [
-  { label: "Proxy (alles sichtbare Elemente)", value: "proxy" },
+  { label: "Preset (Beispiel-IFC)", value: "proxy" },
   { label: "Benutzerdefiniert", value: "custom" },
 ];
 
-const TARGET_OPTIONS: { label: string; value: PortalMappingTarget }[] = [
-  { label: "Element", value: "element" },
-  { label: "Pset", value: "pset" },
-  { label: "Überspringen", value: "skip" },
+const TARGET_OPTIONS: {
+  label: string;
+  value: PortalMappingTarget;
+  hint: string;
+}[] = [
+  { hint: "eigenes IFC-Element (Upsert per ExternalId)", label: "Element", value: "element" },
+  { hint: "nur Property-Sets am übergeordneten Element", label: "Pset am Host", value: "pset" },
+  { hint: "Ebene überspringen, Kinder trotzdem importieren", label: "Durchreichen", value: "skip" },
+  { hint: "Ebene samt Unterbaum nicht importieren", label: "Ignorieren", value: "ignore" },
+];
+
+const BULK_VERFAHREN_OPTIONS: { label: string; value: string }[] = [
+  { label: "Bulk-Aktion wählen …", value: "" },
+  { label: "Alle Verfahren → Pset am Host", value: "pset" },
+  { label: "Alle Verfahren → Element", value: "element" },
+  { label: "Alle Verfahren → Ignorieren (vor Verfahren aufhören)", value: "ignore" },
+];
+
+/** Gruppierung der Mapping-Zeilen für die Anzeige. */
+const MAPPING_GROUPS: { title: string; models: string[]; hint?: string }[] = [
+  {
+    models: ["Bauwerk", "Teilbauwerk", "Bauteil"],
+    title: "Struktur",
+  },
+  {
+    hint: "Untersuchungsbereiche, -stellen und Verfahren aus dem BWD-Modul.",
+    models: [
+      "Untersuchungsbereich",
+      "Untersuchungsstelle",
+      "Untersuchungsverfahren",
+      "Kernbohrung",
+      "Oeffnung",
+      "Bohrkanal",
+      "Bohrkern",
+      "Probe",
+    ],
+    title: "Diagnostik",
+  },
+  {
+    hint: "Messkonzepte, Maßnahmen, Messstellen und Kanäle aus dem Monitoring.",
+    models: ["Messkonzept", "Massnahme", "Messstelle", "Kanal"],
+    title: "Monitoring",
+  },
 ];
 
 const CUSTOM_IFC_CLASS_VALUE = "__andere__";
@@ -73,23 +114,35 @@ export function PortalSettingsPanel({
     onSettingsChange({ ...settings, ...patch });
   };
 
-  const updateMappingRow = (
-    index: number,
+  /**
+   * Zeilen-Änderungen schalten automatisch auf "Benutzerdefiniert" um —
+   * im Preset-Modus würde der Import sonst weiter das Preset verwenden
+   * (Proxy-Modus löst beim Laden immer auf das aktuelle Preset auf).
+   */
+  const patchMappingRows = (
+    models: string[],
     patch: Partial<PortalModelMapping>,
   ) => {
-    const mappings = settings.mapping.mappings.map((row, rowIndex) =>
-      rowIndex === index ? { ...row, ...patch } : row,
+    const wanted = new Set(models.map((model) => model.toLowerCase()));
+    const mappings = settings.mapping.mappings.map((row) =>
+      wanted.has(row.model.toLowerCase()) ? { ...row, ...patch } : row,
     );
-    update({ mapping: { ...settings.mapping, mappings } });
+    update({ mapping: { mappings, mode: "custom", version: 1 } });
   };
 
   const handleModeChange = (value: string) => {
     if (value === "proxy") {
-      // Proxy-Modus setzt die Tabelle auf das Preset zurück, damit Anzeige und
-      // Import identisch bleiben.
+      // Preset-Modus setzt die Tabelle auf das aktuelle Preset zurück, damit
+      // Anzeige und Import identisch bleiben.
       update({ mapping: createProxyPresetMapping() });
     } else if (value === "custom") {
       update({ mapping: { ...settings.mapping, mode: "custom" } });
+    }
+  };
+
+  const handleBulkVerfahren = (value: string) => {
+    if (value === "element" || value === "pset" || value === "ignore") {
+      patchMappingRows(PORTAL_VERFAHREN_MAPPING_MODELS, { target: value });
     }
   };
 
@@ -120,7 +173,7 @@ export function PortalSettingsPanel({
   };
 
   const resetToDefaults = () => {
-    // "Zurücksetzen" = Proxy-Preset + Default-URLs; Bauwerk-/Projekt-Auswahl,
+    // "Zurücksetzen" = Preset + Default-URLs; Bauwerk-/Projekt-Auswahl,
     // Mock-Schalter und Pset-Optionen bleiben erhalten.
     const defaults = createDefaultPortalSettings();
     onSettingsChange({
@@ -134,7 +187,15 @@ export function PortalSettingsPanel({
     });
   };
 
-  const editable = settings.mapping.mode === "custom";
+  const rowsByModel = new Map(
+    settings.mapping.mappings.map((row) => [row.model.toLowerCase(), row]),
+  );
+  const groupedModels = new Set(
+    MAPPING_GROUPS.flatMap((group) => group.models.map((m) => m.toLowerCase())),
+  );
+  const extraRows = settings.mapping.mappings.filter(
+    (row) => !groupedModels.has(row.model.toLowerCase()),
+  );
 
   return (
     <PanelShell>
@@ -192,80 +253,55 @@ export function PortalSettingsPanel({
           </p>
         </InfoSection>
 
-        <InfoSection title="Import-Modus">
-          <DropdownField
-            label="Modus"
-            options={MODE_OPTIONS}
-            value={settings.mapping.mode}
-            onChange={handleModeChange}
-          />
-          <p className="text-[11px] text-muted-foreground">
-            {editable
-              ? "Benutzerdefiniert: Ziel, IFC-Klasse und ObjectType pro API-Modell anpassen."
-              : "Proxy: feste Voreinstellung, Tabelle ist schreibgeschützt."}
+        <InfoSection title="Import-Mapping">
+          <div className="flex flex-wrap items-end gap-3">
+            <DropdownField
+              label="Modus"
+              options={MODE_OPTIONS}
+              value={settings.mapping.mode}
+              onChange={handleModeChange}
+            />
+            <DropdownField
+              label="Diagnostik-Verfahren (Bulk)"
+              options={BULK_VERFAHREN_OPTIONS}
+              value=""
+              onChange={handleBulkVerfahren}
+            />
+          </div>
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            {settings.mapping.mode === "custom"
+              ? "Benutzerdefiniert: pro API-Modell frei einstellbar."
+              : "Preset entspricht den Beispiel-IFCs; jede Änderung wechselt automatisch zu Benutzerdefiniert."}{" "}
+            Ziele: <strong>Element</strong> = eigenes IFC-Element ·{" "}
+            <strong>Pset am Host</strong> = nur Property-Sets am übergeordneten
+            Element · <strong>Durchreichen</strong> = Ebene überspringen, Kinder
+            importieren · <strong>Ignorieren</strong> = Ebene samt Unterbaum
+            nicht importieren. <strong>Werte</strong> abgewählt = nur leere
+            Pset-Hüllen ohne Properties anlegen.
           </p>
         </InfoSection>
 
-        <DataTable
-          columns={MAPPING_COLUMNS}
-          emptyMessage="Keine Mapping-Zeilen."
-          keyExtractor={(row: PortalModelMapping) => row.model}
-          minWidth={620}
-          rows={settings.mapping.mappings}
-          renderRow={(row, index) => (
-            <>
-              <DataTableCell column={MAPPING_COLUMNS[0]}>
-                <span className="text-xs font-medium text-foreground">
-                  {row.model}
-                </span>
-              </DataTableCell>
-              <DataTableCell column={MAPPING_COLUMNS[1]}>
-                {editable ? (
-                  <TargetSelect
-                    value={row.target}
-                    onChange={(target) => updateMappingRow(index, { target })}
-                  />
-                ) : (
-                  <span className="text-xs text-foreground">
-                    {targetLabel(row.target)}
-                  </span>
-                )}
-              </DataTableCell>
-              <DataTableCell column={MAPPING_COLUMNS[2]}>
-                {editable ? (
-                  <IfcClassCell
-                    disabled={row.target !== "element"}
-                    value={row.ifcClass}
-                    onChange={(ifcClass) =>
-                      updateMappingRow(index, { ifcClass })
-                    }
-                  />
-                ) : (
-                  <span className="text-xs text-foreground">
-                    {ifcClassLabel(row.ifcClass)}
-                  </span>
-                )}
-              </DataTableCell>
-              <DataTableCell column={MAPPING_COLUMNS[3]}>
-                {editable ? (
-                  <CommitInput
-                    ariaLabel={`ObjectType für ${row.model}`}
-                    disabled={row.target !== "element"}
-                    placeholder={row.model}
-                    value={row.objectType}
-                    onCommit={(objectType) =>
-                      updateMappingRow(index, { objectType })
-                    }
-                  />
-                ) : (
-                  <span className="text-xs text-foreground">
-                    {row.objectType}
-                  </span>
-                )}
-              </DataTableCell>
-            </>
-          )}
-        />
+        {MAPPING_GROUPS.map((group) => {
+          const rows = group.models
+            .map((model) => rowsByModel.get(model.toLowerCase()))
+            .filter((row): row is PortalModelMapping => row !== undefined);
+          if (rows.length === 0) {
+            return null;
+          }
+          return (
+            <InfoSection key={group.title} title={`Mapping: ${group.title}`}>
+              {group.hint ? (
+                <p className="text-[11px] text-muted-foreground">{group.hint}</p>
+              ) : null}
+              <MappingTable rows={rows} onPatchRow={patchMappingRows} />
+            </InfoSection>
+          );
+        })}
+        {extraRows.length > 0 ? (
+          <InfoSection title="Mapping: Weitere Modelle">
+            <MappingTable rows={extraRows} onPatchRow={patchMappingRows} />
+          </InfoSection>
+        ) : null}
 
         {mappingError ? (
           <div
@@ -292,7 +328,7 @@ export function PortalSettingsPanel({
           />
           <CheckboxField
             checked={settings.psetOptions.writeCatalogPsets}
-            description="ePset_* nach Objektkatalog BWD/MON, z. B. ePset_Untersuchungsstelle oder ePset_Sensor."
+            description="ePset_* nach Objektkatalog BWD/MON, z. B. ePset_Objektinformationen oder ePset_Sensor."
             label="Katalog-Psets schreiben"
             onChange={(checked) =>
               update({
@@ -322,7 +358,7 @@ export function PortalSettingsPanel({
       <Toolbar>
         <ToolbarGroup>
           <Button
-            label="Proxy-Preset"
+            label="Preset laden"
             onPress={() => update({ mapping: createProxyPresetMapping() })}
           />
           <Button label="Mapping exportieren" onPress={exportMapping} />
@@ -351,6 +387,79 @@ export function PortalSettingsPanel({
   );
 }
 
+function MappingTable({
+  rows,
+  onPatchRow,
+}: {
+  rows: PortalModelMapping[];
+  onPatchRow(models: string[], patch: Partial<PortalModelMapping>): void;
+}) {
+  return (
+    <DataTable
+      columns={MAPPING_COLUMNS}
+      emptyMessage="Keine Mapping-Zeilen."
+      keyExtractor={(row: PortalModelMapping) => row.model}
+      minWidth={680}
+      rows={rows}
+      renderRow={(row) => {
+        const inactive = row.target === "skip" || row.target === "ignore";
+        return (
+          <>
+            <DataTableCell column={MAPPING_COLUMNS[0]}>
+              <span
+                className={
+                  row.target === "ignore"
+                    ? "text-xs font-medium text-muted-foreground line-through"
+                    : "text-xs font-medium text-foreground"
+                }
+              >
+                {row.model}
+              </span>
+            </DataTableCell>
+            <DataTableCell column={MAPPING_COLUMNS[1]}>
+              <TargetSelect
+                value={row.target}
+                onChange={(target) => onPatchRow([row.model], { target })}
+              />
+            </DataTableCell>
+            <DataTableCell column={MAPPING_COLUMNS[2]}>
+              <input
+                aria-label={`Property-Werte für ${row.model} schreiben`}
+                checked={row.writeProperties}
+                className="size-4 accent-primary disabled:opacity-40"
+                disabled={inactive}
+                title="Abgewählt: nur leere Pset-Hüllen ohne Properties"
+                type="checkbox"
+                onChange={(event) =>
+                  onPatchRow([row.model], {
+                    writeProperties: event.currentTarget.checked,
+                  })
+                }
+              />
+            </DataTableCell>
+            <DataTableCell column={MAPPING_COLUMNS[3]}>
+              <IfcClassCell
+                disabled={row.target !== "element"}
+                value={row.ifcClass}
+                onChange={(ifcClass) => onPatchRow([row.model], { ifcClass })}
+              />
+            </DataTableCell>
+            <DataTableCell column={MAPPING_COLUMNS[4]}>
+              <CommitInput
+                ariaLabel={`ObjectType für ${row.model}`}
+                disabled={row.target !== "element"}
+                placeholder={row.model}
+                value={row.objectType}
+                onCommit={(objectType) => onPatchRow([row.model], { objectType })}
+              />
+            </DataTableCell>
+          </>
+        );
+      }}
+    />
+  );
+}
+
 function targetLabel(target: PortalMappingTarget): string {
   return (
     TARGET_OPTIONS.find((option) => option.value === target)?.label ?? target
@@ -365,10 +474,6 @@ function matchedIfcClassChoice(value: string): string | null {
   );
 }
 
-function ifcClassLabel(value: string): string {
-  return matchedIfcClassChoice(value) ?? value;
-}
-
 function TargetSelect({
   value,
   onChange,
@@ -380,8 +485,11 @@ function TargetSelect({
     <Select
       value={value}
       onValueChange={(next) => {
-        if (next === "element" || next === "pset" || next === "skip") {
-          onChange(next);
+        const option = TARGET_OPTIONS.find(
+          (candidate) => candidate.value === next,
+        );
+        if (option) {
+          onChange(option.value);
         }
       }}
     >
@@ -390,10 +498,19 @@ function TargetSelect({
           {targetLabel(value)}
         </SelectValue>
       </SelectTrigger>
-      <SelectContent align="start">
+      {/* Ausgeklappt inhaltsbreit (Hinweistexte), mindestens Trigger-Breite. */}
+      <SelectContent
+        align="start"
+        className="w-auto max-w-96 min-w-(--anchor-width)"
+      >
         {TARGET_OPTIONS.map((option) => (
           <SelectItem key={option.value} value={option.value}>
-            {option.label}
+            <span className="grid gap-0.5">
+              <span>{option.label}</span>
+              <span className="text-[11px] text-muted-foreground">
+                {option.hint}
+              </span>
+            </span>
           </SelectItem>
         ))}
       </SelectContent>
@@ -440,7 +557,10 @@ function IfcClassCell({
             {custom ? "Andere…" : (matched ?? value)}
           </SelectValue>
         </SelectTrigger>
-        <SelectContent align="start" className="max-h-72">
+        <SelectContent
+          align="start"
+          className="max-h-72 w-auto max-w-96 min-w-(--anchor-width)"
+        >
           {IFC_CLASS_CHOICES.map((choice) => (
             <SelectItem key={choice} value={choice}>
               {choice}

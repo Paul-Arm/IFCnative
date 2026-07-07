@@ -1,6 +1,7 @@
 import {
   addNativeClassification,
   addNativeElement,
+  addNativeEmptyPropertySet,
   addNativePropertySetValues,
   getNextNativeEntityId,
   quote,
@@ -224,6 +225,28 @@ function writePsets(
       entityId,
       pset.psetName,
       pset.properties,
+    );
+    state.psetCount += 1;
+  }
+}
+
+/**
+ * Leere Pset-Hüllen (Name ohne Properties) — Mapping-Option
+ * writeProperties=false. Vorhandene Namen werden übersprungen (idempotent).
+ */
+function writeEmptyPsets(
+  state: ImportState,
+  entityId: number,
+  psetNames: string[],
+) {
+  for (const psetName of psetNames) {
+    if (!psetName || hasPset(state.document, entityId, psetName)) {
+      continue;
+    }
+    state.document = addNativeEmptyPropertySet(
+      state.document,
+      entityId,
+      psetName,
     );
     state.psetCount += 1;
   }
@@ -464,6 +487,37 @@ function resolveMultiPsetIndex(
   return next;
 }
 
+/**
+ * Reihenfolge-basierter Mehrfach-Pset-Index für leere Pset-Hüllen
+ * (writeProperties=false): Hüllen tragen keine _ExternalId-Identität, deshalb
+ * zählt jeder Lauf pro Host+Präfix ab 1 — vorhandene Namen überspringt
+ * writeEmptyPsets, Re-Importe bleiben so idempotent (bei stabiler
+ * Portal-Reihenfolge).
+ */
+function sequentialMultiPsetIndex(
+  state: ImportState,
+  hostId: number,
+  node: PortalNode,
+): number | undefined {
+  const spec = multiPsetSpecForNode(node);
+  if (!spec) {
+    return undefined;
+  }
+  let byPrefix = state.psetIndexByHost.get(hostId);
+  if (!byPrefix) {
+    byPrefix = new Map();
+    state.psetIndexByHost.set(hostId, byPrefix);
+  }
+  let reserved = byPrefix.get(spec.prefix);
+  if (!reserved) {
+    reserved = new Set();
+    byPrefix.set(spec.prefix, reserved);
+  }
+  const next = Math.max(0, ...reserved) + 1;
+  reserved.add(next);
+  return next;
+}
+
 // --- Klassifikationsreferenzen (Beispiel-IFC: "openSIM BIM Objektkatalog") -------------
 
 /** Entpackt einen STEP-String ('x') auf den inneren Wert. */
@@ -677,6 +731,12 @@ function importChild(
   const mapping = mappingForModel(context.mapping, model);
   const descent = numbersForDescent(child, numbers, siblingNumber);
 
+  if (mapping.target === "ignore") {
+    // Knoten SAMT Unterbaum bewusst nicht importieren
+    // (z. B. Diagnostik "vor den Verfahren aufhören").
+    return;
+  }
+
   if (mapping.target === "skip") {
     // Nur Gliederung: Kinder direkt am selben Host weiterverarbeiten.
     walkChildren(state, context, hostId, child, descent);
@@ -697,15 +757,25 @@ function importChild(
     // "pset" IST der Import-Modus dieses Modells. Verfahren bekommen
     // zusätzlich die Klassifikationsreferenz am Host (Beispiel-IFC).
     catalogContext.asHostPset = true;
-    catalogContext.psetIndex = resolveMultiPsetIndex(state, hostId, child);
-    const psets = buildCatalogPsetsForNode(
-      nodeWithRecordData(child, context),
-      catalogContext,
-    );
-    if (context.psetOptions.writeRecordPsets) {
-      psets.push(recordPsetForNode(child, context, catalogContext));
+    if (mapping.writeProperties) {
+      catalogContext.psetIndex = resolveMultiPsetIndex(state, hostId, child);
+      const psets = buildCatalogPsetsForNode(
+        nodeWithRecordData(child, context),
+        catalogContext,
+      );
+      if (context.psetOptions.writeRecordPsets) {
+        psets.push(recordPsetForNode(child, context, catalogContext));
+      }
+      writePsets(state, hostId, psets, true);
+    } else {
+      // Leere Pset-Hüllen (nur Namen) — Index reihenfolge-basiert.
+      catalogContext.psetIndex = sequentialMultiPsetIndex(state, hostId, child);
+      const shellNames = buildCatalogPsetsForNode(
+        nodeWithRecordData(child, context),
+        catalogContext,
+      ).map((pset) => pset.psetName);
+      writeEmptyPsets(state, hostId, shellNames);
     }
-    writePsets(state, hostId, psets, true);
     ensureVerfahrenClassification(state, hostId, child);
     walkChildren(state, context, hostId, child, descent);
     return;
@@ -714,27 +784,47 @@ function importChild(
   // target "element": Upsert per ExternalId.
   const externalId = portalExternalId(child);
   const existingId = findEntityIdByExternalId(state.document, externalId);
+  const targetId =
+    existingId ?? createElementForNode(state, hostId, child, mapping);
+  if (targetId === null) {
+    return;
+  }
   if (existingId !== null) {
     state.updatedIds.add(existingId);
+  } else {
+    state.createdIds.push(targetId);
+  }
+  if (mapping.writeProperties) {
     writePsets(
       state,
-      existingId,
+      targetId,
       collectNodePsets(child, context, catalogContext),
-      true,
+      existingId !== null,
     );
-    ensureVerfahrenClassification(state, existingId, child);
-    walkChildren(state, context, existingId, child, descent);
-    return;
+  } else {
+    // Link-Pset (Identität) bleibt der globalen Option überlassen; die
+    // Katalog-Psets entstehen als leere Hüllen, Rohdaten-Psets entfallen.
+    if (context.psetOptions.writeLinkPset) {
+      writePsets(
+        state,
+        targetId,
+        [
+          {
+            properties: buildLinkPsetProperties(child),
+            psetName: LINK_PSET_NAME,
+          },
+        ],
+        true,
+      );
+    }
+    const shellNames = buildCatalogPsetsForNode(
+      nodeWithRecordData(child, context),
+      catalogContext,
+    ).map((pset) => pset.psetName);
+    writeEmptyPsets(state, targetId, shellNames);
   }
-
-  const newId = createElementForNode(state, hostId, child, mapping);
-  if (newId === null) {
-    return;
-  }
-  state.createdIds.push(newId);
-  writePsets(state, newId, collectNodePsets(child, context, catalogContext), false);
-  ensureVerfahrenClassification(state, newId, child);
-  walkChildren(state, context, newId, child, descent);
+  ensureVerfahrenClassification(state, targetId, child);
+  walkChildren(state, context, targetId, child, descent);
 }
 
 /** Kaputte Einzelknoten brechen den Import nicht ab (Warnung sammeln). */

@@ -231,6 +231,7 @@ test("mapping: FreeCAD JSON round-trip and Untersuchungsverfahren fallback", () 
     model: "Untersuchungsbereich",
     object_type: "UB",
     target: "pset",
+    write_properties: true,
   });
 
   assert.deepEqual(parseFreecadMapping(serialized), config);
@@ -1112,6 +1113,82 @@ test("idPrefix from settings yields the exact Bauwerksnummer dot-id convention",
     ),
     "5692001.2.Hauptträger Nord",
   );
+});
+
+test("target ignore drops the node including its subtree (stop before Verfahren)", () => {
+  const sample = createNativeSampleDocument();
+  const storeyId = storeyIdOf(sample);
+  const mapping = createProxyPresetMapping();
+  for (const row of mapping.mappings) {
+    if (
+      ["Untersuchungsverfahren", "Kernbohrung", "Oeffnung"].includes(row.model)
+    ) {
+      row.target = "ignore";
+    }
+  }
+  const context = createContext({
+    mapping,
+    verfahrenRecords: createMockVerfahrenRecords(),
+  });
+
+  const result = importPortalChildren(sample, storeyId, mockUb301(), context);
+  // US entstehen weiterhin …
+  assert.equal(result.createdIds.length, 2);
+  const usId = findEntityIdByExternalId(result.document, "untersuchungsstelle:401");
+  assert.ok(usId);
+  // … aber ohne Verfahrens-Psets und ohne Klassifikation.
+  assert.equal(psetOf(result.document, usId, "ePset_Kernbohrung"), undefined);
+  assert.equal(hasClassification(result.document, usId, "BWD - KB"), false);
+  // Feuchte hat keine eigene Zeile -> Fallback "Untersuchungsverfahren" (ignore).
+  const us402 = findEntityIdByExternalId(result.document, "untersuchungsstelle:402");
+  assert.ok(us402);
+  assert.equal(psetOf(result.document, us402, "ePset_Feuchtegehalt"), undefined);
+
+  // FreeCAD-Roundtrip erhält das Ziel "ignore".
+  const roundtrip = parseFreecadMapping(serializeFreecadMapping(mapping));
+  assert.equal(mappingForModel(roundtrip, "Kernbohrung").target, "ignore");
+});
+
+test("writeProperties=false creates empty pset shells only", () => {
+  const sample = createNativeSampleDocument();
+  const storeyId = storeyIdOf(sample);
+  const mapping = createProxyPresetMapping();
+  for (const row of mapping.mappings) {
+    if (row.model === "Kernbohrung" || row.model === "Untersuchungsstelle") {
+      row.writeProperties = false;
+    }
+  }
+  const context = createContext({
+    mapping,
+    verfahrenRecords: createMockVerfahrenRecords(),
+  });
+
+  const result = importPortalChildren(sample, storeyId, mockUb301(), context);
+  const usId = findEntityIdByExternalId(result.document, "untersuchungsstelle:401");
+  assert.ok(usId);
+
+  // US-Element entsteht mit Link-Pset (Identität), Katalog-Psets sind leere Hüllen.
+  assert.equal(
+    propertyValue(result.document, usId, LINK_PSET_NAME, "ExternalId"),
+    "untersuchungsstelle:401",
+  );
+  const objektinfo = psetOf(result.document, usId, "ePset_Objektinformationen");
+  assert.ok(objektinfo);
+  assert.equal(objektinfo.values.length, 0);
+  // Verfahrens-Pset als leere Hülle, Klassifikation bleibt erhalten.
+  const kbShell = psetOf(result.document, usId, "ePset_Kernbohrung");
+  assert.ok(kbShell);
+  assert.equal(kbShell.values.length, 0);
+  assert.ok(hasClassification(result.document, usId, "BWD - KB"));
+
+  // writeProperties=false am Roundtrip erhalten; Re-Import idempotent.
+  const roundtrip = parseFreecadMapping(serializeFreecadMapping(mapping));
+  assert.equal(mappingForModel(roundtrip, "Kernbohrung").writeProperties, false);
+  assert.equal(mappingForModel(roundtrip, "Probe").writeProperties, true);
+  const again = importPortalChildren(result.document, storeyId, mockUb301(), context);
+  assert.deepEqual(again.createdIds, []);
+  assert.equal(again.document.entities.length, result.document.entities.length);
+  assert.equal(psetOf(again.document, usId, "ePset_Kernbohrung2"), undefined);
 });
 
 test("proxy mode always resolves to the current preset (stored snapshots do not stick)", () => {

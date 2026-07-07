@@ -1,6 +1,13 @@
 import { normalizeIfcClass } from "../ifc/catalog";
 
-export type PortalMappingTarget = "element" | "pset" | "skip";
+/**
+ * Ziel eines Portal-Modells beim Import:
+ * - "element": eigenes IFC-Element (Upsert per ExternalId)
+ * - "pset": nur Psets am Host-Element (kein eigenes Element)
+ * - "skip": Knoten überspringen, Kinder aber weiter importieren (Durchreichen)
+ * - "ignore": Knoten SAMT Unterbaum ignorieren (z. B. "vor den Verfahren aufhören")
+ */
+export type PortalMappingTarget = "element" | "pset" | "skip" | "ignore";
 
 export interface PortalModelMapping {
   /** API-Modellname, z. B. "Untersuchungsbereich" oder "Kernbohrung". */
@@ -10,6 +17,12 @@ export interface PortalModelMapping {
   /** ObjectType-Attribut des erzeugten Elements, Default = Modellname. */
   objectType: string;
   target: PortalMappingTarget;
+  /**
+   * false = Psets nur als leere Hüllen anlegen (Name ohne Properties);
+   * bei target "element" entsteht das Element dann ohne Katalog-/Rohdaten-Psets
+   * mit leeren Pset-Hüllen. Default true.
+   */
+  writeProperties: boolean;
 }
 
 export interface PortalMappingConfig {
@@ -35,6 +48,16 @@ export const PORTAL_API_MODELS: string[] = [
   "Massnahme",
   "Messstelle",
   "Kanal",
+];
+
+/** Verfahrens-Modelle (Diagnostik) — für Bulk-Aktionen in der Mapping-UI. */
+export const PORTAL_VERFAHREN_MAPPING_MODELS: string[] = [
+  "Untersuchungsverfahren",
+  "Kernbohrung",
+  "Oeffnung",
+  "Bohrkanal",
+  "Bohrkern",
+  "Probe",
 ];
 
 /**
@@ -95,6 +118,7 @@ function createPresetRow(model: string): PortalModelMapping {
     model,
     objectType: preset?.objectType ?? model,
     target: preset?.target ?? "element",
+    writeProperties: true,
   };
 }
 
@@ -119,7 +143,12 @@ function readString(value: unknown): string {
 
 function readTarget(value: unknown): PortalMappingTarget | null {
   const token = readString(value).trim().toLowerCase();
-  if (token === "element" || token === "pset" || token === "skip") {
+  if (
+    token === "element" ||
+    token === "pset" ||
+    token === "skip" ||
+    token === "ignore"
+  ) {
     return token;
   }
   return null;
@@ -159,11 +188,16 @@ function normalizeMappingRow(raw: Record<string, unknown>): PortalModelMapping |
   const preset = createPresetRow(model);
   const ifcClassRaw = (readString(raw.ifcClass) || readString(raw.ifc_class)).trim();
   const objectTypeRaw = (readString(raw.objectType) || readString(raw.object_type)).trim();
+  const writePropertiesRaw = raw.writeProperties ?? raw.write_properties;
   return {
     ifcClass: ifcClassRaw ? normalizeIfcClass(ifcClassRaw) : preset.ifcClass,
     model,
     objectType: objectTypeRaw || preset.objectType,
     target: readTarget(raw.target) ?? preset.target,
+    writeProperties:
+      typeof writePropertiesRaw === "boolean"
+        ? writePropertiesRaw
+        : preset.writeProperties,
   };
 }
 
@@ -285,6 +319,7 @@ export function serializeFreecadMapping(config: PortalMappingConfig): string {
       ifc_class: camelIfcClass(mapping.ifcClass),
       object_type: mapping.objectType,
       target: mapping.target,
+      write_properties: mapping.writeProperties,
     })),
     version: 1,
   };
