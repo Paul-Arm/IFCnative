@@ -3,7 +3,7 @@ import { useCallback, useSyncExternalStore } from "react";
 const STORAGE_KEY = "ifcnative:ui-scale:v1";
 
 /** Prozentwerte relativ zur Browser-Standardgröße (rem-basiert). */
-export const UI_SCALE_OPTIONS = [90, 100, 110, 125] as const;
+export const UI_SCALE_OPTIONS = [70, 80, 90, 100, 110, 125] as const;
 export type UiScale = (typeof UI_SCALE_OPTIONS)[number];
 
 const DEFAULT_SCALE: UiScale = 100;

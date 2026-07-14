@@ -168,14 +168,17 @@ async function readIfcBytes(request: ConvertIfcToFragmentsRequest) {
   return new TextEncoder().encode(request.text ?? "");
 }
 
-function toExactArrayBuffer(bytes: Uint8Array) {
-  if (bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength) {
+function toExactArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  if (
+    bytes.buffer instanceof ArrayBuffer &&
+    bytes.byteOffset === 0 &&
+    bytes.byteLength === bytes.buffer.byteLength
+  ) {
     return bytes.buffer;
   }
-  return bytes.buffer.slice(
-    bytes.byteOffset,
-    bytes.byteOffset + bytes.byteLength,
-  );
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  return buffer;
 }
 
 export type {

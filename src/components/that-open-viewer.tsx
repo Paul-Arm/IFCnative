@@ -14,6 +14,10 @@ import {
     convertIfcToFragmentsInWorker,
     type ConvertIfcToFragmentsProgress,
 } from "../ifc/fragmentConversionWorker";
+import {
+    fragmentModelPointToScene,
+    fragmentScenePointToIfcWorld,
+} from "../ifc/fragmentSceneCoordinates";
 import { createBodyGeometry } from "./bodyGeometry";
 import type {
     ThatOpenViewerModel,
@@ -24,6 +28,7 @@ import type {
     ViewerMirrorResult,
     ViewerMoveDelta,
     ViewerRotationChange,
+    ViewerTransformCommitReceipt,
 } from "./that-open-viewer.types";
 
 type ViewerRuntime = Awaited<ReturnType<typeof createThatOpenRuntime>>;
@@ -33,6 +38,10 @@ export default function ThatOpenViewer({
   activeModelDeferredReason,
   activeModelFileName,
   activeModelLoaded = true,
+  editCapabilities = {
+    canMove: false,
+    canRotate: false,
+  },
   focusRequest,
   mirrorRequest,
   models,
@@ -141,10 +150,12 @@ export default function ThatOpenViewer({
           setStatus("ThatOpen viewer error");
         },
         onLog: (line) => onLogRef.current?.(line),
-        onMoveSelected: (delta, viewerApplied) =>
-          onMoveSelectedRef.current?.(delta, viewerApplied),
-        onRotateSelected: (rotation, viewerApplied) =>
-          onRotateSelectedRef.current?.(rotation, viewerApplied),
+        onMoveSelected: (entityId, delta) =>
+          onMoveSelectedRef.current?.(entityId, delta) ?? null,
+        onRotateSelected: (entityId, rotation) =>
+          onRotateSelectedRef.current?.(entityId, rotation) ?? null,
+        onTransformResult: (result) =>
+          onMirrorAppliedRef.current?.(result),
         onPickCoordinates: (pick) => {
           setLastPick(pick);
           onPickCoordinatesRef.current?.(pick);
@@ -235,6 +246,7 @@ export default function ThatOpenViewer({
       return;
     }
     void runtime.highlight(activeDocumentId, activeSelectedId);
+    void runtime.updateGrid(activeDocumentId);
   }, [activeDocumentId, activeSelectedId, modelReady]);
 
   useEffect(() => {
@@ -297,6 +309,53 @@ export default function ThatOpenViewer({
     runtime.setMoveGizmoMode(moveGizmoMode);
   }, [moveGizmoMode, runtimeReady]);
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        isViewerShortcutTarget(event.target)
+      ) {
+        return;
+      }
+      if (event.key === "Escape") {
+        setMoveGizmoActive(false);
+        setPickerActive(false);
+        return;
+      }
+      const key = event.key.toLowerCase();
+      if (key === "w" && editCapabilities.canMove) {
+        event.preventDefault();
+        setPickerActive(false);
+        setMoveGizmoMode("translate");
+        setMoveGizmoActive(true);
+      } else if (key === "r" && editCapabilities.canRotate) {
+        event.preventDefault();
+        setPickerActive(false);
+        setMoveGizmoMode("rotate");
+        setMoveGizmoActive(true);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [editCapabilities.canMove, editCapabilities.canRotate]);
+
+  useEffect(() => {
+    if (
+      moveGizmoActive &&
+      ((moveGizmoMode === "translate" && !editCapabilities.canMove) ||
+        (moveGizmoMode === "rotate" && !editCapabilities.canRotate))
+    ) {
+      setMoveGizmoActive(false);
+    }
+  }, [
+    editCapabilities.canMove,
+    editCapabilities.canRotate,
+    moveGizmoActive,
+    moveGizmoMode,
+  ]);
+
   return (
     <div className="ifcnative-thatopen-shell">
       <div
@@ -319,8 +378,13 @@ export default function ThatOpenViewer({
           <button
             aria-label="Verschieben (Gizmo)"
             className={`ifcnative-thatopen-tool${moveGizmoActive && moveGizmoMode === "translate" ? " is-active" : ""}`}
-            disabled={!activeModelVisible}
-            title="Verschieben (Gizmo)"
+            disabled={!activeModelVisible || !editCapabilities.canMove}
+            title={
+              editCapabilities.canMove
+                ? "Verschieben (Gizmo) · W"
+                : editCapabilities.transformDisabledReason ??
+                  "Auswahl kann nicht verschoben werden"
+            }
             type="button"
             onClick={() => {
               setPickerActive(false);
@@ -335,8 +399,13 @@ export default function ThatOpenViewer({
           <button
             aria-label="Rotieren (Gizmo)"
             className={`ifcnative-thatopen-tool${moveGizmoActive && moveGizmoMode === "rotate" ? " is-active" : ""}`}
-            disabled={!activeModelVisible}
-            title="Rotieren (Gizmo)"
+            disabled={!activeModelVisible || !editCapabilities.canRotate}
+            title={
+              editCapabilities.canRotate
+                ? "Rotieren (Gizmo) · R"
+                : editCapabilities.transformDisabledReason ??
+                  "Auswahl kann nicht rotiert werden"
+            }
             type="button"
             onClick={() => {
               setPickerActive(false);
@@ -479,11 +548,15 @@ async function createThatOpenRuntime(
     onError(message: string): void;
     onCoordinatePickerUsed(): void;
     onLog(line: string): void;
-    onMoveSelected(delta: ViewerMoveDelta, viewerApplied: boolean): void;
+    onMoveSelected(
+      entityId: number,
+      delta: ViewerMoveDelta,
+    ): ViewerTransformCommitReceipt | null;
     onRotateSelected(
+      entityId: number,
       rotation: ViewerRotationChange,
-      viewerApplied: boolean,
-    ): void;
+    ): ViewerTransformCommitReceipt | null;
+    onTransformResult(result: ViewerMirrorResult): void;
     onPickCoordinates(pick: ViewerCoordinatePick): void;
     onProgress(progress: { fileName: string; percent: number } | null): void;
     onSelect(
@@ -515,6 +588,7 @@ async function createThatOpenRuntime(
     import("@thatopen/components").SimpleRenderer
   >();
   world.scene = new OBC.SimpleScene(components);
+  world.scene.setup();
   world.renderer = new OBC.SimpleRenderer(components, container, {
     alpha: true,
     antialias: true,
@@ -524,7 +598,6 @@ async function createThatOpenRuntime(
   world.camera = new OBC.SimpleCamera(components);
 
   components.init();
-  world.scene.setup();
   const readViewerBackdrop = () => {
     const value = getComputedStyle(container)
       .getPropertyValue("--viewer-backdrop")
@@ -532,28 +605,71 @@ async function createThatOpenRuntime(
     return value || "#f8fafc";
   };
   world.scene.three.background = new THREE.Color(readViewerBackdrop());
-  const themeObserver = new MutationObserver(() => {
-    world.scene.three.background = new THREE.Color(readViewerBackdrop());
-  });
   world.camera.three.near = 0.1;
   world.camera.three.far = 1_000_000;
   world.camera.three.updateProjectionMatrix();
   world.camera.controls.setLookAt(8, 6, 8, 0, 0, 0);
 
   const grids = components.get(OBC.Grids);
-  grids.create(world);
+  const grid = grids.create(world);
+  const readGridColor = () =>
+    new THREE.Color(
+      globalThis.document.documentElement.classList.contains("dark")
+        ? 0x64748b
+        : 0x94a3b8,
+    );
+  grid.setup({
+    color: readGridColor(),
+    distance: 1_000,
+    primarySize: 1,
+    secondarySize: 10,
+  });
+  // SimpleGrid.setup currently forces visibility to true internally; keep the
+  // runtime setting explicit after setup as recommended by the component API.
+  grid.config.visible = true;
+  grid.fade = world.camera.three instanceof THREE.PerspectiveCamera;
+  const themeObserver = new MutationObserver(() => {
+    world.scene.three.background = new THREE.Color(readViewerBackdrop());
+    grid.config.color = readGridColor();
+  });
   const fragments = components.get(OBC.FragmentsManager);
-  const fragmentsWorkerUrl = resolvePublicAssetUrl("fragments/worker.mjs");
+  // Official Fragments workflow: let the installed package resolve its
+  // matching worker. Our postinstall patch keeps that worker available
+  // locally for the desktop/offline build.
+  const fragmentsWorkerUrl = await OBC.FragmentsManager.getWorker();
   fragments.init(fragmentsWorkerUrl);
-  const coreWithSettings = fragments.core as typeof fragments.core & {
-    settings?: { autoCoordinate?: boolean };
+  // Keep COORDINATE_TO_ORIGIN for float32 precision, but let Fragments place
+  // every independently rebased IFC relative to the first loaded model. Picks
+  // and native writes still use each model's own coordination matrix below.
+  fragments.core.settings.autoCoordinate = true;
+  const updateFragmentsOnCamera = () =>
+    void fragments.core.update().catch(() => undefined);
+  world.camera.controls.addEventListener("update", updateFragmentsOnCamera);
+  const handleFragmentModelSet = ({
+    value: model,
+  }: {
+    value: import("@thatopen/fragments").FragmentsModel;
+  }) => {
+    model.useCamera(world.camera.three);
+    world.scene.three.add(model.object);
+    void fragments.core.update(true).catch(() => undefined);
   };
-  if (coreWithSettings.settings) {
-    // We apply each model's own coordination matrix explicitly on load so
-    // scene coordinates equal IFC world coordinates. The built-in
-    // autoCoordinate (align to first loaded model) would fight with that.
-    coreWithSettings.settings.autoCoordinate = false;
-  }
+  const handleFragmentMaterialSet = ({
+    value: material,
+  }: {
+    value: import("@thatopen/fragments").BIMMaterial;
+  }) => {
+    if (!("isLodMaterial" in material && material.isLodMaterial)) {
+      material.polygonOffset = true;
+      material.polygonOffsetUnits = 1;
+      material.polygonOffsetFactor = Math.random();
+      material.needsUpdate = true;
+    }
+  };
+  fragments.list.onItemSet.add(handleFragmentModelSet);
+  fragments.core.models.materials.list.onItemSet.add(
+    handleFragmentMaterialSet,
+  );
   const viewCube = createThatOpenViewCube(THREE, container, world.camera);
   const moveGizmo = createMoveGizmo(
     THREE,
@@ -570,32 +686,72 @@ async function createThatOpenRuntime(
         callbacks.onLog(
           `fragments.moveSkipped({ reason: 'no-active-selection' });`,
         );
-        return;
+        return null;
       }
-      await highlight(activeDocumentId, change.localId);
-      if (change.mode === "translate" && change.delta) {
-        callbacks.onMoveSelected(change.delta, change.applied);
+      const entityId =
+        loaded.mirrorEntityIdByLocalId.get(change.localId) ?? change.localId;
+      if (callbacks.getSelectedId(activeDocumentId) !== entityId) {
         callbacks.onLog(
-          `fragments.move({ file: '${loaded.fileName}', id: ${change.localId}, applied: ${change.applied}, dx: ${formatCoordinate(change.delta.x ?? 0)}, dy: ${formatCoordinate(change.delta.y ?? 0)}, dz: ${formatCoordinate(change.delta.z ?? 0)} });`,
+          `fragments.transformSkipped({ reason: 'selection-changed', id: ${entityId} });`,
         );
-        return;
+        return null;
       }
-      if (change.rotationChange) {
-        callbacks.onRotateSelected(change.rotationChange, change.applied);
+      let receipt: ViewerTransformCommitReceipt | null = null;
+      if (change.mode === "translate" && change.delta) {
+        const worldDelta = sceneToIfcWorldVector(loaded, change.delta);
+        receipt = callbacks.onMoveSelected(entityId, {
+          x: worldDelta.x,
+          y: worldDelta.y,
+          z: worldDelta.z,
+        });
+        callbacks.onLog(
+          `fragments.moveCommitted({ file: '${loaded.fileName}', id: ${entityId}, dx: ${formatCoordinate(worldDelta.x)}, dy: ${formatCoordinate(worldDelta.y)}, dz: ${formatCoordinate(worldDelta.z)} });`,
+        );
+      } else if (change.rotationChange) {
+        const worldAxis = sceneToIfcWorldVector(
+          loaded,
+          change.rotationChange.axis,
+          true,
+        );
+        const worldRefDirection = sceneToIfcWorldVector(
+          loaded,
+          change.rotationChange.refDirection,
+          true,
+        );
+        receipt = callbacks.onRotateSelected(entityId, {
+          ...change.rotationChange,
+          axis: { x: worldAxis.x, y: worldAxis.y, z: worldAxis.z },
+          refDirection: {
+            x: worldRefDirection.x,
+            y: worldRefDirection.y,
+            z: worldRefDirection.z,
+          },
+        });
+        callbacks.onLog(
+          `fragments.rotateCommitted({ file: '${loaded.fileName}', id: ${entityId}, rx: ${formatCoordinate(change.rotation?.x ?? 0)}, ry: ${formatCoordinate(change.rotation?.y ?? 0)}, rz: ${formatCoordinate(change.rotation?.z ?? 0)} });`,
+        );
       }
+      return receipt
+        ? { ...receipt, documentId: activeDocumentId, entityId }
+        : null;
+    },
+    async (change, receipt) => {
+      callbacks.onTransformResult({
+        documentId: receipt.documentId,
+        label: receipt.label,
+        ok: change.applied,
+        pendingKey: receipt.pendingKey,
+        reason: change.applied ? undefined : "fragments-edit-failed",
+      });
+      await highlight(receipt.documentId, receipt.entityId).catch(() =>
+        undefined,
+      );
       callbacks.onLog(
-        `fragments.rotate({ file: '${loaded.fileName}', id: ${change.localId}, applied: ${change.applied}, rx: ${formatCoordinate(change.rotation?.x ?? 0)}, ry: ${formatCoordinate(change.rotation?.y ?? 0)}, rz: ${formatCoordinate(change.rotation?.z ?? 0)} });`,
+        `fragments.transformFinished({ id: ${receipt.entityId}, mode: '${change.mode}', applied: ${change.applied} });`,
       );
     },
     (line) => callbacks.onLog(line),
     () => void fragments.core.update(true),
-    (localId, model) => {
-      const documentId = documentIdByModelId.get(model.modelId);
-      const loaded = documentId
-        ? modelsByDocumentId.get(documentId)
-        : undefined;
-      return loaded ? loaded.mirrorEntityIdByLocalId.has(localId) : false;
-    },
   );
   const coordinateCursor = createCoordinateCursor(THREE);
   world.scene.three.add(coordinateCursor.group, coordinateCursor.rayLine);
@@ -625,9 +781,9 @@ async function createThatOpenRuntime(
     mirrorLocalIdByEntityId: Map<number, number>;
     model: import("@thatopen/fragments").FragmentsModel;
     /**
-     * Rebase aus der Konvertierung (COORDINATE_TO_ORIGIN): Szene/Modellraum →
-     * echte IFC-Welt (Viewer-Achsen, Meter) und Umkehrung. null = kein Rebase
-     * (Szene == IFC-Welt).
+     * Rebase aus der Konvertierung (COORDINATE_TO_ORIGIN): lokaler Modellraum
+     * → echte IFC-Welt (Viewer-Achsen, Meter) und Umkehrung. Die zusätzliche
+     * model.object-Transformation koordiniert diesen Modellraum in der Szene.
      */
     modelToIfcWorld: import("three").Matrix4 | null;
     ifcWorldToModel: import("three").Matrix4 | null;
@@ -640,12 +796,46 @@ async function createThatOpenRuntime(
     point: { x: number; y: number; z: number },
   ) => {
     const vector = new THREE.Vector3(point.x, point.y, point.z);
-    if (!loaded.modelToIfcWorld) {
-      return vector;
+    return fragmentScenePointToIfcWorld(
+      vector,
+      loaded.model.object,
+      loaded.modelToIfcWorld,
+    );
+  };
+
+  const sceneToIfcWorldVector = (
+    loaded: LoadedViewerModel,
+    vector: { x?: number; y?: number; z?: number },
+    normalize = false,
+  ) => {
+    const result = new THREE.Vector3(
+      vector.x ?? 0,
+      vector.y ?? 0,
+      vector.z ?? 0,
+    );
+    if (loaded.modelToIfcWorld) {
+      result.applyMatrix3(
+        new THREE.Matrix3().setFromMatrix4(loaded.modelToIfcWorld),
+      );
     }
-    loaded.model.object.updateWorldMatrix(true, false);
-    loaded.model.object.worldToLocal(vector);
-    return vector.applyMatrix4(loaded.modelToIfcWorld);
+    return normalize ? result.normalize() : result;
+  };
+
+  const ifcWorldToSceneVector = (
+    loaded: LoadedViewerModel,
+    vector: { x?: number; y?: number; z?: number },
+  ) => {
+    const result = new THREE.Vector3(
+      vector.x ?? 0,
+      vector.y ?? 0,
+      vector.z ?? 0,
+    );
+    if (loaded.ifcWorldToModel) {
+      result.applyMatrix3(
+        new THREE.Matrix3().setFromMatrix4(loaded.ifcWorldToModel),
+      );
+    }
+    return result;
   };
 
   const modelsByDocumentId = new Map<string, LoadedViewerModel>();
@@ -657,19 +847,68 @@ async function createThatOpenRuntime(
   const resolveLocalId = (loaded: LoadedViewerModel, entityId: number) =>
     loaded.mirrorLocalIdByEntityId.get(entityId) ?? entityId;
 
-  // Delta-Modelle der Edit-API (`<modelId>-DELTA-MODEL-<ts>`) hängen als
-  // eigene Modelle in der Registry und überleben das Dispose ihres
-  // Elternmodells — ohne Aufräumen bleiben nach einer Neuberechnung
-  // Zombie-Renderings der gespiegelten Elemente in der Szene stehen.
+  async function updateGrid(documentId: string) {
+    const loaded = modelsByDocumentId.get(documentId);
+    if (!loaded) {
+      grid.three.position.y = 0;
+      return;
+    }
+    const categories = await loaded.model
+      .getItemsOfCategories([/BUILDINGSTOREY/])
+      .catch(() => ({}));
+    const storeyIds = Object.values(categories).flat();
+    const storeys = storeyIds.length
+      ? await loaded.model.getItemsData(storeyIds).catch(() => [])
+      : [];
+    const elevations = storeys
+      .map((storey) => readNumericAttribute(storey, ["Elevation", "elevation"]))
+      .filter((value): value is number => value !== undefined);
+    const coordinates = await loaded.model.getCoordinates().catch(() => []);
+    const coordinationHeight = Number(coordinates[1] ?? 0);
+    const finiteCoordinationHeight = Number.isFinite(coordinationHeight)
+      ? coordinationHeight
+      : 0;
+    let gridElevation: number;
+    if (elevations.length) {
+      // Elevation is expressed in IFC world coordinates. First convert it to
+      // this model's rebased local frame, then include the model.object offset
+      // that Fragments applied while coordinating all loaded IFCs.
+      const localGridPoint = new THREE.Vector3(
+        0,
+        Math.min(...elevations) + finiteCoordinationHeight,
+        0,
+      );
+      gridElevation = fragmentModelPointToScene(
+        localGridPoint,
+        loaded.model.object,
+      ).y;
+    } else {
+      // Some infrastructure IFCs omit IfcBuildingStorey.Elevation. In that
+      // case, anchor the grid to the visible model bounds instead of putting
+      // it at an unrelated georeferencing origin.
+      const gridItems = loaded.fitItems
+        ? [...loaded.fitItems]
+        : await loaded.model.getLocalIds().catch(() => []);
+      const box = gridItems.length
+        ? await loaded.model.getMergedBox(gridItems).catch(() => null)
+        : null;
+      gridElevation = box && !box.isEmpty() ? box.min.y : 0;
+    }
+    grid.three.position.y = gridElevation;
+    callbacks.onLog(
+      `viewer.grid({ file: '${loaded.fileName}', elevation: ${formatCoordinate(grid.three.position.y)}, storeys: ${storeyIds.length} });`,
+    );
+  }
+
+  // Delta-Modelle der Edit-API hängen als eigene Modelle in der Registry und
+  // überleben das Dispose ihres Elternmodells. Über die öffentliche
+  // parentModelId-Beziehung lassen sie sich ohne Namenskonvention aufräumen.
   async function disposeDeltaModels(baseModelId: string) {
-    const prefix = `${baseModelId}-DELTA-MODEL-`;
-    for (const [modelId, model] of [...fragments.core.models.list.entries()]) {
-      if (!modelId.startsWith(prefix)) {
+    for (const [modelId, model] of [...fragments.list.entries()]) {
+      if (!model.isDeltaModel || model.parentModelId !== baseModelId) {
         continue;
       }
-      model.object.removeFromParent();
-      await model.dispose().catch(() => undefined);
-      fragments.core.models.list.delete(modelId);
+      await fragments.core.disposeModel(modelId).catch(() => undefined);
       callbacks.onLog(
         `viewer.disposeDeltaModel({ modelId: '${modelId}' });`,
       );
@@ -725,10 +964,11 @@ async function createThatOpenRuntime(
       callbacks.onLog("viewer.selectMiss({ engine: 'thatopen' });");
       return;
     }
-    // Per Edit-API erzeugte/bearbeitete Elemente rendert die Fragments-Engine
-    // in einem separaten Delta-Modell (`<modelId>-DELTA-MODEL-<ts>`) — für
-    // Auswahl/Daten auf das Elternmodell auflösen.
-    const modelId = stripDeltaModelId(result.fragments.modelId);
+    // Per Edit-API erzeugte/bearbeitete Elemente rendern in einem separaten
+    // Delta-Modell. Für Auswahl/Daten dessen öffentliche Elternbeziehung
+    // verwenden.
+    const hitModel = fragments.list.get(result.fragments.modelId);
+    const modelId = hitModel?.parentModelId ?? result.fragments.modelId;
     const documentId = documentIdByModelId.get(modelId);
     const loadedModel = documentId
       ? modelsByDocumentId.get(documentId)
@@ -828,8 +1068,9 @@ async function createThatOpenRuntime(
     for (const [documentId, loaded] of modelsByDocumentId) {
       if (!nextDocumentIds.has(documentId)) {
         await disposeDeltaModels(loaded.model.modelId);
-        loaded.model.object.removeFromParent();
-        await loaded.model.dispose().catch(() => undefined);
+        await fragments.core
+          .disposeModel(loaded.model.modelId)
+          .catch(() => undefined);
         modelsByDocumentId.delete(documentId);
         documentIdByModelId.delete(loaded.model.modelId);
       }
@@ -844,8 +1085,9 @@ async function createThatOpenRuntime(
       }
       if (current) {
         await disposeDeltaModels(current.model.modelId);
-        current.model.object.removeFromParent();
-        await current.model.dispose().catch(() => undefined);
+        await fragments.core
+          .disposeModel(current.model.modelId)
+          .catch(() => undefined);
         modelsByDocumentId.delete(nextModel.documentId);
         documentIdByModelId.delete(current.model.modelId);
       }
@@ -879,14 +1121,12 @@ async function createThatOpenRuntime(
         `viewer.convert({ engine: 'worker', file: '${nextModel.fileName}', ms: ${Math.round(converted.elapsedMs)} });`,
       );
       const model = await fragments.core.load(converted.fragments, {
-        camera: world.camera.three,
         modelId,
         raw: true,
       });
-      // Die Szene bleibt bewusst rebased am Ursprung (float32-Präzision bei
-      // georeferenzierten Modellen). Die beim Konvertieren angewendete
-      // Welt→Ursprung-Transformation wird gespeichert, damit Picks und
-      // Schreibpfade explizit zwischen Szenenraum und IFC-Welt umrechnen.
+      // Die Geometrie jedes IFC bleibt für float32-Präzision lokal rebased.
+      // Fragments positioniert model.object relativ zum ersten geladenen IFC;
+      // die individuelle Welt→Modell-Matrix bleibt für Picks/Schreibpfade.
       const ifcWorldToModel = coordinationToMatrix(
         THREE,
         converted.coordination,
@@ -910,8 +1150,6 @@ async function createThatOpenRuntime(
           `viewer.fit.ignoreOriginMarkers({ file: '${nextModel.fileName}', count: ${fitModelItems.ignored} });`,
         );
       }
-      model.useCamera(world.camera.three);
-      world.scene.three.add(model.object);
       modelsByDocumentId.set(nextModel.documentId, {
         documentId: nextModel.documentId,
         fileName: nextModel.fileName,
@@ -929,6 +1167,7 @@ async function createThatOpenRuntime(
       );
     }
     await fragments.core.update(true);
+    await updateGrid(callbacks.getActiveDocumentId());
     callbacks.onProgress(null);
     if (options?.fitAfterLoad ?? true) {
       await fit();
@@ -943,7 +1182,26 @@ async function createThatOpenRuntime(
     );
   }
 
-  async function highlight(
+  let highlightRequest = 0;
+  let highlightQueue: Promise<unknown> = Promise.resolve();
+
+  function highlight(
+    documentId: string,
+    entityId: number,
+    options?: { updateGizmo?: boolean },
+  ) {
+    const request = ++highlightRequest;
+    const run = highlightQueue.then(async () => {
+      if (request !== highlightRequest) {
+        return;
+      }
+      await highlightInternal(documentId, entityId, options);
+    });
+    highlightQueue = run.catch(() => undefined);
+    return run;
+  }
+
+  async function highlightInternal(
     documentId: string,
     entityId: number,
     options?: { updateGizmo?: boolean },
@@ -956,10 +1214,10 @@ async function createThatOpenRuntime(
     // Auch die Delta-Modelle des Elternmodells einfärben — per Edit-API
     // erzeugte/verschobene Elemente rendern dort, nicht im Basismodell.
     const targets: Record<string, Set<number>> = {};
-    for (const modelId of fragments.core.models.list.keys()) {
+    for (const [modelId, model] of fragments.list) {
       if (
         modelId === loaded.model.modelId ||
-        modelId.startsWith(`${loaded.model.modelId}-DELTA-MODEL-`)
+        (model.isDeltaModel && model.parentModelId === loaded.model.modelId)
       ) {
         targets[modelId] = new Set([localId]);
       }
@@ -1053,7 +1311,20 @@ async function createThatOpenRuntime(
         await fragments.core.editor.applyChanges(loaded.model.modelId);
       }
     } else {
-      await loaded.model.setVisible([localId], false);
+      const [element] = await fragments.core.editor.getElements(
+        loaded.model.modelId,
+        [localId],
+      );
+      if (element) {
+        await setFragmentElementVisible(
+          fragments.core,
+          loaded.model,
+          element,
+          false,
+        );
+      } else {
+        await loaded.model.setVisible([localId], false);
+      }
     }
     loaded.mirrorLocalIdByEntityId.delete(entityId);
     loaded.mirrorEntityIdByLocalId.delete(localId);
@@ -1085,20 +1356,32 @@ async function createThatOpenRuntime(
           return finish(false, "no-editable-element");
         }
         const meshes = await element.getMeshes();
+        let disposed = false;
         try {
+          const sceneDelta = ifcWorldToSceneVector(loaded, op.delta);
           meshes.position.set(
-            meshes.position.x + op.delta.x,
-            meshes.position.y + op.delta.y,
-            meshes.position.z + op.delta.z,
+            meshes.position.x + sceneDelta.x,
+            meshes.position.y + sceneDelta.y,
+            meshes.position.z + sceneDelta.z,
           );
           meshes.updateMatrixWorld(true);
           await element.setMeshes(meshes);
+          element.disposeMeshes(meshes);
+          disposed = true;
           const requests = element.getRequests();
           if (requests?.length) {
             await fragments.core.editor.edit(loaded.model.modelId, requests);
           }
+          await setFragmentElementVisible(
+            fragments.core,
+            loaded.model,
+            element,
+            true,
+          );
         } finally {
-          element.disposeMeshes(meshes);
+          if (!disposed) {
+            element.disposeMeshes(meshes);
+          }
         }
       } else if (op.kind === "remove") {
         await removeMirroredElement(loaded, op.entityId);
@@ -1185,10 +1468,16 @@ async function createThatOpenRuntime(
     canvas.removeEventListener("click", selectFromPointer, { capture: true });
     resizeObserver.disconnect();
     themeObserver.disconnect();
+    world.camera.controls.removeEventListener("update", updateFragmentsOnCamera);
+    fragments.list.onItemSet.remove(handleFragmentModelSet);
+    fragments.core.models.materials.list.onItemSet.remove(
+      handleFragmentMaterialSet,
+    );
     for (const loaded of modelsByDocumentId.values()) {
       await disposeDeltaModels(loaded.model.modelId).catch(() => undefined);
-      loaded.model.object.removeFromParent();
-      await loaded.model.dispose().catch(() => undefined);
+      await fragments.core
+        .disposeModel(loaded.model.modelId)
+        .catch(() => undefined);
     }
     modelsByDocumentId.clear();
     documentIdByModelId.clear();
@@ -1219,6 +1508,7 @@ async function createThatOpenRuntime(
     setMoveGizmoEnabled: moveGizmo.setEnabled,
     setMoveGizmoMode: moveGizmo.setMode,
     syncModels,
+    updateGrid,
   };
 }
 
@@ -1231,13 +1521,7 @@ interface CameraControlsLike {
 
 type MoveGizmoMode = "translate" | "rotate";
 
-interface MoveGizmoCommit {
-  /**
-   * true: die gezogene Pose wurde bereits per Edit-Request in das
-   * Fragments-Modell übernommen (Tutorial-Muster) — der Workspace muss nur
-   * noch das native Dokument nachziehen.
-   */
-  applied: boolean;
+interface MoveGizmoChange {
   delta?: ViewerMoveDelta;
   localId: number;
   mode: MoveGizmoMode;
@@ -1245,32 +1529,52 @@ interface MoveGizmoCommit {
   rotationChange?: ViewerRotationChange;
 }
 
-interface EditableFragmentElementLike {
-  disposeMeshes(meshes: import("three").Group): void;
-  getMeshes(): Promise<import("three").Group>;
-  getRequests(): unknown[] | null | undefined;
-  setMeshes(meshes: import("three").Group): Promise<void>;
+interface MoveGizmoCommit extends MoveGizmoChange {
+  /** Der Edit wurde vom Fragments-Worker erfolgreich angewendet. */
+  applied: boolean;
 }
 
-interface EditableFragmentsLike {
-  editor: {
-    edit(
-      modelId: string,
-      requests: unknown[],
-      options?: unknown,
-    ): Promise<unknown>;
-    getElements(
-      modelId: string,
-      localIds: number[],
-    ): Promise<EditableFragmentElementLike[]>;
-  };
-  update(force?: boolean): Promise<void>;
+interface MoveGizmoCommitReceipt extends ViewerTransformCommitReceipt {
+  documentId: string;
+  entityId: number;
 }
 
-interface EditableFragmentModelLike {
-  modelId: string;
-  object?: import("three").Object3D;
-  setVisible?(localIds: number[] | undefined, visible: boolean): Promise<void>;
+type EditableFragmentElementLike = import("@thatopen/fragments").Element;
+type EditableFragmentsLike = import("@thatopen/fragments").FragmentsModels;
+type EditableFragmentModelLike = import("@thatopen/fragments").FragmentsModel;
+
+/**
+ * Synchronisiert die Sichtbarkeit des bearbeiteten Elements zwischen Basis-
+ * und Delta-Modell nach dem offiziellen EditElements-Muster. Andere geladene
+ * Dokumente bleiben unberührt, weil sich deren localIds überschneiden können.
+ */
+async function setFragmentElementVisible(
+  fragments: EditableFragmentsLike,
+  model: EditableFragmentModelLike,
+  element: EditableFragmentElementLike,
+  visible: boolean,
+) {
+  const relatedModelIds = new Set(
+    [model.modelId, model.deltaModelId].filter(
+      (value): value is string => Boolean(value),
+    ),
+  );
+  const promises: Promise<void>[] = [];
+  for (const [modelId, candidate] of fragments.models.list) {
+    if (!relatedModelIds.has(modelId)) {
+      continue;
+    }
+    if (visible && candidate.deltaModelId) {
+      const editedElements = new Set(await candidate.getEditedElements());
+      if (editedElements.has(element.localId)) {
+        // Das veraltete Basiselement bleibt verborgen; sein Ersatz liegt im
+        // Delta-Modell.
+        continue;
+      }
+    }
+    promises.push(candidate.setVisible([element.localId], visible));
+  }
+  await Promise.all(promises);
 }
 
 interface FitFragmentModelLike {
@@ -1290,15 +1594,6 @@ function canvasFromRenderer(
   return renderer.three.domElement;
 }
 
-/**
- * Die Fragments-Engine rendert per Edit-API erzeugte/bearbeitete Elemente in
- * einem separaten Delta-Modell namens `<modelId>-DELTA-MODEL-<timestamp>`.
- * Für Auswahl, Daten und Dokument-Zuordnung zählt das Elternmodell.
- */
-function stripDeltaModelId(modelId: string) {
-  return modelId.replace(/-DELTA-MODEL-[\d.]+$/, "");
-}
-
 function createMoveGizmo(
   THREE: typeof import("three"),
   TransformControls: TransformControlsConstructor,
@@ -1307,13 +1602,15 @@ function createMoveGizmo(
   camera: import("three").Camera,
   cameraControls: CameraControlsLike,
   canvas: HTMLCanvasElement,
-  onTransformCommitted: (change: MoveGizmoCommit) => Promise<void>,
+  onNativeSync: (
+    change: MoveGizmoChange,
+  ) => Promise<MoveGizmoCommitReceipt | null>,
+  onTransformFinished: (
+    change: MoveGizmoCommit,
+    receipt: MoveGizmoCommitReceipt,
+  ) => Promise<void>,
   onLog: (line: string) => void,
   onSceneChange: () => void,
-  isMirrorCreated: (
-    localId: number,
-    model: EditableFragmentModelLike,
-  ) => boolean = () => false,
 ) {
   const controls = new TransformControls(camera, canvas);
   controls.setMode("translate");
@@ -1331,8 +1628,9 @@ function createMoveGizmo(
   let selectedModel: EditableFragmentModelLike | null = null;
   let editElement: EditableFragmentElementLike | null = null;
   let editMeshes: import("three").Group | null = null;
-  const dragStart = new THREE.Vector3();
-  const dragStartRotation = new THREE.Euler();
+  const dragStartWorldPosition = new THREE.Vector3();
+  const dragStartWorldQuaternion = new THREE.Quaternion();
+  const dragStartLocalRotation = new THREE.Euler();
 
   // Gizmo operations arrive concurrently (reload, fit, highlight, selection
   // effects). Serialize them so overlapping loadEditable/disposeEditable calls
@@ -1362,6 +1660,7 @@ function createMoveGizmo(
   const disposeEditable = async (restoreVisible: boolean) => {
     const model = selectedModel;
     const localId = selectedLocalId;
+    const element = editElement;
     controls.detach();
     helper.visible = false;
     if (editMeshes) {
@@ -1375,8 +1674,16 @@ function createMoveGizmo(
       editElement = null;
     }
     removeOrphanEditMeshes();
-    if (restoreVisible && model && Number.isFinite(localId) && localId > 0) {
-      await model.setVisible?.([localId], true).catch(() => undefined);
+    if (
+      restoreVisible &&
+      model &&
+      element &&
+      Number.isFinite(localId) &&
+      localId > 0
+    ) {
+      await setFragmentElementVisible(fragments, model, element, true).catch(
+        () => undefined,
+      );
       await fragments.update(true).catch(() => undefined);
     }
     onSceneChange();
@@ -1397,30 +1704,28 @@ function createMoveGizmo(
       return;
     }
     editElement = element;
-    editMeshes = await element.getMeshes();
-    editMeshes.name = "IFCnativeEditableElement";
-    if (isMirrorCreated(localId, model)) {
-      // Delta-Element (per Edit-API erzeugt): die Klon-Meshes sind nicht
-      // verlässlich rekonstruierbar und das Original lässt sich nicht per
-      // setVisible ausblenden — das Gizmo hängt an einem unsichtbaren Proxy
-      // an der Element-Pose; die gezogene Pose wird beim Loslassen per
-      // setMeshes übernommen (das Element springt nach).
-      for (const child of [...editMeshes.children]) {
-        child.removeFromParent();
-        child.traverse((object) => {
-          if (object instanceof THREE.Mesh) {
-            object.geometry.dispose();
-          }
-        });
-      }
-    } else {
-      await model.setVisible?.([localId], false).catch(() => undefined);
+    try {
+      await setFragmentElementVisible(fragments, model, element, false);
+      editMeshes = await element.getMeshes();
+      editMeshes.name = "IFCnativeEditableElement";
+    } catch (reason) {
+      await setFragmentElementVisible(fragments, model, element, true).catch(
+        () => undefined,
+      );
+      editElement = null;
+      editMeshes = null;
+      throw reason;
     }
     // Parent the preview under the model object so any coordination
     // transform (georeferenced models) applies to the clone as well.
-    (model.object ?? scene).add(editMeshes);
+    const previewParent = model.object ?? scene;
+    previewParent.add(editMeshes);
+    editMeshes.updateWorldMatrix(true, true);
     removeOrphanEditMeshes();
     controls.setMode(mode);
+    // Official EditElements workflow: TransformControls operate directly on
+    // the group returned by element.getMeshes(). setMeshes() reads this
+    // group's local matrix to generate UPDATE_GLOBAL_TRANSFORM requests.
     controls.attach(editMeshes);
     helper.visible = true;
     await fragments.update(true).catch(() => undefined);
@@ -1477,8 +1782,10 @@ function createMoveGizmo(
     if (!target) {
       return;
     }
-    dragStart.copy(target.position);
-    dragStartRotation.copy(target.rotation);
+    target.updateWorldMatrix(true, false);
+    target.getWorldPosition(dragStartWorldPosition);
+    target.getWorldQuaternion(dragStartWorldQuaternion);
+    dragStartLocalRotation.copy(target.rotation);
     onSceneChange();
   };
   const onMouseUp = () => {
@@ -1486,26 +1793,39 @@ function createMoveGizmo(
   };
 
   const commitCurrentTransform = async () => {
-    const commit = await enqueue(async (): Promise<MoveGizmoCommit | null> => {
+    const result = await enqueue(async (): Promise<{
+      commit: MoveGizmoCommit;
+      receipt: MoveGizmoCommitReceipt;
+    } | null> => {
       const target = editMeshes;
-      if (!target || !selectedModel || selectedLocalId <= 0) {
+      const meshes = editMeshes;
+      const element = editElement;
+      if (
+        !target ||
+        !meshes ||
+        !element ||
+        !selectedModel ||
+        selectedLocalId <= 0
+      ) {
         onSceneChange();
         return null;
       }
-      const delta = target.position.clone().sub(dragStart);
+      target.updateWorldMatrix(true, false);
+      const endWorldPosition = target.getWorldPosition(new THREE.Vector3());
+      const endWorldQuaternion = target.getWorldQuaternion(
+        new THREE.Quaternion(),
+      );
+      const delta = endWorldPosition.sub(dragStartWorldPosition);
       const rotation = {
-        x: target.rotation.x - dragStartRotation.x,
-        y: target.rotation.y - dragStartRotation.y,
-        z: target.rotation.z - dragStartRotation.z,
+        x: target.rotation.x - dragStartLocalRotation.x,
+        y: target.rotation.y - dragStartLocalRotation.y,
+        z: target.rotation.z - dragStartLocalRotation.z,
       };
       const rotationChange = readRotationChange(THREE, target, rotation);
       const changed =
         mode === "translate"
           ? delta.lengthSq() >= 0.000001
-          : Math.abs(rotation.x) +
-              Math.abs(rotation.y) +
-              Math.abs(rotation.z) >=
-            0.000001;
+          : dragStartWorldQuaternion.angleTo(endWorldQuaternion) >= 0.000001;
       if (!changed) {
         onSceneChange();
         return null;
@@ -1513,33 +1833,39 @@ function createMoveGizmo(
 
       const localId = selectedLocalId;
       const model = selectedModel;
-      const element = editElement;
-      // Tutorial-Muster (Fragments EditElements): die gezogene Pose direkt
-      // als Edit-Request in das Fragments-Modell übernehmen. Das native
-      // Dokument zieht über onTransformCommitted nach (Dual-Write) — der
-      // Viewer braucht danach keine Neuberechnung.
+      const change: MoveGizmoChange = {
+        localId,
+        mode,
+        ...(mode === "translate"
+          ? { delta: { x: delta.x, y: delta.y, z: delta.z } }
+          : { rotation, rotationChange }),
+      };
       let applied = false;
-      if (element) {
-        try {
-          target.updateMatrixWorld(true);
-          await element.setMeshes(target);
-          const requests = element.getRequests();
-          if (requests?.length) {
-            await fragments.editor.edit(model.modelId, requests);
-            applied = true;
-          }
-        } catch (reason) {
-          onLog(
-            `viewer.transformGizmo.editError(${JSON.stringify(String(reason))});`,
-          );
+      try {
+        // That Open EditElements commit order:
+        // setMeshes -> dispose preview -> getRequests -> editor.edit -> update.
+        // No native STEP write happens until this worker-backed edit succeeds.
+        await element.setMeshes(meshes);
+        controls.detach();
+        helper.visible = false;
+        element.disposeMeshes(meshes);
+        editMeshes = null;
+        const requests = element.getRequests();
+        if (requests?.length) {
+          await fragments.editor.edit(model.modelId, requests);
+          applied = true;
         }
+      } catch (reason) {
+        onLog(
+          `viewer.transformGizmo.editError(${JSON.stringify(String(reason))});`,
+        );
       }
       controls.detach();
       helper.visible = false;
       if (editMeshes) {
         editMeshes.removeFromParent();
         try {
-          element?.disposeMeshes(editMeshes);
+          element.disposeMeshes(editMeshes);
         } catch {
           // The owning model may already be disposed after a reload.
         }
@@ -1547,27 +1873,46 @@ function createMoveGizmo(
       editElement = null;
       editMeshes = null;
       removeOrphanEditMeshes();
-      // Original (jetzt an der neuen Pose) wieder zeigen; die anschließende
-      // Selektion lädt frische Editor-Meshes für die nächste Verschiebung.
-      await model.setVisible?.([localId], true).catch(() => undefined);
+      // Restore visibility using the tutorial's base/delta rule. After a
+      // successful edit the stale base item stays hidden and the delta item
+      // becomes visible.
+      await setFragmentElementVisible(fragments, model, element, true).catch(
+        () => undefined,
+      );
       await fragments.update(true).catch(() => undefined);
-      return {
-        applied,
-        localId,
-        mode,
-        ...(mode === "translate"
-          ? { delta: { x: delta.x, y: delta.y, z: delta.z } }
-          : { rotation, rotationChange }),
-      };
+      if (!applied) {
+        onLog(
+          `viewer.transformGizmo.reverted({ id: ${localId}, reason: 'fragments-edit-failed' });`,
+        );
+        return null;
+      }
+      // Fragments is now authoritative for the completed interaction. Mirror
+      // the resulting world transform into the native STEP document so IFC
+      // export preserves the same pose.
+      let receipt: MoveGizmoCommitReceipt | null = null;
+      try {
+        receipt = await onNativeSync(change);
+      } catch (reason) {
+        onLog(
+          `viewer.transformGizmo.nativeSyncError(${JSON.stringify(String(reason))});`,
+        );
+      }
+      if (!receipt) {
+        onLog(
+          `viewer.transformGizmo.nativeSyncRejected({ id: ${localId} });`,
+        );
+        return null;
+      }
+      return { commit: { ...change, applied }, receipt };
     });
-    if (!commit) {
+    if (!result) {
       return;
     }
-    await onTransformCommitted(commit);
+    await onTransformFinished(result.commit, result.receipt);
     onLog(
-      commit.mode === "translate"
-        ? `viewer.moveGizmo.delta({ dx: ${formatCoordinate(commit.delta?.x ?? 0)}, dy: ${formatCoordinate(commit.delta?.y ?? 0)}, dz: ${formatCoordinate(commit.delta?.z ?? 0)} });`
-        : `viewer.rotateGizmo.delta({ rx: ${formatCoordinate(commit.rotation?.x ?? 0)}, ry: ${formatCoordinate(commit.rotation?.y ?? 0)}, rz: ${formatCoordinate(commit.rotation?.z ?? 0)} });`,
+      result.commit.mode === "translate"
+        ? `viewer.moveGizmo.delta({ dx: ${formatCoordinate(result.commit.delta?.x ?? 0)}, dy: ${formatCoordinate(result.commit.delta?.y ?? 0)}, dz: ${formatCoordinate(result.commit.delta?.z ?? 0)} });`
+        : `viewer.rotateGizmo.delta({ rx: ${formatCoordinate(result.commit.rotation?.x ?? 0)}, ry: ${formatCoordinate(result.commit.rotation?.y ?? 0)}, rz: ${formatCoordinate(result.commit.rotation?.z ?? 0)} });`,
     );
     onSceneChange();
   };
@@ -1577,11 +1922,13 @@ function createMoveGizmo(
     meshes: import("three").Object3D,
     rotation: ViewerMoveDelta,
   ): ViewerRotationChange => {
+    meshes.updateWorldMatrix(true, false);
+    const worldQuaternion = meshes.getWorldQuaternion(new THREE.Quaternion());
     const axis = new THREE.Vector3(0, 1, 0)
-      .applyQuaternion(meshes.quaternion)
+      .applyQuaternion(worldQuaternion)
       .normalize();
     const refDirection = new THREE.Vector3(1, 0, 0)
-      .applyQuaternion(meshes.quaternion)
+      .applyQuaternion(worldQuaternion)
       .normalize();
     return {
       axis: { x: axis.x, y: axis.y, z: axis.z },
@@ -1709,6 +2056,7 @@ async function replaceFragmentElementGeometry(
   const meshes = await element.getMeshes();
   const replacement = createBodyGeometry(THREE, options);
   let changedMeshes = 0;
+  let disposed = false;
   try {
     meshes.traverse((object) => {
       if (!(object instanceof THREE.Mesh)) {
@@ -1725,15 +2073,20 @@ async function replaceFragmentElementGeometry(
     }
     meshes.updateMatrixWorld(true);
     await element.setMeshes(meshes);
+    element.disposeMeshes(meshes);
+    disposed = true;
     const requests = element.getRequests();
     if (!requests?.length) {
       return false;
     }
     await fragments.editor.edit(model.modelId, requests);
+    await setFragmentElementVisible(fragments, model, element, true);
     return true;
   } finally {
     replacement.dispose();
-    element.disposeMeshes(meshes);
+    if (!disposed) {
+      element.disposeMeshes(meshes);
+    }
   }
 }
 
@@ -2077,6 +2430,16 @@ function formatCoordinatePickClipboard(pick: ViewerCoordinatePick) {
     y: formatCoordinate(pick.y),
     z: formatCoordinate(pick.z),
   });
+}
+
+function isViewerShortcutTarget(target: EventTarget | null) {
+  return (
+    target instanceof HTMLElement &&
+    (target.isContentEditable ||
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement)
+  );
 }
 
 async function writeClipboardText(text: string) {

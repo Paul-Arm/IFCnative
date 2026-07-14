@@ -1,6 +1,6 @@
 {
   "name": "ifcnative",
-  "version": "1.4.0",
+  "version": "1.4.8",
   "description": "Desktop IFC builder and viewer built with Vite, React, and Electron.",
   "main": "dist-electron/main.js",
   "engines": {
@@ -32,10 +32,10 @@
     "@fontsource-variable/geist-mono": "^5.2.8",
     "@pierre/trees": "^1.0.0-beta.3",
     "@tailwindcss/vite": "^4.3.0",
-    "@thatopen/components": "^3.4.6",
-    "@thatopen/fragments": "^3.4.5",
-    "@thatopen/ui": "^3.4.1",
-    "@thatopen/ui-obc": "^3.4.2",
+    "@thatopen/components": "~3.4.6",
+    "@thatopen/fragments": "~3.4.5",
+    "@thatopen/ui": "~3.4.1",
+    "@thatopen/ui-obc": "~3.4.2",
     "@xyflow/react": "^12.10.2",
     "camera-controls": "^3.1.2",
     "class-variance-authority": "^0.7.1",
@@ -74,6 +74,7 @@
   "private": true,
   "build": {
     "appId": "com.mkp.ifcnative.desktop",
+    "compression": "normal",
     "productName": "IFCnative",
     "directories": {
       "output": "release/electron"
@@ -85,17 +86,24 @@
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
+      "build/icon.ico",
       "!node_modules/**/*",
       "package.json"
     ],
     "win": {
+      "electronLanguages": [
+        "de",
+        "en-US"
+      ],
+      "icon": "build/icon.ico",
       "signAndEditExecutable": false,
       "target": [
         "portable"
       ]
     },
     "portable": {
-      "artifactName": "IFCnative-${version}-portable.exe"
+      "artifactName": "IFCnative-${version}-portable.exe",
+      "useZip": true
     }
   }
 }

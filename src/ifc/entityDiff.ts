@@ -411,7 +411,7 @@ function describeRelationshipFallback(entity: StepEntityLine) {
   return uniqueRefs ? `${entity.type} ${uniqueRefs}${suffix}` : entity.type;
 }
 
-function describeGeometry(entity: StepEntityLine, step?: ParsedStepText) {
+function describeGeometry(entity: StepEntityLine, step?: ParsedStepText): string {
   const profileDescription = describeProfileGeometry(entity);
   if (profileDescription) {
     return `${entity.type} ${profileDescription}`;

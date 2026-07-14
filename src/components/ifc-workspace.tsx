@@ -17,8 +17,10 @@ import {
     HardDriveDownload,
     PanelTopOpen,
     Plus,
+    Redo2,
     Save,
     Trash2,
+    Undo2,
     X,
 } from "lucide-react";
 import {
@@ -78,19 +80,22 @@ import {
     getNativePlacementWorldFrame,
     getNextNativeEntityId,
     ifcPlacementPointToViewerWorldPoint,
+    nativeWorldDirectionInPlacementParentFrame,
     parseNativeIfcFileInWorker,
+    planNativeEntityRemoval,
     removeNativeBodyRepresentation,
-    removeNativeEntity,
     removeNativePropertyFromSet,
     removeNativePropertySet,
     removeNativeRelationship,
     resolveNativeMovableProductId,
     serializeNativeIfcDocument,
+    summarizeNativeIfcGeometry,
     setDiagnosticObjectiveReferences as setNativeDiagnosticObjectiveReferences,
     splitTopLevel,
     suggestCatalogObjectForEntity,
     updateNativeEntity,
     updateNativePlacement,
+    updateNativePlacementWorld,
     updateNativePlacementRotation,
     updateNativePropertySetName,
     updateNativePropertyValue,
@@ -107,6 +112,7 @@ import {
     type IfcObjectCatalog,
     type NativeIfcDocument,
     type NativeIfcEntity,
+    type NativeEntityRemovalPlan,
 } from "@/ifc";
 import { type NativeGraphPreset } from "@/ifc/nativeGraph";
 
@@ -135,6 +141,7 @@ import {
     RELATION_TYPES,
 } from "./ifc-workspace/constants";
 import { DiagnosticsAssistantPanel } from "./ifc-workspace/DiagnosticsAssistantPanel";
+import { DeleteEntityDialog } from "./ifc-workspace/DeleteEntityDialog";
 import { GraphPanel } from "./ifc-workspace/GraphPanel";
 import {
     INSPECTOR_MODES,
@@ -188,6 +195,22 @@ import type {
     ViewerRotationChange,
 } from "./that-open-viewer.types";
 
+interface WorkspaceDocumentSnapshot {
+  document: NativeIfcDocument;
+  graphAnchorId: number;
+  graphCollapsed: Set<number>;
+  graphExpanded: Set<number>;
+  graphPinned: Set<number>;
+  graphPositions: Map<number, Point>;
+  selectedId: number;
+  selectedIds: Set<number>;
+}
+
+interface WorkspaceHistoryEntry {
+  snapshot: WorkspaceDocumentSnapshot;
+  summary: string;
+}
+
 interface WorkspaceDocumentSession {
   id: string;
   document: NativeIfcDocument;
@@ -210,6 +233,8 @@ interface WorkspaceDocumentSession {
   selectedIds: Set<number>;
   sourceIfcBytes: ArrayBuffer | null;
   sourceIfcFile: File | null;
+  redoStack: WorkspaceHistoryEntry[];
+  undoStack: WorkspaceHistoryEntry[];
   viewerModelBytes: ArrayBuffer | null;
   viewerModelDeferredReason: string;
   viewerModelFile: File | null;
@@ -219,6 +244,7 @@ interface WorkspaceDocumentSession {
 }
 
 let nextWorkspaceDocumentId = 0;
+const DOCUMENT_HISTORY_LIMIT = 20;
 
 function createWorkspaceDocumentSession(
   document: NativeIfcDocument,
@@ -255,10 +281,12 @@ function createWorkspaceDocumentSession(
     graphPositions: options?.graphPositions ?? new Map(),
     id: options?.id ?? createWorkspaceDocumentId(document.fileName),
     pendingViewerChanges: [],
+    redoStack: [],
     selectedId,
     selectedIds: new Set(),
     sourceIfcBytes: sourceBytes,
     sourceIfcFile: sourceFile,
+    undoStack: [],
     viewerModelBytes: sourceBytes,
     viewerModelDeferredReason,
     viewerModelFile: sourceFile,
@@ -271,6 +299,21 @@ function createWorkspaceDocumentSession(
 function createWorkspaceDocumentId(fileName: string) {
   nextWorkspaceDocumentId += 1;
   return `${fileName || "IFC"}:${Date.now().toString(36)}:${nextWorkspaceDocumentId}`;
+}
+
+function createWorkspaceDocumentSnapshot(
+  session: WorkspaceDocumentSession,
+): WorkspaceDocumentSnapshot {
+  return {
+    document: session.document,
+    graphAnchorId: session.graphAnchorId,
+    graphCollapsed: new Set(session.graphCollapsed),
+    graphExpanded: new Set(session.graphExpanded),
+    graphPinned: new Set(session.graphPinned),
+    graphPositions: new Map(session.graphPositions),
+    selectedId: session.selectedId,
+    selectedIds: new Set(session.selectedIds),
+  };
 }
 
 function matchesEntitySearch(entity: NativeIfcEntity, query: string) {
@@ -321,6 +364,7 @@ export default function IfcWorkspace() {
     workspaceBootState.activeWorkspaceId,
   );
   const [structureMode, setStructureMode] = useState<StructureMode>("tree");
+  const [treeRevealNonce, setTreeRevealNonce] = useState(0);
   const [inspectorMode, setInspectorMode] = useState<InspectorMode>("overview");
   const [mosaicValue, setMosaicValue] =
     useState<MosaicNode<MosaicViewId> | null>(workspaceBootState.layout);
@@ -352,6 +396,13 @@ export default function IfcWorkspace() {
   const [portalTokens, setPortalTokens] = useState(loadPortalTokens);
   const [coordinateClipboard, setCoordinateClipboard] =
     useState<CoordinateClipboard | null>(null);
+  const [deleteRequest, setDeleteRequest] = useState<{
+    documentId: string;
+    entity: NativeIfcEntity;
+    plan: NativeEntityRemovalPlan;
+    sourceDocument: NativeIfcDocument;
+    source: "tree" | "graph" | "viewer" | "keyboard";
+  } | null>(null);
   const [detachedViews, setDetachedViews] = useState<Set<MosaicViewId>>(
     () => new Set(),
   );
@@ -379,6 +430,8 @@ export default function IfcWorkspace() {
   const graphPositions = activeSession.graphPositions;
   const documentText = activeSession.documentText;
   const documentTextDirty = activeSession.documentTextDirty;
+  const undoStack = activeSession.undoStack ?? [];
+  const redoStack = activeSession.redoStack ?? [];
 
   const updateActiveSession = (
     updater: (session: WorkspaceDocumentSession) => WorkspaceDocumentSession,
@@ -455,6 +508,16 @@ export default function IfcWorkspace() {
     viewerDocument.entityById.get(selectedId) ??
     document.entityById.get(selectedId) ??
     document.entities[0];
+  const viewerEditCapabilities = useMemo(() => {
+    const hasPlacement = Boolean(getNativePlacement(document, selectedId));
+    return {
+      canMove: hasPlacement,
+      canRotate: hasPlacement,
+      transformDisabledReason: hasPlacement
+        ? undefined
+        : "Auswahl hat kein editierbares IFCLOCALPLACEMENT",
+    };
+  }, [document, selectedId]);
   const suggestedCatalogObject = useMemo(
     () =>
       catalog
@@ -679,14 +742,10 @@ export default function IfcWorkspace() {
        * schlägt der Mirror fehl, bleibt "Modell neu berechnen" verfügbar.
        */
       viewerMirror?: ViewerMirrorOp;
-      /**
-       * Der Viewer hat die Änderung bereits selbst per Edit-API angewendet
-       * (Gizmo-Direkt-Commit) — kein Pending-Eintrag, kein Mirror nötig.
-       */
-      viewerApplied?: boolean;
     },
   ) => {
     const committedSessionId = activeSession.id;
+    const previousSnapshot = createWorkspaceDocumentSnapshot(activeSession);
     const resolvedSelectedId = next.entityById.has(nextSelectedId ?? 0)
       ? (nextSelectedId as number)
       : (next.spatialRoots[0]?.id ?? next.entities[0]?.id ?? selectedId);
@@ -709,13 +768,17 @@ export default function IfcWorkspace() {
           // Viewer. viewerModel* bleibt bis dahin unverändert (stabiler
           // Load-Key).
           pendingViewerChanges:
-            options?.reloadViewer && !options.viewerApplied
+            options?.reloadViewer
               ? mergePendingViewerChange(session.pendingViewerChanges, {
                   key: options.pendingKey,
                   label: summary,
                 })
               : session.pendingViewerChanges,
+          redoStack: next === session.document ? (session.redoStack ?? []) : [],
           selectedId: resolvedSelectedId,
+          selectedIds: new Set(
+            [...session.selectedIds].filter((id) => next.entityById.has(id)),
+          ),
           sourceIfcBytes: options?.reloadViewer ? null : session.sourceIfcBytes,
           sourceIfcFile: options?.reloadViewer ? null : session.sourceIfcFile,
           viewerModelDeferredReason: options?.reloadViewer
@@ -725,13 +788,22 @@ export default function IfcWorkspace() {
                 "3D-Konvertierung pausiert."
             : session.viewerModelDeferredReason,
           viewerModelLoadRequested: session.viewerModelLoadRequested,
+          undoStack:
+            next === session.document
+              ? (session.undoStack ?? [])
+              : [
+                  ...(session.undoStack ?? []),
+                  {
+                    snapshot: previousSnapshot,
+                    summary,
+                  },
+                ].slice(-DOCUMENT_HISTORY_LIMIT),
         };
       }),
     );
     if (
       options?.reloadViewer &&
       options.viewerMirror &&
-      !options.viewerApplied &&
       activeSession.viewerModelLoadRequested
     ) {
       setViewerMirrorRequest({
@@ -812,22 +884,91 @@ export default function IfcWorkspace() {
     );
   };
 
+  const restoreDocumentHistory = (direction: "undo" | "redo") => {
+    const sourceStack =
+      direction === "undo" ? undoStack : redoStack;
+    const entry = sourceStack.at(-1);
+    if (!entry) {
+      return;
+    }
+    const restored = entry.snapshot;
+    const restoredSelectedId = restored.document.entityById.has(
+      restored.selectedId,
+    )
+      ? restored.selectedId
+      : (restored.document.spatialRoots[0]?.id ??
+        restored.document.entities[0]?.id ??
+        0);
+    const viewerModelText = serializeNativeIfcDocument(restored.document);
+    const sessionId = activeSession.id;
+    setDeleteRequest(null);
+    setDocumentSessions((current) =>
+      current.map((session) => {
+        if (session.id !== sessionId) {
+          return session;
+        }
+        const currentEntry: WorkspaceHistoryEntry = {
+          snapshot: createWorkspaceDocumentSnapshot(session),
+          summary: entry.summary,
+        };
+        return {
+          ...session,
+          document: restored.document,
+          documentTextDirty: true,
+          graphAnchorId: restored.graphAnchorId,
+          graphCollapsed: new Set(restored.graphCollapsed),
+          graphExpanded: new Set(restored.graphExpanded),
+          graphPinned: new Set(restored.graphPinned),
+          graphPositions: new Map(restored.graphPositions),
+          pendingViewerChanges: [],
+          redoStack:
+            direction === "undo"
+              ? [...(session.redoStack ?? []), currentEntry].slice(
+                  -DOCUMENT_HISTORY_LIMIT,
+                )
+              : (session.redoStack ?? []).slice(0, -1),
+          selectedId: restoredSelectedId,
+          selectedIds: new Set(
+            [...restored.selectedIds].filter((id) =>
+              restored.document.entityById.has(id),
+            ),
+          ),
+          sourceIfcBytes: null,
+          sourceIfcFile: null,
+          undoStack:
+            direction === "undo"
+              ? (session.undoStack ?? []).slice(0, -1)
+              : [...(session.undoStack ?? []), currentEntry].slice(
+                  -DOCUMENT_HISTORY_LIMIT,
+                ),
+          viewerModelBytes: null,
+          viewerModelFile: null,
+          viewerModelRevision: session.viewerModelRevision + 1,
+          viewerModelText,
+        };
+      }),
+    );
+    logAction(
+      `history.${direction}({ summary: ${JSON.stringify(entry.summary)} });`,
+    );
+  };
+
+  const undoDocument = () => restoreDocumentHistory("undo");
+  const redoDocument = () => restoreDocumentHistory("redo");
+
   const selectEntity = (
     id: number,
     source = "ui",
     globalId?: string,
     documentId = activeSession.id,
   ) => {
-    if (documentId !== activeSession.id) {
-      const inactiveSession = documentSessions.find(
-        (session) => session.id === documentId,
-      );
-      logAction(
-        `${source}.selectInactiveIfc({ file: '${inactiveSession?.document.fileName ?? documentId}', id: ${id} });`,
-      );
+    const selectionSession = documentSessions.find(
+      (session) => session.id === documentId,
+    );
+    if (!selectionSession) {
       return;
     }
-    const selectionDocument = activeSession.document;
+    const selectionDocument = selectionSession.document;
     const resolvedId =
       source === "thatopen"
         ? (resolveNativeMovableProductId(selectionDocument, id, globalId) ??
@@ -844,15 +985,35 @@ export default function IfcWorkspace() {
     if (!resolvedId || !selectionDocument.entityById.has(resolvedId)) {
       return;
     }
-    setSelectedId(resolvedId);
-    setSelectedIds(new Set([resolvedId]));
+    if (source === "thatopen") {
+      setStructureMode("tree");
+      setSearch("");
+      setTreeRevealNonce((current) => current + 1);
+    }
+    if (documentId !== activeSession.id) {
+      setDocumentSessions((current) =>
+        current.map((session) =>
+          session.id === documentId
+            ? {
+                ...session,
+                selectedId: resolvedId,
+                selectedIds: new Set([resolvedId]),
+              }
+            : session,
+        ),
+      );
+      setActiveDocumentId(documentId);
+    } else {
+      setSelectedId(resolvedId);
+      setSelectedIds(new Set([resolvedId]));
+    }
     if (source === "graph") {
       setGraphAnchorId(resolvedId);
       setGraphFocusRequest(null);
     }
     const entity = selectionDocument.entityById.get(resolvedId);
     logAction(
-      `${source}.selectEntity({ id: ${resolvedId}, class: '${entity?.type ?? "UNKNOWN"}' });`,
+      `${source}.selectEntity({ file: '${selectionDocument.fileName}', id: ${resolvedId}, class: '${entity?.type ?? "UNKNOWN"}' });`,
     );
   };
 
@@ -1141,13 +1302,23 @@ export default function IfcWorkspace() {
         serializeNativeIfcDocument(document);
     const fileName = document.fileName.replace(/\.ifc$/i, "") || "IFCnative";
     const blob = new Blob([contents], { type: "application/x-step" });
+    const geometry = summarizeNativeIfcGeometry(document);
     const url = URL.createObjectURL(blob);
     const anchor = globalThis.document.createElement("a");
     anchor.href = url;
     anchor.download = `${fileName}.ifc`;
-    anchor.click();
-    URL.revokeObjectURL(url);
-    logAction(`ui.exportIfc({ file: '${fileName}.ifc' });`);
+    anchor.hidden = true;
+    globalThis.document.body.append(anchor);
+    try {
+      anchor.click();
+    } finally {
+      anchor.remove();
+      // Keep the object URL alive until the browser has consumed the click.
+      globalThis.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+    }
+    logAction(
+      `ui.exportIfc({ file: '${fileName}.ifc', bytes: ${blob.size}, representedProducts: ${geometry.representedProductCount}, shapeRepresentations: ${geometry.shapeRepresentationCount}, geometryItems: ${geometry.geometryItemCount} });`,
+    );
   };
 
   useEffect(() => {
@@ -2329,16 +2500,44 @@ export default function IfcWorkspace() {
     );
   };
 
-  const deleteEntity = (entityId: number, source: "tree" | "graph") => {
+  const requestDeleteEntity = (
+    entityId: number,
+    source: "tree" | "graph" | "viewer" | "keyboard",
+  ) => {
     const entity = document.entityById.get(entityId);
     if (!entity || entity.type === "IFCPROJECT") {
       return;
     }
-
-    const next = removeNativeEntity(document, entityId);
-    if (next === document) {
+    const plan = planNativeEntityRemoval(document, entityId);
+    if (!plan) {
       return;
     }
+    setDeleteRequest({
+      documentId: activeSession.id,
+      entity,
+      plan,
+      source,
+      sourceDocument: document,
+    });
+  };
+
+  const confirmDeleteEntity = () => {
+    const request = deleteRequest;
+    if (!request || request.documentId !== activeSession.id) {
+      setDeleteRequest(null);
+      return;
+    }
+    const currentEntity = document.entityById.get(request.entity.id);
+    const currentPlan =
+      request.sourceDocument === document
+        ? request.plan
+        : planNativeEntityRemoval(document, request.entity.id);
+    if (!currentEntity || !currentPlan) {
+      setDeleteRequest(null);
+      return;
+    }
+    const entityId = currentEntity.id;
+    const next = currentPlan.document;
 
     const nextSelection = findNextSelectionAfterEntityDelete(
       document,
@@ -2356,12 +2555,13 @@ export default function IfcWorkspace() {
     setGraphExpanded((current) => filterEntitySet(current, next));
     setGraphCollapsed((current) => filterEntitySet(current, next));
     setGraphAnchorId(nextAnchor);
+    setDeleteRequest(null);
 
     commitDocument(
       next,
       nextSelection,
-      `Delete #${entityId} ${entity.type}`,
-      `${source}.deleteEntity({ id: ${entityId}, class: '${entity.type}' });`,
+      `Delete #${entityId} ${currentEntity.type}`,
+      `${request.source}.deleteEntity({ id: ${entityId}, class: '${currentEntity.type}' });`,
       nextPositions,
       {
         pendingKey: `hide:${entityId}`,
@@ -2409,49 +2609,27 @@ export default function IfcWorkspace() {
     );
   };
 
-  // Der Viewer hat eine Gizmo-Änderung bereits per Edit-API angewendet, aber
-  // das native Dokument konnte nicht nachziehen — Ansicht und Dokument
-  // weichen ab, bis "Modell neu berechnen" die Ansicht aus dem Dokument
-  // wiederherstellt.
-  const notePendingViewerDrift = (label: string) => {
-    const sessionId = activeSession.id;
-    setDocumentSessions((current) =>
-      current.map((session) =>
-        session.id === sessionId
-          ? {
-              ...session,
-              pendingViewerChanges: mergePendingViewerChange(
-                session.pendingViewerChanges,
-                { label },
-              ),
-            }
-          : session,
-      ),
-    );
-  };
-
   const nudgeSelectedPlacement = (
+    entityId: number,
     delta: {
       x?: number;
       y?: number;
       z?: number;
     },
-    viewerApplied = false,
   ) => {
     const failNative = (reason: string) => {
       logAction(
-        `fragments.viewerDeltaSkipped({ id: ${selectedId}, reason: '${reason}' });`,
+        `fragments.viewerDeltaSkipped({ id: ${entityId}, reason: '${reason}' });`,
       );
-      if (viewerApplied) {
-        notePendingViewerDrift(
-          `Ansicht weicht ab: Verschiebung von #${selectedId} nicht ins Dokument übernommen`,
-        );
-      }
     };
-    const placement = getNativePlacement(document, selectedId);
+    if (entityId !== selectedId || !document.entityById.has(entityId)) {
+      failNative("selection-changed");
+      return null;
+    }
+    const placement = getNativePlacementWorld(document, entityId);
     if (!placement) {
       failNative("no-native-placement");
-      return;
+      return null;
     }
     // Gizmo-Deltas kommen in Metern (Viewer-Welt) — in Modelleinheiten
     // umrechnen (mm-Modelle!).
@@ -2459,77 +2637,111 @@ export default function IfcWorkspace() {
       delta,
       getNativeLengthUnitScale(document),
     );
-    const next = updateNativePlacement(document, selectedId, {
-      x: placement.x + ifcDelta.x,
-      y: placement.y + ifcDelta.y,
-      z: placement.z + ifcDelta.z,
+    const next = updateNativePlacementWorld(document, entityId, {
+      x: placement.worldX + ifcDelta.x,
+      y: placement.worldY + ifcDelta.y,
+      z: placement.worldZ + ifcDelta.z,
     });
     if (next === document) {
       failNative("placement-update-failed");
-      return;
+      return null;
     }
+    const label = `Move #${entityId} placement by viewer delta`;
+    const pendingKey = `transform:${entityId}`;
     commitDocument(
       next,
-      selectedId,
-      `Move #${selectedId} placement by viewer delta`,
-      `fragments.viewerDelta({ id: ${selectedId}, applied: ${viewerApplied}, dx: ${delta.x ?? 0}, dy: ${delta.y ?? 0}, dz: ${delta.z ?? 0} });`,
+      entityId,
+      label,
+      `fragments.viewerDeltaCommit({ id: ${entityId}, dx: ${delta.x ?? 0}, dy: ${delta.y ?? 0}, dz: ${delta.z ?? 0} });`,
       undefined,
       {
-        pendingKey: `transform:${selectedId}`,
+        pendingKey,
         reloadViewer: true,
-        // Gizmo-Direkt-Commit: der Viewer hat die Pose bereits per Edit-API
-        // übernommen. Nur wenn das fehlschlug, das Delta als Mirror-Op
-        // nachreichen.
-        viewerApplied,
-        viewerMirror: viewerApplied
-          ? undefined
-          : {
-              delta: { x: delta.x ?? 0, y: delta.y ?? 0, z: delta.z ?? 0 },
-              entityId: selectedId,
-              kind: "move",
-            },
       },
     );
+    return { label, pendingKey };
   };
 
   const rotateSelectedPlacement = (
+    entityId: number,
     rotation: ViewerRotationChange,
-    viewerApplied = false,
   ) => {
-    const axis = viewerWorldDirectionToIfcPlacementDirection(rotation.axis);
-    const refDirection = viewerWorldDirectionToIfcPlacementDirection(
+    if (entityId !== selectedId || !document.entityById.has(entityId)) {
+      return null;
+    }
+    const worldAxis = viewerWorldDirectionToIfcPlacementDirection(rotation.axis);
+    const worldRefDirection = viewerWorldDirectionToIfcPlacementDirection(
       rotation.refDirection,
     );
-    const next = updateNativePlacementRotation(document, selectedId, {
+    const axis = nativeWorldDirectionInPlacementParentFrame(
+      document,
+      entityId,
+      worldAxis,
+    );
+    const refDirection = nativeWorldDirectionInPlacementParentFrame(
+      document,
+      entityId,
+      worldRefDirection,
+    );
+    if (!axis || !refDirection) {
+      return null;
+    }
+    const next = updateNativePlacementRotation(document, entityId, {
       axis,
       refDirection,
     });
     if (next === document) {
       logAction(
-        `fragments.viewerRotateSkipped({ id: ${selectedId}, reason: 'placement-update-failed' });`,
+        `fragments.viewerRotateSkipped({ id: ${entityId}, reason: 'placement-update-failed' });`,
       );
-      if (viewerApplied) {
-        notePendingViewerDrift(
-          `Ansicht weicht ab: Rotation von #${selectedId} nicht ins Dokument übernommen`,
-        );
-      }
-      return;
+      return null;
     }
+    const label = `Rotate #${entityId} placement with viewer gizmo`;
+    const pendingKey = `transform:${entityId}`;
     commitDocument(
       next,
-      selectedId,
-      `Rotate #${selectedId} placement with viewer gizmo`,
-      `fragments.viewerRotate({ id: ${selectedId}, applied: ${viewerApplied}, rx: ${rotation.rotation.x ?? 0}, ry: ${rotation.rotation.y ?? 0}, rz: ${rotation.rotation.z ?? 0} });`,
+      entityId,
+      label,
+      `fragments.viewerRotateCommit({ id: ${entityId}, rx: ${rotation.rotation.x ?? 0}, ry: ${rotation.rotation.y ?? 0}, rz: ${rotation.rotation.z ?? 0} });`,
       undefined,
       {
-        // Rotation kann nur der Gizmo-Direkt-Commit spiegeln; ohne ihn
-        // bleibt der Pending-Eintrag als Fallback stehen.
-        pendingKey: `transform:${selectedId}`,
+        pendingKey,
         reloadViewer: true,
-        viewerApplied,
       },
     );
+    return { label, pendingKey };
   };
+
+  useEffect(() => {
+    const handleEditorKeyDown = (event: KeyboardEvent) => {
+      if (isEditableShortcutTarget(event.target) || event.altKey) {
+        return;
+      }
+      const key = event.key.toLowerCase();
+      const commandKey = event.ctrlKey || event.metaKey;
+      if (commandKey && key === "z") {
+        event.preventDefault();
+        if (event.shiftKey) redoDocument();
+        else undoDocument();
+        return;
+      }
+      if (commandKey && key === "y") {
+        event.preventDefault();
+        redoDocument();
+        return;
+      }
+      if (
+        !commandKey &&
+        !event.shiftKey &&
+        event.key === "Delete"
+      ) {
+        event.preventDefault();
+        requestDeleteEntity(selectedId, "keyboard");
+      }
+    };
+    window.addEventListener("keydown", handleEditorKeyDown);
+    return () => window.removeEventListener("keydown", handleEditorKeyDown);
+  }, [activeSession, document, selectedId]);
 
   const storePickedCoordinates = (pick: ViewerCoordinatePick) => {
     const copiedAt = new Date().toLocaleTimeString();
@@ -2639,11 +2851,12 @@ export default function IfcWorkspace() {
         <StructurePanel
           document={document}
           filteredEntities={filteredEntities}
+          revealSelectionNonce={treeRevealNonce}
           search={search}
           selectedId={selectedId}
           onAddChild={addChildElement}
           onCenterCamera={(id) => centerViewerCamera(id, "tree")}
-          onRemove={(id) => deleteEntity(id, "tree")}
+          onRemove={(id) => requestDeleteEntity(id, "tree")}
           onSelect={selectEntity}
           onSelectMany={selectEntities}
         />
@@ -2671,7 +2884,7 @@ export default function IfcWorkspace() {
           onPasteNodes={pasteGraphNodes}
           onPreset={setGraphPreset}
           onPositions={setGraphPositions}
-          onRemoveNode={(id) => deleteEntity(id, "graph")}
+          onRemoveNode={(id) => requestDeleteEntity(id, "graph")}
           onRemoveRelationship={deleteRelationship}
           onRelationshipTypeFilters={(filters) =>
             setGraphRelationshipTypes(new Set(filters))
@@ -2857,6 +3070,7 @@ export default function IfcWorkspace() {
               }
               activeModelFileName={activeSession.document.fileName}
               activeModelLoaded={activeSession.viewerModelLoadRequested}
+              editCapabilities={viewerEditCapabilities}
               focusRequest={viewerFocusRequest}
               mirrorRequest={viewerMirrorRequest}
               models={viewerModels}
@@ -3244,18 +3458,6 @@ export default function IfcWorkspace() {
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
       <header className="relative z-20 flex shrink-0 flex-col gap-2 border-b border-border/70 bg-card/95 px-3 pt-2 pb-0 shadow-sm backdrop-blur lg:flex-row lg:items-center lg:gap-3">
-        <div className="flex shrink-0 items-center gap-2.5">
-          <span
-            aria-hidden
-            className="flex size-7 items-center justify-center rounded-md bg-primary text-[10px] font-bold text-primary-foreground shadow-sm"
-          >
-            IFC
-          </span>
-          <span className="text-sm font-semibold tracking-tight">
-            IFCnative
-          </span>
-          <div className="mx-1 hidden h-6 w-px bg-border/70 lg:block" />
-        </div>
         {renderWorkspaceSwitcher()}
         <div className="min-w-0 flex-1">{renderDocumentTabs()}</div>
         <div className="flex shrink-0 items-center gap-1.5 pb-2 lg:pb-0">
@@ -3286,6 +3488,35 @@ export default function IfcWorkspace() {
             <span className="hidden xl:inline">Exportieren</span>
           </Button>
           <div className="mx-1 h-5 w-px bg-border/70" />
+          <IconButton
+            aria-label="Rückgängig"
+            disabled={!undoStack.length}
+            size="icon-sm"
+            title={
+              undoStack.length
+                ? `Rückgängig: ${undoStack.at(-1)?.summary} · Strg+Z`
+                : "Nichts rückgängig zu machen"
+            }
+            variant="outline"
+            onClick={undoDocument}
+          >
+            <Undo2 aria-hidden className="size-3.5" />
+          </IconButton>
+          <IconButton
+            aria-label="Wiederholen"
+            disabled={!redoStack.length}
+            size="icon-sm"
+            title={
+              redoStack.length
+                ? `Wiederholen: ${redoStack.at(-1)?.summary} · Strg+Umschalt+Z`
+                : "Nichts zu wiederholen"
+            }
+            variant="outline"
+            onClick={redoDocument}
+          >
+            <Redo2 aria-hidden className="size-3.5" />
+          </IconButton>
+          <div className="mx-1 h-5 w-px bg-border/70" />
           <MosaicWindowMenu
             closedIds={closedMosaicIds}
             onRestore={restoreMosaicView}
@@ -3312,6 +3543,13 @@ export default function IfcWorkspace() {
           />
         </div>
       </main>
+
+      <DeleteEntityDialog
+        entity={deleteRequest?.entity ?? null}
+        plan={deleteRequest?.plan ?? null}
+        onCancel={() => setDeleteRequest(null)}
+        onConfirm={confirmDeleteEntity}
+      />
 
       <footer className="flex h-6 shrink-0 items-center gap-3 overflow-hidden border-t border-border/70 bg-card px-3 text-[11px] text-muted-foreground">
         <span className="shrink-0 font-medium text-foreground/80">

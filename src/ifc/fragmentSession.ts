@@ -32,7 +32,7 @@ export async function createFragmentIfcSession(
   const fragments = components.get(OBC.FragmentsManager);
   fragments.init(
     options.fragmentsWorkerUrl ??
-      resolveIfcPublicAssetUrl("fragments/worker.mjs"),
+      (await OBC.FragmentsManager.getWorker()),
   );
   const ifcLoader = components.get(OBC.IfcLoader);
   await ifcLoader.setup({
@@ -51,7 +51,7 @@ export async function createFragmentIfcSession(
 
   async function setModel(nextModel: FragmentsModel) {
     if (model && model !== nextModel) {
-      await model.dispose().catch(() => undefined);
+      await fragments.core.disposeModel(model.modelId).catch(() => undefined);
     }
     model = nextModel;
     return model;
@@ -65,7 +65,7 @@ export async function createFragmentIfcSession(
     },
     async dispose() {
       if (model) {
-        await model.dispose().catch(() => undefined);
+        await fragments.core.disposeModel(model.modelId).catch(() => undefined);
         model = null;
       }
       components.dispose();

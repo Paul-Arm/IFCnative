@@ -653,7 +653,7 @@ function isInvestigationObjectiveIdProperty(name: string) {
 
 function parseObjectiveIdList(value: string) {
   const typedValue = unwrapIfcTypedValue(value);
-  const textValue = unquote(typedValue.trim()).trim();
+  const textValue = unquote(typedValue.trim())?.trim() ?? "";
   return textValue
     .split(";")
     .map((entry) => entry.trim())

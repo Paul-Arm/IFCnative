@@ -17,12 +17,15 @@ fs.mkdirSync(workerTargetDir, { recursive: true });
 fs.copyFileSync(workerSource, workerTarget);
 console.log('[patch-thatopen-fragments] Copied fragments worker to public/fragments/worker.mjs.');
 
-JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
 let source = fs.readFileSync(target, 'utf8');
 const from = 'const url = workerURL ?? new URL("./Worker/worker.mjs", import.meta.url).href;';
 const to = 'const url = workerURL ?? "/fragments/worker.mjs";';
 const oldCdnFallback = /const url = workerURL \?\? "https:\/\/unpkg\.com\/@thatopen\/fragments@[^"]+\/dist\/Worker\/worker\.mjs";/;
-const getWorkerFrom = 'const url = `https://unpkg.com/@thatopen/fragments@${"3.4.5"}/dist/worker/worker.mjs`;';
+const getWorkerFrom =
+  'const url = `https://unpkg.com/@thatopen/fragments@${"' +
+  packageJson.version +
+  '"}/dist/worker/worker.mjs`;';
 const getWorkerTo = 'const url = "/fragments/worker.mjs";';
 
 let changed = false;

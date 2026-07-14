@@ -91,13 +91,13 @@ function windowBackgroundColor() {
 async function createMainWindow() {
   const mainWindow = new BrowserWindow({
     title: "IFCnative",
+    icon: getWindowIconPath(),
     width: 1440,
     height: 940,
     minWidth: 1024,
     minHeight: 720,
     backgroundColor: windowBackgroundColor(),
     autoHideMenuBar: true,
-    show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -107,10 +107,6 @@ async function createMainWindow() {
   });
 
   configureAppWindow(mainWindow);
-
-  mainWindow.once("ready-to-show", () => {
-    mainWindow.show();
-  });
 
   if (devServerUrl) {
     await mainWindow.loadURL(createRendererUrl());
@@ -131,6 +127,7 @@ function configureAppWindow(window: BrowserWindow) {
         overrideBrowserWindowOptions: {
           autoHideMenuBar: true,
           backgroundColor: windowBackgroundColor(),
+          icon: getWindowIconPath(),
           minHeight: 520,
           minWidth: 760,
           webPreferences: {
@@ -153,6 +150,10 @@ function configureAppWindow(window: BrowserWindow) {
     event.preventDefault();
     openExternalUrl(url);
   });
+}
+
+function getWindowIconPath() {
+  return path.resolve(__dirname, "..", "build", "icon.ico");
 }
 
 function getRendererDistPath() {

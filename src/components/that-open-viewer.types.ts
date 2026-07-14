@@ -30,6 +30,7 @@ export interface ThatOpenViewerProps {
   activeModelFileName?: string;
   activeModelLoaded?: boolean;
   focusRequest?: { documentId: string; entityId: number; nonce: number } | null;
+  editCapabilities?: ViewerEditCapabilities;
   /**
    * Live-Mirror: eine bereits im nativen Dokument committete Änderung, die per
    * Fragments-Edit-API sofort in das geladene Modell übernommen werden soll
@@ -40,12 +41,15 @@ export interface ThatOpenViewerProps {
   onLoadActiveModel?(): void;
   onLog?(line: string): void;
   onMirrorApplied?(result: ViewerMirrorResult): void;
-  onMoveSelected?(delta: ViewerMoveDelta, viewerApplied: boolean): void;
+  onMoveSelected?(
+    entityId: number,
+    delta: ViewerMoveDelta,
+  ): ViewerTransformCommitReceipt | null;
   onRecalculateModel?(): void;
   onRotateSelected?(
+    entityId: number,
     rotation: ViewerRotationChange,
-    viewerApplied: boolean,
-  ): void;
+  ): ViewerTransformCommitReceipt | null;
   onPickCoordinates?(pick: ViewerCoordinatePick): void;
   onSelect(
     id: number,
@@ -58,6 +62,18 @@ export interface ThatOpenViewerProps {
    * mit "Modell neu berechnen" in das Fragments-Modell übernommen werden.
    */
   pendingViewerChanges?: string[];
+}
+
+export interface ViewerEditCapabilities {
+  canMove: boolean;
+  canRotate: boolean;
+  transformDisabledReason?: string;
+}
+
+/** Bestätigung, dass ein erfolgreicher Fragments-Edit ins native IFC synchronisiert wurde. */
+export interface ViewerTransformCommitReceipt {
+  label: string;
+  pendingKey: string;
 }
 
 /**

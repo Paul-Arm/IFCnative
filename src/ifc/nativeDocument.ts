@@ -121,6 +121,14 @@ export interface NativeBodyRepresentationSummary {
   message?: string;
 }
 
+export interface NativeIfcGeometrySummary {
+  entityCount: number;
+  geometryItemCount: number;
+  productDefinitionShapeCount: number;
+  representedProductCount: number;
+  shapeRepresentationCount: number;
+}
+
 interface NativeMaterialRow {
   category: string;
   materialName: string;
@@ -296,6 +304,42 @@ export function serializeNativeIfcDocument(document: NativeIfcDocument) {
     "END-ISO-10303-21;",
     "",
   ].join("\n");
+}
+
+/**
+ * Lightweight export guard for the STEP representation graph. This does not
+ * tessellate the IFC, but it catches the important "export contains no body
+ * references" case without loading a second WASM engine in the UI.
+ */
+export function summarizeNativeIfcGeometry(
+  document: NativeIfcDocument,
+): NativeIfcGeometrySummary {
+  const productDefinitionShapeIds = new Set(
+    (document.entitiesByType.get("IFCPRODUCTDEFINITIONSHAPE") ?? []).map(
+      (entity) => entity.id,
+    ),
+  );
+  const shapeRepresentations =
+    document.entitiesByType.get("IFCSHAPEREPRESENTATION") ?? [];
+  const geometryItemIds = new Set<number>();
+  for (const representation of shapeRepresentations) {
+    for (const itemId of readReferences(representation.args[3] ?? "")) {
+      geometryItemIds.add(itemId);
+    }
+  }
+  const representedProductCount = document.entities.filter((entity) =>
+    readReferences(entity.args[6] ?? "").some((id) =>
+      productDefinitionShapeIds.has(id),
+    ),
+  ).length;
+
+  return {
+    entityCount: document.entities.length,
+    geometryItemCount: geometryItemIds.size,
+    productDefinitionShapeCount: productDefinitionShapeIds.size,
+    representedProductCount,
+    shapeRepresentationCount: shapeRepresentations.length,
+  };
 }
 
 export function getNextNativeEntityId(document: NativeIfcDocument) {
@@ -655,6 +699,28 @@ export function nativeWorldToLocalPlacementPoint(
 }
 
 /**
+ * Projiziert eine IFC-Weltrichtung in das Koordinatensystem des Parent-
+ * Placements einer Entität. IFCAXIS2PLACEMENT3D speichert Axis und
+ * RefDirection relativ zu genau diesem Parent-Frame, nicht in Weltachsen.
+ */
+export function nativeWorldDirectionInPlacementParentFrame(
+  document: NativeIfcDocument,
+  entityId: number,
+  worldDirection: { x: number; y: number; z: number },
+): { x: number; y: number; z: number } | undefined {
+  const placement = getNativePlacement(document, entityId);
+  if (!placement) {
+    return undefined;
+  }
+  const frame = getLocalPlacementWorldFrame(document, placement.relativeTo);
+  return {
+    x: dotVectors(worldDirection, frame.xAxis),
+    y: dotVectors(worldDirection, frame.yAxis),
+    z: dotVectors(worldDirection, frame.zAxis),
+  };
+}
+
+/**
  * Projiziert einen WELT-Versatz (IFC-Achsen, Modelleinheiten) in das EIGENE
  * Platzierungs-Koordinatensystem einer Entität. Ergebnis = lokale Koordinaten
  * für einen Körper, dessen IFCLOCALPLACEMENT relativ zur Platzierung dieser
@@ -825,7 +891,7 @@ export function getNativeBodyRepresentation(
     .map((id) => document.entityById.get(id))
     .filter(
       (entity): entity is NativeIfcEntity =>
-        Boolean(entity) && entity.type === "IFCSHAPEREPRESENTATION",
+        entity !== undefined && entity.type === "IFCSHAPEREPRESENTATION",
     );
   const bodyRepresentation =
     representations.find(
@@ -979,24 +1045,89 @@ export function updateNativePlacement(
     return document;
   }
 
-  const next = cloneDocumentEntities(document);
-  const point = next.find(
-    (entity) =>
-      entity.id === placement.pointId && entity.type === "IFCCARTESIANPOINT",
-  );
-  if (!point) {
+  const point = document.entityById.get(placement.pointId);
+  if (point?.type !== "IFCCARTESIANPOINT") {
     return document;
   }
 
   const x = numericStepNumber(coordinates.x, placement.x);
   const y = numericStepNumber(coordinates.y, placement.y);
   const z = numericStepNumber(coordinates.z, placement.z);
-  setArg(point.args, 0, `(${x},${y},${z})`);
+  const nextPoint: NativeIfcEntity = {
+    ...point,
+    args: [`(${x},${y},${z})`],
+  };
+
+  const pointIsShared = (document.incomingRefs.get(placement.pointId)?.length ?? 0) > 1;
+  const axisIsShared =
+    (document.incomingRefs.get(placement.axisPlacementId)?.length ?? 0) > 1;
+  if (!pointIsShared && !axisIsShared) {
+    // Placement-Bewegungen ändern keine Referenzen. Für den häufigsten
+    // Gizmo-Pfad reicht daher ein strukturelles Update der zwei Entity-Indizes;
+    // ein vollständiges STEP-Serialize+Parse des ganzen IFC entfällt.
+    const entities = document.entities.map((entity) =>
+      entity.id === nextPoint.id ? nextPoint : entity,
+    );
+    const entityById = new Map(document.entityById);
+    entityById.set(nextPoint.id, nextPoint);
+    const entitiesByType = new Map(document.entitiesByType);
+    entitiesByType.set(
+      nextPoint.type,
+      (entitiesByType.get(nextPoint.type) ?? []).map((entity) =>
+        entity.id === nextPoint.id ? nextPoint : entity,
+      ),
+    );
+    return { ...document, entities, entityById, entitiesByType };
+  }
+
+  // Copy-on-write für ungewöhnliche IFCs, die Punkt oder Axis-Placement
+  // zwischen mehreren Produkten teilen. Sonst würde das Gizmo alle Nutzer der
+  // gemeinsamen Ressource gleichzeitig verschieben.
+  const next = cloneDocumentEntities(document);
+  const nextPlacement = next.find(
+    (entity) =>
+      entity.id === placement.placementId && entity.type === "IFCLOCALPLACEMENT",
+  );
+  const nextAxis = next.find(
+    (entity) =>
+      entity.id === placement.axisPlacementId &&
+      entity.type === "IFCAXIS2PLACEMENT3D",
+  );
+  if (!nextPlacement || !nextAxis) {
+    return document;
+  }
+  let nextId = nextEntityId(next);
+  const copiedPoint = { ...nextPoint, id: nextId++ };
+  next.push(copiedPoint);
+  if (axisIsShared) {
+    const copiedAxis = {
+      ...nextAxis,
+      args: [...nextAxis.args],
+      id: nextId,
+    };
+    setArg(copiedAxis.args, 0, `#${copiedPoint.id}`);
+    setArg(nextPlacement.args, 1, `#${copiedAxis.id}`);
+    next.push(copiedAxis);
+  } else {
+    setArg(nextAxis.args, 0, `#${copiedPoint.id}`);
+  }
 
   return parseNativeIfcText(
     serializeEntities(document, next),
     document.fileName,
   );
+}
+
+/** Schreibt einen absoluten IFC-Weltpunkt korrekt als lokales Placement. */
+export function updateNativePlacementWorld(
+  document: NativeIfcDocument,
+  entityId: number,
+  world: { x: number; y: number; z: number },
+) {
+  const local = nativeWorldToLocalPlacementPoint(document, entityId, world);
+  return local
+    ? updateNativePlacement(document, entityId, local)
+    : document;
 }
 
 export function updateNativePlacementRotation(
@@ -1013,7 +1144,7 @@ export function updateNativePlacementRotation(
   }
 
   const next = cloneDocumentEntities(document);
-  const axisPlacement = next.find(
+  let axisPlacement = next.find(
     (entity) =>
       entity.id === placement.axisPlacementId &&
       entity.type === "IFCAXIS2PLACEMENT3D",
@@ -1029,21 +1160,49 @@ export function updateNativePlacementRotation(
     z: 0,
   });
   let nextId = nextEntityId(next);
-  const axisDirection = ensureDirectionEntity(
-    next,
-    axisPlacement.args[1],
-    nextId,
-  );
-  nextId = Math.max(nextId, axisDirection.id + 1);
-  const refDirectionEntity = ensureDirectionEntity(
-    next,
-    axisPlacement.args[2],
-    nextId,
-  );
+
+  // Axis placements and directions are frequently shared in authored IFCs,
+  // including with extrusion geometry. Mutating those resources in place can
+  // rotate or invalidate the body itself. Clone the placement only when it is
+  // shared, and always allocate private direction entities for this product.
+  const axisPlacementIsShared =
+    (document.incomingRefs.get(placement.axisPlacementId)?.length ?? 0) > 1;
+  if (axisPlacementIsShared) {
+    const localPlacement = next.find(
+      (entity) =>
+        entity.id === placement.placementId &&
+        entity.type === "IFCLOCALPLACEMENT",
+    );
+    if (!localPlacement) {
+      return document;
+    }
+    axisPlacement = {
+      ...axisPlacement,
+      args: [...axisPlacement.args],
+      id: nextId++,
+    };
+    next.push(axisPlacement);
+    setArg(localPlacement.args, 1, `#${axisPlacement.id}`);
+  }
+  const axisDirection: NativeIfcEntity = {
+    args: [formatDirectionTuple(axis)],
+    description: "",
+    globalId: "",
+    id: nextId++,
+    name: "",
+    type: "IFCDIRECTION",
+  };
+  const refDirectionEntity: NativeIfcEntity = {
+    args: [formatDirectionTuple(refDirection)],
+    description: "",
+    globalId: "",
+    id: nextId++,
+    name: "",
+    type: "IFCDIRECTION",
+  };
+  next.push(axisDirection, refDirectionEntity);
   setArg(axisPlacement.args, 1, `#${axisDirection.id}`);
   setArg(axisPlacement.args, 2, `#${refDirectionEntity.id}`);
-  setArg(axisDirection.args, 0, formatDirectionTuple(axis));
-  setArg(refDirectionEntity.args, 0, formatDirectionTuple(refDirection));
 
   return parseNativeIfcText(
     serializeEntities(document, next),
@@ -3483,18 +3642,30 @@ export function removeNativeRelationship(
   );
 }
 
-export function removeNativeEntity(
+export interface NativeEntityRemovalPlan {
+  document: NativeIfcDocument;
+  entityId: number;
+  relationshipCount: number;
+  removedEntityIds: number[];
+}
+
+/**
+ * Berechnet Löschwirkung und Ergebnis in einem Durchlauf. Die UI kann damit
+ * die Kaskade vor dem Commit anzeigen, ohne das große IFC beim Bestätigen ein
+ * zweites Mal serialisieren und parsen zu müssen.
+ */
+export function planNativeEntityRemoval(
   document: NativeIfcDocument,
   entityId: number,
-) {
+): NativeEntityRemovalPlan | undefined {
   const entity = document.entityById.get(entityId);
   if (!entity || entity.type === "IFCPROJECT") {
-    return document;
+    return undefined;
   }
 
   const removedIds = collectCascadeRemovalIds(document, entityId);
   if (removedIds.size === 0 || removedIds.size >= document.entities.length) {
-    return document;
+    return undefined;
   }
 
   const survivors: NativeIfcEntity[] = [];
@@ -3525,10 +3696,27 @@ export function removeNativeEntity(
   collectOrphanedResources(document, survivors, removedIds);
 
   const next = survivors.filter((current) => !removedIds.has(current.id));
-  return parseNativeIfcText(
-    serializeEntities(document, next),
-    document.fileName,
+  const removedEntityIds = [...removedIds].filter((id) =>
+    document.entityById.has(id),
   );
+  return {
+    document: parseNativeIfcText(
+      serializeEntities(document, next),
+      document.fileName,
+    ),
+    entityId,
+    relationshipCount: removedEntityIds.filter((id) =>
+      document.entityById.get(id)?.type.startsWith("IFCREL"),
+    ).length,
+    removedEntityIds,
+  };
+}
+
+export function removeNativeEntity(
+  document: NativeIfcDocument,
+  entityId: number,
+) {
+  return planNativeEntityRemoval(document, entityId)?.document ?? document;
 }
 
 /**
@@ -4833,32 +5021,6 @@ function normalizeDirection(
 
 function formatDirectionTuple(value: { x: number; y: number; z: number }) {
   return `(${formatDecimal(value.x)},${formatDecimal(value.y)},${formatDecimal(value.z)})`;
-}
-
-function ensureDirectionEntity(
-  entities: NativeIfcEntity[],
-  reference: string | undefined,
-  fallbackId: number,
-) {
-  const directionId = readReferences(reference ?? "")[0];
-  const existing = directionId
-    ? entities.find(
-        (entity) => entity.id === directionId && entity.type === "IFCDIRECTION",
-      )
-    : undefined;
-  if (existing) {
-    return existing;
-  }
-  const created: NativeIfcEntity = {
-    args: ["(0.,0.,1.)"],
-    description: "",
-    globalId: "",
-    id: fallbackId,
-    name: "",
-    type: "IFCDIRECTION",
-  };
-  entities.push(created);
-  return created;
 }
 
 function readStepNumber(value = "") {

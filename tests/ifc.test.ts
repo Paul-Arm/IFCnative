@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { Matrix4, Vector3 } from "three";
+import { Matrix4, Object3D, Vector3 } from "three";
 import * as WebIFC from "web-ifc";
 
 import { createBodyGeometry } from "../src/components/bodyGeometry";
@@ -35,6 +35,10 @@ import {
     buildNativeDocumentFromFragments,
     type FragmentDocumentModel,
 } from "../src/ifc/fragmentDocument";
+import {
+    fragmentModelPointToScene,
+    fragmentScenePointToIfcWorld,
+} from "../src/ifc/fragmentSceneCoordinates";
 import { buildGraphIndex, summarizeLine } from "../src/ifc/graphIndex";
 import {
     addNativeApproval,
@@ -68,9 +72,12 @@ import {
     getNativeLengthUnitScale,
     getNativePlacement,
     getNativePlacementWorld,
+    getNativePlacementWorldFrame,
     nativeWorldDeltaInElementFrame,
+    nativeWorldDirectionInPlacementParentFrame,
     nativeWorldToLocalPlacementPoint,
     parseNativeIfcText,
+    planNativeEntityRemoval,
     quote,
     removeNativeBodyRepresentation,
     removeNativeEntity,
@@ -79,10 +86,12 @@ import {
     removeNativeRelationship,
     resolveNativeMovableProductId,
     serializeNativeIfcDocument,
+    summarizeNativeIfcGeometry,
     unquote,
     updateNativeEntity,
     updateNativePlacement,
     updateNativePlacementRotation,
+    updateNativePlacementWorld,
     updateNativePropertySetName,
     updateNativePropertyValue,
     updateNativeRelationship,
@@ -1118,7 +1127,15 @@ test("removing an entity cascades hierarchy children and referencing relationshi
     ?.find((relationship) => relationship.type === "IFCRELASSOCIATESMATERIAL");
   assert.ok(materialRelationship);
 
-  const removed = removeNativeEntity(withMaterial, wall.id);
+  const plan = planNativeEntityRemoval(withMaterial, wall.id);
+  assert.ok(plan);
+  assert.ok(plan.removedEntityIds.includes(wall.id));
+  assert.ok(plan.relationshipCount > 0);
+  const removed = plan.document;
+  assert.equal(
+    serializeNativeIfcDocument(removed),
+    serializeNativeIfcDocument(removeNativeEntity(withMaterial, wall.id)),
+  );
 
   assert.equal(removed.entityById.has(wall.id), false);
   assert.equal(
@@ -2618,6 +2635,13 @@ test("native body assignment updates selected product representation with review
   assert.equal(body.width, 3);
   assert.equal(body.depth, 1.5);
   assert.equal(body.height, 2);
+  assert.deepEqual(summarizeNativeIfcGeometry(assigned), {
+    entityCount: assigned.entities.length,
+    geometryItemCount: 1,
+    productDefinitionShapeCount: 1,
+    representedProductCount: 1,
+    shapeRepresentationCount: 1,
+  });
   assert.equal(
     getNativePlacement(assigned, block.id)?.pointId,
     beforePlacement.pointId,
@@ -2891,6 +2915,69 @@ test("viewer-world rotation writes valid IFC placement directions", async () => 
   api.CloseModel(modelID);
 });
 
+test("placement rotation keeps shared extrusion directions private", async () => {
+  const sample = createNativeSampleDocument();
+  const block = sample.entities.find(
+    (entity) => entity.type === "IFCBUILTELEMENT",
+  );
+  assert.ok(block);
+  const placement = getNativePlacement(sample, block.id);
+  const body = getNativeBodyRepresentation(sample, block.id);
+  assert.ok(placement);
+  assert.ok(body.solidId);
+  const solid = sample.entityById.get(body.solidId);
+  assert.equal(solid?.type, "IFCEXTRUDEDAREASOLID");
+  const sharedDirectionId = Number(solid?.args[2]?.replace(/^#/, ""));
+  const sharedDirection = sample.entityById.get(sharedDirectionId);
+  assert.equal(sharedDirection?.type, "IFCDIRECTION");
+  const axisPlacement = sample.entityById.get(placement.axisPlacementId);
+  assert.equal(axisPlacement?.type, "IFCAXIS2PLACEMENT3D");
+
+  const withSharedDirection = updateNativeEntity(
+    sample,
+    placement.axisPlacementId,
+    {
+      args: [
+        axisPlacement.args[0],
+        `#${sharedDirectionId}`,
+        axisPlacement.args[2] ?? "$",
+      ],
+    },
+  );
+  assert.ok(
+    (withSharedDirection.incomingRefs.get(sharedDirectionId)?.length ?? 0) > 1,
+  );
+  const rotated = updateNativePlacementRotation(withSharedDirection, block.id, {
+    axis: { x: 1, y: 0, z: 0 },
+    refDirection: { x: 0, y: 1, z: 0 },
+  });
+
+  assert.deepEqual(
+    rotated.entityById.get(sharedDirectionId)?.args,
+    sharedDirection?.args,
+    "The extrusion direction must not be mutated by placement rotation",
+  );
+  const rotatedPlacement = getNativePlacement(rotated, block.id);
+  assert.ok(rotatedPlacement);
+  const rotatedAxis = rotated.entityById.get(rotatedPlacement.axisPlacementId);
+  assert.notEqual(rotatedAxis?.args[1], `#${sharedDirectionId}`);
+
+  const api = new WebIFC.IfcAPI();
+  await api.Init();
+  const beforeModelID = api.OpenModel(
+    new TextEncoder().encode(serializeNativeIfcDocument(withSharedDirection)),
+  );
+  const afterModelID = api.OpenModel(
+    new TextEncoder().encode(serializeNativeIfcDocument(rotated)),
+  );
+  assert.equal(
+    streamGeometryVertexCount(api, afterModelID),
+    streamGeometryVertexCount(api, beforeModelID),
+  );
+  api.CloseModel(beforeModelID);
+  api.CloseModel(afterModelID);
+});
+
 test("viewer-world picked points are converted to IFC placement axes", () => {
   assert.deepEqual(
     viewerWorldPointToIfcPlacementPoint({
@@ -3037,18 +3124,36 @@ test("world placement accumulates rotated parent frames and round-trips writes",
     y: childWorld.worldY - 2,
     z: childWorld.worldZ + 3,
   };
-  const local = nativeWorldToLocalPlacementPoint(rotated, child.id, target);
-  assert.ok(local);
-  const moved = updateNativePlacement(rotated, child.id, {
-    x: String(local.x),
-    y: String(local.y),
-    z: String(local.z),
-  });
+  const moved = updateNativePlacementWorld(rotated, child.id, target);
   const movedWorld = getNativePlacementWorld(moved, child.id);
   assert.ok(movedWorld);
   assert.equal(roundCoordinate(movedWorld.worldX), roundCoordinate(target.x));
   assert.equal(roundCoordinate(movedWorld.worldY), roundCoordinate(target.y));
   assert.equal(roundCoordinate(movedWorld.worldZ), roundCoordinate(target.z));
+
+  // A desired world orientation must be projected through the rotated parent
+  // before it is written into the child's local IFCAXIS2PLACEMENT3D.
+  const localAxis = nativeWorldDirectionInPlacementParentFrame(
+    moved,
+    child.id,
+    { x: 0, y: 0, z: 1 },
+  );
+  const localRefDirection = nativeWorldDirectionInPlacementParentFrame(
+    moved,
+    child.id,
+    { x: 1, y: 0, z: 0 },
+  );
+  assert.ok(localAxis);
+  assert.ok(localRefDirection);
+  const worldAligned = updateNativePlacementRotation(moved, child.id, {
+    axis: localAxis,
+    refDirection: localRefDirection,
+  });
+  const alignedFrame = getNativePlacementWorldFrame(worldAligned, child.id);
+  assert.ok(alignedFrame);
+  assert.equal(roundCoordinate(alignedFrame.xAxis.x), 1);
+  assert.equal(roundCoordinate(alignedFrame.xAxis.y), 0);
+  assert.equal(roundCoordinate(alignedFrame.xAxis.z), 0);
 });
 
 test("picked viewer point on a moved element spawns a world body at the same spot", async () => {
@@ -3840,6 +3945,72 @@ test("picked body is placed RELATIVE to the georeferenced element with small loc
   assert.equal(Math.round(bodyWorld.worldX), Math.round(blockWorld.worldX + 5));
   assert.equal(Math.round(bodyWorld.worldY), Math.round(blockWorld.worldY - 1));
   assert.equal(Math.round(bodyWorld.worldZ), Math.round(blockWorld.worldZ + 2));
+});
+
+test("multiple fragment models retain their IFC-world offsets in one scene", () => {
+  // Real coordination origins from the Turm (base) and VLRLP IFCs. Fragments
+  // uses base - current as model.object translation when autoCoordinate=true.
+  const baseCoordinates = new Vector3(
+    -32455042.679142058,
+    -128.256040609,
+    5497783.06572473,
+  );
+  const modelCoordinates = new Vector3(
+    -32454930.38779673,
+    -99.604018586,
+    5497746.698481041,
+  );
+  const modelObject = new Object3D();
+  modelObject.position.copy(baseCoordinates).sub(modelCoordinates);
+
+  const ifcWorldToModel = new Matrix4().makeTranslation(
+    modelCoordinates.x,
+    modelCoordinates.y,
+    modelCoordinates.z,
+  );
+  const modelToIfcWorld = ifcWorldToModel.clone().invert();
+  const ifcWorldPoint = new Vector3(
+    32454988.793381,
+    95.426206,
+    -5497757.466828,
+  );
+  const modelPoint = ifcWorldPoint.clone().applyMatrix4(ifcWorldToModel);
+  const scenePoint = fragmentModelPointToScene(modelPoint, modelObject);
+
+  // The shared scene is expressed relative to the first model, not relative
+  // to each IFC independently.
+  const expectedScenePoint = ifcWorldPoint.clone().add(baseCoordinates);
+  assert.ok(scenePoint.distanceTo(expectedScenePoint) < 1e-6);
+  assert.ok(
+    fragmentScenePointToIfcWorld(
+      scenePoint,
+      modelObject,
+      modelToIfcWorld,
+    ).distanceTo(ifcWorldPoint) < 1e-6,
+  );
+
+  // The grid uses the same object transform. Switching active models must not
+  // drop it back into the independently rebased local frame.
+  const localGridPoint = new Vector3(0, modelCoordinates.y + 100, 0);
+  const sceneGridPoint = fragmentModelPointToScene(localGridPoint, modelObject);
+  assert.ok(Math.abs(sceneGridPoint.y - (baseCoordinates.y + 100)) < 1e-9);
+
+  // Even an identity coordination matrix may still receive a scene offset
+  // relative to a georeferenced base model; worldToLocal must always run.
+  const identityModelObject = new Object3D();
+  identityModelObject.position.set(25, -4, 7);
+  const identityLocalPoint = new Vector3(1, 2, 3);
+  const identityScenePoint = fragmentModelPointToScene(
+    identityLocalPoint,
+    identityModelObject,
+  );
+  assert.ok(
+    fragmentScenePointToIfcWorld(
+      identityScenePoint,
+      identityModelObject,
+      null,
+    ).distanceTo(identityLocalPoint) < 1e-9,
+  );
 });
 
 test("rebased viewer pick converts back to the exact IFC world position (end-to-end)", async () => {

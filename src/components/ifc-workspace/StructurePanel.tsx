@@ -28,9 +28,13 @@ const EMPTY_TREE_PLACEHOLDER = "(Keine Raumstruktur indiziert)";
 /** Maximale Zeilenzahl der Fallback-Suchliste. */
 const FALLBACK_ROW_LIMIT = 250;
 
+/** Anzahl Render-Frames für das Reveal in großen, virtualisierten Bäumen. */
+const TREE_REVEAL_MAX_FRAMES = 30;
+
 export function StructurePanel({
   document,
   filteredEntities,
+  revealSelectionNonce,
   search,
   selectedId,
   onAddChild,
@@ -41,6 +45,7 @@ export function StructurePanel({
 }: {
   document: NativeIfcDocument;
   filteredEntities: NativeIfcEntity[];
+  revealSelectionNonce: number;
   search: string;
   selectedId: number;
   onAddChild(parentId: number, type: string, name: string): void;
@@ -156,12 +161,81 @@ export function StructurePanel({
     if (selectedId == null) return;
     const path = treeModel.pathById.get(selectedId);
     if (!path) return;
-    if (model.getSelectedPaths().includes(path)) return;
-    model.getSelectedPaths().forEach((p) => model.getItem(p)?.deselect());
+
+    getAncestorDirectoryPaths(path).forEach((ancestorPath) => {
+      const ancestor = model.getItem(ancestorPath);
+      if (
+        ancestor &&
+        "isExpanded" in ancestor &&
+        !ancestor.isExpanded()
+      ) {
+        ancestor.expand();
+      }
+    });
+
     const item = model.getItem(path);
-    item?.select();
-    item?.focus();
-  }, [model, selectedId, treeModel]);
+    if (!item) return;
+    if (!model.getSelectedPaths().includes(path)) {
+      model.getSelectedPaths().forEach((p) => model.getItem(p)?.deselect());
+      item.select();
+    }
+    item.focus();
+
+    let animationFrame = 0;
+    let revealFrame = 0;
+
+    const revealSelectedItem = () => {
+      revealFrame += 1;
+      const shadowRoot = model.getFileTreeContainer()?.shadowRoot;
+      const scrollElement = shadowRoot?.querySelector<HTMLElement>(
+        "[data-file-tree-virtualized-scroll]",
+      );
+      const focusedIndex = model.getFocusedIndex();
+      if (!shadowRoot || !scrollElement || focusedIndex < 0) {
+        if (revealFrame < TREE_REVEAL_MAX_FRAMES) {
+          animationFrame = window.requestAnimationFrame(revealSelectedItem);
+        }
+        return;
+      }
+
+      const itemHeight = model.getItemHeight();
+      const itemTop = focusedIndex * itemHeight;
+      const stickyOverlayHeight =
+        shadowRoot
+          ?.querySelector<HTMLElement>("[data-file-tree-sticky-overlay]")
+          ?.getBoundingClientRect().height ?? 0;
+      const usableHeight = Math.max(
+        itemHeight,
+        scrollElement.clientHeight - stickyOverlayHeight,
+      );
+      scrollElement.scrollTop = Math.max(
+        0,
+        itemTop +
+          itemHeight / 2 -
+          stickyOverlayHeight -
+          usableHeight / 2,
+      );
+
+      const renderedRow = Array.from(
+        shadowRoot.querySelectorAll<HTMLElement>("[data-item-path]"),
+      ).find(
+        (row) =>
+          row.dataset.itemPath === path && row.dataset.itemParked !== "true",
+      );
+      if (renderedRow) {
+        renderedRow.scrollIntoView({ block: "center", inline: "nearest" });
+        return;
+      }
+
+      if (revealFrame < TREE_REVEAL_MAX_FRAMES) {
+        animationFrame = window.requestAnimationFrame(revealSelectedItem);
+      }
+    };
+
+    animationFrame = window.requestAnimationFrame(revealSelectedItem);
+
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [model, revealSelectionNonce, selectedId, treeModel]);
 
   // Override default click behaviour: single click on a row body should only
   // select; only the chevron expands. Double click on a row body toggles
@@ -519,6 +593,14 @@ function sanitizeSegment(value: string) {
   return (
     value.replace(/[\\/]/g, "-").replace(/\s+/g, " ").trim().slice(0, 96) ||
     "IFC Entity"
+  );
+}
+
+function getAncestorDirectoryPaths(path: string) {
+  const normalizedPath = path.endsWith("/") ? path.slice(0, -1) : path;
+  const segments = normalizedPath.split("/");
+  return segments.slice(0, -1).map((_, index) =>
+    `${segments.slice(0, index + 1).join("/")}/`,
   );
 }
 

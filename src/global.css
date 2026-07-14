@@ -519,16 +519,19 @@ body,
   background: color-mix(in oklab, var(--popover) 88%, transparent);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
+  box-sizing: border-box;
   box-shadow: 0 10px 28px oklch(0.145 0 0 / 18%);
   display: grid;
   gap: 6px;
   left: 50%;
-  max-width: min(420px, calc(100% - 120px));
-  min-width: 240px;
+  max-width: none;
+  min-width: 0;
+  overflow: hidden;
   padding: 8px 12px;
   position: absolute;
   top: 12px;
   transform: translateX(-50%);
+  width: min(320px, calc(100% - 112px));
   z-index: 5;
 }
 
@@ -550,6 +553,7 @@ body,
 
 .ifcnative-thatopen-progress-label strong {
   color: var(--primary);
+  flex: 0 0 auto;
   font-weight: 700;
 }
 
@@ -557,7 +561,9 @@ body,
   background: var(--muted);
   border-radius: 999px;
   height: 4px;
+  min-width: 0;
   overflow: hidden;
+  width: 100%;
 }
 
 .ifcnative-thatopen-progress-fill {
