@@ -1,5 +1,7 @@
-import { useMemo, useState } from "react";
+import { Search } from "lucide-react";
+import { useMemo, useState, type ReactNode } from "react";
 
+import { Input } from "@/components/ui/input";
 import {
     OBJECT_INFO_PSET_NAME,
     type NativeIfcDocument,
@@ -7,17 +9,46 @@ import {
     type ObjectInfoIdReference,
     type ObjectInfoIndex,
     type ObjectInfoValidationFinding,
+    type ObjectInfoValidationFindingKind,
+    type ObjectInfoValidationSeverity,
 } from "@/ifc";
 import { cn } from "@/lib/utils";
 
 import {
     Badge,
-    Button,
     CollapsibleSection,
-    LabeledInput,
     PanelHeader,
     PanelShell,
+    shortType,
+    type BadgeTone,
 } from "./ui";
+
+const FINDINGS_CAP = 200;
+const DEFINITIONS_CAP = 240;
+const REFERENCES_CAP = 240;
+
+const SEVERITY_TONES: Record<ObjectInfoValidationSeverity, BadgeTone> = {
+  error: "danger",
+  info: "info",
+  warning: "warning",
+};
+
+const SEVERITY_LABELS: Record<ObjectInfoValidationSeverity, string> = {
+  error: "Fehler",
+  info: "Hinweis",
+  warning: "Warnung",
+};
+
+const KIND_LABELS: Record<ObjectInfoValidationFindingKind, string> = {
+  "ambiguous-object-info-reference": "Mehrdeutige ID-Referenz",
+  "duplicate-object-info-id": "Doppelte Objektinfo-ID",
+  "empty-id-reference": "Leere ID-Referenz",
+  "empty-object-info-id": "Leere Objektinfo-ID",
+  "external-id-reference": "Externe ID-Referenz",
+  "missing-object-info-id": "Fehlende Objektinfo-ID",
+  "missing-object-info-reference": "ID-Referenz ohne Ziel",
+  "unreferenced-object-info-id": "Nicht referenzierte Objektinfo-ID",
+};
 
 export function ObjectInfoPanel({
   document,
@@ -34,27 +65,27 @@ export function ObjectInfoPanel({
 }) {
   const [query, setQuery] = useState("");
   const normalizedQuery = normalizeSearch(query);
-  const visibleFindings = useMemo(
-    () =>
-      findings
-        .filter((finding) => matchesFinding(finding, normalizedQuery))
-        .slice(0, 200),
+  const matchedFindings = useMemo(
+    () => findings.filter((finding) => matchesFinding(finding, normalizedQuery)),
     [findings, normalizedQuery],
   );
-  const visibleDefinitions = useMemo(
+  const matchedDefinitions = useMemo(
     () =>
-      index.definitions
-        .filter((definition) => matchesDefinition(definition, normalizedQuery))
-        .slice(0, 240),
+      index.definitions.filter((definition) =>
+        matchesDefinition(definition, normalizedQuery),
+      ),
     [index.definitions, normalizedQuery],
   );
-  const visibleReferences = useMemo(
+  const matchedReferences = useMemo(
     () =>
-      index.references
-        .filter((reference) => matchesReference(reference, normalizedQuery))
-        .slice(0, 240),
+      index.references.filter((reference) =>
+        matchesReference(reference, normalizedQuery),
+      ),
     [index.references, normalizedQuery],
   );
+  const visibleFindings = matchedFindings.slice(0, FINDINGS_CAP);
+  const visibleDefinitions = matchedDefinitions.slice(0, DEFINITIONS_CAP);
+  const visibleReferences = matchedReferences.slice(0, REFERENCES_CAP);
   const errorCount = findings.filter(
     (finding) => finding.severity === "error",
   ).length;
@@ -68,41 +99,55 @@ export function ObjectInfoPanel({
   return (
     <PanelShell>
       <PanelHeader
-        title="Objektinfo: IDs"
-        description={`${index.definitions.length.toLocaleString()} Objektinfo-IDs / ${index.references.length.toLocaleString()} ID-Referenzen / ${findings.length.toLocaleString()} Findings`}
+        description={`${index.definitions.length.toLocaleString("de-DE")} Objektinfo-IDs · ${index.references.length.toLocaleString("de-DE")} ID-Referenzen · ${findings.length.toLocaleString("de-DE")} Prüfmeldungen`}
+        eyebrow="Validierung"
         meta={
           <Badge tone={errorCount ? "danger" : "success"}>
-            {errorCount} Fehler
+            {errorCount.toLocaleString("de-DE")} Fehler
           </Badge>
         }
+        title="Objektinfo: IDs"
       />
 
       <PanelShell scroll>
-        <div className="grid gap-3 rounded-xl border bg-card/80 p-3">
-          <p className="text-sm text-muted-foreground">
-            Registry: {OBJECT_INFO_PSET_NAME}._ID. Referenzen: Properties mit
-            Suffix ID, ohne _ID.
+        <div className="grid shrink-0 gap-1.5">
+          <div className="relative">
+            <Search
+              aria-hidden
+              className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
+              aria-label="Filter"
+              className="h-8 pl-7 text-xs"
+              placeholder="Filtern nach Wert, Objekt, Property oder #ID …"
+              value={query}
+              onChange={(event) => setQuery(event.currentTarget.value)}
+            />
+          </div>
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            Registry: {OBJECT_INFO_PSET_NAME}._ID · Referenzen: Properties mit
+            Suffix „ID“, ohne _ID.
           </p>
-          <LabeledInput label="Filter" value={query} onChangeText={setQuery} />
         </div>
 
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-          <SummaryCard label="Fehler" value={errorCount} />
-          <SummaryCard label="Warnungen" value={warningCount} />
-          <SummaryCard label="Info" value={infoCount} />
-          <SummaryCard
+        <div className="grid shrink-0 grid-cols-[repeat(auto-fit,minmax(7rem,1fr))] gap-2">
+          <SummaryStat label="Fehler" tone="danger" value={errorCount} />
+          <SummaryStat label="Warnungen" tone="warning" value={warningCount} />
+          <SummaryStat label="Hinweise" tone="info" value={infoCount} />
+          <SummaryStat
             label="Externe _ID"
+            tone="neutral"
             value={index.externalDefinitions.length}
           />
         </div>
 
         <CollapsibleSection
           defaultOpen
-          title="Findings"
-          meta={`${visibleFindings.length.toLocaleString()} sichtbar`}
+          meta={sectionMeta(visibleFindings.length, findings.length)}
+          title="Prüfmeldungen"
         >
           {visibleFindings.length ? (
-            <div className="grid gap-2">
+            <RowList>
               {visibleFindings.map((finding) => (
                 <FindingRow
                   document={document}
@@ -112,21 +157,24 @@ export function ObjectInfoPanel({
                   onSelectEntity={onSelectEntity}
                 />
               ))}
-            </div>
+              <HiddenHint
+                count={matchedFindings.length - visibleFindings.length}
+              />
+            </RowList>
           ) : (
-            <p className="text-sm text-muted-foreground">
-              Keine Findings fuer diesen Filter.
+            <p className="text-xs text-muted-foreground">
+              Keine Prüfmeldungen für diesen Filter.
             </p>
           )}
         </CollapsibleSection>
 
         <CollapsibleSection
           defaultOpen
+          meta={sectionMeta(visibleDefinitions.length, index.definitions.length)}
           title="Objektinfo-Registry"
-          meta={`${visibleDefinitions.length.toLocaleString()} sichtbar`}
         >
           {visibleDefinitions.length ? (
-            <div className="grid gap-2">
+            <RowList>
               {visibleDefinitions.map((definition) => (
                 <DefinitionRow
                   definition={definition}
@@ -135,20 +183,23 @@ export function ObjectInfoPanel({
                   onSelectEntity={onSelectEntity}
                 />
               ))}
-            </div>
+              <HiddenHint
+                count={matchedDefinitions.length - visibleDefinitions.length}
+              />
+            </RowList>
           ) : (
-            <p className="text-sm text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               Keine Objektinfo-IDs gefunden.
             </p>
           )}
         </CollapsibleSection>
 
         <CollapsibleSection
+          meta={sectionMeta(visibleReferences.length, index.references.length)}
           title="ID-Referenzen"
-          meta={`${visibleReferences.length.toLocaleString()} sichtbar`}
         >
           {visibleReferences.length ? (
-            <div className="grid gap-2">
+            <RowList>
               {visibleReferences.map((reference) => (
                 <ReferenceRow
                   key={`${reference.entityId}:${reference.propertyId}`}
@@ -157,9 +208,12 @@ export function ObjectInfoPanel({
                   onSelectEntity={onSelectEntity}
                 />
               ))}
-            </div>
+              <HiddenHint
+                count={matchedReferences.length - visibleReferences.length}
+              />
+            </RowList>
           ) : (
-            <p className="text-sm text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               Keine ID-Referenzen gefunden.
             </p>
           )}
@@ -169,14 +223,140 @@ export function ObjectInfoPanel({
   );
 }
 
-function SummaryCard({ label, value }: { label: string; value: number }) {
+type StatTone = "danger" | "warning" | "info" | "neutral";
+
+const STAT_TONE_STYLES: Record<StatTone, { surface: string; number: string }> =
+  {
+    danger: {
+      number: "text-destructive",
+      surface: "border-destructive/30 bg-destructive/10",
+    },
+    info: {
+      number: "text-info",
+      surface: "border-info/30 bg-info/10",
+    },
+    neutral: {
+      number: "text-foreground",
+      surface: "border-border/60 bg-card",
+    },
+    warning: {
+      number: "text-warning-foreground dark:text-warning",
+      surface: "border-warning/30 bg-warning/10",
+    },
+  };
+
+function SummaryStat({
+  label,
+  tone,
+  value,
+}: {
+  label: string;
+  tone: StatTone;
+  value: number;
+}) {
+  const active = value > 0;
+  const styles = STAT_TONE_STYLES[tone];
   return (
-    <div className="rounded-xl border bg-card/80 p-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 text-lg font-semibold text-foreground">
-        {value.toLocaleString()}
+    <div
+      className={cn(
+        "min-w-0 rounded-md border px-2.5 py-2",
+        active ? styles.surface : "border-border/60 bg-card",
+      )}
+    >
+      <div
+        className={cn(
+          "text-lg font-semibold leading-tight tabular-nums",
+          active ? styles.number : "text-muted-foreground",
+        )}
+      >
+        {value.toLocaleString("de-DE")}
+      </div>
+      <div className="truncate text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+        {label}
       </div>
     </div>
+  );
+}
+
+function RowList({ children }: { children: ReactNode }) {
+  return (
+    <div className="divide-y divide-border/50 overflow-hidden rounded-md border border-border/60 bg-card">
+      {children}
+    </div>
+  );
+}
+
+function HiddenHint({ count }: { count: number }) {
+  if (count <= 0) {
+    return null;
+  }
+  return (
+    <div className="px-2.5 py-1.5 text-[11px] text-muted-foreground">
+      … {count.toLocaleString("de-DE")} weitere ausgeblendet
+    </div>
+  );
+}
+
+function SelectableRow({
+  children,
+  onSelect,
+  selected,
+  title,
+}: {
+  children: ReactNode;
+  onSelect?: () => void;
+  selected?: boolean;
+  title?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "grid min-w-0 gap-0.5 px-2.5 py-1.5 transition-colors",
+        onSelect &&
+          "cursor-pointer hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none",
+        selected && "bg-primary/10",
+      )}
+      role={onSelect ? "button" : undefined}
+      tabIndex={onSelect ? 0 : undefined}
+      title={title}
+      onClick={onSelect}
+      onKeyDown={
+        onSelect
+          ? (event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onSelect();
+              }
+            }
+          : undefined
+      }
+    >
+      {children}
+    </div>
+  );
+}
+
+function IdChip({
+  label,
+  onSelect,
+  title,
+}: {
+  label: string;
+  onSelect(): void;
+  title: string;
+}) {
+  return (
+    <button
+      className="inline-flex h-5 shrink-0 items-center rounded border border-border/70 bg-muted/40 px-1.5 font-mono text-[10px] font-medium text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary"
+      title={title}
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        onSelect();
+      }}
+    >
+      {label}
+    </button>
   );
 }
 
@@ -194,39 +374,47 @@ function FindingRow({
   const targetEntityId =
     finding.definitions?.[0]?.entityId ??
     finding.externalDefinitions?.[0]?.entityId;
+  const primaryTargetId = finding.entityId ?? targetEntityId;
   const selected = finding.entityId === selectedId;
   return (
-    <div
-      className={cn(
-        "grid gap-2 rounded-xl border bg-card/80 p-3",
-        selected && "border-primary/40 bg-primary/5",
-      )}
+    <SelectableRow
+      selected={selected}
+      title={primaryTargetId ? "Objekt öffnen" : undefined}
+      onSelect={
+        primaryTargetId ? () => onSelectEntity(primaryTargetId) : undefined
+      }
     >
-      <div className="text-sm font-medium text-foreground">
-        {finding.severity.toUpperCase()} / {finding.kind}
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+        <Badge tone={SEVERITY_TONES[finding.severity]}>
+          {SEVERITY_LABELS[finding.severity]}
+        </Badge>
+        <span
+          className="min-w-0 flex-1 truncate text-xs font-medium text-foreground"
+          title={finding.kind}
+        >
+          {KIND_LABELS[finding.kind] ?? finding.kind}
+        </span>
+        {finding.entityId && targetEntityId ? (
+          <IdChip
+            label={`→ #${targetEntityId}`}
+            title="Ziel öffnen"
+            onSelect={() => onSelectEntity(targetEntityId)}
+          />
+        ) : null}
       </div>
-      <p className="text-sm text-muted-foreground">{finding.message}</p>
-      <div className="truncate text-xs text-muted-foreground">
-        {finding.value ? `${finding.value} / ` : ""}
+      <p
+        className="truncate text-xs text-muted-foreground"
+        title={finding.message}
+      >
+        {finding.message}
+      </p>
+      <div className="truncate text-[11px] text-muted-foreground">
+        {finding.value ? `${finding.value} · ` : ""}
         {finding.entityId
           ? entityLabel(document, finding.entityId)
           : "Dokument"}
       </div>
-      <div className="flex flex-wrap gap-2">
-        {finding.entityId ? (
-          <Button
-            label="Objekt oeffnen"
-            onPress={() => onSelectEntity(finding.entityId as number)}
-          />
-        ) : null}
-        {targetEntityId ? (
-          <Button
-            label="Ziel oeffnen"
-            onPress={() => onSelectEntity(targetEntityId)}
-          />
-        ) : null}
-      </div>
-    </div>
+    </SelectableRow>
   );
 }
 
@@ -239,27 +427,30 @@ function DefinitionRow({
   selected: boolean;
   onSelectEntity(id: number): void;
 }) {
+  const detail = `${shortType(definition.entityType)}${
+    definition.entityName ? ` ${definition.entityName}` : ""
+  } · ${definition.psetName}.${definition.propertyName}`;
   return (
-    <button
-      type="button"
-      onClick={() => onSelectEntity(definition.entityId)}
-      className={cn(
-        "grid gap-1 rounded-xl border bg-card/80 p-3 text-left hover:bg-muted/50",
-        selected && "border-primary/40 bg-primary/5",
-      )}
+    <SelectableRow
+      selected={selected}
+      title="Objekt öffnen"
+      onSelect={() => onSelectEntity(definition.entityId)}
     >
-      <div className="text-sm font-medium text-foreground">
-        {definition.value || "-"}
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+        <span className="min-w-0 flex-1 truncate font-mono text-xs font-medium text-foreground">
+          {definition.value || "–"}
+        </span>
+        <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+          #{definition.entityId}
+        </span>
       </div>
-      <div className="truncate text-xs text-muted-foreground">
-        #{definition.entityId} {definition.entityType}{" "}
-        {definition.entityName || ""}
+      <div
+        className="truncate text-[11px] text-muted-foreground"
+        title={`#${definition.entityId} ${definition.entityType} ${definition.entityName} · #${definition.psetId} ${definition.psetName} · #${definition.propertyId} ${definition.propertyName}`}
+      >
+        {detail}
       </div>
-      <div className="text-sm text-muted-foreground">
-        #{definition.psetId} {definition.psetName} / #{definition.propertyId}{" "}
-        {definition.propertyName}
-      </div>
-    </button>
+    </SelectableRow>
   );
 }
 
@@ -274,49 +465,49 @@ function ReferenceRow({
 }) {
   const resolved = reference.targetDefinitions[0]?.entityId;
   const external = reference.externalDefinitions[0]?.entityId;
+  const detail = `#${reference.entityId} ${shortType(reference.entityType)}${
+    reference.entityName ? ` ${reference.entityName}` : ""
+  } · ${reference.psetName}.${reference.propertyName}`;
   return (
-    <div
-      className={cn(
-        "grid gap-2 rounded-xl border bg-card/80 p-3",
-        selected && "border-primary/40 bg-primary/5",
-      )}
+    <SelectableRow
+      selected={selected}
+      title="Objekt öffnen"
+      onSelect={() => onSelectEntity(reference.entityId)}
     >
-      <div className="text-sm font-medium text-foreground">
-        {reference.value || "-"}
-      </div>
-      <div className="truncate text-xs text-muted-foreground">
-        #{reference.entityId} {reference.entityType}{" "}
-        {reference.entityName || ""}
-      </div>
-      <div className="text-sm text-muted-foreground">
-        {reference.psetName}.{reference.propertyName}
-      </div>
-      <div className="truncate text-xs text-muted-foreground">
-        {resolved
-          ? `Objektinfo-Ziel #${resolved}`
-          : external
-            ? `Externe _ID-Familie #${external}`
-            : "Kein Ziel gefunden"}
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <Button
-          label="Objekt oeffnen"
-          onPress={() => onSelectEntity(reference.entityId)}
-        />
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+        <span className="min-w-0 flex-1 truncate font-mono text-xs font-medium text-foreground">
+          {reference.value || "–"}
+        </span>
         {resolved ? (
-          <Button
-            label="Ziel oeffnen"
-            onPress={() => onSelectEntity(resolved)}
+          <IdChip
+            label={`→ #${resolved}`}
+            title={`Ziel öffnen: Objektinfo-Ziel #${resolved}`}
+            onSelect={() => onSelectEntity(resolved)}
           />
         ) : external ? (
-          <Button
-            label="Extern oeffnen"
-            onPress={() => onSelectEntity(external)}
+          <IdChip
+            label={`extern #${external}`}
+            title={`Extern öffnen: Externe _ID-Familie #${external}`}
+            onSelect={() => onSelectEntity(external)}
           />
-        ) : null}
+        ) : (
+          <span className="shrink-0 text-[10px] font-medium text-destructive">
+            Kein Ziel gefunden
+          </span>
+        )}
       </div>
-    </div>
+      <div
+        className="truncate text-[11px] text-muted-foreground"
+        title={`${detail} · #${reference.psetId} ${reference.psetName} · #${reference.propertyId} ${reference.propertyName}`}
+      >
+        {detail}
+      </div>
+    </SelectableRow>
   );
+}
+
+function sectionMeta(shown: number, total: number) {
+  return `${shown.toLocaleString("de-DE")} von ${total.toLocaleString("de-DE")} sichtbar`;
 }
 
 function matchesFinding(

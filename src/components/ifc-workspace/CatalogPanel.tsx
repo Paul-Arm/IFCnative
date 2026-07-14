@@ -1,3 +1,4 @@
+import { FileUp, Wrench } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import {
@@ -5,6 +6,8 @@ import {
     catalogKindLabel,
     catalogObjectLabel,
     normalizeCatalogToken,
+    type CatalogFindingKind,
+    type CatalogFindingSeverity,
     type CatalogKind,
     type CatalogValidationFinding,
     type IfcObjectCatalog,
@@ -16,20 +19,19 @@ import {
     Badge,
     Button,
     CollapsibleSection,
+    EmptyState,
     LabeledInput,
     PanelHeader,
     PanelShell,
     SegmentedControl,
+    shortType,
+    type BadgeTone,
 } from "./ui";
 
-const CATALOG_KIND_LABELS = CATALOG_KINDS.map(catalogKindLabel);
-
-function catalogKindFromLabel(label: string): CatalogKind {
-  return (
-    CATALOG_KINDS.find((kind) => catalogKindLabel(kind) === label) ??
-    "diagnostik"
-  );
-}
+const CATALOG_KIND_OPTIONS = CATALOG_KINDS.map((kind) => ({
+  label: catalogKindLabel(kind),
+  value: kind,
+}));
 
 export function CatalogPanel({
   catalog,
@@ -54,24 +56,26 @@ export function CatalogPanel({
 }) {
   const [query, setQuery] = useState("");
   const selectedEntity = document.entityById.get(selectedId);
-  const visibleObjects = useMemo(() => {
+  const { hiddenCount, visibleObjects } = useMemo(() => {
     const token = normalizeCatalogToken(query);
     const objects = catalog?.objectTypes ?? [];
-    if (!token) {
-      return objects.slice(0, 80);
-    }
-    return objects
-      .filter((objectType) =>
-        [
-          objectType.name,
-          objectType.code,
-          objectType.ifcClass,
-          objectType.sheetName,
-        ]
-          .map(normalizeCatalogToken)
-          .some((value) => value.includes(token)),
-      )
-      .slice(0, 120);
+    const matches = token
+      ? objects.filter((objectType) =>
+          [
+            objectType.name,
+            objectType.code,
+            objectType.ifcClass,
+            objectType.sheetName,
+          ]
+            .map(normalizeCatalogToken)
+            .some((value) => value.includes(token)),
+        )
+      : objects;
+    const cap = token ? 120 : 80;
+    return {
+      hiddenCount: Math.max(0, matches.length - cap),
+      visibleObjects: matches.slice(0, cap),
+    };
   }, [catalog?.objectTypes, query]);
 
   return (
@@ -80,30 +84,35 @@ export function CatalogPanel({
         title="Objektkatalog"
         description={
           catalog
-            ? `${catalogKindLabel(catalog.kind)}: ${catalog.objectTypes.length.toLocaleString()} Klassen / ${countProperties(catalog).toLocaleString()} Property-Regeln`
+            ? `${catalogKindLabel(catalog.kind)}: ${catalog.objectTypes.length.toLocaleString("de-DE")} Klassen / ${countProperties(catalog).toLocaleString("de-DE")} Property-Regeln`
             : "Kein Katalog geladen."
         }
         meta={
-          catalog ? <Badge tone="success">{catalogKindLabel(catalog.kind)}</Badge> : null
+          catalog ? (
+            <Badge tone="success">{catalogKindLabel(catalog.kind)}</Badge>
+          ) : null
         }
         actions={
           <Button
             disabled={importing}
-            label={importing ? "Import..." : "Import Catalog"}
-            primary={!catalog}
-            onPress={() => void onImportCatalog()}
-          />
+            title="Objektkatalog aus einer Excel-Datei importieren"
+            variant={catalog ? "outline" : "default"}
+            onClick={() => void onImportCatalog()}
+          >
+            <FileUp className="size-3.5" />
+            {importing ? "Importiere …" : "Katalog importieren"}
+          </Button>
         }
       />
 
-      <div className="grid gap-1 px-1 pb-1">
+      <div className="grid shrink-0 gap-1">
         <span className="text-xs font-medium text-muted-foreground">
           Katalogtyp
         </span>
         <SegmentedControl
-          options={CATALOG_KIND_LABELS}
-          value={catalogKindLabel(catalogKind)}
-          onChange={(label) => onChangeCatalogKind(catalogKindFromLabel(label))}
+          options={CATALOG_KIND_OPTIONS}
+          value={catalogKind}
+          onChange={(value) => onChangeCatalogKind(value as CatalogKind)}
         />
         <span className="text-[11px] text-muted-foreground">
           Wird beim nächsten Import verwendet (Diagnostik = openSIM BWD,
@@ -117,7 +126,9 @@ export function CatalogPanel({
             defaultOpen
             title="Auswahl"
             meta={
-              selectedEntity ? `#${selectedId} ${selectedEntity.type}` : "-"
+              selectedEntity
+                ? `#${selectedId} ${shortType(selectedEntity.type)}`
+                : "–"
             }
           >
             <LabeledInput
@@ -125,52 +136,73 @@ export function CatalogPanel({
               value={query}
               onChangeText={setQuery}
             />
-            <div className="grid max-h-72 gap-2 overflow-auto pr-1">
-              {visibleObjects.map((objectType) => {
-                const selected = objectType.id === selectedCatalogObjectId;
-                return (
-                  <button
-                    type="button"
-                    key={objectType.id}
-                    onClick={() => onSelectCatalogObject(objectType.id)}
-                    className={cn(
-                      "grid gap-1 rounded-lg border bg-card px-3 py-2 text-left text-sm hover:bg-muted/50",
-                      selected && "border-primary/40 bg-primary/5",
-                    )}
-                  >
-                    <span className="truncate font-medium text-foreground">
-                      {catalogObjectLabel(objectType)}
-                    </span>
-                    <span className="truncate text-xs text-muted-foreground">
-                      {objectType.ifcClass} /{" "}
-                      {objectType.propertyRules.length.toLocaleString()} Regeln
-                    </span>
-                  </button>
-                );
-              })}
+            <div className="overflow-hidden rounded-md border border-border/60 bg-card">
+              <div className="max-h-72 divide-y divide-border/50 overflow-y-auto">
+                {visibleObjects.length ? (
+                  visibleObjects.map((objectType) => {
+                    const selected =
+                      objectType.id === selectedCatalogObjectId;
+                    return (
+                      <button
+                        type="button"
+                        key={objectType.id}
+                        onClick={() => onSelectCatalogObject(objectType.id)}
+                        className={cn(
+                          "flex w-full items-center gap-2 border-l-2 border-l-transparent px-2 py-1 text-left transition-colors hover:bg-muted/50",
+                          selected && "border-l-primary bg-accent",
+                        )}
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-xs font-medium text-foreground">
+                            {catalogObjectLabel(objectType)}
+                          </span>
+                          <span className="block truncate text-[11px] text-muted-foreground">
+                            {shortType(objectType.ifcClass)} ·{" "}
+                            {objectType.propertyRules.length.toLocaleString(
+                              "de-DE",
+                            )}{" "}
+                            Regeln
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  })
+                ) : (
+                  <p className="px-2.5 py-3 text-xs text-muted-foreground">
+                    Keine Klassen für den aktuellen Filter gefunden.
+                  </p>
+                )}
+              </div>
+              {hiddenCount ? (
+                <div className="border-t border-border/60 bg-muted/30 px-2.5 py-1 text-[11px] text-muted-foreground">
+                  … {hiddenCount.toLocaleString("de-DE")} weitere ausgeblendet
+                </div>
+              ) : null}
             </div>
           </CollapsibleSection>
 
           <CollapsibleSection title="Importdiagnose" meta={catalog.fileName}>
-            {catalog.diagnostics.map((diagnostic) => (
-              <code
-                key={diagnostic}
-                className="block rounded-lg bg-muted px-3 py-2 font-mono text-xs text-foreground"
-              >
-                {diagnostic}
-              </code>
-            ))}
+            {catalog.diagnostics.length ? (
+              catalog.diagnostics.map((diagnostic, index) => (
+                <code
+                  key={`${index}-${diagnostic}`}
+                  className="block rounded-md bg-muted px-2.5 py-1.5 font-mono text-[11px] break-words text-foreground"
+                >
+                  {diagnostic}
+                </code>
+              ))
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Keine Auffälligkeiten beim Import.
+              </p>
+            )}
           </CollapsibleSection>
         </PanelShell>
       ) : (
-        <div className="grid place-items-center gap-2 rounded-xl border border-dashed bg-muted/20 p-6 text-center">
-          <h3 className="text-sm font-medium text-foreground">
-            Kein Katalog geladen
-          </h3>
-          <p className="text-sm text-muted-foreground">
-            Excel-Datei importieren, danach erscheint die Katalogpruefung.
-          </p>
-        </div>
+        <EmptyState
+          title="Kein Katalog geladen"
+          description="Excel-Datei importieren, danach erscheint die Katalogprüfung."
+        />
       )}
     </PanelShell>
   );
@@ -195,12 +227,12 @@ export function CatalogReviewPanel({
   return (
     <PanelShell>
       <PanelHeader
-        title="Objektkatalog: Pruefung"
+        title="Objektkatalog: Prüfung"
         description={
           selectedObject
-            ? `${catalogObjectLabel(selectedObject)} / ${findings.length.toLocaleString()} Findings`
+            ? `${catalogObjectLabel(selectedObject)} / ${findings.length.toLocaleString("de-DE")} Findings`
             : catalog
-              ? "Keine Katalogklasse gewaehlt."
+              ? "Keine Katalogklasse gewählt."
               : "Kein Katalog geladen."
         }
         meta={
@@ -213,71 +245,114 @@ export function CatalogReviewPanel({
       {catalog ? (
         <PanelShell scroll>
           {selectedObject ? (
-            <div className="grid gap-1 rounded-xl border bg-card/80 p-3">
-              <h3 className="text-sm font-medium text-foreground">
+            <section className="grid shrink-0 gap-1.5 rounded-lg border border-border/60 bg-card p-2.5">
+              <h3 className="min-w-0 truncate text-sm font-medium text-foreground">
                 {catalogObjectLabel(selectedObject)}
               </h3>
-              <p className="text-xs text-muted-foreground">
-                Sheet {selectedObject.sheetName}, {selectedObject.ifcClass},
-                Version {selectedObject.version || "-"}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {selectedObject.propertyRules
-                  .filter((rule) => rule.requirement === "required")
-                  .length.toLocaleString()}{" "}
-                erforderliche /{" "}
-                {selectedObject.propertyRules.length.toLocaleString()} gesamte
-                Properties
-              </p>
-            </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Badge tone="info">{shortType(selectedObject.ifcClass)}</Badge>
+                <Badge tone="neutral">Sheet {selectedObject.sheetName}</Badge>
+                <Badge tone="neutral">
+                  Version {selectedObject.version || "–"}
+                </Badge>
+                <Badge tone="neutral">
+                  {selectedObject.propertyRules
+                    .filter((rule) => rule.requirement === "required")
+                    .length.toLocaleString("de-DE")}{" "}
+                  Pflicht /{" "}
+                  {selectedObject.propertyRules.length.toLocaleString("de-DE")}{" "}
+                  Properties
+                </Badge>
+              </div>
+            </section>
           ) : null}
 
           {findings.length ? (
-            <div className="grid gap-2">
-              <p className="text-sm text-muted-foreground">
-                {findings.length.toLocaleString()} Warnungen,{" "}
-                {quickFixCount.toLocaleString()} Quick-Fixes
+            <div className="grid content-start gap-1.5">
+              <p className="text-xs text-muted-foreground">
+                {findings.length.toLocaleString("de-DE")} Warnungen,{" "}
+                {quickFixCount.toLocaleString("de-DE")} Quick-Fixes
               </p>
-              {findings.map((finding) => (
-                <div
-                  key={finding.id}
-                  className="grid gap-2 rounded-xl border bg-card/80 p-3"
-                >
-                  <div className="text-sm font-medium text-foreground">
-                    {finding.kind}
+              <div className="divide-y divide-border/50 overflow-hidden rounded-md border border-border/60 bg-card">
+                {findings.map((finding) => (
+                  <div
+                    key={finding.id}
+                    className="flex items-start gap-2 px-2 py-1.5"
+                  >
+                    <Badge tone={severityTone(finding.severity)}>
+                      {severityLabel(finding.severity)}
+                    </Badge>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-xs font-medium text-foreground">
+                        {findingKindLabel(finding.kind)}
+                      </div>
+                      <p className="text-xs leading-snug break-words text-muted-foreground">
+                        {finding.message}
+                      </p>
+                    </div>
+                    {finding.quickFix ? (
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        title={finding.quickFix.label}
+                        onClick={() => onApplyFinding(finding)}
+                      >
+                        <Wrench className="size-3.5" />
+                      </Button>
+                    ) : null}
                   </div>
-                  <p className="text-sm text-muted-foreground">
-                    {finding.message}
-                  </p>
-                  {finding.quickFix ? (
-                    <Button
-                      label={finding.quickFix.label}
-                      onPress={() => onApplyFinding(finding)}
-                    />
-                  ) : null}
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
+          ) : selectedObject ? (
+            <EmptyState
+              title="Keine Warnungen"
+              description="Keine Katalogwarnungen für die aktuelle Kombination."
+            />
           ) : (
-            <p className="text-sm text-muted-foreground">
-              {selectedObject
-                ? "Keine Katalogwarnungen fuer die aktuelle Kombination."
-                : "Katalogklasse im Objektkatalog-Fenster waehlen."}
-            </p>
+            <EmptyState
+              title="Keine Klasse gewählt"
+              description="Im Objektkatalog-Panel muss eine Katalogklasse gewählt werden, um die Prüfung anzuzeigen."
+            />
           )}
         </PanelShell>
       ) : (
-        <div className="grid place-items-center gap-2 rounded-xl border border-dashed bg-muted/20 p-6 text-center">
-          <h3 className="text-sm font-medium text-foreground">
-            Kein Katalog geladen
-          </h3>
-          <p className="text-sm text-muted-foreground">
-            Excel-Datei im Objektkatalog-Fenster importieren.
-          </p>
-        </div>
+        <EmptyState
+          title="Kein Katalog geladen"
+          description="Excel-Datei im Objektkatalog-Panel importieren."
+        />
       )}
     </PanelShell>
   );
+}
+
+const FINDING_KIND_LABELS: Record<CatalogFindingKind, string> = {
+  "class-mismatch": "Klassenabweichung",
+  "missing-classification": "Fehlende Klassifikation",
+  "missing-pset": "Fehlendes Property-Set",
+  "missing-property": "Fehlende Property",
+  "property-type-mismatch": "Typabweichung",
+  "empty-required-value": "Leerer Pflichtwert",
+};
+
+function findingKindLabel(kind: CatalogFindingKind) {
+  return FINDING_KIND_LABELS[kind] ?? kind;
+}
+
+function severityTone(severity: CatalogFindingSeverity): BadgeTone {
+  return severity === "error"
+    ? "danger"
+    : severity === "warning"
+      ? "warning"
+      : "info";
+}
+
+function severityLabel(severity: CatalogFindingSeverity) {
+  return severity === "error"
+    ? "Fehler"
+    : severity === "warning"
+      ? "Warnung"
+      : "Info";
 }
 
 function countProperties(catalog: IfcObjectCatalog) {

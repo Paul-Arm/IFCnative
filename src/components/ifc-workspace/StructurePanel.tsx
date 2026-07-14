@@ -8,8 +8,10 @@ import type {
     NativeIfcEntity,
     NativeIfcTreeNode,
 } from "@/ifc";
+import { cn } from "@/lib/utils";
 
 import { structureChildGroupsForParent } from "./constants";
+import { shortType } from "./ui";
 
 interface StructureTreeModel {
   paths: string[];
@@ -19,6 +21,12 @@ interface StructureTreeModel {
   typeById: Map<number, string>;
   nameById: Map<number, string>;
 }
+
+/** Platzhalter-Zeile, wenn keine räumliche Struktur indiziert ist. */
+const EMPTY_TREE_PLACEHOLDER = "(Keine Raumstruktur indiziert)";
+
+/** Maximale Zeilenzahl der Fallback-Suchliste. */
+const FALLBACK_ROW_LIMIT = 250;
 
 export function StructurePanel({
   document,
@@ -32,7 +40,6 @@ export function StructurePanel({
   onSelectMany,
 }: {
   document: NativeIfcDocument;
-  expanded: Set<number>;
   filteredEntities: NativeIfcEntity[];
   search: string;
   selectedId: number;
@@ -41,7 +48,6 @@ export function StructurePanel({
   onRemove(id: number): void;
   onSelect(id: number, source?: string): void;
   onSelectMany(ids: number[]): void;
-  onToggle(id: number): void;
 }) {
   const treeModel = useMemo(
     () => buildStructureTreeModel(document),
@@ -63,7 +69,7 @@ export function StructurePanel({
 
   const initialPaths = treeModel.paths.length
     ? treeModel.paths
-    : ["(No spatial roots indexed)"];
+    : [EMPTY_TREE_PLACEHOLDER];
 
   const { model } = useFileTree({
     density: "compact",
@@ -101,9 +107,34 @@ export function StructurePanel({
       },
     },
     unsafeCSS: `
+      /* Der Baum rendert in einem Shadow DOM und erbt daher keine
+         Tailwind-Styles. CSS-Custom-Properties erben jedoch über die
+         Shadow-Grenze: hier die Design-Tokens der App auf die
+         --trees-theme-*-Variablen der Bibliothek mappen, damit der Baum
+         auch im Dark Mode lesbar bleibt. */
       :host {
         font-family: inherit;
         font-size: 13px;
+        --trees-theme-sidebar-bg: var(--card);
+        --trees-theme-sidebar-fg: var(--foreground);
+        --trees-theme-sidebar-header-fg: var(--muted-foreground);
+        --trees-theme-sidebar-border: var(--border);
+        --trees-theme-list-hover-bg: var(--accent);
+        --trees-theme-list-active-selection-bg: color-mix(
+          in oklab,
+          var(--primary) 14%,
+          transparent
+        );
+        --trees-theme-list-active-selection-fg: var(--foreground);
+        --trees-theme-focus-ring: var(--ring);
+        --trees-theme-input-bg: var(--card);
+        --trees-theme-input-fg: var(--foreground);
+        --trees-theme-input-border: var(--input);
+        --trees-theme-scrollbar-thumb: color-mix(
+          in oklab,
+          var(--muted-foreground) 35%,
+          transparent
+        );
       }
     `,
   });
@@ -112,7 +143,7 @@ export function StructurePanel({
     idByPathRef.current = treeModel.idByPath;
     typeByIdRef.current = treeModel.typeById;
     model.resetPaths(
-      treeModel.paths.length ? treeModel.paths : ["(No spatial roots indexed)"],
+      treeModel.paths.length ? treeModel.paths : [EMPTY_TREE_PLACEHOLDER],
       { initialExpandedPaths: treeModel.expandedPaths },
     );
   }, [model, treeModel]);
@@ -164,7 +195,8 @@ export function StructurePanel({
       const path = readPath(event);
       if (!path) return;
       const item = model.getItem(path);
-      if (!item || !item.isDirectory()) return;
+      // Typeguard: nur Directory-Handles besitzen isExpanded/expand/collapse.
+      if (!item || !("isExpanded" in item)) return;
       // Block the library's built-in single-click expand on directory rows
       // by snapshotting the state and restoring it on the next microtask.
       const wasExpanded = item.isExpanded();
@@ -181,7 +213,7 @@ export function StructurePanel({
       const path = readPath(event);
       if (!path) return;
       const item = model.getItem(path);
-      if (!item || !item.isDirectory()) return;
+      if (!item || !("toggle" in item)) return;
       item.toggle();
       event.preventDefault();
       event.stopPropagation();
@@ -228,6 +260,9 @@ export function StructurePanel({
       const isProtected = typeName === "IFCPROJECT";
       const childGroups = structureChildGroupsForParent(typeName ?? "");
 
+      const menuItemClass =
+        "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground";
+
       const menu = (
         <div
           data-file-tree-context-menu-root="true"
@@ -238,75 +273,90 @@ export function StructurePanel({
             zIndex: 9999,
           }}
         >
-          <div className="mb-1 min-w-[190px] rounded-md border border-border bg-popover p-1 text-sm shadow-md">
+          <div className="min-w-[200px] max-w-[280px] rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md">
             <button
               type="button"
-              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-foreground hover:bg-muted/70"
+              className={menuItemClass}
               onClick={() => {
                 context.close({ restoreFocus: false });
                 onSelectRef.current(id, "tree");
                 onCenterCameraRef.current(id);
               }}
             >
-              <Crosshair aria-hidden className="size-3.5" />
-              <span className="min-w-0 flex-1">Kamera zentrieren</span>
-              <kbd className="rounded border border-border/70 px-1 text-[10px] leading-4 text-muted-foreground">
-                .
-              </kbd>
+              <Crosshair
+                aria-hidden
+                className="size-3.5 shrink-0 text-muted-foreground"
+              />
+              <span className="min-w-0 flex-1 truncate">Kamera zentrieren</span>
+              <kbd className="ml-auto text-[10px] text-muted-foreground">.</kbd>
             </button>
-          </div>
-          {childGroups.length ? (
-            <div className="mb-1 max-h-72 min-w-[210px] overflow-y-auto rounded-md border border-border bg-popover p-1 text-sm shadow-md">
-              <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                Neues Element anlegen
-              </div>
-              {childGroups.map((group) => (
-                <div key={group.label}>
-                  <div className="mt-1 border-t border-border/50 px-2 pb-0.5 pt-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/80">
-                    {group.label}
-                  </div>
-                  {group.options.map((option) => (
-                    <button
-                      key={`${group.label}-${option.value}`}
-                      type="button"
-                      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-foreground hover:bg-muted/70"
-                      onClick={() => {
-                        context.close({ restoreFocus: false });
-                        onAddChildRef.current(id, option.value, option.label);
-                      }}
-                    >
-                      <Plus aria-hidden className="size-3.5 shrink-0" />
-                      <span className="min-w-0 flex-1 truncate">
-                        {option.label}
-                      </span>
-                      <span className="shrink-0 text-[10px] uppercase text-muted-foreground">
-                        {option.value.replace(/^IFC/, "")}
-                      </span>
-                    </button>
+            {childGroups.length ? (
+              <>
+                <div aria-hidden className="-mx-1 my-1 h-px bg-border" />
+                <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Neues Element anlegen
+                </div>
+                <div className="max-h-64 overflow-y-auto">
+                  {childGroups.map((group, groupIndex) => (
+                    <div key={group.label}>
+                      <div
+                        className={cn(
+                          "px-2 pb-0.5 pt-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/80",
+                          groupIndex > 0 && "mt-1 border-t border-border/50",
+                        )}
+                      >
+                        {group.label}
+                      </div>
+                      {group.options.map((option) => (
+                        <button
+                          key={`${group.label}-${option.value}`}
+                          type="button"
+                          className={menuItemClass}
+                          onClick={() => {
+                            context.close({ restoreFocus: false });
+                            onAddChildRef.current(
+                              id,
+                              option.value,
+                              option.label,
+                            );
+                          }}
+                        >
+                          <Plus
+                            aria-hidden
+                            className="size-3.5 shrink-0 text-muted-foreground"
+                          />
+                          <span className="min-w-0 flex-1 truncate">
+                            {option.label}
+                          </span>
+                          <span className="ml-auto shrink-0 text-[10px] uppercase text-muted-foreground">
+                            {shortType(option.value)}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
                   ))}
                 </div>
-              ))}
-            </div>
-          ) : null}
-          {isProtected ? (
-            <div className="rounded-md border border-border bg-popover px-3 py-2 text-xs text-muted-foreground shadow-md">
-              IFCPROJECT kann nicht gelöscht werden.
-            </div>
-          ) : (
-            <div className="min-w-[160px] rounded-md border border-border bg-popover p-1 text-sm shadow-md">
+              </>
+            ) : null}
+            <div aria-hidden className="-mx-1 my-1 h-px bg-border" />
+            {isProtected ? (
+              <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                IFCPROJECT kann nicht gelöscht werden.
+              </div>
+            ) : (
               <button
                 type="button"
-                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-destructive hover:bg-destructive/10"
+                className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10"
                 onClick={() => {
                   context.close({ restoreFocus: false });
                   onRemoveRef.current(id);
                 }}
               >
-                <Trash2 aria-hidden className="size-3.5" />
+                <Trash2 aria-hidden className="size-3.5 shrink-0" />
                 <span>Löschen</span>
               </button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       );
 
@@ -323,9 +373,11 @@ export function StructurePanel({
     treeModel.paths.length === 0;
 
   if (showFallbackList) {
+    const visibleEntities = filteredEntities.slice(0, FALLBACK_ROW_LIMIT);
+    const hiddenCount = filteredEntities.length - visibleEntities.length;
     return (
-      <div className="min-h-0 flex-1 overflow-auto pr-1">
-        {filteredEntities.map((entity) => (
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1">
+        {visibleEntities.map((entity) => (
           <FallbackRow
             entity={entity}
             key={entity.id}
@@ -335,6 +387,11 @@ export function StructurePanel({
             onPress={() => onSelect(entity.id, "tree")}
           />
         ))}
+        {hiddenCount > 0 ? (
+          <div className="px-1.5 py-1.5 text-[11px] text-muted-foreground">
+            … {hiddenCount.toLocaleString("de-DE")} weitere ausgeblendet
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -365,39 +422,40 @@ function FallbackRow({
 }) {
   return (
     <div
-      className={
-        "group mb-0.5 flex items-center gap-1 rounded-md border px-1.5 py-1 text-sm transition-colors " +
-        (selected
-          ? "border-primary/30 bg-primary/10"
-          : "border-transparent hover:bg-muted/40")
-      }
+      className={cn(
+        "group flex h-7 items-center gap-1 rounded-sm px-1.5 transition-colors",
+        selected ? "bg-primary/10" : "hover:bg-muted/50",
+      )}
     >
       <button
         type="button"
         onClick={onPress}
-        className="min-w-0 flex-1 text-left"
+        title={`#${entity.id} · ${entity.type}`}
+        className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-left"
       >
-        <div className="truncate text-[13px] font-medium leading-tight text-foreground">
+        <span className="min-w-0 truncate text-xs font-medium text-foreground">
           {entity.name || `#${entity.id}`}
-        </div>
-        <div className="truncate text-[11px] leading-tight text-muted-foreground">
-          #{entity.id} · {entity.type}
-        </div>
+        </span>
+        <span className="min-w-0 shrink truncate text-[10px] text-muted-foreground">
+          #{entity.id} · {shortType(entity.type)}
+        </span>
       </button>
       <button
         type="button"
         aria-label={`Kamera zentrieren ${entity.name || entity.type}`}
+        title="Kamera zentrieren"
         onClick={() => onCenterCamera(entity.id)}
-        className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-muted/70 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+        className="flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground focus-visible:opacity-100 group-hover:opacity-100"
       >
         <Crosshair aria-hidden className="size-3.5" />
       </button>
       {entity.type !== "IFCPROJECT" ? (
         <button
           type="button"
-          aria-label={`L\u00f6schen ${entity.name || entity.type}`}
+          aria-label={`Löschen ${entity.name || entity.type}`}
+          title="Löschen"
           onClick={() => onRemove(entity.id)}
-          className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
+          className="flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
         >
           <Trash2 aria-hidden className="size-3.5" />
         </button>

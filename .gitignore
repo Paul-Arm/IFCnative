@@ -9,17 +9,9 @@ obj/
 dist/
 dist-electron/
 release/
-native-release/
-web-build/
 
-# Native
-.kotlin/
 *.orig.*
-*.jks
-*.p8
-*.p12
 *.key
-*.mobileprovision
 
 # debug
 npm-debug.*
@@ -40,9 +32,4 @@ server/.ifc-vcs-data/
 # typescript
 *.tsbuildinfo
 
-app-example
-
-# generated native folders
-/ios
-/android
 20250820_openSIM_BIM_Objektkatalog-BWD-V001_MKP_a_V.xlsx

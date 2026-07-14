@@ -19,7 +19,7 @@ import {
     type IfcObjectCatalog,
     type NativeIfcDocument,
 } from "@/ifc";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, PenLine, Plus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { PsetTableSection } from "./InspectorPanel";
@@ -28,11 +28,17 @@ import {
     Badge,
     Button,
     CollapsibleSection,
+    InlineAlert,
     LabeledInput,
     PanelHeader,
     PanelShell,
     SegmentedControl,
 } from "./ui";
+
+const ROLE_LABELS: Record<DiagnosticObjectRole, string> = {
+  probe: "Probe",
+  untersuchungsstelle: "Untersuchungsstelle",
+};
 
 export function DiagnosticsAssistantPanel({
   catalog,
@@ -89,20 +95,23 @@ export function DiagnosticsAssistantPanel({
     () => suggestDiagnosticProcedureCatalogObjects(catalog),
     [catalog],
   );
-  const visibleProcedureCatalogObjects = useMemo(() => {
-    const query = procedureQuery.trim().toLowerCase();
-    if (!query) {
-      return procedureCatalogObjects.slice(0, 12);
-    }
-    return procedureCatalogObjects
-      .filter((objectType) =>
-        [objectType.name, objectType.code, objectType.sheetName]
-          .join(" ")
-          .toLowerCase()
-          .includes(query),
-      )
-      .slice(0, 20);
-  }, [procedureCatalogObjects, procedureQuery]);
+  const { hiddenProcedureCount, visibleProcedureCatalogObjects } =
+    useMemo(() => {
+      const query = procedureQuery.trim().toLowerCase();
+      const matches = query
+        ? procedureCatalogObjects.filter((objectType) =>
+            [objectType.name, objectType.code, objectType.sheetName]
+              .join(" ")
+              .toLowerCase()
+              .includes(query),
+          )
+        : procedureCatalogObjects;
+      const limit = query ? 20 : 12;
+      return {
+        hiddenProcedureCount: Math.max(0, matches.length - limit),
+        visibleProcedureCatalogObjects: matches.slice(0, limit),
+      };
+    }, [procedureCatalogObjects, procedureQuery]);
 
   useEffect(() => {
     setRole(context.detectedRole ?? "probe");
@@ -132,7 +141,7 @@ export function DiagnosticsAssistantPanel({
         title="Diagnostik-Assistent"
         meta={
           <Badge tone={context.detectedRole ? "success" : "warning"}>
-            {context.detectedRole ?? "neu"}
+            {context.detectedRole ? ROLE_LABELS[context.detectedRole] : "Neu"}
           </Badge>
         }
       />
@@ -143,40 +152,46 @@ export function DiagnosticsAssistantPanel({
         meta="Untersuchungsstelle oder Probe"
       >
         <SegmentedControl
-          options={["untersuchungsstelle", "probe"]}
+          options={[
+            { label: "Untersuchungsstelle", value: "untersuchungsstelle" },
+            { label: "Probe", value: "probe" },
+          ]}
           value={role}
           onChange={(value) => setRole(value as DiagnosticObjectRole)}
         />
         {context.detectedRoleReason ? (
-          <div className="rounded-md border border-emerald-200/70 bg-emerald-50/60 px-2.5 py-1.5 text-xs text-emerald-800">
-            Erkannt ueber {context.detectedRoleReason}.
-          </div>
+          <InlineAlert tone="info">
+            Erkannt über {context.detectedRoleReason}.
+          </InlineAlert>
         ) : null}
-        <LabeledInput label="_ID" mono value={id} onChangeText={setId} />
-        {role === "probe" ? (
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-2">
+          <LabeledInput label="_ID" mono value={id} onChangeText={setId} />
+          {role === "probe" ? (
+            <LabeledInput
+              label="_UntersuchungsstelleID"
+              mono
+              value={untersuchungsstelleId}
+              onChangeText={setUntersuchungsstelleId}
+            />
+          ) : null}
           <LabeledInput
-            label="_UntersuchungsstelleID"
-            mono
-            value={untersuchungsstelleId}
-            onChangeText={setUntersuchungsstelleId}
+            label="_Bezeichnung"
+            value={bezeichnung}
+            onChangeText={setBezeichnung}
           />
-        ) : null}
-        <LabeledInput
-          label="_Bezeichnung"
-          value={bezeichnung}
-          onChangeText={setBezeichnung}
-        />
+        </div>
         <LabeledInput
           label="_Bemerkung"
           multiline
           value={bemerkung}
           onChangeText={setBemerkung}
         />
-        <Button
-          label="Objektinformation schreiben"
-          primary
-          onPress={applyObjectInfo}
-        />
+        <div className="flex flex-wrap justify-end">
+          <Button variant="default" onClick={applyObjectInfo}>
+            <PenLine aria-hidden className="size-3.5" />
+            Objektinformation schreiben
+          </Button>
+        </div>
       </CollapsibleSection>
 
       <CollapsibleSection
@@ -184,13 +199,13 @@ export function DiagnosticsAssistantPanel({
         title="Untersuchungsverfahren"
         meta={
           catalog
-            ? `${procedureCatalogObjects.length} Katalogtreffer`
+            ? `${procedureCatalogObjects.length.toLocaleString("de-DE")} Katalogtreffer`
             : "Kein Katalog geladen"
         }
       >
         <CollapsibleSection
           title="Vorhandene Verfahren"
-          meta={`${context.procedureSets.length.toLocaleString()} Sets`}
+          meta={`${context.procedureSets.length.toLocaleString("de-DE")} Sets`}
         >
           {context.procedureSets.length ? (
             <div className="grid gap-3">
@@ -223,41 +238,55 @@ export function DiagnosticsAssistantPanel({
             </div>
           ) : (
             <p className="text-xs text-muted-foreground">
-              Noch keine Verfahrens-Psets am ausgewaehlten Element.
+              Noch keine Verfahrens-Psets am ausgewählten Element.
             </p>
           )}
         </CollapsibleSection>
 
         <div className="grid gap-2">
           <Input
-            className="h-8"
+            className="h-8 text-xs"
             placeholder="Verfahren im Objektkatalog suchen"
             value={procedureQuery}
             onChange={(event) => setProcedureQuery(event.currentTarget.value)}
           />
           {visibleProcedureCatalogObjects.length ? (
-            <div className="grid gap-2">
-              {visibleProcedureCatalogObjects.map((objectType) => (
-                <div
-                  key={objectType.id}
-                  className="grid gap-2 rounded-md border border-border/60 bg-card px-3 py-2"
-                >
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-medium text-foreground">
-                      {catalogObjectLabel(objectType)}
-                    </div>
-                    <div className="truncate text-xs text-muted-foreground">
-                      {objectType.ifcClass} / {objectType.propertyRules.length}{" "}
-                      Regeln
-                    </div>
-                  </div>
-                  <Button
-                    label="Verfahren hinzufuegen"
-                    onPress={() => onApplyProcedure(objectType)}
-                  />
-                </div>
-              ))}
-            </div>
+            <>
+              <div className="overflow-hidden rounded-md border border-border/60 bg-card">
+                {visibleProcedureCatalogObjects.map((objectType) => (
+                  <button
+                    key={objectType.id}
+                    type="button"
+                    className="flex h-auto w-full items-center gap-2 border-b border-border/40 px-2.5 py-1.5 text-left transition-colors last:border-b-0 hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
+                    title="Verfahren hinzufügen"
+                    onClick={() => onApplyProcedure(objectType)}
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-xs font-medium text-foreground">
+                        {catalogObjectLabel(objectType)}
+                      </span>
+                      <span className="block truncate text-[11px] text-muted-foreground">
+                        {objectType.ifcClass} ·{" "}
+                        {objectType.propertyRules.length.toLocaleString(
+                          "de-DE",
+                        )}{" "}
+                        Regeln
+                      </span>
+                    </span>
+                    <Plus
+                      aria-hidden
+                      className="size-3.5 shrink-0 text-muted-foreground"
+                    />
+                  </button>
+                ))}
+              </div>
+              {hiddenProcedureCount ? (
+                <p className="text-[11px] text-muted-foreground">
+                  … {hiddenProcedureCount.toLocaleString("de-DE")} weitere
+                  ausgeblendet
+                </p>
+              ) : null}
+            </>
           ) : (
             <p className="text-xs text-muted-foreground">
               {catalog
@@ -297,7 +326,7 @@ function ProcedureObjectivePicker({
       ]
         .filter(Boolean)
         .join(", ")
-    : "Untersuchungsziele waehlen";
+    : "Untersuchungsziele wählen";
 
   const toggleObjective = (objectiveId: string, checked: boolean) => {
     const nextObjectiveIds = checked

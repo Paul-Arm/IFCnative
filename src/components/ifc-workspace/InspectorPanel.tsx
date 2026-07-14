@@ -1,4 +1,3 @@
-import { Button as ShadcnButton } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
     Select,
@@ -7,7 +6,8 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import { Copy, Plus, Save, Trash2 } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import { Check, Copy, Plus, Save, Trash2 } from "lucide-react";
 import {
     useEffect,
     useMemo,
@@ -20,6 +20,7 @@ import {
 import {
     catalogObjectLabel,
     getNativeBodyRepresentation,
+    getNativeLengthUnitScale,
     getNativePlacementWorld,
     ifcPlacementPointToViewerWorldPoint,
     nativeWorldToLocalPlacementPoint,
@@ -61,9 +62,11 @@ import {
     Button,
     CollapsibleSection,
     ColorInput,
+    CommitInput,
     DataTable,
     DataTableCell,
     DropdownField,
+    EmptyState,
     EntityDropdown,
     InfoRow,
     InfoSection,
@@ -71,8 +74,16 @@ import {
     PanelHeader,
     PanelShell,
     SegmentedControl,
+    shortType,
     type DataTableColumn,
 } from "./ui";
+
+export const INSPECTOR_MODES: { value: InspectorMode; label: string }[] = [
+  { value: "overview", label: "Übersicht" },
+  { value: "properties", label: "Eigenschaften" },
+  { value: "placement", label: "Platzierung" },
+  { value: "relations", label: "Beziehungen" },
+];
 
 export function InspectorPanel({
   activeCatalogObjectId,
@@ -208,13 +219,23 @@ export function InspectorPanel({
 }) {
   const entity = document.entityById.get(selectedId);
   if (!entity) {
-    return <EmptyBlock>No entity selected.</EmptyBlock>;
+    return (
+      <DocumentOverview
+        document={document}
+        objectInfoFindings={objectInfoFindings}
+        onSelectEntity={onSelectEntity}
+      />
+    );
   }
 
-  if (mode === "edit") {
-    return <EditPanel entity={entity} onSave={onSaveEdit} />;
-  }
-  if (mode === "psets") {
+  // Unbekannte (z. B. veraltete) Modus-Werte fallen auf die Übersicht zurück.
+  const activeMode: InspectorMode = INSPECTOR_MODES.some(
+    (item) => item.value === mode,
+  )
+    ? mode
+    : "overview";
+
+  if (activeMode === "properties") {
     return (
       <PsetPanel
         activeCatalogObjectId={activeCatalogObjectId}
@@ -234,18 +255,7 @@ export function InspectorPanel({
       />
     );
   }
-  if (mode === "object-info") {
-    return (
-      <ObjectInfoInspectorPanel
-        document={document}
-        findings={objectInfoFindings}
-        index={objectInfoIndex}
-        selectedId={selectedId}
-        onSelectEntity={onSelectEntity}
-      />
-    );
-  }
-  if (mode === "placement") {
+  if (activeMode === "placement") {
     return (
       <PlacementGeometryPanel
         document={document}
@@ -253,26 +263,13 @@ export function InspectorPanel({
         selectedId={selectedId}
         onAssignBodyToSelected={onAssignBodyToSelected}
         onMove={onMovePlacement}
+        onSelectEntity={onSelectEntity}
       />
     );
   }
-  if (mode === "relations") {
+  if (activeMode === "relations") {
     return (
-      <RelationsPanel
-        document={document}
-        selectedId={selectedId}
-        onAddRelationship={onAddRelationship}
-        onRemoveRelationship={onRemoveRelationship}
-        onUpdateRelationship={onUpdateRelationship}
-      />
-    );
-  }
-  if (mode === "refs") {
-    return <ReferencesPanel document={document} selectedId={selectedId} />;
-  }
-  if (mode === "resources") {
-    return (
-      <ResourcesPanel
+      <RelationsResourcesPanel
         document={document}
         selectedId={selectedId}
         onAddGroupAssignment={onAddGroupAssignment}
@@ -284,15 +281,29 @@ export function InspectorPanel({
         onAddMaterialProfileSetUsage={onAddMaterialProfileSetUsage}
         onAddMaterialStyle={onAddMaterialStyle}
         onAddMaterialWithProperties={onAddMaterialWithProperties}
+        onAddRelationship={onAddRelationship}
         onAssignType={onAssignType}
+        onRemoveRelationship={onRemoveRelationship}
+        onUpdateRelationship={onUpdateRelationship}
       />
     );
   }
-  if (mode === "units") {
-    return <UnitsPanel document={document} onAddUnit={onAddUnit} />;
-  }
-  return <InfoPanel document={document} entity={entity} />;
+  return (
+    <OverviewPanel
+      document={document}
+      entity={entity}
+      objectInfoFindings={objectInfoFindings}
+      objectInfoIndex={objectInfoIndex}
+      onAddUnit={onAddUnit}
+      onSaveEdit={onSaveEdit}
+      onSelectEntity={onSelectEntity}
+    />
+  );
 }
+
+/* ------------------------------------------------------------------ */
+/* Kleine Layout-Primitive                                             */
+/* ------------------------------------------------------------------ */
 
 function EmptyBlock({
   title,
@@ -327,24 +338,6 @@ function CodeBlock({ children }: { children: ReactNode }) {
   );
 }
 
-function ItemCard({ children }: { children: ReactNode }) {
-  return (
-    <div className="grid gap-2 rounded-md border border-border/60 bg-muted/20 p-2.5">
-      {children}
-    </div>
-  );
-}
-
-function ItemTitle({ children }: { children: ReactNode }) {
-  return <div className="text-sm font-medium text-foreground">{children}</div>;
-}
-
-function ItemMeta({ children }: { children: ReactNode }) {
-  return (
-    <div className="truncate text-xs text-muted-foreground">{children}</div>
-  );
-}
-
 function EditBlock({
   title,
   children,
@@ -374,99 +367,855 @@ function ResponsiveField({ children }: { children: ReactNode }) {
   return <div className="min-w-0">{children}</div>;
 }
 
-function InfoPanel({
+function SectionHeading({ children }: { children: ReactNode }) {
+  return (
+    <div className="mt-1 flex shrink-0 items-center gap-2">
+      <h3 className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+        {children}
+      </h3>
+      <div className="h-px flex-1 bg-border/60" />
+    </div>
+  );
+}
+
+function SubHeading({ children }: { children: ReactNode }) {
+  return (
+    <div className="mt-1 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground first:mt-0">
+      {children}
+    </div>
+  );
+}
+
+function IconButton({
+  disabled,
+  icon,
+  label,
+  tone = "neutral",
+  onClick,
+}: {
+  disabled?: boolean;
+  icon: ReactNode;
+  label: string;
+  tone?: "neutral" | "danger" | "primary";
+  onClick(): void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        "inline-flex size-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40",
+        tone === "danger" && "hover:bg-destructive/10 hover:text-destructive",
+        tone === "primary" &&
+          "text-primary hover:bg-primary/10 hover:text-primary",
+      )}
+    >
+      {icon}
+    </button>
+  );
+}
+
+function CopyIconButton({ text, title }: { text: string; title: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <IconButton
+      label={copied ? "Kopiert" : title}
+      icon={
+        copied ? (
+          <Check aria-hidden className="size-3.5 text-success" />
+        ) : (
+          <Copy aria-hidden className="size-3.5" />
+        )
+      }
+      onClick={() => {
+        const clipboard = globalThis.navigator?.clipboard;
+        if (!clipboard) {
+          return;
+        }
+        void clipboard
+          .writeText(text)
+          .then(() => {
+            setCopied(true);
+            globalThis.setTimeout(() => setCopied(false), 1500);
+          })
+          .catch(() => undefined);
+      }}
+    />
+  );
+}
+
+/** Klickbarer Entity-Verweis (#id + Kurzklasse) mit Auswahl per Klick. */
+function EntityChip({
   document,
-  entity,
+  id,
+  showType = true,
+  onSelect,
 }: {
   document: NativeIfcDocument;
-  entity: NativeIfcEntity;
+  id: number;
+  showType?: boolean;
+  onSelect(entityId: number): void;
 }) {
-  const path = findTreePath(document, entity.id);
-  const resources = document.resourcesByEntity.get(entity.id) ?? [];
-  const sets = document.propertySetsByEntity.get(entity.id) ?? [];
-  const relationships = document.relationshipsByEntity.get(entity.id) ?? [];
+  const target = document.entityById.get(id);
+  const title = target
+    ? `#${id} ${shortType(target.type)}${target.name ? ` – ${target.name}` : ""} auswählen`
+    : `#${id} auswählen`;
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={() => onSelect(id)}
+      className="inline-flex min-w-0 max-w-full items-center gap-1 rounded border border-border/60 bg-background px-1.5 py-0.5 text-[11px] leading-4 text-foreground transition-colors hover:border-primary/50 hover:bg-primary/5 hover:text-primary"
+    >
+      <span className="shrink-0 font-mono">#{id}</span>
+      {showType && target ? (
+        <span className="truncate text-muted-foreground">
+          {shortType(target.type)}
+        </span>
+      ) : null}
+    </button>
+  );
+}
+
+/**
+ * Rendert maximal `limit` Einträge; abgeschnittene Listen zeigen den
+ * "… N weitere ausgeblendet"-Hinweis und lassen sich per Klick expandieren.
+ */
+function CappedItems<T>({
+  items,
+  limit,
+  renderItem,
+}: {
+  items: T[];
+  limit: number;
+  renderItem(item: T, index: number): ReactNode;
+}) {
+  const [showAll, setShowAll] = useState(false);
+  const visible = showAll ? items : items.slice(0, limit);
+  const hidden = items.length - visible.length;
+  return (
+    <>
+      {visible.map((item, index) => renderItem(item, index))}
+      {hidden > 0 ? (
+        <button
+          type="button"
+          className="text-left text-xs text-primary hover:underline"
+          onClick={() => setShowAll(true)}
+        >
+          … {hidden.toLocaleString("de-DE")} weitere ausgeblendet – alle
+          anzeigen
+        </button>
+      ) : null}
+    </>
+  );
+}
+
+/** LabeledInput-Variante mit Placeholder-Unterstützung. */
+function TextField({
+  keyboardType,
+  label,
+  mono,
+  multiline,
+  placeholder,
+  value,
+  onChangeText,
+}: {
+  keyboardType?: "default" | "numeric";
+  label: string;
+  mono?: boolean;
+  multiline?: boolean;
+  placeholder?: string;
+  value: string;
+  onChangeText(value: string): void;
+}) {
+  return (
+    <label className="grid min-w-0 gap-1.5 text-xs text-muted-foreground">
+      {label}
+      {multiline ? (
+        <Textarea
+          className={cn("min-h-20 text-xs text-foreground", mono && "font-mono")}
+          placeholder={placeholder}
+          value={value}
+          onChange={(event) => onChangeText(event.currentTarget.value)}
+        />
+      ) : (
+        <Input
+          className={cn("h-8 text-xs text-foreground", mono && "font-mono")}
+          inputMode={keyboardType === "numeric" ? "decimal" : undefined}
+          placeholder={placeholder}
+          value={value}
+          onChange={(event) => onChangeText(event.currentTarget.value)}
+        />
+      )}
+    </label>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Startseite ohne Auswahl: Dokument-Übersicht                         */
+/* ------------------------------------------------------------------ */
+
+function DocumentOverview({
+  document,
+  objectInfoFindings,
+  onSelectEntity,
+}: {
+  document: NativeIfcDocument;
+  objectInfoFindings: ObjectInfoValidationFinding[];
+  onSelectEntity(entityId: number): void;
+}) {
+  const psetCount = document.entitiesByType.get("IFCPROPERTYSET")?.length ?? 0;
+  const qtoCount =
+    document.entitiesByType.get("IFCELEMENTQUANTITY")?.length ?? 0;
+  const severityCounts = { error: 0, info: 0, warning: 0 };
+  for (const finding of objectInfoFindings) {
+    severityCounts[finding.severity] += 1;
+  }
+  const projectId = document.spatialRoots[0]?.id;
+
   return (
     <PanelShell scroll>
       <PanelHeader
-        eyebrow={`#${entity.id}`}
-        title={entity.name || entity.type}
-        description={`${entity.type} / ${sets.length.toLocaleString()} Psets / ${relationships.length.toLocaleString()} Relationen`}
-        meta={<Badge tone="neutral">Info</Badge>}
+        eyebrow="Dokument"
+        title={document.fileName || "IFC-Dokument"}
+        description="Kein Objekt ausgewählt – Übersicht über das geladene Modell."
+        meta={<Badge tone="info">{document.schema || "IFC"}</Badge>}
       />
-      <InfoSection title="Identity">
-        <InfoRow label="ID" value={`#${entity.id}`} />
-        <InfoRow label="Class" value={entity.type} />
-        <InfoRow label="GlobalId" value={entity.globalId || "-"} />
-        <InfoRow label="Name" value={entity.name || "-"} />
-        <InfoRow label="Description" value={entity.description || "-"} />
-      </InfoSection>
-      <InfoSection title="Document">
-        <InfoRow label="File" value={document.fileName} />
-        <InfoRow label="Schema" value={document.schema} />
+      <InfoSection title="Modell">
         <InfoRow
-          label="Entities"
-          value={document.entities.length.toLocaleString()}
+          label="Entitäten"
+          value={document.entities.length.toLocaleString("de-DE")}
         />
         <InfoRow
-          label="Types"
-          value={document.entitiesByType.size.toLocaleString()}
+          label="Typen"
+          value={document.entitiesByType.size.toLocaleString("de-DE")}
+        />
+        <InfoRow label="Psets" value={psetCount.toLocaleString("de-DE")} />
+        <InfoRow
+          label="Mengensätze"
+          value={qtoCount.toLocaleString("de-DE")}
+        />
+        <InfoRow
+          label="Einheiten"
+          value={document.units.length.toLocaleString("de-DE")}
         />
       </InfoSection>
-      <InfoSection title="Spatial Path">
-        {path.length ? (
-          path.map((item) => (
-            <TextLine key={item.id}>
-              #{item.id} {item.type}: {item.name || item.type}
-            </TextLine>
-          ))
-        ) : (
-          <TextLine>No spatial path.</TextLine>
-        )}
+      <InfoSection title="Objektinfo-Prüfung">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Badge tone={severityCounts.error ? "danger" : "neutral"}>
+            {severityCounts.error.toLocaleString("de-DE")} Fehler
+          </Badge>
+          <Badge tone={severityCounts.warning ? "warning" : "neutral"}>
+            {severityCounts.warning.toLocaleString("de-DE")} Warnungen
+          </Badge>
+          <Badge tone={severityCounts.info ? "info" : "neutral"}>
+            {severityCounts.info.toLocaleString("de-DE")} Hinweise
+          </Badge>
+        </div>
+        {objectInfoFindings.length === 0 ? (
+          <TextLine>Keine Objektinfo-Findings im Modell.</TextLine>
+        ) : null}
       </InfoSection>
-      <InfoSection title="Resources">
-        {resources.length ? (
-          resources.map((item) => <TextLine key={item}>{item}</TextLine>)
-        ) : (
-          <TextLine>No resources linked.</TextLine>
-        )}
-      </InfoSection>
-      <InfoSection title="Properties / Quantities">
-        {sets.length ? (
-          sets.map((set) => (
-            <TextLine key={set.id}>
-              #{set.id} {set.kind} {set.name}:{" "}
-              {set.values
-                .map((value) => `${value.name}=${value.value}`)
-                .join(", ")}
-            </TextLine>
-          ))
-        ) : (
-          <TextLine>No Psets or QTOs linked.</TextLine>
-        )}
-      </InfoSection>
-      <InfoSection title="Relationships">
-        {relationships.length ? (
-          relationships.map((relationship) => (
-            <TextLine key={relationship.id}>
-              #{relationship.id} {relationship.type}:{" "}
-              {relationship.sourceIds.map((id) => `#${id}`).join(",") || "-"} -{" "}
-              {relationship.targetIds.map((id) => `#${id}`).join(",") || "-"}
-            </TextLine>
-          ))
-        ) : (
-          <TextLine>No relationships indexed.</TextLine>
-        )}
-      </InfoSection>
-      <InfoSection title="STEP">
-        <CodeBlock>
-          #{entity.id}= {entity.type}({entity.args.join(",")});
-        </CodeBlock>
-      </InfoSection>
+      <EmptyState
+        title="Kein Objekt ausgewählt"
+        description="Ein Objekt in der Struktur oder im 3D-Fenster wählen, um Details, Eigenschaften und Beziehungen zu sehen."
+        action={
+          projectId ? (
+            <Button variant="default" onClick={() => onSelectEntity(projectId)}>
+              Projekt auswählen
+            </Button>
+          ) : undefined
+        }
+      />
     </PanelShell>
   );
 }
 
-function ObjectInfoInspectorPanel({
+/* ------------------------------------------------------------------ */
+/* Tab "Übersicht"                                                     */
+/* ------------------------------------------------------------------ */
+
+function OverviewPanel({
+  document,
+  entity,
+  objectInfoFindings,
+  objectInfoIndex,
+  onAddUnit,
+  onSaveEdit,
+  onSelectEntity,
+}: {
+  document: NativeIfcDocument;
+  entity: NativeIfcEntity;
+  objectInfoFindings: ObjectInfoValidationFinding[];
+  objectInfoIndex: ObjectInfoIndex;
+  onAddUnit(unitType: string, unitName: string): void;
+  onSaveEdit(draft: EntityEditDraft): void;
+  onSelectEntity(entityId: number): void;
+}) {
+  const path = findTreePath(document, entity.id);
+  const sets = document.propertySetsByEntity.get(entity.id) ?? [];
+  const relationships = document.relationshipsByEntity.get(entity.id) ?? [];
+
+  return (
+    <PanelShell scroll>
+      <PanelHeader
+        eyebrow={`#${entity.id}`}
+        title={entity.name || shortType(entity.type)}
+        description={`${sets.length.toLocaleString("de-DE")} Psets · ${relationships.length.toLocaleString("de-DE")} Beziehungen`}
+        meta={<Badge tone="info">{shortType(entity.type)}</Badge>}
+      />
+
+      <InfoSection title="Identität">
+        <div className="grid gap-1">
+          <IdentityEditRow label="Klasse">
+            <Select
+              value={entity.type}
+              onValueChange={(nextType) => {
+                if (nextType && nextType !== entity.type) {
+                  onSaveEdit({
+                    description: entity.description,
+                    name: entity.name,
+                    rawArgs: entity.args.join(","),
+                    type: nextType,
+                  });
+                }
+              }}
+            >
+              <SelectTrigger className="h-6 w-full min-w-0 text-xs">
+                <SelectValue className="truncate">
+                  {shortType(entity.type)}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent
+                align="start"
+                className="max-h-72 w-auto max-w-96 min-w-(--anchor-width)"
+              >
+                {identityClassOptions(entity.type).map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </IdentityEditRow>
+          <div className="grid gap-1 rounded-md bg-muted/30 px-2 py-1 text-sm sm:grid-cols-[8rem_minmax(0,1fr)] sm:items-center sm:gap-2">
+            <span className="text-[0.7rem] font-medium uppercase tracking-wide text-muted-foreground">
+              GlobalId
+            </span>
+            <span className="flex min-w-0 items-center gap-1">
+              <span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">
+                {entity.globalId || "–"}
+              </span>
+              {entity.globalId ? (
+                <CopyIconButton
+                  text={entity.globalId}
+                  title="GlobalId kopieren"
+                />
+              ) : null}
+            </span>
+          </div>
+          <IdentityEditRow label="Name">
+            <CommitInput
+              className="h-6 w-full"
+              placeholder="–"
+              value={entity.name}
+              onCommit={(next) =>
+                onSaveEdit({
+                  description: entity.description,
+                  name: next,
+                  rawArgs: entity.args.join(","),
+                  type: entity.type,
+                })
+              }
+            />
+          </IdentityEditRow>
+          <IdentityEditRow label="Beschreibung">
+            <CommitInput
+              className="h-6 w-full"
+              placeholder="–"
+              value={entity.description}
+              onCommit={(next) =>
+                onSaveEdit({
+                  description: next,
+                  name: entity.name,
+                  rawArgs: entity.args.join(","),
+                  type: entity.type,
+                })
+              }
+            />
+          </IdentityEditRow>
+          <EntitySpecificIdentityFields
+            entity={entity}
+            schema={document.schema}
+            onSave={onSaveEdit}
+          />
+        </div>
+      </InfoSection>
+
+      <InfoSection title="Räumlicher Pfad">
+        {path.length ? (
+          <div className="flex min-w-0 flex-wrap items-center gap-1">
+            {path.map((item, index) => (
+              <span
+                key={item.id}
+                className="flex min-w-0 max-w-full items-center gap-1"
+              >
+                {index > 0 ? (
+                  <span className="text-xs text-muted-foreground">/</span>
+                ) : null}
+                <button
+                  type="button"
+                  title={`#${item.id} ${item.type} auswählen`}
+                  onClick={() => onSelectEntity(item.id)}
+                  className="min-w-0 max-w-full truncate rounded border border-border/60 bg-background px-1.5 py-0.5 text-[11px] leading-4 text-foreground transition-colors hover:border-primary/50 hover:bg-primary/5 hover:text-primary"
+                >
+                  {item.name || shortType(item.type)}
+                </button>
+              </span>
+            ))}
+          </div>
+        ) : (
+          <TextLine>Kein räumlicher Pfad.</TextLine>
+        )}
+      </InfoSection>
+
+      <InfoSection title="Eigenschaften & Mengen">
+        {sets.length ? (
+          <CappedItems
+            items={sets}
+            limit={12}
+            renderItem={(set) => (
+              <div
+                key={set.id}
+                className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 rounded-md bg-muted/30 px-2 py-1.5"
+              >
+                <Badge tone={set.kind === "Qto" ? "warning" : "success"}>
+                  {set.kind}
+                </Badge>
+                <EntityChip
+                  document={document}
+                  id={set.id}
+                  showType={false}
+                  onSelect={onSelectEntity}
+                />
+                <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
+                  {set.name}
+                </span>
+                <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+                  {set.values.length.toLocaleString("de-DE")} Werte
+                </span>
+              </div>
+            )}
+          />
+        ) : (
+          <TextLine>Keine Psets oder QTOs verknüpft.</TextLine>
+        )}
+      </InfoSection>
+
+      <InfoSection title="Beziehungen">
+        {relationships.length ? (
+          <CappedItems
+            items={relationships}
+            limit={20}
+            renderItem={(relationship) => (
+              <div
+                key={relationship.id}
+                className="grid gap-1 rounded-md bg-muted/30 px-2 py-1.5"
+              >
+                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                  <EntityChip
+                    document={document}
+                    id={relationship.id}
+                    showType={false}
+                    onSelect={onSelectEntity}
+                  />
+                  <span className="min-w-0 truncate text-xs font-medium text-foreground">
+                    {shortType(relationship.type)}
+                  </span>
+                </div>
+                <div className="flex min-w-0 flex-wrap items-center gap-1 text-xs text-muted-foreground">
+                  <RelationshipIdChips
+                    document={document}
+                    ids={relationship.sourceIds}
+                    onSelect={onSelectEntity}
+                  />
+                  <span aria-hidden>→</span>
+                  <RelationshipIdChips
+                    document={document}
+                    ids={relationship.targetIds}
+                    onSelect={onSelectEntity}
+                  />
+                </div>
+              </div>
+            )}
+          />
+        ) : (
+          <TextLine>Keine Beziehungen indexiert.</TextLine>
+        )}
+      </InfoSection>
+
+      <ObjectInfoSummary
+        document={document}
+        findings={objectInfoFindings}
+        index={objectInfoIndex}
+        selectedId={entity.id}
+        onSelectEntity={onSelectEntity}
+      />
+
+      <ReferencesSection
+        document={document}
+        selectedId={entity.id}
+        onSelectEntity={onSelectEntity}
+      />
+
+      <UnitsSection document={document} onAddUnit={onAddUnit} />
+
+      <AdvancedEditSection entity={entity} onSave={onSaveEdit} />
+    </PanelShell>
+  );
+}
+
+/** Label/Control-Zeile im InfoRow-Layout für die editierbare Identität. */
+function IdentityEditRow({
+  children,
+  label,
+}: {
+  children: ReactNode;
+  label: string;
+}) {
+  return (
+    <div className="grid gap-1 rounded-md bg-muted/30 px-2 py-1 text-sm sm:grid-cols-[8rem_minmax(0,1fr)] sm:items-center sm:gap-2">
+      <span className="text-[0.7rem] font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </span>
+      <span className="min-w-0">{children}</span>
+    </div>
+  );
+}
+
+type IdentityAttributeKind = "angle" | "enum" | "number" | "text";
+
+interface IdentityAttributeDefinition {
+  argIndex: number;
+  kind: IdentityAttributeKind;
+  label: string;
+  options?: { label: string; value: string }[];
+  placeholder?: string;
+}
+
+const COMPOSITION_TYPE_OPTIONS = [
+  { label: "Nicht gesetzt", value: "$" },
+  { label: "Element", value: ".ELEMENT." },
+  { label: "Teilweise", value: ".PARTIAL." },
+  { label: "Komplex", value: ".COMPLEX." },
+];
+
+const SPACE_TYPE_OPTIONS = [
+  { label: "Nicht gesetzt", value: "$" },
+  { label: "Innenraum", value: ".INTERNAL." },
+  { label: "Außenraum", value: ".EXTERNAL." },
+  { label: "GFA", value: ".GFA." },
+  { label: "Parken", value: ".PARKING." },
+  { label: "USERDEFINED", value: ".USERDEFINED." },
+  { label: "NOTDEFINED", value: ".NOTDEFINED." },
+];
+
+const PROXY_TYPE_OPTIONS = [
+  { label: "Nicht gesetzt", value: "$" },
+  { label: "Komplex", value: ".COMPLEX." },
+  { label: "Element", value: ".ELEMENT." },
+  { label: "Teil", value: ".PARTIAL." },
+  { label: "Platzhalter für Raum", value: ".PROVISIONFORSPACE." },
+  { label: "Platzhalter für Öffnung", value: ".PROVISIONFORVOID." },
+  { label: "Benutzerdefiniert", value: ".USERDEFINED." },
+  { label: "Nicht definiert", value: ".NOTDEFINED." },
+];
+
+const IDENTITY_ATTRIBUTES_BY_TYPE: Record<
+  string,
+  IdentityAttributeDefinition[]
+> = {
+  IFCBUILDING: [
+    { argIndex: 4, kind: "text", label: "Objekttyp" },
+    { argIndex: 7, kind: "text", label: "Langname" },
+    {
+      argIndex: 8,
+      kind: "enum",
+      label: "Gliederung",
+      options: COMPOSITION_TYPE_OPTIONS,
+    },
+    {
+      argIndex: 9,
+      kind: "number",
+      label: "Referenzhöhe",
+      placeholder: "z. B. 125.40",
+    },
+    {
+      argIndex: 10,
+      kind: "number",
+      label: "Geländehöhe",
+      placeholder: "z. B. 123.80",
+    },
+  ],
+  IFCBUILDINGSTOREY: [
+    { argIndex: 4, kind: "text", label: "Objekttyp" },
+    { argIndex: 7, kind: "text", label: "Langname" },
+    {
+      argIndex: 8,
+      kind: "enum",
+      label: "Gliederung",
+      options: COMPOSITION_TYPE_OPTIONS,
+    },
+    {
+      argIndex: 9,
+      kind: "number",
+      label: "Höhenlage",
+      placeholder: "z. B. 3.20",
+    },
+  ],
+  IFCPROJECT: [
+    { argIndex: 4, kind: "text", label: "Objekttyp" },
+    { argIndex: 5, kind: "text", label: "Langname" },
+    { argIndex: 6, kind: "text", label: "Projektphase" },
+  ],
+  IFCSITE: [
+    { argIndex: 4, kind: "text", label: "Objekttyp" },
+    { argIndex: 7, kind: "text", label: "Langname" },
+    {
+      argIndex: 8,
+      kind: "enum",
+      label: "Gliederung",
+      options: COMPOSITION_TYPE_OPTIONS,
+    },
+    {
+      argIndex: 9,
+      kind: "angle",
+      label: "Breitengrad",
+      placeholder: "z. B. 52, 31, 12",
+    },
+    {
+      argIndex: 10,
+      kind: "angle",
+      label: "Längengrad",
+      placeholder: "z. B. 13, 24, 18",
+    },
+    {
+      argIndex: 11,
+      kind: "number",
+      label: "Referenzhöhe",
+      placeholder: "z. B. 34.50",
+    },
+    { argIndex: 12, kind: "text", label: "Grundbuchnummer" },
+  ],
+  IFCSPACE: [
+    { argIndex: 4, kind: "text", label: "Objekttyp" },
+    { argIndex: 7, kind: "text", label: "Langname" },
+    {
+      argIndex: 8,
+      kind: "enum",
+      label: "Gliederung",
+      options: COMPOSITION_TYPE_OPTIONS,
+    },
+    {
+      argIndex: 9,
+      kind: "enum",
+      label: "Raumtyp",
+      options: SPACE_TYPE_OPTIONS,
+    },
+    {
+      argIndex: 10,
+      kind: "number",
+      label: "Fertigfußboden",
+      placeholder: "z. B. 0.15",
+    },
+  ],
+};
+
+function EntitySpecificIdentityFields({
+  entity,
+  schema,
+  onSave,
+}: {
+  entity: NativeIfcEntity;
+  schema: string;
+  onSave(draft: EntityEditDraft): void;
+}) {
+  const definitions = identityAttributeDefinitions(entity.type, schema);
+  if (!definitions.length) {
+    return null;
+  }
+
+  const saveAttribute = (
+    definition: IdentityAttributeDefinition,
+    nextValue: string,
+  ) => {
+    const nextArgs = [...entity.args];
+    while (nextArgs.length <= definition.argIndex) {
+      nextArgs.push("$");
+    }
+    nextArgs[definition.argIndex] = encodeIdentityAttribute(
+      nextValue,
+      definition.kind,
+    );
+    onSave({
+      description: entity.description,
+      name: entity.name,
+      rawArgs: nextArgs.join(","),
+      type: entity.type,
+    });
+  };
+
+  return definitions.map((definition) => {
+    const rawValue = entity.args[definition.argIndex] ?? "$";
+    return (
+      <IdentityEditRow key={definition.argIndex} label={definition.label}>
+        {definition.kind === "enum" ? (
+          <Select
+            value={rawValue}
+            onValueChange={(nextValue) => {
+              if (nextValue && nextValue !== rawValue) {
+                saveAttribute(definition, nextValue);
+              }
+            }}
+          >
+            <SelectTrigger className="h-6 w-full min-w-0 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent
+              align="start"
+              className="w-auto min-w-(--anchor-width)"
+            >
+              {definition.options?.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <CommitInput
+            className="h-6 w-full"
+            placeholder={definition.placeholder ?? "–"}
+            value={decodeIdentityAttribute(rawValue, definition.kind)}
+            onCommit={(nextValue) => saveAttribute(definition, nextValue)}
+          />
+        )}
+      </IdentityEditRow>
+    );
+  });
+}
+
+function identityAttributeDefinitions(
+  entityType: string,
+  schema: string,
+): IdentityAttributeDefinition[] {
+  if (entityType !== "IFCBUILDINGELEMENTPROXY") {
+    return IDENTITY_ATTRIBUTES_BY_TYPE[entityType] ?? [];
+  }
+
+  const legacyIfc2x3 = /^IFC2X3/i.test(schema);
+  return [
+    { argIndex: 4, kind: "text", label: "Objekttyp" },
+    { argIndex: 7, kind: "text", label: "Kennzeichen / Tag" },
+    {
+      argIndex: 8,
+      kind: "enum",
+      label: legacyIfc2x3 ? "Gliederung" : "Vordefinierter Typ",
+      options: legacyIfc2x3
+        ? COMPOSITION_TYPE_OPTIONS
+        : PROXY_TYPE_OPTIONS,
+    },
+  ];
+}
+
+function decodeIdentityAttribute(rawValue: string, kind: IdentityAttributeKind) {
+  if (!rawValue || rawValue === "$" || rawValue === "*") {
+    return "";
+  }
+  if (kind === "text") {
+    return unquote(rawValue) ?? rawValue;
+  }
+  if (kind === "angle") {
+    return rawValue.replace(/^\(|\)$/g, "");
+  }
+  return rawValue;
+}
+
+function encodeIdentityAttribute(value: string, kind: IdentityAttributeKind) {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "$") {
+    return "$";
+  }
+  if (kind === "text") {
+    return quote(trimmed);
+  }
+  if (kind === "angle") {
+    const components = trimmed
+      .replace(/^\(|\)$/g, "")
+      .split(/[;,\s]+/)
+      .filter(Boolean)
+      .join(",");
+    return components ? `(${components})` : "$";
+  }
+  if (kind === "number") {
+    return trimmed.replace(",", ".");
+  }
+  return trimmed;
+}
+
+function identityClassOptions(currentType: string) {
+  const seen = new Set<string>();
+  const options: { label: string; value: string }[] = [];
+  for (const value of [currentType, ...ENTITY_TYPES]) {
+    if (!value || seen.has(value)) {
+      continue;
+    }
+    seen.add(value);
+    options.push({ label: shortType(value), value });
+  }
+  return options;
+}
+
+function RelationshipIdChips({
+  document,
+  ids,
+  onSelect,
+}: {
+  document: NativeIfcDocument;
+  ids: number[];
+  onSelect(entityId: number): void;
+}) {
+  const visible = ids.slice(0, 4);
+  const hidden = ids.length - visible.length;
+  if (!ids.length) {
+    return <span>–</span>;
+  }
+  return (
+    <span className="flex min-w-0 flex-wrap items-center gap-1">
+      {visible.map((id) => (
+        <EntityChip
+          key={id}
+          document={document}
+          id={id}
+          onSelect={onSelect}
+        />
+      ))}
+      {hidden > 0 ? (
+        <span
+          className="text-[11px] text-muted-foreground"
+          title={`${hidden.toLocaleString("de-DE")} weitere ausgeblendet`}
+        >
+          +{hidden.toLocaleString("de-DE")} weitere
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function ObjectInfoSummary({
   document,
   findings,
   index,
@@ -495,103 +1244,142 @@ function ObjectInfoInspectorPanel({
   );
 
   return (
-    <PanelShell scroll>
-      <PanelHeader
-        eyebrow={`Auswahl #${selectedId}`}
-        title="Objektinfo"
-        description={`${definitions.length.toLocaleString()} IDs / ${outgoing.length.toLocaleString()} ausgehend / ${incoming.length.toLocaleString()} eingehend`}
-        meta={
-          <Badge tone={localFindings.length ? "warning" : "success"}>
-            {localFindings.length} Findings
-          </Badge>
-        }
-      />
-      <InfoSection title="Objektinfo-ID">
-        {definitions.length ? (
-          definitions.map((definition) => (
-            <ItemCard key={definition.propertyId}>
-              <ItemTitle>{definition.value || "-"}</ItemTitle>
-              <ItemMeta>
-                #{definition.psetId} {definition.psetName} / #
-                {definition.propertyId} {definition.propertyName}
-              </ItemMeta>
-            </ItemCard>
-          ))
-        ) : (
-          <TextLine>
-            Kein ePset_Objektinformationen._ID am ausgewaehlten Objekt.
-          </TextLine>
-        )}
-      </InfoSection>
+    <InfoSection title="Objektinfo">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Badge tone={localFindings.length ? "warning" : "success"}>
+          {localFindings.length.toLocaleString("de-DE")} Findings
+        </Badge>
+        <span className="text-[11px] text-muted-foreground">
+          {definitions.length.toLocaleString("de-DE")} IDs ·{" "}
+          {outgoing.length.toLocaleString("de-DE")} ausgehend ·{" "}
+          {incoming.length.toLocaleString("de-DE")} eingehend
+        </span>
+      </div>
 
-      <InfoSection title="Ausgehende ID-Referenzen">
-        {outgoing.length ? (
-          outgoing.map((reference) => {
+      <SubHeading>Objektinfo-IDs</SubHeading>
+      {definitions.length ? (
+        <CappedItems
+          items={definitions}
+          limit={10}
+          renderItem={(definition) => (
+            <div
+              key={definition.propertyId}
+              className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded-md bg-muted/30 px-2 py-1 text-xs"
+            >
+              <span className="font-mono font-medium text-foreground">
+                {definition.value || "–"}
+              </span>
+              <span className="min-w-0 truncate text-muted-foreground">
+                #{definition.psetId} {definition.psetName} · #
+                {definition.propertyId} {definition.propertyName}
+              </span>
+            </div>
+          )}
+        />
+      ) : (
+        <TextLine>
+          Kein ePset_Objektinformationen._ID am ausgewählten Objekt.
+        </TextLine>
+      )}
+
+      <SubHeading>Ausgehende ID-Referenzen</SubHeading>
+      {outgoing.length ? (
+        <CappedItems
+          items={outgoing}
+          limit={15}
+          renderItem={(reference) => {
             const target =
               reference.targetDefinitions[0]?.entityId ??
               reference.externalDefinitions[0]?.entityId;
             return (
-              <ItemCard key={reference.propertyId}>
-                <ItemTitle>
+              <div
+                key={reference.propertyId}
+                className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 rounded-md bg-muted/30 px-2 py-1 text-xs"
+              >
+                <span className="font-mono font-medium text-foreground">
+                  {reference.value || "–"}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-muted-foreground">
                   {reference.psetName}.{reference.propertyName}
-                </ItemTitle>
-                <TextLine>{reference.value || "-"}</TextLine>
-                <ItemMeta>
-                  {target
-                    ? objectInfoEntityLabel(document, target)
-                    : "Kein Ziel gefunden"}
-                </ItemMeta>
+                </span>
                 {target ? (
-                  <Button
-                    label="Ziel oeffnen"
-                    onPress={() => onSelectEntity(target)}
+                  <EntityChip
+                    document={document}
+                    id={target}
+                    onSelect={onSelectEntity}
                   />
-                ) : null}
-              </ItemCard>
+                ) : (
+                  <span className="text-muted-foreground">
+                    Kein Ziel gefunden
+                  </span>
+                )}
+              </div>
             );
-          })
-        ) : (
-          <TextLine>Keine ausgehenden ID-Referenzen.</TextLine>
-        )}
-      </InfoSection>
+          }}
+        />
+      ) : (
+        <TextLine>Keine ausgehenden ID-Referenzen.</TextLine>
+      )}
 
-      <InfoSection title="Eingehende ID-Referenzen">
-        {incoming.length ? (
-          incoming.map((reference) => (
-            <ItemCard key={reference.propertyId}>
-              <ItemTitle>{reference.value || "-"}</ItemTitle>
-              <TextLine>
+      <SubHeading>Eingehende ID-Referenzen</SubHeading>
+      {incoming.length ? (
+        <CappedItems
+          items={incoming}
+          limit={15}
+          renderItem={(reference) => (
+            <div
+              key={reference.propertyId}
+              className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 rounded-md bg-muted/30 px-2 py-1 text-xs"
+            >
+              <span className="font-mono font-medium text-foreground">
+                {reference.value || "–"}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-muted-foreground">
                 {reference.psetName}.{reference.propertyName}
-              </TextLine>
-              <ItemMeta>
-                {objectInfoEntityLabel(document, reference.entityId)}
-              </ItemMeta>
-              <Button
-                label="Quelle oeffnen"
-                onPress={() => onSelectEntity(reference.entityId)}
+              </span>
+              <EntityChip
+                document={document}
+                id={reference.entityId}
+                onSelect={onSelectEntity}
               />
-            </ItemCard>
-          ))
-        ) : (
-          <TextLine>Keine eingehenden ID-Referenzen.</TextLine>
-        )}
-      </InfoSection>
+            </div>
+          )}
+        />
+      ) : (
+        <TextLine>Keine eingehenden ID-Referenzen.</TextLine>
+      )}
 
-      <InfoSection title="Lokale Findings">
-        {localFindings.length ? (
-          localFindings.map((finding) => (
-            <ItemCard key={finding.id}>
-              <ItemTitle>
-                {finding.severity.toUpperCase()} / {finding.kind}
-              </ItemTitle>
-              <TextLine>{finding.message}</TextLine>
-            </ItemCard>
-          ))
-        ) : (
-          <TextLine>Keine lokalen Objektinfo-Findings.</TextLine>
-        )}
-      </InfoSection>
-    </PanelShell>
+      <SubHeading>Lokale Findings</SubHeading>
+      {localFindings.length ? (
+        <CappedItems
+          items={localFindings}
+          limit={10}
+          renderItem={(finding) => (
+            <div
+              key={finding.id}
+              className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 rounded-md bg-muted/30 px-2 py-1 text-xs"
+            >
+              <Badge
+                tone={
+                  finding.severity === "error"
+                    ? "danger"
+                    : finding.severity === "warning"
+                      ? "warning"
+                      : "info"
+                }
+              >
+                {finding.kind}
+              </Badge>
+              <span className="min-w-0 flex-1 break-words text-foreground">
+                {finding.message}
+              </span>
+            </div>
+          )}
+        />
+      ) : (
+        <TextLine>Keine lokalen Objektinfo-Findings.</TextLine>
+      )}
+    </InfoSection>
   );
 }
 
@@ -611,14 +1399,123 @@ function objectInfoFindingTouchesEntity(
   );
 }
 
-function objectInfoEntityLabel(document: NativeIfcDocument, entityId: number) {
-  const entity = document.entityById.get(entityId);
-  return entity
-    ? `#${entityId} ${entity.type} ${entity.name || ""}`
-    : `#${entityId}`;
+function ReferencesSection({
+  document,
+  selectedId,
+  onSelectEntity,
+}: {
+  document: NativeIfcDocument;
+  selectedId: number;
+  onSelectEntity(entityId: number): void;
+}) {
+  const outgoing = document.outgoingRefs.get(selectedId) ?? [];
+  const incoming = document.incomingRefs.get(selectedId) ?? [];
+  return (
+    <CollapsibleSection
+      title="Referenzen"
+      meta={`${outgoing.length.toLocaleString("de-DE")} ausgehend · ${incoming.length.toLocaleString("de-DE")} eingehend`}
+    >
+      <SubHeading>Ausgehend</SubHeading>
+      {outgoing.length ? (
+        <div className="flex flex-wrap items-center gap-1">
+          <CappedItems
+            items={outgoing}
+            limit={60}
+            renderItem={(id) => (
+              <EntityChip
+                key={id}
+                document={document}
+                id={id}
+                onSelect={onSelectEntity}
+              />
+            )}
+          />
+        </div>
+      ) : (
+        <TextLine>Keine ausgehenden Referenzen.</TextLine>
+      )}
+      <SubHeading>Eingehend</SubHeading>
+      {incoming.length ? (
+        <div className="flex flex-wrap items-center gap-1">
+          <CappedItems
+            items={incoming}
+            limit={60}
+            renderItem={(referencing) => (
+              <EntityChip
+                key={referencing.id}
+                document={document}
+                id={referencing.id}
+                onSelect={onSelectEntity}
+              />
+            )}
+          />
+        </div>
+      ) : (
+        <TextLine>Keine eingehenden Referenzen.</TextLine>
+      )}
+    </CollapsibleSection>
+  );
 }
 
-function EditPanel({
+function UnitsSection({
+  document,
+  onAddUnit,
+}: {
+  document: NativeIfcDocument;
+  onAddUnit(unitType: string, unitName: string): void;
+}) {
+  const [unitType, setUnitType] = useState("LENGTHUNIT");
+  const [unitName, setUnitName] = useState("METRE");
+  return (
+    <CollapsibleSection
+      title="Einheiten"
+      meta={`${document.units.length.toLocaleString("de-DE")} Einheiten im Modell`}
+    >
+      {document.units.length ? (
+        <div className="grid gap-1">
+          <CappedItems
+            items={document.units}
+            limit={20}
+            renderItem={(unit, index) => (
+              <div
+                key={`${unit}-${index}`}
+                className="truncate rounded-md bg-muted/30 px-2 py-1 font-mono text-[11px] text-foreground"
+                title={unit}
+              >
+                {unit}
+              </div>
+            )}
+          />
+        </div>
+      ) : (
+        <TextLine>Keine Einheiten definiert.</TextLine>
+      )}
+      <ResponsiveRow>
+        <ResponsiveField>
+          <DropdownField
+            label="Einheitentyp"
+            options={UNIT_TYPES}
+            value={unitType}
+            onChange={setUnitType}
+          />
+        </ResponsiveField>
+        <ResponsiveField>
+          <DropdownField
+            label="Einheit"
+            options={UNIT_NAMES}
+            value={unitName}
+            onChange={setUnitName}
+          />
+        </ResponsiveField>
+      </ResponsiveRow>
+      <Button variant="default" onClick={() => onAddUnit(unitType, unitName)}>
+        <Plus aria-hidden className="size-3.5" /> Einheit hinzufügen
+      </Button>
+    </CollapsibleSection>
+  );
+}
+
+function AdvancedEditSection({
   entity,
   onSave,
 }: {
@@ -626,54 +1523,44 @@ function EditPanel({
   onSave(draft: EntityEditDraft): void;
 }) {
   const rawArgsValue = entity.args.join(",");
-  const [type, setType] = useState(entity.type);
-  const [name, setName] = useState(entity.name);
-  const [description, setDescription] = useState(entity.description);
   const [rawArgs, setRawArgs] = useState(rawArgsValue);
 
   useEffect(() => {
-    setType(entity.type);
-    setName(entity.name);
-    setDescription(entity.description);
     setRawArgs(rawArgsValue);
-  }, [entity.description, entity.id, entity.name, entity.type, rawArgsValue]);
+  }, [entity.id, rawArgsValue]);
 
   return (
-    <PanelShell scroll>
-      <PanelHeader
-        eyebrow={`#${entity.id}`}
-        title="Entity bearbeiten"
-        description={entity.type}
-        meta={<Badge tone="warning">STEP</Badge>}
-      />
-      <DropdownField
-        label="Class"
-        options={ENTITY_TYPES}
-        value={type}
-        onChange={setType}
-      />
-      <LabeledInput label="Name" value={name} onChangeText={setName} />
+    <CollapsibleSection title="Erweitert" meta="STEP-Argumente (roh) bearbeiten">
+      <CodeBlock>
+        #{entity.id}= {entity.type}({entity.args.join(",")});
+      </CodeBlock>
       <LabeledInput
-        label="Description"
-        value={description}
-        onChangeText={setDescription}
-        multiline
-      />
-      <LabeledInput
-        label="Raw STEP arguments"
+        label="STEP-Argumente (roh)"
         value={rawArgs}
         onChangeText={setRawArgs}
         multiline
         mono
       />
       <Button
-        label="Save Entity"
-        primary
-        onPress={() => onSave({ description, name, rawArgs, type })}
-      />
-    </PanelShell>
+        variant="default"
+        onClick={() =>
+          onSave({
+            description: entity.description,
+            name: entity.name,
+            rawArgs,
+            type: entity.type,
+          })
+        }
+      >
+        <Save aria-hidden className="size-3.5" /> Speichern
+      </Button>
+    </CollapsibleSection>
   );
 }
+
+/* ------------------------------------------------------------------ */
+/* Tab "Platzierung"                                                   */
+/* ------------------------------------------------------------------ */
 
 type PlacementCoordinateSpace = "welt" | "viewer";
 
@@ -696,12 +1583,14 @@ function PlacementGeometryPanel({
   selectedId,
   onAssignBodyToSelected,
   onMove,
+  onSelectEntity,
 }: {
   document: NativeIfcDocument;
   entity: NativeIfcEntity;
   selectedId: number;
   onAssignBodyToSelected(options: BodyElementDraft): void;
   onMove(x: string, y: string, z: string): void;
+  onSelectEntity(entityId: number): void;
 }) {
   const placement = getNativePlacementWorld(document, selectedId);
   const body = getNativeBodyRepresentation(document, selectedId);
@@ -716,6 +1605,9 @@ function PlacementGeometryPanel({
   const [depth, setDepth] = useState(formatEditableNumber(body.depth, "1"));
   const [height, setHeight] = useState(formatEditableNumber(body.height, "1"));
 
+  // Viewer-Raum ist Meter, IFC-Raum ist Modelleinheit (mm-Modelle!).
+  const metersPerUnit = getNativeLengthUnitScale(document);
+
   const displayPoint = useMemo(() => {
     if (!placement) {
       return { x: 0, y: 0, z: 0 };
@@ -726,9 +1618,15 @@ function PlacementGeometryPanel({
       z: placement.worldZ,
     };
     return space === "viewer"
-      ? ifcPlacementPointToViewerWorldPoint(world)
+      ? ifcPlacementPointToViewerWorldPoint(world, metersPerUnit)
       : world;
-  }, [placement?.worldX, placement?.worldY, placement?.worldZ, space]);
+  }, [
+    metersPerUnit,
+    placement?.worldX,
+    placement?.worldY,
+    placement?.worldZ,
+    space,
+  ]);
 
   useEffect(() => {
     setX(formatPlacementCoordinate(displayPoint.x));
@@ -761,7 +1659,9 @@ function PlacementGeometryPanel({
       z: readPlacementCoordinate(z),
     };
     const worldTarget =
-      space === "viewer" ? viewerWorldPointToIfcPlacementPoint(input) : input;
+      space === "viewer"
+        ? viewerWorldPointToIfcPlacementPoint(input, metersPerUnit)
+        : input;
     const local = nativeWorldToLocalPlacementPoint(
       document,
       selectedId,
@@ -793,7 +1693,7 @@ function PlacementGeometryPanel({
     <PanelShell scroll>
       <PanelHeader
         eyebrow={`Auswahl #${selectedId}`}
-        title="Placement & Geometrie"
+        title="Platzierung & Geometrie"
         description={
           placement
             ? `Welt: ${formatPlacementCoordinate(placement.worldX)}, ${formatPlacementCoordinate(placement.worldY)}, ${formatPlacementCoordinate(placement.worldZ)}`
@@ -806,10 +1706,10 @@ function PlacementGeometryPanel({
             }
           >
             {body.canEdit
-              ? "Editable"
+              ? "Bearbeitbar"
               : body.canAssign
-                ? "Assignable"
-                : "Read only"}
+                ? "Zuweisbar"
+                : "Schreibgeschützt"}
           </Badge>
         }
       />
@@ -817,7 +1717,10 @@ function PlacementGeometryPanel({
       {placement ? (
         <InfoSection title="Position">
           <SegmentedControl
-            options={["welt", "viewer"]}
+            options={[
+              { label: "Welt (IFC)", value: "welt" },
+              { label: "Viewer", value: "viewer" },
+            ]}
             value={space}
             onChange={(value) => setSpace(value as PlacementCoordinateSpace)}
           />
@@ -861,7 +1764,9 @@ function PlacementGeometryPanel({
             {formatPlacementCoordinate(placement.y)},{" "}
             {formatPlacementCoordinate(placement.z)}
           </TextLine>
-          <Button label="Position übernehmen" primary onPress={applyMove} />
+          <Button variant="default" onClick={applyMove}>
+            Position übernehmen
+          </Button>
         </InfoSection>
       ) : (
         <EmptyBlock title="Keine editierbare Platzierung">
@@ -911,14 +1816,13 @@ function PlacementGeometryPanel({
         {body.message ? <TextLine>{body.message}</TextLine> : null}
         <Button
           disabled={!body.canAssign}
-          label={
-            body.hasRepresentation
-              ? "Geometrie aktualisieren"
-              : "Geometrie zuweisen"
-          }
-          primary
-          onPress={() => onAssignBodyToSelected(bodyDraft)}
-        />
+          variant="default"
+          onClick={() => onAssignBodyToSelected(bodyDraft)}
+        >
+          {body.hasRepresentation
+            ? "Geometrie aktualisieren"
+            : "Geometrie zuweisen"}
+        </Button>
       </InfoSection>
 
       <CollapsibleSection
@@ -927,43 +1831,105 @@ function PlacementGeometryPanel({
       >
         {placement ? (
           <>
-            <InfoRow label="Placement" value={`#${placement.placementId}`} />
-            <InfoRow label="Axis" value={`#${placement.axisPlacementId}`} />
-            <InfoRow label="Point" value={`#${placement.pointId}`} />
-            <InfoRow
-              label="Relative to"
-              value={placement.relativeTo ? `#${placement.relativeTo}` : "$"}
+            <ReferenceIdRow
+              document={document}
+              id={placement.placementId}
+              label="Placement"
+              onSelectEntity={onSelectEntity}
+            />
+            <ReferenceIdRow
+              document={document}
+              id={placement.axisPlacementId}
+              label="Axis"
+              onSelectEntity={onSelectEntity}
+            />
+            <ReferenceIdRow
+              document={document}
+              id={placement.pointId}
+              label="Point"
+              onSelectEntity={onSelectEntity}
+            />
+            <ReferenceIdRow
+              document={document}
+              id={placement.relativeTo}
+              label="Relativ zu"
+              onSelectEntity={onSelectEntity}
             />
           </>
         ) : (
-          <InfoRow label="Placement" value="$" />
+          <ReferenceIdRow
+            document={document}
+            label="Placement"
+            onSelectEntity={onSelectEntity}
+          />
         )}
-        <InfoRow
+        <ReferenceIdRow
+          document={document}
+          id={body.shapeId}
           label="Shape"
-          value={body.shapeId ? `#${body.shapeId}` : "$"}
+          onSelectEntity={onSelectEntity}
         />
-        <InfoRow
+        <ReferenceIdRow
+          document={document}
+          id={body.bodyRepresentationId}
           label="Body"
-          value={
-            body.bodyRepresentationId ? `#${body.bodyRepresentationId}` : "$"
-          }
+          onSelectEntity={onSelectEntity}
         />
-        <InfoRow
+        <ReferenceIdRow
+          document={document}
+          id={body.solidId}
           label="Solid"
-          value={body.solidId ? `#${body.solidId}` : "$"}
+          onSelectEntity={onSelectEntity}
         />
-        <InfoRow
-          label="Profile"
-          value={
-            body.profileId
-              ? `#${body.profileId} ${body.profileType ?? ""}`.trim()
-              : "$"
-          }
+        <ReferenceIdRow
+          document={document}
+          detail={body.profileType ?? undefined}
+          id={body.profileId}
+          label="Profil"
+          onSelectEntity={onSelectEntity}
         />
       </CollapsibleSection>
     </PanelShell>
   );
 }
+
+function ReferenceIdRow({
+  detail,
+  document,
+  id,
+  label,
+  onSelectEntity,
+}: {
+  detail?: string;
+  document: NativeIfcDocument;
+  id?: number;
+  label: string;
+  onSelectEntity(entityId: number): void;
+}) {
+  return (
+    <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-1 rounded-md bg-muted/30 px-2.5 py-1.5">
+      <span className="text-[0.7rem] font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </span>
+      {id ? (
+        <span className="flex min-w-0 items-center gap-1.5">
+          {detail ? (
+            <span className="truncate text-xs text-muted-foreground">
+              {detail}
+            </span>
+          ) : null}
+          <EntityChip document={document} id={id} onSelect={onSelectEntity} />
+        </span>
+      ) : (
+        <span className="font-mono text-xs text-muted-foreground">$</span>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Tab "Eigenschaften" (Psets & Mengen)                                */
+/* ------------------------------------------------------------------ */
 
 function PsetPanel({
   activeCatalogObjectId,
@@ -1040,27 +2006,6 @@ function PsetPanel({
     (finding) => finding.quickFix,
   );
 
-  useEffect(() => {
-    const browserWindow = globalThis.window;
-    if (!browserWindow) {
-      return undefined;
-    }
-    const handleFindShortcut = (event: KeyboardEvent) => {
-      if (
-        !(event.ctrlKey || event.metaKey) ||
-        event.key.toLowerCase() !== "f"
-      ) {
-        return;
-      }
-      event.preventDefault();
-      psetSearchInputRef.current?.focus();
-    };
-    browserWindow.addEventListener("keydown", handleFindShortcut);
-    return () => {
-      browserWindow.removeEventListener("keydown", handleFindShortcut);
-    };
-  }, []);
-
   const addSelectedPset = () => {
     if (psetSource === "catalog") {
       return;
@@ -1068,154 +2013,181 @@ function PsetPanel({
     onAddEmptyPset(emptyPsetName.trim() || "Pset_IFCnative_Custom");
   };
 
+  // Strg+F fokussiert die Pset-Suche, solange der Eigenschaften-Tab offen ist —
+  // auch wenn der Fokus gerade im Baum oder Viewer liegt (wie vor dem Redesign).
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        event.key.toLowerCase() === "f"
+      ) {
+        event.preventDefault();
+        psetSearchInputRef.current?.focus();
+        psetSearchInputRef.current?.select();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   return (
-    <PanelShell scroll>
-      <PanelHeader
-        eyebrow={`Auswahl #${selectedId}`}
-        title="Psets & Quantities"
-        description={
-          normalizedPsetSearch
-            ? `${visibleSets.length.toLocaleString()} von ${sets.length.toLocaleString()} Sets sichtbar`
-            : `${sets.length.toLocaleString()} Sets verkn\u00fcpft`
-        }
-        meta={<Badge tone="info">Kompakt</Badge>}
-      />
-
-      <div className="flex shrink-0 flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="min-w-56 flex-1">
-            <Input
-              ref={psetSearchInputRef}
-              className="h-8"
-              placeholder="Psets, Eigenschaften, Werte suchen \u2026"
-              value={psetSearch}
-              onFocus={(event) => event.currentTarget.select()}
-              onChange={(event) => setPsetSearch(event.currentTarget.value)}
-            />
-          </div>
-          <SegmentedControl
-            options={["empty", "catalog"]}
-            value={psetSource}
-            onChange={setPsetSource}
-          />
-        </div>
-        {psetSource === "catalog" ? (
-          <div className="flex flex-wrap items-center gap-2 rounded-md border border-border/60 bg-muted/30 px-3 py-2">
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-medium text-foreground">
-                {catalogObject
-                  ? catalogObjectLabel(catalogObject)
-                  : "Keine Katalogklasse gew\u00e4hlt"}
-              </div>
-              <div className="truncate text-xs text-muted-foreground">
-                {catalogObject
-                  ? `${catalogPsets.length.toLocaleString()} Psets \u00b7 ${catalogRuleCount.toLocaleString()} Regeln`
-                  : "Auswahl im Objektkatalog-Panel treffen"}
-              </div>
-            </div>
-            <ShadcnButton
-              disabled={!catalogQuickFixes.length}
-              size="sm"
-              onClick={() => onApplyCatalogFindings(catalogQuickFixes)}
-            >
-              {catalogQuickFixes.length ? "Katalog anwenden" : "Katalog OK"}
-            </ShadcnButton>
-          </div>
-        ) : (
-          <div className="flex flex-wrap items-center gap-2">
-            <Input
-              className="h-8 min-w-56 flex-1"
-              placeholder="Pset-Name"
-              value={emptyPsetName}
-              onChange={(event) => setEmptyPsetName(event.currentTarget.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  addSelectedPset();
-                }
-              }}
-            />
-            <ShadcnButton size="sm" onClick={addSelectedPset}>
-              <Plus aria-hidden className="size-3.5" /> Pset
-            </ShadcnButton>
-          </div>
-        )}
-      </div>
-
-      {visibleSets.length ? (
-        <div className="flex flex-col gap-3">
-          {visibleSets.map(({ set, values }) => (
-            <PsetTableSection
-              document={document}
-              key={set.id}
-              set={set}
-              visibleValues={values}
-              searchActive={!!normalizedPsetSearch}
-              onAddPropertyToSet={onAddPropertyToSet}
-              onDuplicatePropertySet={onDuplicatePropertySet}
-              onRemovePropertyFromSet={onRemovePropertyFromSet}
-              onRemovePropertySet={onRemovePropertySet}
-              onRenamePropertySet={onRenamePropertySet}
-              onUpdateProperty={onUpdateProperty}
-            />
-          ))}
-        </div>
-      ) : null}
-      {sets.length > 0 && !visibleSets.length ? (
-        <EmptyBlock title="Keine Treffer">
-          Der aktuelle Pset-Filter findet keine Sets, Eigenschaften oder Werte.
-        </EmptyBlock>
-      ) : null}
-      {!sets.length ? (
-        <EmptyBlock title="Keine Psets">
-          Ueber + Pset ein leeres Set oder eine Vorlage aus dem Objektkatalog
-          anlegen.
-        </EmptyBlock>
-      ) : null}
-
-      <CollapsibleSection title="Quantity Set" meta="QTO manuell anlegen">
-        <ResponsiveRow>
-          <ResponsiveField>
-            <LabeledInput
-              label="QTO name"
-              value={qtoName}
-              onChangeText={setQtoName}
-            />
-          </ResponsiveField>
-          <ResponsiveField>
-            <LabeledInput
-              label="Quantity"
-              value={quantityName}
-              onChangeText={setQuantityName}
-            />
-          </ResponsiveField>
-        </ResponsiveRow>
-        <ResponsiveRow>
-          <ResponsiveField>
-            <DropdownField
-              label="Quantity type"
-              options={QUANTITY_TYPES}
-              value={quantityType}
-              onChange={setQuantityType}
-            />
-          </ResponsiveField>
-          <ResponsiveField>
-            <LabeledInput
-              label="Value"
-              keyboardType="numeric"
-              value={quantityValue}
-              onChangeText={setQuantityValue}
-            />
-          </ResponsiveField>
-        </ResponsiveRow>
-        <Button
-          label="+ Add Quantity Set"
-          onPress={() =>
-            onAddQuantity(qtoName, quantityName, quantityValue, quantityType)
+    <div className="flex h-full min-h-0 flex-col">
+      <PanelShell scroll>
+        <PanelHeader
+          eyebrow={`Auswahl #${selectedId}`}
+          title="Eigenschaften & Mengen"
+          description={
+            normalizedPsetSearch
+              ? `${visibleSets.length.toLocaleString("de-DE")} von ${sets.length.toLocaleString("de-DE")} Sets sichtbar`
+              : `${sets.length.toLocaleString("de-DE")} Sets verknüpft`
           }
+          meta={<Badge tone="info">Psets</Badge>}
         />
-      </CollapsibleSection>
-    </PanelShell>
+
+        <div className="flex shrink-0 flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="min-w-56 flex-1">
+              <Input
+                ref={psetSearchInputRef}
+                className="h-8"
+                placeholder="Psets, Eigenschaften, Werte suchen … (Strg+F)"
+                value={psetSearch}
+                onFocus={(event) => event.currentTarget.select()}
+                onChange={(event) => setPsetSearch(event.currentTarget.value)}
+              />
+            </div>
+            <SegmentedControl
+              options={[
+                { label: "Leeres Set", value: "empty" },
+                { label: "Katalog", value: "catalog" },
+              ]}
+              value={psetSource}
+              onChange={setPsetSource}
+            />
+          </div>
+          {psetSource === "catalog" ? (
+            <div className="flex flex-wrap items-center gap-2 rounded-md border border-border/60 bg-muted/30 px-3 py-2">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium text-foreground">
+                  {catalogObject
+                    ? catalogObjectLabel(catalogObject)
+                    : "Keine Katalogklasse gewählt"}
+                </div>
+                <div className="truncate text-xs text-muted-foreground">
+                  {catalogObject
+                    ? `${catalogPsets.length.toLocaleString("de-DE")} Psets · ${catalogRuleCount.toLocaleString("de-DE")} Regeln`
+                    : "Auswahl im Objektkatalog-Panel treffen"}
+                </div>
+              </div>
+              <Button
+                disabled={!catalogQuickFixes.length}
+                variant="default"
+                onClick={() => onApplyCatalogFindings(catalogQuickFixes)}
+              >
+                {catalogQuickFixes.length ? "Katalog anwenden" : "Katalog OK"}
+              </Button>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                className="h-8 min-w-56 flex-1"
+                placeholder="Pset-Name"
+                value={emptyPsetName}
+                onChange={(event) =>
+                  setEmptyPsetName(event.currentTarget.value)
+                }
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    addSelectedPset();
+                  }
+                }}
+              />
+              <Button variant="default" onClick={addSelectedPset}>
+                <Plus aria-hidden className="size-3.5" /> Pset
+              </Button>
+            </div>
+          )}
+        </div>
+
+        {visibleSets.length ? (
+          <div className="flex flex-col gap-3">
+            {visibleSets.map(({ set, values }) => (
+              <PsetTableSection
+                document={document}
+                key={set.id}
+                set={set}
+                visibleValues={values}
+                searchActive={!!normalizedPsetSearch}
+                onAddPropertyToSet={onAddPropertyToSet}
+                onDuplicatePropertySet={onDuplicatePropertySet}
+                onRemovePropertyFromSet={onRemovePropertyFromSet}
+                onRemovePropertySet={onRemovePropertySet}
+                onRenamePropertySet={onRenamePropertySet}
+                onUpdateProperty={onUpdateProperty}
+              />
+            ))}
+          </div>
+        ) : null}
+        {sets.length > 0 && !visibleSets.length ? (
+          <EmptyBlock title="Keine Treffer">
+            Der aktuelle Pset-Filter findet keine Sets, Eigenschaften oder
+            Werte.
+          </EmptyBlock>
+        ) : null}
+        {!sets.length ? (
+          <EmptyBlock title="Keine Psets">
+            Über „+ Pset" ein leeres Set oder eine Vorlage aus dem
+            Objektkatalog anlegen.
+          </EmptyBlock>
+        ) : null}
+
+        <CollapsibleSection title="Quantity Set" meta="QTO manuell anlegen">
+          <ResponsiveRow>
+            <ResponsiveField>
+              <LabeledInput
+                label="QTO-Name"
+                value={qtoName}
+                onChangeText={setQtoName}
+              />
+            </ResponsiveField>
+            <ResponsiveField>
+              <LabeledInput
+                label="Mengenname"
+                value={quantityName}
+                onChangeText={setQuantityName}
+              />
+            </ResponsiveField>
+          </ResponsiveRow>
+          <ResponsiveRow>
+            <ResponsiveField>
+              <DropdownField
+                label="Mengentyp"
+                options={QUANTITY_TYPES}
+                value={quantityType}
+                onChange={setQuantityType}
+              />
+            </ResponsiveField>
+            <ResponsiveField>
+              <LabeledInput
+                label="Wert"
+                keyboardType="numeric"
+                value={quantityValue}
+                onChangeText={setQuantityValue}
+              />
+            </ResponsiveField>
+          </ResponsiveRow>
+          <Button
+            variant="outline"
+            onClick={() =>
+              onAddQuantity(qtoName, quantityName, quantityValue, quantityType)
+            }
+          >
+            <Plus aria-hidden className="size-3.5" /> Quantity Set hinzufügen
+          </Button>
+        </CollapsibleSection>
+      </PanelShell>
+    </div>
   );
 }
 
@@ -1284,11 +2256,11 @@ export function PsetTableSection({
 
   const isQto = set.kind === "Qto";
   const accentClasses = isQto
-    ? "border-l-amber-400 bg-amber-50/40"
-    : "border-l-emerald-400 bg-emerald-50/40";
+    ? "border-l-warning/60 bg-warning/5"
+    : "border-l-success/60 bg-success/5";
   const headerAccent = isQto
-    ? "bg-amber-50/70 border-amber-200/60"
-    : "bg-emerald-50/70 border-emerald-200/60";
+    ? "border-warning/25 bg-warning/10"
+    : "border-success/25 bg-success/10";
 
   return (
     <section
@@ -1305,7 +2277,7 @@ export function PsetTableSection({
       >
         <Badge tone={isQto ? "warning" : "success"}>{set.kind}</Badge>
         <Input
-          className="h-7 min-w-40 flex-1 rounded-md border-transparent bg-transparent px-2 text-sm font-semibold text-foreground shadow-none hover:bg-white/70 focus-visible:border-ring focus-visible:bg-white"
+          className="h-7 min-w-40 flex-1 rounded-md border-transparent bg-transparent px-2 text-sm font-semibold text-foreground shadow-none hover:bg-background/60 focus-visible:border-ring focus-visible:bg-background"
           value={setName}
           onBlur={() => commitSetName()}
           onChange={(event) => setSetName(event.currentTarget.value)}
@@ -1319,21 +2291,21 @@ export function PsetTableSection({
         <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
           #{set.id} ·{" "}
           {searchActive
-            ? `${visibleValues.length.toLocaleString()}/${set.values.length.toLocaleString()}`
-            : set.values.length.toLocaleString()}{" "}
+            ? `${visibleValues.length.toLocaleString("de-DE")}/${set.values.length.toLocaleString("de-DE")}`
+            : set.values.length.toLocaleString("de-DE")}{" "}
           Werte
         </span>
         <div className="flex shrink-0 items-center gap-0.5">
           <IconButton
             label="Duplizieren"
             icon={<Copy aria-hidden className="size-3.5" />}
-            onPress={() => onDuplicatePropertySet(set.id)}
+            onClick={() => onDuplicatePropertySet(set.id)}
           />
           <IconButton
             label="Löschen"
             tone="danger"
             icon={<Trash2 aria-hidden className="size-3.5" />}
-            onPress={() => onRemovePropertySet(set.id)}
+            onClick={() => onRemovePropertySet(set.id)}
           />
         </div>
       </div>
@@ -1476,10 +2448,10 @@ function EditablePropertyTableCells({
       <DataTableCell column={columns[3]}>
         <div className="flex justify-end">
           <IconButton
-            label="Eigenschaft l\u00f6schen"
+            label="Eigenschaft löschen"
             tone="danger"
             icon={<Trash2 aria-hidden className="size-3.5" />}
-            onPress={() => onRemove(setId, property.id)}
+            onClick={() => onRemove(setId, property.id)}
           />
         </div>
       </DataTableCell>
@@ -1536,10 +2508,10 @@ function PsetAddTableCells({
         <div className="flex justify-end">
           <IconButton
             disabled={disabled}
-            label="Wert hinzuf\u00fcgen"
+            label="Wert hinzufügen"
             tone="primary"
             icon={<Plus aria-hidden className="size-3.5" />}
-            onPress={onAdd}
+            onClick={onAdd}
           />
         </div>
       </DataTableCell>
@@ -1601,48 +2573,79 @@ function PsetTypeSelect({
   );
 }
 
-function IconButton({
-  disabled,
-  icon,
-  label,
-  tone = "neutral",
-  onPress,
-}: {
-  disabled?: boolean;
-  icon: ReactNode;
-  label: string;
-  tone?: "neutral" | "danger" | "primary";
-  onPress(): void;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      disabled={disabled}
-      onClick={onPress}
-      className={cn(
-        "inline-flex size-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40",
-        tone === "danger" && "hover:bg-destructive/10 hover:text-destructive",
-        tone === "primary" &&
-          "text-primary hover:bg-primary/10 hover:text-primary",
-      )}
-    >
-      {icon}
-    </button>
-  );
-}
+/* ------------------------------------------------------------------ */
+/* Tab "Beziehungen" (Beziehungen + Ressourcen)                        */
+/* ------------------------------------------------------------------ */
 
-function RelationsPanel({
+function RelationsResourcesPanel({
   document,
   selectedId,
+  onAddGroupAssignment,
+  onAddMaterial,
+  onAddMaterialConstituentSet,
+  onAddMaterialLayerSet,
+  onAddMaterialLayerSetUsage,
+  onAddMaterialProfileSet,
+  onAddMaterialProfileSetUsage,
+  onAddMaterialStyle,
+  onAddMaterialWithProperties,
   onAddRelationship,
+  onAssignType,
   onRemoveRelationship,
   onUpdateRelationship,
 }: {
   document: NativeIfcDocument;
   selectedId: number;
+  onAddGroupAssignment(
+    groupType: string,
+    groupName: string,
+    objectType: string,
+    longName: string,
+  ): void;
+  onAddMaterial(materialName: string, materialCategory: string): void;
+  onAddMaterialConstituentSet(setName: string, constituentRows: string): void;
+  onAddMaterialLayerSet(setName: string, layerRows: string): void;
+  onAddMaterialLayerSetUsage(
+    setName: string,
+    layerRows: string,
+    direction: string,
+    directionSense: string,
+    offset: string,
+    referenceExtent: string,
+  ): void;
+  onAddMaterialProfileSet(
+    setName: string,
+    profileName: string,
+    materialName: string,
+    category: string,
+    width: string,
+    depth: string,
+  ): void;
+  onAddMaterialProfileSetUsage(
+    setName: string,
+    profileName: string,
+    materialName: string,
+    category: string,
+    width: string,
+    depth: string,
+    cardinalPoint: string,
+    referenceExtent: string,
+  ): void;
+  onAddMaterialStyle(
+    materialName: string,
+    materialCategory: string,
+    styleName: string,
+    color: string,
+    transparency: string,
+  ): void;
+  onAddMaterialWithProperties(
+    materialName: string,
+    materialCategory: string,
+    propertySetName: string,
+    propertyRows: string,
+  ): void;
   onAddRelationship(type: string, sourceId: number, targetId: number): void;
+  onAssignType(typeName: string, typeClass: string, tag: string): void;
   onRemoveRelationship(relationshipId: number): void;
   onUpdateRelationship(
     relationshipId: number,
@@ -1652,6 +2655,9 @@ function RelationsPanel({
   ): void;
 }) {
   const relationships = document.relationshipsByEntity.get(selectedId) ?? [];
+  const resources = document.resourcesByEntity.get(selectedId) ?? [];
+  const typeAssignments =
+    document.typeAssignmentsByEntity.get(selectedId) ?? [];
   const [relType, setRelType] = useState("IFCRELAGGREGATES");
   const [sourceId, setSourceId] = useState(String(selectedId));
   const [targetId, setTargetId] = useState(String(selectedId));
@@ -1688,43 +2694,49 @@ function RelationsPanel({
     <PanelShell scroll>
       <PanelHeader
         eyebrow={`Auswahl #${selectedId}`}
-        title="Relationen"
-        description={`${relationships.length.toLocaleString()} Beziehungen indexiert`}
-        meta={<Badge tone="neutral">Graph</Badge>}
+        title="Beziehungen & Ressourcen"
+        description={`${relationships.length.toLocaleString("de-DE")} Beziehungen · ${resources.length.toLocaleString("de-DE")} Ressourcen · ${typeAssignments.length.toLocaleString("de-DE")} Typzuweisungen`}
+        meta={<Badge tone="neutral">IFC</Badge>}
       />
-      <EditBlock title="Add Relationship">
+
+      <SectionHeading>Beziehungen</SectionHeading>
+      <CollapsibleSection
+        title="Neue Beziehung"
+        meta="Beziehung zwischen zwei Objekten anlegen"
+      >
         <DropdownField
-          label="Relationship class"
+          label="Beziehungsklasse"
           options={relationshipTypeOptions}
           value={relType}
           onChange={setRelType}
         />
         <EntityDropdown
-          label="Source object"
+          label="Quellobjekt"
           document={document}
           value={sourceId}
           onChange={setSourceId}
         />
         <EntityDropdown
-          label="Target object"
+          label="Zielobjekt"
           document={document}
           value={targetId}
           onChange={setTargetId}
         />
         {!relationshipTypeOptions.length ? (
           <TextLine>
-            No valid relationship for this source/target class.
+            Keine gültige Beziehungsklasse für diese Quell-/Zielklassen.
           </TextLine>
         ) : null}
         <Button
           disabled={!canCreateRelationship}
-          label="+ Add Relationship"
-          primary
-          onPress={() =>
+          variant="default"
+          onClick={() =>
             onAddRelationship(relType, Number(sourceId), Number(targetId))
           }
-        />
-      </EditBlock>
+        >
+          <Plus aria-hidden className="size-3.5" /> Beziehung hinzufügen
+        </Button>
+      </CollapsibleSection>
       {relationships.map((relationship) => (
         <InfoSection
           key={relationship.id}
@@ -1740,8 +2752,24 @@ function RelationsPanel({
         </InfoSection>
       ))}
       {!relationships.length ? (
-        <TextLine>No relationships indexed.</TextLine>
+        <TextLine>Keine Beziehungen indexiert.</TextLine>
       ) : null}
+
+      <SectionHeading>Ressourcen</SectionHeading>
+      <ResourceSections
+        document={document}
+        selectedId={selectedId}
+        onAddGroupAssignment={onAddGroupAssignment}
+        onAddMaterial={onAddMaterial}
+        onAddMaterialConstituentSet={onAddMaterialConstituentSet}
+        onAddMaterialLayerSet={onAddMaterialLayerSet}
+        onAddMaterialLayerSetUsage={onAddMaterialLayerSetUsage}
+        onAddMaterialProfileSet={onAddMaterialProfileSet}
+        onAddMaterialProfileSetUsage={onAddMaterialProfileSetUsage}
+        onAddMaterialStyle={onAddMaterialStyle}
+        onAddMaterialWithProperties={onAddMaterialWithProperties}
+        onAssignType={onAssignType}
+      />
     </PanelShell>
   );
 }
@@ -1802,47 +2830,44 @@ function EditableRelationship({
 
   return (
     <EditBlock>
-      <InfoRow label="Family" value={relationship.family} />
+      <InfoRow label="Familie" value={relationship.family} />
       <DropdownField
-        label="Relationship class"
+        label="Beziehungsklasse"
         options={typeOptions}
         value={type}
         onChange={setType}
       />
       <EntityDropdown
-        label="Source object"
+        label="Quellobjekt"
         document={document}
         value={sourceId}
         onChange={setSourceId}
       />
       <EntityDropdown
-        label="Target object"
+        label="Zielobjekt"
         document={document}
         value={targetId}
         onChange={setTargetId}
       />
-      <ResponsiveRow>
-        <ResponsiveField>
-          <Button
-            disabled={!canSaveRelationship}
-            label="Save Relationship"
-            onPress={() =>
-              onUpdate(
-                relationship.id,
-                type,
-                Number(sourceId),
-                Number(targetId),
-              )
-            }
-          />
-        </ResponsiveField>
-        <ResponsiveField>
-          <Button
-            label="Stage Delete Relationship"
-            onPress={() => onRemove(relationship.id)}
-          />
-        </ResponsiveField>
-      </ResponsiveRow>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          disabled={!canSaveRelationship}
+          variant="outline"
+          onClick={() =>
+            onUpdate(relationship.id, type, Number(sourceId), Number(targetId))
+          }
+        >
+          <Save aria-hidden className="size-3.5" /> Speichern
+        </Button>
+        <Button
+          title="Beziehung zum Löschen vormerken"
+          variant="outline"
+          onClick={() => onRemove(relationship.id)}
+        >
+          <Trash2 aria-hidden className="size-3.5 text-destructive" /> Löschen
+          vormerken
+        </Button>
+      </div>
     </EditBlock>
   );
 }
@@ -1916,167 +2941,279 @@ export function ResourcesPanel({
   const resources = document.resourcesByEntity.get(selectedId) ?? [];
   const typeAssignments =
     document.typeAssignmentsByEntity.get(selectedId) ?? [];
-  const [materialName, setMaterialName] = useState("Inspektionsbeton");
-  const [materialCategory, setMaterialCategory] = useState("Beton");
-  const [materialPropertySetName, setMaterialPropertySetName] = useState(
-    "Pset_MaterialCommon",
-  );
-  const [materialPropertyRows, setMaterialPropertyRows] = useState(
-    "MassDensity | 2400 | IFCREAL\nThermalConductivity | 1.7 | IFCREAL",
-  );
-  const [materialStyleName, setMaterialStyleName] = useState(
-    "IFCnative Surface Style",
-  );
-  const [materialColor, setMaterialColor] = useState("#8ea7c2");
-  const [materialTransparency, setMaterialTransparency] = useState("0");
-  const [layerSetName, setLayerSetName] = useState("Wall Layer Set");
-  const [layerRows, setLayerRows] = useState(
-    "Core | Concrete | 0.2 | LoadBearing\nInsulation | Mineral wool | 0.08 | Insulation",
-  );
-  const [layerDirection, setLayerDirection] = useState("AXIS2");
-  const [layerDirectionSense, setLayerDirectionSense] = useState("POSITIVE");
-  const [layerOffset, setLayerOffset] = useState("0");
-  const [layerReferenceExtent, setLayerReferenceExtent] = useState("");
-  const [profileSetName, setProfileSetName] = useState("Beam Profile Set");
-  const [profileName, setProfileName] = useState("Rectangular Profile");
-  const [profileMaterialName, setProfileMaterialName] = useState("Steel");
-  const [profileMaterialCategory, setProfileMaterialCategory] =
-    useState("LoadBearing");
-  const [profileWidth, setProfileWidth] = useState("0.2");
-  const [profileDepth, setProfileDepth] = useState("0.3");
-  const [profileCardinalPoint, setProfileCardinalPoint] = useState("5");
-  const [profileReferenceExtent, setProfileReferenceExtent] = useState("");
-  const [constituentSetName, setConstituentSetName] = useState(
-    "Window Constituent Set",
-  );
-  const [constituentRows, setConstituentRows] = useState(
-    "Frame | Aluminium | 0.6 | Frame\nGlazing | Glass | 0.4 | Glazing",
-  );
-  const [groupType, setGroupType] = useState("IFCZONE");
-  const [groupName, setGroupName] = useState("Brandschutzbereich A");
-  const [groupObjectType, setGroupObjectType] = useState("Fire compartment");
-  const [groupLongName, setGroupLongName] = useState(
-    "Brandschutzbereich Ebene 1",
-  );
-  const [typeClass, setTypeClass] = useState("IFCTYPEOBJECT");
-  const [typeName, setTypeName] = useState("Inspektionselement-Typ");
-  const [typeTag, setTypeTag] = useState("TYPE-INSPECTION");
-
   return (
     <PanelShell scroll>
       <PanelHeader
         eyebrow={`Auswahl #${selectedId}`}
         title="Ressourcen"
-        description={`${resources.length.toLocaleString()} Ressourcen / ${typeAssignments.length.toLocaleString()} Typzuweisungen`}
+        description={`${resources.length.toLocaleString("de-DE")} Ressourcen · ${typeAssignments.length.toLocaleString("de-DE")} Typzuweisungen`}
         meta={<Badge tone="neutral">IFC</Badge>}
       />
-      <InfoSection title="Linked Resources">
+      <ResourceSections
+        document={document}
+        selectedId={selectedId}
+        onAddGroupAssignment={onAddGroupAssignment}
+        onAddMaterial={onAddMaterial}
+        onAddMaterialConstituentSet={onAddMaterialConstituentSet}
+        onAddMaterialLayerSet={onAddMaterialLayerSet}
+        onAddMaterialLayerSetUsage={onAddMaterialLayerSetUsage}
+        onAddMaterialProfileSet={onAddMaterialProfileSet}
+        onAddMaterialProfileSetUsage={onAddMaterialProfileSetUsage}
+        onAddMaterialStyle={onAddMaterialStyle}
+        onAddMaterialWithProperties={onAddMaterialWithProperties}
+        onAssignType={onAssignType}
+      />
+    </PanelShell>
+  );
+}
+
+function ResourceSections({
+  document,
+  selectedId,
+  onAddGroupAssignment,
+  onAddMaterial,
+  onAddMaterialConstituentSet,
+  onAddMaterialLayerSet,
+  onAddMaterialLayerSetUsage,
+  onAddMaterialProfileSet,
+  onAddMaterialProfileSetUsage,
+  onAddMaterialStyle,
+  onAddMaterialWithProperties,
+  onAssignType,
+}: {
+  document: NativeIfcDocument;
+  selectedId: number;
+  onAddGroupAssignment(
+    groupType: string,
+    groupName: string,
+    objectType: string,
+    longName: string,
+  ): void;
+  onAddMaterial(materialName: string, materialCategory: string): void;
+  onAddMaterialConstituentSet(setName: string, constituentRows: string): void;
+  onAddMaterialLayerSet(setName: string, layerRows: string): void;
+  onAddMaterialLayerSetUsage(
+    setName: string,
+    layerRows: string,
+    direction: string,
+    directionSense: string,
+    offset: string,
+    referenceExtent: string,
+  ): void;
+  onAddMaterialProfileSet(
+    setName: string,
+    profileName: string,
+    materialName: string,
+    category: string,
+    width: string,
+    depth: string,
+  ): void;
+  onAddMaterialProfileSetUsage(
+    setName: string,
+    profileName: string,
+    materialName: string,
+    category: string,
+    width: string,
+    depth: string,
+    cardinalPoint: string,
+    referenceExtent: string,
+  ): void;
+  onAddMaterialStyle(
+    materialName: string,
+    materialCategory: string,
+    styleName: string,
+    color: string,
+    transparency: string,
+  ): void;
+  onAddMaterialWithProperties(
+    materialName: string,
+    materialCategory: string,
+    propertySetName: string,
+    propertyRows: string,
+  ): void;
+  onAssignType(typeName: string, typeClass: string, tag: string): void;
+}) {
+  const resources = document.resourcesByEntity.get(selectedId) ?? [];
+  const typeAssignments =
+    document.typeAssignmentsByEntity.get(selectedId) ?? [];
+  const [materialName, setMaterialName] = useState("");
+  const [materialCategory, setMaterialCategory] = useState("");
+  const [materialPropertySetName, setMaterialPropertySetName] = useState("");
+  const [materialPropertyRows, setMaterialPropertyRows] = useState("");
+  const [materialStyleName, setMaterialStyleName] = useState("");
+  const [materialColor, setMaterialColor] = useState("#8ea7c2");
+  const [materialTransparency, setMaterialTransparency] = useState("0");
+  const [layerSetName, setLayerSetName] = useState("");
+  const [layerRows, setLayerRows] = useState("");
+  const [layerDirection, setLayerDirection] = useState("AXIS2");
+  const [layerDirectionSense, setLayerDirectionSense] = useState("POSITIVE");
+  const [layerOffset, setLayerOffset] = useState("0");
+  const [layerReferenceExtent, setLayerReferenceExtent] = useState("");
+  const [profileSetName, setProfileSetName] = useState("");
+  const [profileName, setProfileName] = useState("");
+  const [profileMaterialName, setProfileMaterialName] = useState("");
+  const [profileMaterialCategory, setProfileMaterialCategory] = useState("");
+  const [profileWidth, setProfileWidth] = useState("0.2");
+  const [profileDepth, setProfileDepth] = useState("0.3");
+  const [profileCardinalPoint, setProfileCardinalPoint] = useState("5");
+  const [profileReferenceExtent, setProfileReferenceExtent] = useState("");
+  const [constituentSetName, setConstituentSetName] = useState("");
+  const [constituentRows, setConstituentRows] = useState("");
+  const [groupType, setGroupType] = useState("IFCZONE");
+  const [groupName, setGroupName] = useState("");
+  const [groupObjectType, setGroupObjectType] = useState("");
+  const [groupLongName, setGroupLongName] = useState("");
+  const [typeClass, setTypeClass] = useState("IFCTYPEOBJECT");
+  const [typeName, setTypeName] = useState("");
+  const [typeTag, setTypeTag] = useState("");
+
+  return (
+    <>
+      <InfoSection title="Verknüpfte Ressourcen">
         {resources.length ? (
-          resources.map((resource) => (
-            <TextLine key={resource}>{resource}</TextLine>
-          ))
+          <CappedItems
+            items={resources}
+            limit={20}
+            renderItem={(resource, index) => (
+              <div
+                key={`${resource}-${index}`}
+                className="truncate rounded-md bg-muted/30 px-2 py-1 text-xs text-foreground"
+                title={resource}
+              >
+                {resource}
+              </div>
+            )}
+          />
         ) : (
-          <TextLine>No material, classification or document linked.</TextLine>
+          <TextLine>
+            Kein Material, keine Klassifikation und kein Dokument verknüpft.
+          </TextLine>
         )}
       </InfoSection>
-      <InfoSection title="Type assignments">
+      <InfoSection title="Typzuweisungen">
         {typeAssignments.length ? (
-          typeAssignments.map((assignment) => (
-            <TextLine key={`${assignment.relationshipId}-${assignment.typeId}`}>
-              #{assignment.relationshipId} → #{assignment.typeId}{" "}
-              {assignment.typeClass} {assignment.typeName}
-            </TextLine>
-          ))
+          <CappedItems
+            items={typeAssignments}
+            limit={20}
+            renderItem={(assignment) => (
+              <div
+                key={`${assignment.relationshipId}-${assignment.typeId}`}
+                className="truncate rounded-md bg-muted/30 px-2 py-1 text-xs text-foreground"
+              >
+                #{assignment.relationshipId} → #{assignment.typeId}{" "}
+                {assignment.typeClass} {assignment.typeName}
+              </div>
+            )}
+          />
         ) : (
-          <TextLine>No IFCRELDEFINESBYTYPE assignment.</TextLine>
+          <TextLine>Keine IFCRELDEFINESBYTYPE-Zuweisung.</TextLine>
         )}
       </InfoSection>
-      <EditBlock title="Assign Type">
+
+      <CollapsibleSection title="Typ zuweisen" meta="IFCRELDEFINESBYTYPE">
         <DropdownField
-          label="Type class"
+          label="Typklasse"
           options={TYPE_CLASSES}
           value={typeClass}
           onChange={setTypeClass}
         />
-        <LabeledInput
-          label="Type name"
+        <TextField
+          label="Typname"
+          placeholder="z. B. Wandtyp WD-01"
           value={typeName}
           onChangeText={setTypeName}
         />
-        <LabeledInput
-          label="Type tag"
+        <TextField
+          label="Tag"
+          placeholder="z. B. TYP-001"
           value={typeTag}
           onChangeText={setTypeTag}
         />
         <Button
-          label="+ Assign Type"
-          primary
-          onPress={() => onAssignType(typeName, typeClass, typeTag)}
-        />
-      </EditBlock>
-      <EditBlock title="Add Material">
-        <LabeledInput
-          label="Material"
-          value={materialName}
-          onChangeText={setMaterialName}
-        />
-        <LabeledInput
-          label="Category"
-          value={materialCategory}
-          onChangeText={setMaterialCategory}
-        />
-        <Button
-          label="+ Add Material"
-          primary
-          onPress={() => onAddMaterial(materialName, materialCategory)}
-        />
+          variant="default"
+          onClick={() => onAssignType(typeName, typeClass, typeTag)}
+        >
+          <Plus aria-hidden className="size-3.5" /> Typ zuweisen
+        </Button>
+      </CollapsibleSection>
+
+      <CollapsibleSection
+        title="Material"
+        meta="Material, Eigenschaften & Oberflächenstil"
+      >
         <ResponsiveRow>
           <ResponsiveField>
-            <LabeledInput
-              label="Material property set"
-              value={materialPropertySetName}
-              onChangeText={setMaterialPropertySetName}
+            <TextField
+              label="Material"
+              placeholder="z. B. Beton C25/30"
+              value={materialName}
+              onChangeText={setMaterialName}
             />
           </ResponsiveField>
           <ResponsiveField>
-            <Button
-              label="+ Add Material Properties"
-              onPress={() =>
-                onAddMaterialWithProperties(
-                  materialName,
-                  materialCategory,
-                  materialPropertySetName,
-                  materialPropertyRows,
-                )
-              }
+            <TextField
+              label="Kategorie"
+              placeholder="z. B. Beton"
+              value={materialCategory}
+              onChangeText={setMaterialCategory}
             />
           </ResponsiveField>
         </ResponsiveRow>
-        <LabeledInput
-          label="Name | Value | IFC type"
+        <Button
+          variant="default"
+          onClick={() => onAddMaterial(materialName, materialCategory)}
+        >
+          <Plus aria-hidden className="size-3.5" /> Material hinzufügen
+        </Button>
+        <TextField
+          label="Material-Eigenschaftssatz"
+          placeholder="z. B. Pset_MaterialCommon"
+          value={materialPropertySetName}
+          onChangeText={setMaterialPropertySetName}
+        />
+        <TextField
+          label="Name | Wert | IFC-Typ"
           multiline
           mono
+          placeholder={
+            "MassDensity | 2400 | IFCREAL\nThermalConductivity | 1.7 | IFCREAL"
+          }
           value={materialPropertyRows}
           onChangeText={setMaterialPropertyRows}
         />
+        <Button
+          variant="outline"
+          onClick={() =>
+            onAddMaterialWithProperties(
+              materialName,
+              materialCategory,
+              materialPropertySetName,
+              materialPropertyRows,
+            )
+          }
+        >
+          <Plus aria-hidden className="size-3.5" /> Materialeigenschaften
+          hinzufügen
+        </Button>
         <ResponsiveRow>
           <ResponsiveField>
-            <LabeledInput
-              label="Material style"
+            <TextField
+              label="Materialstil"
+              placeholder="z. B. Sichtbeton"
               value={materialStyleName}
               onChangeText={setMaterialStyleName}
             />
           </ResponsiveField>
           <ResponsiveField>
             <ColorInput
-              label="Color"
+              label="Farbe"
               value={materialColor}
               onChangeText={setMaterialColor}
             />
           </ResponsiveField>
           <ResponsiveField>
-            <LabeledInput
-              label="Transparency 0..1"
+            <TextField
+              label="Transparenz 0..1"
               keyboardType="numeric"
               value={materialTransparency}
               onChangeText={setMaterialTransparency}
@@ -2084,8 +3221,8 @@ export function ResourcesPanel({
           </ResponsiveField>
         </ResponsiveRow>
         <Button
-          label="+ Add Material Style"
-          onPress={() =>
+          variant="outline"
+          onClick={() =>
             onAddMaterialStyle(
               materialName,
               materialCategory,
@@ -2094,35 +3231,41 @@ export function ResourcesPanel({
               materialTransparency,
             )
           }
+        >
+          <Plus aria-hidden className="size-3.5" /> Materialstil hinzufügen
+        </Button>
+      </CollapsibleSection>
+
+      <CollapsibleSection
+        title="Material-Schichten"
+        meta="Layer Set & Layer Usage"
+      >
+        <TextField
+          label="Set-Name"
+          placeholder="z. B. Wandaufbau"
+          value={layerSetName}
+          onChangeText={setLayerSetName}
         />
-      </EditBlock>
-      <EditBlock title="Add Material Layer Set">
-        <ResponsiveRow>
-          <ResponsiveField>
-            <LabeledInput
-              label="Set name"
-              value={layerSetName}
-              onChangeText={setLayerSetName}
-            />
-          </ResponsiveField>
-          <ResponsiveField>
-            <Button
-              label="+ Add Layer Set"
-              onPress={() => onAddMaterialLayerSet(layerSetName, layerRows)}
-            />
-          </ResponsiveField>
-        </ResponsiveRow>
-        <LabeledInput
-          label="Name | Material | Thickness | Category"
+        <TextField
+          label="Name | Material | Dicke | Kategorie"
           multiline
           mono
+          placeholder={
+            "Kern | Beton | 0.2 | LoadBearing\nDämmung | Mineralwolle | 0.08 | Insulation"
+          }
           value={layerRows}
           onChangeText={setLayerRows}
         />
+        <Button
+          variant="outline"
+          onClick={() => onAddMaterialLayerSet(layerSetName, layerRows)}
+        >
+          <Plus aria-hidden className="size-3.5" /> Layer Set hinzufügen
+        </Button>
         <ResponsiveRow>
           <ResponsiveField>
             <DropdownField
-              label="Direction"
+              label="Richtung"
               options={["AXIS1", "AXIS2", "AXIS3"]}
               value={layerDirection}
               onChange={setLayerDirection}
@@ -2130,14 +3273,14 @@ export function ResourcesPanel({
           </ResponsiveField>
           <ResponsiveField>
             <DropdownField
-              label="Sense"
+              label="Richtungssinn"
               options={["POSITIVE", "NEGATIVE"]}
               value={layerDirectionSense}
               onChange={setLayerDirectionSense}
             />
           </ResponsiveField>
           <ResponsiveField>
-            <LabeledInput
+            <TextField
               label="Offset"
               keyboardType="numeric"
               value={layerOffset}
@@ -2147,49 +3290,56 @@ export function ResourcesPanel({
         </ResponsiveRow>
         <ResponsiveRow>
           <ResponsiveField>
-            <LabeledInput
+            <TextField
               label="Reference extent"
               keyboardType="numeric"
               value={layerReferenceExtent}
               onChangeText={setLayerReferenceExtent}
             />
           </ResponsiveField>
-          <ResponsiveField>
-            <Button
-              label="+ Add Layer Usage"
-              onPress={() =>
-                onAddMaterialLayerSetUsage(
-                  layerSetName,
-                  layerRows,
-                  layerDirection,
-                  layerDirectionSense,
-                  layerOffset,
-                  layerReferenceExtent,
-                )
-              }
-            />
-          </ResponsiveField>
         </ResponsiveRow>
-      </EditBlock>
-      <EditBlock title="Add Material Profile Set">
+        <Button
+          variant="outline"
+          onClick={() =>
+            onAddMaterialLayerSetUsage(
+              layerSetName,
+              layerRows,
+              layerDirection,
+              layerDirectionSense,
+              layerOffset,
+              layerReferenceExtent,
+            )
+          }
+        >
+          <Plus aria-hidden className="size-3.5" /> Layer Usage hinzufügen
+        </Button>
+      </CollapsibleSection>
+
+      <CollapsibleSection
+        title="Material-Profile"
+        meta="Profile Set & Profile Usage"
+      >
         <ResponsiveRow>
           <ResponsiveField>
-            <LabeledInput
-              label="Set name"
+            <TextField
+              label="Set-Name"
+              placeholder="z. B. Trägerprofile"
               value={profileSetName}
               onChangeText={setProfileSetName}
             />
           </ResponsiveField>
           <ResponsiveField>
-            <LabeledInput
-              label="Profile"
+            <TextField
+              label="Profil"
+              placeholder="z. B. Rechteckprofil"
               value={profileName}
               onChangeText={setProfileName}
             />
           </ResponsiveField>
           <ResponsiveField>
-            <LabeledInput
+            <TextField
               label="Material"
+              placeholder="z. B. Stahl"
               value={profileMaterialName}
               onChangeText={setProfileMaterialName}
             />
@@ -2197,14 +3347,15 @@ export function ResourcesPanel({
         </ResponsiveRow>
         <ResponsiveRow>
           <ResponsiveField>
-            <LabeledInput
-              label="Category"
+            <TextField
+              label="Kategorie"
+              placeholder="z. B. LoadBearing"
               value={profileMaterialCategory}
               onChangeText={setProfileMaterialCategory}
             />
           </ResponsiveField>
           <ResponsiveField>
-            <LabeledInput
+            <TextField
               label="XDim"
               keyboardType="numeric"
               value={profileWidth}
@@ -2212,7 +3363,7 @@ export function ResourcesPanel({
             />
           </ResponsiveField>
           <ResponsiveField>
-            <LabeledInput
+            <TextField
               label="YDim"
               keyboardType="numeric"
               value={profileDepth}
@@ -2221,8 +3372,8 @@ export function ResourcesPanel({
           </ResponsiveField>
         </ResponsiveRow>
         <Button
-          label="+ Add Profile Set"
-          onPress={() =>
+          variant="outline"
+          onClick={() =>
             onAddMaterialProfileSet(
               profileSetName,
               profileName,
@@ -2232,10 +3383,12 @@ export function ResourcesPanel({
               profileDepth,
             )
           }
-        />
+        >
+          <Plus aria-hidden className="size-3.5" /> Profile Set hinzufügen
+        </Button>
         <ResponsiveRow>
           <ResponsiveField>
-            <LabeledInput
+            <TextField
               label="Cardinal point"
               keyboardType="numeric"
               value={profileCardinalPoint}
@@ -2243,109 +3396,117 @@ export function ResourcesPanel({
             />
           </ResponsiveField>
           <ResponsiveField>
-            <LabeledInput
+            <TextField
               label="Reference extent"
               keyboardType="numeric"
               value={profileReferenceExtent}
               onChangeText={setProfileReferenceExtent}
             />
           </ResponsiveField>
-          <ResponsiveField>
-            <Button
-              label="+ Add Profile Usage"
-              onPress={() =>
-                onAddMaterialProfileSetUsage(
-                  profileSetName,
-                  profileName,
-                  profileMaterialName,
-                  profileMaterialCategory,
-                  profileWidth,
-                  profileDepth,
-                  profileCardinalPoint,
-                  profileReferenceExtent,
-                )
-              }
-            />
-          </ResponsiveField>
         </ResponsiveRow>
-      </EditBlock>
-      <EditBlock title="Add Material Constituent Set">
-        <ResponsiveRow>
-          <ResponsiveField>
-            <LabeledInput
-              label="Set name"
-              value={constituentSetName}
-              onChangeText={setConstituentSetName}
-            />
-          </ResponsiveField>
-          <ResponsiveField>
-            <Button
-              label="+ Add Constituent Set"
-              onPress={() =>
-                onAddMaterialConstituentSet(constituentSetName, constituentRows)
-              }
-            />
-          </ResponsiveField>
-        </ResponsiveRow>
-        <LabeledInput
-          label="Name | Material | Fraction | Category"
+        <Button
+          variant="outline"
+          onClick={() =>
+            onAddMaterialProfileSetUsage(
+              profileSetName,
+              profileName,
+              profileMaterialName,
+              profileMaterialCategory,
+              profileWidth,
+              profileDepth,
+              profileCardinalPoint,
+              profileReferenceExtent,
+            )
+          }
+        >
+          <Plus aria-hidden className="size-3.5" /> Profile Usage hinzufügen
+        </Button>
+      </CollapsibleSection>
+
+      <CollapsibleSection title="Material-Bestandteile" meta="Constituent Set">
+        <TextField
+          label="Set-Name"
+          placeholder="z. B. Fensteraufbau"
+          value={constituentSetName}
+          onChangeText={setConstituentSetName}
+        />
+        <TextField
+          label="Name | Material | Anteil | Kategorie"
           multiline
           mono
+          placeholder={
+            "Rahmen | Aluminium | 0.6 | Frame\nVerglasung | Glas | 0.4 | Glazing"
+          }
           value={constituentRows}
           onChangeText={setConstituentRows}
         />
-      </EditBlock>
-      <EditBlock title="Assign Group / Zone / System">
+        <Button
+          variant="outline"
+          onClick={() =>
+            onAddMaterialConstituentSet(constituentSetName, constituentRows)
+          }
+        >
+          <Plus aria-hidden className="size-3.5" /> Constituent Set hinzufügen
+        </Button>
+      </CollapsibleSection>
+
+      <CollapsibleSection
+        title="Gruppe / Zone / System"
+        meta="IFCRELASSIGNSTOGROUP"
+      >
         <ResponsiveRow>
           <ResponsiveField>
             <DropdownField
-              label="Group type"
+              label="Gruppentyp"
               options={GROUP_TYPES}
               value={groupType}
               onChange={setGroupType}
             />
           </ResponsiveField>
           <ResponsiveField>
-            <LabeledInput
-              label="Group name"
+            <TextField
+              label="Gruppenname"
+              placeholder="z. B. Brandabschnitt A"
               value={groupName}
               onChangeText={setGroupName}
             />
           </ResponsiveField>
           <ResponsiveField>
-            <LabeledInput
+            <TextField
               label="ObjectType"
+              placeholder="z. B. Brandabschnitt"
               value={groupObjectType}
               onChangeText={setGroupObjectType}
             />
           </ResponsiveField>
         </ResponsiveRow>
-        <ResponsiveRow>
-          <ResponsiveField>
-            <LabeledInput
-              label="LongName"
-              value={groupLongName}
-              onChangeText={setGroupLongName}
-            />
-          </ResponsiveField>
-          <ResponsiveField>
-            <Button
-              label="+ Assign Group"
-              onPress={() =>
-                onAddGroupAssignment(
-                  groupType,
-                  groupName,
-                  groupObjectType,
-                  groupLongName,
-                )
-              }
-            />
-          </ResponsiveField>
-        </ResponsiveRow>
-      </EditBlock>
-    </PanelShell>
+        <TextField
+          label="LongName"
+          placeholder="z. B. Brandabschnitt Ebene 1"
+          value={groupLongName}
+          onChangeText={setGroupLongName}
+        />
+        <Button
+          variant="default"
+          onClick={() =>
+            onAddGroupAssignment(
+              groupType,
+              groupName,
+              groupObjectType,
+              groupLongName,
+            )
+          }
+        >
+          <Plus aria-hidden className="size-3.5" /> Gruppe zuweisen
+        </Button>
+      </CollapsibleSection>
+    </>
   );
 }
+
+/* ------------------------------------------------------------------ */
+/* Ressourcen-Zusatzpanels (eigene Mosaic-Fenster)                     */
+/* ------------------------------------------------------------------ */
 
 type ResourceAssociation = {
   relationship: NativeIfcRelationship;
@@ -2409,16 +3570,18 @@ function EditableReferenceResource({
     setName(readOptionalStepString(resource.args[2]));
   }, [resource.args, resource.id]);
 
-  const label =
+  // logLabel bleibt englisch, damit bestehende Log-/History-Zeilen
+  // ("Update classification #…") unverändert bleiben.
+  const { logLabel, uiLabel } =
     resource.type === "IFCCLASSIFICATIONREFERENCE"
-      ? "Classification"
+      ? { logLabel: "Classification", uiLabel: "Klassifikation" }
       : resource.type === "IFCDOCUMENTREFERENCE"
-        ? "Document"
-        : "Library";
+        ? { logLabel: "Document", uiLabel: "Dokument" }
+        : { logLabel: "Library", uiLabel: "Bibliothek" };
 
   return (
     <CompactResourceCard
-      title={`${label} #${resource.id}`}
+      title={`${uiLabel} #${resource.id}`}
       relation={`#${relationship.id} ${relationship.type}`}
       onRemove={() => onRemoveAssociation(relationship.id)}
       onSave={() =>
@@ -2433,19 +3596,19 @@ function EditableReferenceResource({
               entityId: resource.id,
             },
           ],
-          `Update ${label.toLowerCase()} #${resource.id}`,
+          `Update ${logLabel.toLowerCase()} #${resource.id}`,
         )
       }
     >
       <div className="grid grid-cols-[repeat(auto-fit,minmax(8.5rem,1fr))] gap-2">
         <CompactTextInput
-          label="Identification"
+          label="Kennung"
           value={identification}
           onChangeText={setIdentification}
         />
         <CompactTextInput label="Name" value={name} onChangeText={setName} />
         <CompactTextInput
-          label="Location / URI"
+          label="Ort / URI"
           value={location}
           onChangeText={setLocation}
         />
@@ -2479,27 +3642,24 @@ function CompactResourceCard({
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          <ShadcnButton
-            aria-label={`${title} speichern`}
+          <Button
             className="h-7 gap-1 px-2 text-xs"
-            size="sm"
-            type="button"
+            title={`${title} speichern`}
+            variant="default"
             onClick={onSave}
           >
             <Save aria-hidden className="size-3" />
             <span>Speichern</span>
-          </ShadcnButton>
-          <ShadcnButton
-            aria-label={`${title} Zuordnung entfernen`}
+          </Button>
+          <Button
             className="h-7 gap-1 px-2 text-xs"
-            size="sm"
-            type="button"
+            title={`${title} Zuordnung entfernen`}
             variant="outline"
             onClick={onRemove}
           >
             <Trash2 aria-hidden className="size-3" />
             <span>Entfernen</span>
-          </ShadcnButton>
+          </Button>
         </div>
       </div>
       {children}
@@ -2509,10 +3669,12 @@ function CompactResourceCard({
 
 function CompactTextInput({
   label,
+  placeholder,
   value,
   onChangeText,
 }: {
   label: string;
+  placeholder?: string;
   value: string;
   onChangeText(value: string): void;
 }) {
@@ -2521,6 +3683,7 @@ function CompactTextInput({
       <span className="truncate">{label}</span>
       <Input
         className="h-8 min-w-0 rounded-md px-2 text-xs text-foreground"
+        placeholder={placeholder}
         title={value}
         value={value}
         onChange={(event) => onChangeText(event.currentTarget.value)}
@@ -2543,7 +3706,14 @@ function CompactSelectInput({
   return (
     <label className="grid min-w-0 gap-1 text-[0.65rem] font-medium uppercase tracking-wide text-muted-foreground">
       <span className="truncate">{label}</span>
-      <Select value={value} onValueChange={onChange}>
+      <Select
+        value={value}
+        onValueChange={(nextValue) => {
+          if (nextValue !== null) {
+            onChange(nextValue);
+          }
+        }}
+      >
         <SelectTrigger className="h-8 min-w-0 rounded-md px-2 text-xs text-foreground">
           <SelectValue />
         </SelectTrigger>
@@ -2583,23 +3753,27 @@ function CompactAddSection({
 }
 
 function CompactCreateButton({
+  disabled,
   label,
   onClick,
+  title,
 }: {
+  disabled?: boolean;
   label: string;
   onClick(): void;
+  title?: string;
 }) {
   return (
-    <ShadcnButton
+    <Button
       className="h-8 w-full gap-1.5 text-xs"
-      size="sm"
-      type="button"
+      disabled={disabled}
+      title={title}
       variant="outline"
       onClick={onClick}
     >
       <Plus aria-hidden className="size-3.5" />
       <span>{label}</span>
-    </ShadcnButton>
+    </Button>
   );
 }
 
@@ -2627,7 +3801,7 @@ function EditableApprovalResource({
 
   return (
     <CompactResourceCard
-      title={`Approval #${resource.id}`}
+      title={`Freigabe #${resource.id}`}
       relation={`#${relationship.id} ${relationship.type}`}
       onRemove={() => onRemoveAssociation(relationship.id)}
       onSave={() =>
@@ -2648,7 +3822,7 @@ function EditableApprovalResource({
     >
       <div className="grid grid-cols-[repeat(auto-fit,minmax(8.5rem,1fr))] gap-2">
         <CompactTextInput
-          label="Identifier"
+          label="Kennung"
           value={identifier}
           onChangeText={setIdentifier}
         />
@@ -2730,7 +3904,7 @@ function EditableConstraintResource({
       <div className="grid grid-cols-[repeat(auto-fit,minmax(8.5rem,1fr))] gap-2">
         <CompactTextInput label="Name" value={name} onChangeText={setName} />
         <CompactSelectInput
-          label="Grade"
+          label="Grad"
           options={CONSTRAINT_GRADES}
           value={grade || "NOTDEFINED"}
           onChange={setGrade}
@@ -2742,12 +3916,12 @@ function EditableConstraintResource({
           onChange={setQualifier}
         />
         <CompactTextInput
-          label="Source"
+          label="Quelle"
           value={source}
           onChangeText={setSource}
         />
         <CompactTextInput
-          label="Intent"
+          label="Zweck"
           value={intent}
           onChangeText={setIntent}
         />
@@ -2793,31 +3967,22 @@ export function ResourceReferencesPanel({
     "IFCRELASSOCIATESDOCUMENT",
     "IFCRELASSOCIATESLIBRARY",
   ]);
-  const [classificationId, setClassificationId] = useState(
-    "IFCNATIVE-INSPECTION",
-  );
-  const [classificationName, setClassificationName] =
-    useState("Inspektionsziel");
-  const [classificationUri, setClassificationUri] = useState(
-    "https://ifcnative.local/classification/inspection-target",
-  );
-  const [documentId, setDocumentId] = useState("DOC-INSPECTION");
-  const [documentName, setDocumentName] = useState("Inspektionsbericht");
-  const [documentUri, setDocumentUri] = useState(
-    "https://ifcnative.local/documents/inspection-report",
-  );
-  const [libraryId, setLibraryId] = useState("LIB-INSPECTION");
-  const [libraryName, setLibraryName] = useState("Inspektionsbibliothek");
-  const [libraryUri, setLibraryUri] = useState(
-    "https://ifcnative.local/library/inspection",
-  );
+  const [classificationId, setClassificationId] = useState("");
+  const [classificationName, setClassificationName] = useState("");
+  const [classificationUri, setClassificationUri] = useState("");
+  const [documentId, setDocumentId] = useState("");
+  const [documentName, setDocumentName] = useState("");
+  const [documentUri, setDocumentUri] = useState("");
+  const [libraryId, setLibraryId] = useState("");
+  const [libraryName, setLibraryName] = useState("");
+  const [libraryUri, setLibraryUri] = useState("");
 
   return (
     <PanelShell scroll>
       <PanelHeader
         eyebrow={`Auswahl #${selectedId}`}
         title="Klassifikation & Dokumente"
-        description={`${referenceAssociations.length.toLocaleString()} verknuepfte Referenzen`}
+        description={`${referenceAssociations.length.toLocaleString("de-DE")} verknüpfte Referenzen`}
         meta={<Badge tone="neutral">IFC</Badge>}
       />
       <div className="grid gap-2">
@@ -2832,30 +3997,36 @@ export function ResourceReferencesPanel({
           ))
         ) : (
           <EmptyBlock>
-            Keine Klassifikation, kein Dokument und keine Library zugewiesen.
+            Keine Klassifikation, kein Dokument und keine Bibliothek
+            zugewiesen.
           </EmptyBlock>
         )}
       </div>
-      <CompactAddSection title="Add Classification">
+      <CompactAddSection title="Klassifikation hinzufügen">
         <div className="grid grid-cols-[repeat(auto-fit,minmax(8.5rem,1fr))] gap-2">
           <CompactTextInput
-            label="Identification"
+            label="Kennung"
+            placeholder="z. B. DIN 276-1"
             value={classificationId}
             onChangeText={setClassificationId}
           />
           <CompactTextInput
             label="Name"
+            placeholder="z. B. Kostengruppe"
             value={classificationName}
             onChangeText={setClassificationName}
           />
           <CompactTextInput
-            label="Location / URI"
+            label="Ort / URI"
+            placeholder="https://…"
             value={classificationUri}
             onChangeText={setClassificationUri}
           />
         </div>
         <CompactCreateButton
-          label="Add Classification"
+          disabled={!classificationId.trim() && !classificationName.trim()}
+          label="Klassifikation hinzufügen"
+          title="Mindestens Kennung oder Name angeben"
           onClick={() =>
             onAddClassification(
               classificationId,
@@ -2865,51 +4036,61 @@ export function ResourceReferencesPanel({
           }
         />
       </CompactAddSection>
-      <CompactAddSection title="Add Document">
+      <CompactAddSection title="Dokument hinzufügen">
         <div className="grid grid-cols-[repeat(auto-fit,minmax(8.5rem,1fr))] gap-2">
           <CompactTextInput
-            label="Identification"
+            label="Kennung"
+            placeholder="z. B. DOC-001"
             value={documentId}
             onChangeText={setDocumentId}
           />
           <CompactTextInput
             label="Name"
+            placeholder="z. B. Prüfbericht"
             value={documentName}
             onChangeText={setDocumentName}
           />
           <CompactTextInput
-            label="Location / URI"
+            label="Ort / URI"
+            placeholder="https://…"
             value={documentUri}
             onChangeText={setDocumentUri}
           />
         </div>
         <CompactCreateButton
-          label="Add Document"
+          disabled={!documentId.trim() && !documentName.trim()}
+          label="Dokument hinzufügen"
+          title="Mindestens Kennung oder Name angeben"
           onClick={() =>
             onAddDocumentReference(documentId, documentName, documentUri)
           }
         />
       </CompactAddSection>
-      <CompactAddSection title="Add Library">
+      <CompactAddSection title="Bibliothek hinzufügen">
         <div className="grid grid-cols-[repeat(auto-fit,minmax(8.5rem,1fr))] gap-2">
           <CompactTextInput
-            label="Identification"
+            label="Kennung"
+            placeholder="z. B. LIB-001"
             value={libraryId}
             onChangeText={setLibraryId}
           />
           <CompactTextInput
             label="Name"
+            placeholder="z. B. Objektbibliothek"
             value={libraryName}
             onChangeText={setLibraryName}
           />
           <CompactTextInput
-            label="Location / URI"
+            label="Ort / URI"
+            placeholder="https://…"
             value={libraryUri}
             onChangeText={setLibraryUri}
           />
         </div>
         <CompactCreateButton
-          label="Add Library"
+          disabled={!libraryId.trim() && !libraryName.trim()}
+          label="Bibliothek hinzufügen"
+          title="Mindestens Kennung oder Name angeben"
           onClick={() =>
             onAddLibraryReference(libraryId, libraryName, libraryUri)
           }
@@ -2947,25 +4128,21 @@ export function ResourceControlsPanel({
     "IFCRELASSOCIATESAPPROVAL",
     "IFCRELASSOCIATESCONSTRAINT",
   ]);
-  const [approvalId, setApprovalId] = useState("APP-INSPECTION");
-  const [approvalName, setApprovalName] = useState("Pruefung freigegeben");
-  const [approvalStatus, setApprovalStatus] = useState("Approved");
-  const [constraintName, setConstraintName] = useState(
-    "Objektanforderung erfuellen",
-  );
+  const [approvalId, setApprovalId] = useState("");
+  const [approvalName, setApprovalName] = useState("");
+  const [approvalStatus, setApprovalStatus] = useState("");
+  const [constraintName, setConstraintName] = useState("");
   const [constraintGrade, setConstraintGrade] = useState("HARD");
-  const [constraintSource, setConstraintSource] = useState("IFCnative");
+  const [constraintSource, setConstraintSource] = useState("");
   const [constraintQualifier, setConstraintQualifier] = useState("REQUIREMENT");
-  const [constraintIntent, setConstraintIntent] = useState(
-    "EXPECTED PERFORMANCE",
-  );
+  const [constraintIntent, setConstraintIntent] = useState("");
 
   return (
     <PanelShell scroll>
       <PanelHeader
         eyebrow={`Auswahl #${selectedId}`}
         title="Freigaben & Constraints"
-        description={`${controlAssociations.length.toLocaleString()} verknuepfte Kontrollressourcen`}
+        description={`${controlAssociations.length.toLocaleString("de-DE")} verknüpfte Kontrollressourcen`}
         meta={<Badge tone="neutral">IFC</Badge>}
       />
       <div className="grid gap-2">
@@ -2993,40 +4170,46 @@ export function ResourceControlsPanel({
           </EmptyBlock>
         )}
       </div>
-      <CompactAddSection title="Add Approval">
+      <CompactAddSection title="Freigabe hinzufügen">
         <div className="grid grid-cols-[repeat(auto-fit,minmax(8.5rem,1fr))] gap-2">
           <CompactTextInput
-            label="Identifier"
+            label="Kennung"
+            placeholder="z. B. APP-001"
             value={approvalId}
             onChangeText={setApprovalId}
           />
           <CompactTextInput
             label="Name"
+            placeholder="z. B. Freigabe Entwurf"
             value={approvalName}
             onChangeText={setApprovalName}
           />
           <CompactTextInput
             label="Status"
+            placeholder="z. B. Approved"
             value={approvalStatus}
             onChangeText={setApprovalStatus}
           />
         </div>
         <CompactCreateButton
-          label="Add Approval"
+          disabled={!approvalId.trim() && !approvalName.trim()}
+          label="Freigabe hinzufügen"
+          title="Mindestens Kennung oder Name angeben"
           onClick={() =>
             onAddApproval(approvalId, approvalName, approvalStatus)
           }
         />
       </CompactAddSection>
-      <CompactAddSection title="Add Constraint">
+      <CompactAddSection title="Constraint hinzufügen">
         <div className="grid grid-cols-[repeat(auto-fit,minmax(8.5rem,1fr))] gap-2">
           <CompactTextInput
             label="Name"
+            placeholder="z. B. Anforderung erfüllen"
             value={constraintName}
             onChangeText={setConstraintName}
           />
           <CompactSelectInput
-            label="Grade"
+            label="Grad"
             options={CONSTRAINT_GRADES}
             value={constraintGrade}
             onChange={setConstraintGrade}
@@ -3038,18 +4221,20 @@ export function ResourceControlsPanel({
             onChange={setConstraintQualifier}
           />
           <CompactTextInput
-            label="Source"
+            label="Quelle"
+            placeholder="z. B. Bauherr"
             value={constraintSource}
             onChangeText={setConstraintSource}
           />
           <CompactTextInput
-            label="Intent"
+            label="Zweck"
+            placeholder="z. B. EXPECTED PERFORMANCE"
             value={constraintIntent}
             onChangeText={setConstraintIntent}
           />
         </div>
         <CompactCreateButton
-          label="Add Constraint"
+          label="Constraint hinzufügen"
           onClick={() =>
             onAddConstraint(
               constraintName,
@@ -3065,88 +4250,9 @@ export function ResourceControlsPanel({
   );
 }
 
-function ReferencesPanel({
-  document,
-  selectedId,
-}: {
-  document: NativeIfcDocument;
-  selectedId: number;
-}) {
-  const outgoing = document.outgoingRefs.get(selectedId) ?? [];
-  const incoming = document.incomingRefs.get(selectedId) ?? [];
-  return (
-    <PanelShell scroll>
-      <PanelHeader
-        eyebrow={`Auswahl #${selectedId}`}
-        title="Referenzen"
-        description={`${outgoing.length.toLocaleString()} ausgehend / ${incoming.length.toLocaleString()} eingehend`}
-        meta={<Badge tone="neutral">STEP</Badge>}
-      />
-      <InfoSection title="Outgoing">
-        {outgoing.length ? (
-          outgoing.map((id) => (
-            <TextLine key={id}>
-              -&gt; #{id} {document.entityById.get(id)?.type ?? ""}
-            </TextLine>
-          ))
-        ) : (
-          <TextLine>None.</TextLine>
-        )}
-      </InfoSection>
-      <InfoSection title="Incoming">
-        {incoming.length ? (
-          incoming.map((entity) => (
-            <TextLine key={entity.id}>
-              &lt;- #{entity.id} {entity.type}
-            </TextLine>
-          ))
-        ) : (
-          <TextLine>None.</TextLine>
-        )}
-      </InfoSection>
-    </PanelShell>
-  );
-}
-
-function UnitsPanel({
-  document,
-  onAddUnit,
-}: {
-  document: NativeIfcDocument;
-  onAddUnit(unitType: string, unitName: string): void;
-}) {
-  const [unitType, setUnitType] = useState("LENGTHUNIT");
-  const [unitName, setUnitName] = useState("METRE");
-  return (
-    <PanelShell scroll>
-      <PanelHeader
-        title="Einheiten"
-        description={`${document.units.length.toLocaleString()} Einheiten im Modell`}
-        meta={<Badge tone="neutral">Units</Badge>}
-      />
-      <DropdownField
-        label="Unit type"
-        options={UNIT_TYPES}
-        value={unitType}
-        onChange={setUnitType}
-      />
-      <DropdownField
-        label="Unit name"
-        options={UNIT_NAMES}
-        value={unitName}
-        onChange={setUnitName}
-      />
-      <Button
-        label="+ Add Unit"
-        primary
-        onPress={() => onAddUnit(unitType, unitName)}
-      />
-      {document.units.map((unit) => (
-        <TextLine key={unit}>{unit}</TextLine>
-      ))}
-    </PanelShell>
-  );
-}
+/* ------------------------------------------------------------------ */
+/* STEP-Parsing-Helfer                                                 */
+/* ------------------------------------------------------------------ */
 
 function editableSetValue(
   entity: NativeIfcEntity | undefined,

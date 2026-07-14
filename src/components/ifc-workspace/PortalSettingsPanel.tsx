@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { Download, RotateCcw, Upload, Wand2 } from "lucide-react";
+import { useRef, useState } from "react";
 
-import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -26,10 +27,13 @@ import {
 import {
   Badge,
   Button,
+  CheckboxField,
+  CommitInput,
   DataTable,
   DataTableCell,
   DropdownField,
   InfoSection,
+  InlineAlert,
   LabeledInput,
   PanelHeader,
   PanelShell,
@@ -209,41 +213,43 @@ export function PortalSettingsPanel({
 
       <PanelShell scroll>
         <InfoSection title="Verbindung">
-          <LabeledInput
-            label="BWD-API (bwdBaseUrl)"
-            mono
-            value={settings.bwdBaseUrl}
-            onChangeText={(value) => update({ bwdBaseUrl: value })}
-          />
-          <LabeledInput
-            label="Assetverwaltung-API (assetBaseUrl)"
-            mono
-            value={settings.assetBaseUrl}
-            onChangeText={(value) => update({ assetBaseUrl: value })}
-          />
-          <LabeledInput
-            label="Monitoring-API (monitoringBaseUrl)"
-            mono
-            value={settings.monitoringBaseUrl}
-            onChangeText={(value) => update({ monitoringBaseUrl: value })}
-          />
-          <LabeledInput
-            label="Token-URL (Keycloak)"
-            mono
-            value={settings.tokenUrl}
-            onChangeText={(value) => update({ tokenUrl: value })}
-          />
-          <LabeledInput
-            label="Client-ID"
-            mono
-            value={settings.clientId}
-            onChangeText={(value) => update({ clientId: value })}
-          />
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2.5">
+            <LabeledInput
+              label="BWD-API (bwdBaseUrl)"
+              mono
+              value={settings.bwdBaseUrl}
+              onChangeText={(value) => update({ bwdBaseUrl: value })}
+            />
+            <LabeledInput
+              label="Assetverwaltung-API (assetBaseUrl)"
+              mono
+              value={settings.assetBaseUrl}
+              onChangeText={(value) => update({ assetBaseUrl: value })}
+            />
+            <LabeledInput
+              label="Monitoring-API (monitoringBaseUrl)"
+              mono
+              value={settings.monitoringBaseUrl}
+              onChangeText={(value) => update({ monitoringBaseUrl: value })}
+            />
+            <LabeledInput
+              label="Token-URL (Keycloak)"
+              mono
+              value={settings.tokenUrl}
+              onChangeText={(value) => update({ tokenUrl: value })}
+            />
+            <LabeledInput
+              label="Client-ID"
+              mono
+              value={settings.clientId}
+              onChangeText={(value) => update({ clientId: value })}
+            />
+          </div>
           <CheckboxField
             checked={settings.useMockData}
             description="Alle Portal-Abrufe liefern lokale Demo-Daten (kein Netzwerk, keine Anmeldung nötig)."
             label="Mock-Daten verwenden"
-            onChange={(checked) => update({ useMockData: checked })}
+            onCheckedChange={(checked) => update({ useMockData: checked })}
           />
           <p className="text-[11px] leading-relaxed text-muted-foreground">
             Die Standardpfade (/mkp/…) laufen im Dev-Server über den
@@ -304,12 +310,7 @@ export function PortalSettingsPanel({
         ) : null}
 
         {mappingError ? (
-          <div
-            role="alert"
-            className="shrink-0 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-          >
-            {mappingError}
-          </div>
+          <InlineAlert tone="danger">{mappingError}</InlineAlert>
         ) : null}
 
         <InfoSection title="Pset-Optionen">
@@ -317,7 +318,7 @@ export function PortalSettingsPanel({
             checked={settings.psetOptions.writeLinkPset}
             description="Pset_MarxKrontalBWD mit ExternalId, Quellsystem und API-Metadaten am verknüpften Element. Auch ohne Link-Pset bleiben Re-Importe über die deterministische GlobalId erkennbar (keine Duplikate)."
             label="Link-Pset schreiben"
-            onChange={(checked) =>
+            onCheckedChange={(checked) =>
               update({
                 psetOptions: {
                   ...settings.psetOptions,
@@ -330,7 +331,7 @@ export function PortalSettingsPanel({
             checked={settings.psetOptions.writeCatalogPsets}
             description="ePset_* nach Objektkatalog BWD/MON, z. B. ePset_Objektinformationen oder ePset_Sensor."
             label="Katalog-Psets schreiben"
-            onChange={(checked) =>
+            onCheckedChange={(checked) =>
               update({
                 psetOptions: {
                   ...settings.psetOptions,
@@ -343,7 +344,7 @@ export function PortalSettingsPanel({
             checked={settings.psetOptions.writeRecordPsets}
             description="Pset_MarxKrontalBWD_<Modell> mit allen rohen Datenbankfeldern des Portal-Datensatzes."
             label="Rohdaten-Psets schreiben"
-            onChange={(checked) =>
+            onCheckedChange={(checked) =>
               update({
                 psetOptions: {
                   ...settings.psetOptions,
@@ -358,15 +359,37 @@ export function PortalSettingsPanel({
       <Toolbar>
         <ToolbarGroup>
           <Button
-            label="Preset laden"
-            onPress={() => update({ mapping: createProxyPresetMapping() })}
-          />
-          <Button label="Mapping exportieren" onPress={exportMapping} />
+            title="Mapping auf das Preset der Beispiel-IFCs setzen"
+            variant="outline"
+            onClick={() => update({ mapping: createProxyPresetMapping() })}
+          >
+            <Wand2 aria-hidden className="size-3.5" />
+            Preset laden
+          </Button>
           <Button
-            label="Mapping importieren"
-            onPress={() => fileInputRef.current?.click()}
-          />
-          <Button label="Zurücksetzen" onPress={resetToDefaults} />
+            title="Aktuelles Mapping als JSON-Datei herunterladen"
+            variant="outline"
+            onClick={exportMapping}
+          >
+            <Download aria-hidden className="size-3.5" />
+            Exportieren
+          </Button>
+          <Button
+            title="Mapping aus JSON-Datei laden"
+            variant="outline"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Upload aria-hidden className="size-3.5" />
+            Importieren
+          </Button>
+          <Button
+            title="URLs, Client-ID und Mapping auf Standardwerte zurücksetzen"
+            variant="outline"
+            onClick={resetToDefaults}
+          >
+            <RotateCcw aria-hidden className="size-3.5" />
+            Zurücksetzen
+          </Button>
         </ToolbarGroup>
       </Toolbar>
       <input
@@ -395,68 +418,75 @@ function MappingTable({
   onPatchRow(models: string[], patch: Partial<PortalModelMapping>): void;
 }) {
   return (
-    <DataTable
-      columns={MAPPING_COLUMNS}
-      emptyMessage="Keine Mapping-Zeilen."
-      keyExtractor={(row: PortalModelMapping) => row.model}
-      minWidth={680}
-      rows={rows}
-      renderRow={(row) => {
-        const inactive = row.target === "skip" || row.target === "ignore";
-        return (
-          <>
-            <DataTableCell column={MAPPING_COLUMNS[0]}>
-              <span
-                className={
-                  row.target === "ignore"
-                    ? "text-xs font-medium text-muted-foreground line-through"
-                    : "text-xs font-medium text-foreground"
-                }
-              >
-                {row.model}
-              </span>
-            </DataTableCell>
-            <DataTableCell column={MAPPING_COLUMNS[1]}>
-              <TargetSelect
-                value={row.target}
-                onChange={(target) => onPatchRow([row.model], { target })}
-              />
-            </DataTableCell>
-            <DataTableCell column={MAPPING_COLUMNS[2]}>
-              <input
-                aria-label={`Property-Werte für ${row.model} schreiben`}
-                checked={row.writeProperties}
-                className="size-4 accent-primary disabled:opacity-40"
-                disabled={inactive}
-                title="Abgewählt: nur leere Pset-Hüllen ohne Properties"
-                type="checkbox"
-                onChange={(event) =>
-                  onPatchRow([row.model], {
-                    writeProperties: event.currentTarget.checked,
-                  })
-                }
-              />
-            </DataTableCell>
-            <DataTableCell column={MAPPING_COLUMNS[3]}>
-              <IfcClassCell
-                disabled={row.target !== "element"}
-                value={row.ifcClass}
-                onChange={(ifcClass) => onPatchRow([row.model], { ifcClass })}
-              />
-            </DataTableCell>
-            <DataTableCell column={MAPPING_COLUMNS[4]}>
-              <CommitInput
-                ariaLabel={`ObjectType für ${row.model}`}
-                disabled={row.target !== "element"}
-                placeholder={row.model}
-                value={row.objectType}
-                onCommit={(objectType) => onPatchRow([row.model], { objectType })}
-              />
-            </DataTableCell>
-          </>
-        );
-      }}
-    />
+    <div className="overflow-x-auto">
+      <DataTable
+        columns={MAPPING_COLUMNS}
+        emptyMessage="Keine Mapping-Zeilen."
+        keyExtractor={(row: PortalModelMapping) => row.model}
+        minWidth={680}
+        rows={rows}
+        renderRow={(row) => {
+          const inactive = row.target === "skip" || row.target === "ignore";
+          return (
+            <>
+              <DataTableCell column={MAPPING_COLUMNS[0]}>
+                <span
+                  className={
+                    row.target === "ignore"
+                      ? "text-xs font-medium text-muted-foreground line-through"
+                      : "text-xs font-medium text-foreground"
+                  }
+                >
+                  {row.model}
+                </span>
+              </DataTableCell>
+              <DataTableCell column={MAPPING_COLUMNS[1]}>
+                <TargetSelect
+                  value={row.target}
+                  onChange={(target) => onPatchRow([row.model], { target })}
+                />
+              </DataTableCell>
+              <DataTableCell column={MAPPING_COLUMNS[2]}>
+                <Checkbox
+                  aria-label={`Property-Werte für ${row.model} schreiben`}
+                  checked={row.writeProperties}
+                  disabled={inactive}
+                  title="Abgewählt: nur leere Pset-Hüllen ohne Properties"
+                  onCheckedChange={(state) =>
+                    onPatchRow([row.model], {
+                      writeProperties: state === true,
+                    })
+                  }
+                />
+              </DataTableCell>
+              <DataTableCell column={MAPPING_COLUMNS[3]}>
+                <IfcClassCell
+                  disabled={row.target !== "element"}
+                  value={row.ifcClass}
+                  onChange={(ifcClass) => onPatchRow([row.model], { ifcClass })}
+                />
+              </DataTableCell>
+              <DataTableCell column={MAPPING_COLUMNS[4]}>
+                <CommitInput
+                  className="min-w-0"
+                  disabled={row.target !== "element"}
+                  placeholder={row.model}
+                  value={row.objectType}
+                  onCommit={(next) => {
+                    // Wie das alte lokale CommitInput: trimmen und nur bei
+                    // echter Änderung patchen (sonst kein Modus-Wechsel).
+                    const objectType = next.trim();
+                    if (objectType !== row.objectType) {
+                      onPatchRow([row.model], { objectType });
+                    }
+                  }}
+                />
+              </DataTableCell>
+            </>
+          );
+        }}
+      />
+    </div>
   );
 }
 
@@ -571,90 +601,17 @@ function IfcClassCell({
       </Select>
       {custom ? (
         <CommitInput
-          ariaLabel="IFC-Klasse (Freitext)"
+          className="min-w-0 font-mono"
           disabled={disabled}
           placeholder="IfcBuildingElementProxy"
           value={value}
-          onCommit={(next) => onChange(normalizeIfcClass(next))}
+          onCommit={(next) => {
+            if (next.trim() !== value) {
+              onChange(normalizeIfcClass(next));
+            }
+          }}
         />
       ) : null}
     </div>
-  );
-}
-
-/** Input mit lokalem Entwurf; übernimmt den Wert bei Blur/Enter (Escape verwirft). */
-function CommitInput({
-  ariaLabel,
-  disabled,
-  placeholder,
-  value,
-  onCommit,
-}: {
-  ariaLabel: string;
-  disabled?: boolean;
-  placeholder?: string;
-  value: string;
-  onCommit(value: string): void;
-}) {
-  const [draft, setDraft] = useState(value);
-
-  useEffect(() => {
-    setDraft(value);
-  }, [value]);
-
-  const commit = () => {
-    const next = draft.trim();
-    if (next !== value) {
-      onCommit(next);
-    }
-  };
-
-  return (
-    <Input
-      aria-label={ariaLabel}
-      className="h-7 min-w-0 text-xs text-foreground"
-      disabled={disabled}
-      placeholder={placeholder}
-      value={draft}
-      onBlur={commit}
-      onChange={(event) => setDraft(event.currentTarget.value)}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") {
-          event.currentTarget.blur();
-        } else if (event.key === "Escape") {
-          setDraft(value);
-          event.currentTarget.blur();
-        }
-      }}
-    />
-  );
-}
-
-function CheckboxField({
-  checked,
-  description,
-  label,
-  onChange,
-}: {
-  checked: boolean;
-  description?: string;
-  label: string;
-  onChange(checked: boolean): void;
-}) {
-  return (
-    <label className="flex items-start gap-2 text-sm text-foreground">
-      <input
-        checked={checked}
-        className="mt-0.5 size-4 shrink-0 accent-primary"
-        type="checkbox"
-        onChange={(event) => onChange(event.currentTarget.checked)}
-      />
-      <span className="grid gap-0.5">
-        <span>{label}</span>
-        {description ? (
-          <span className="text-xs text-muted-foreground">{description}</span>
-        ) : null}
-      </span>
-    </label>
   );
 }

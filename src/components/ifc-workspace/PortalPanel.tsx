@@ -1,13 +1,24 @@
 import {
   Box,
+  CheckCircle2,
   ChevronRight,
   ClipboardList,
   Crosshair,
   FlaskConical,
+  FolderDown,
+  FolderTree,
   Gauge,
   Landmark,
   Layers,
+  Link2,
   ListChecks,
+  ListTree,
+  Loader2,
+  Locate,
+  LogIn,
+  LogOut,
+  MousePointerClick,
+  RefreshCw,
   Target,
   Waves,
   type LucideIcon,
@@ -43,6 +54,9 @@ import {
   Button,
   CollapsibleSection,
   DropdownField,
+  EmptyState,
+  InlineAlert,
+  LabeledInput,
   PanelHeader,
   PanelShell,
   SegmentedControl,
@@ -85,7 +99,10 @@ interface PortalNodeIndexEntry {
   tab: PortalTreeTab;
 }
 
-const TREE_TABS: PortalTreeTab[] = ["Diagnostik", "Monitoring"];
+const TREE_TAB_OPTIONS: { value: PortalTreeTab; label: string }[] = [
+  { label: "Diagnostik", value: "Diagnostik" },
+  { label: "Monitoring", value: "Monitoring" },
+];
 
 const NODE_ICONS: Record<string, LucideIcon> = {
   bauteil: Box,
@@ -653,8 +670,6 @@ export function PortalPanel({
     (linkedEntityForNode !== null || selectedId !== null);
   const canImportStructure = !busy && !!document && roots.length > 0;
 
-  const token = query.trim().toLowerCase();
-
   return (
     <PanelShell>
       <PanelHeader
@@ -672,219 +687,455 @@ export function PortalPanel({
         }
         actions={
           tokens ? (
-            <Button label="Abmelden" onPress={() => onTokensChange(null)} />
+            <Button
+              title="Vom MKP-Portal abmelden"
+              onClick={() => onTokensChange(null)}
+            >
+              <LogOut aria-hidden className="size-3.5" />
+              Abmelden
+            </Button>
           ) : null
         }
       />
 
-      {error ? <AlertMessage message={error} /> : null}
+      {error ? <InlineAlert tone="danger">{error}</InlineAlert> : null}
 
       <PanelShell scroll>
         {!tokens ? (
-          <CollapsibleSection
-            defaultOpen={!settings.useMockData}
-            title="Anmeldung"
-            meta={
-              settings.useMockData
-                ? "Mock-Modus: Anmeldung optional"
-                : "MKP-Portal-Konto (Keycloak)"
-            }
-          >
-            <TextField
-              label="Benutzername"
-              value={loginName}
-              onChangeText={setLoginName}
-            />
-            <TextField
-              label="Passwort"
-              type="password"
-              value={loginPassword}
-              onChangeText={setLoginPassword}
-              onSubmit={() => void handleLogin()}
-            />
-            {loginError ? <AlertMessage message={loginError} /> : null}
-            <Button
-              disabled={loginBusy || !loginName.trim() || !loginPassword}
-              label={loginBusy ? "Lädt…" : "Anmelden"}
-              primary
-              onPress={() => void handleLogin()}
-            />
-          </CollapsibleSection>
+          <PortalAuthSection
+            busy={loginBusy}
+            error={loginError}
+            name={loginName}
+            password={loginPassword}
+            useMockData={settings.useMockData}
+            onLogin={() => void handleLogin()}
+            onNameChange={setLoginName}
+            onPasswordChange={setLoginPassword}
+          />
         ) : null}
 
-        <CollapsibleSection
-          defaultOpen
-          title="Bauwerk & Projekt"
-          meta={
-            settings.bauwerkId !== null
-              ? `${settings.bauwerkName || `Bauwerk ${settings.bauwerkId}`}${
-                  settings.projektId !== null
-                    ? ` · ${settings.projektName || `Projekt ${settings.projektId}`}`
-                    : ""
-                }`
-              : "Nichts gewählt"
-          }
-        >
-          <div className="flex items-end gap-2">
-            <div className="min-w-0 flex-1">
-              <DropdownField
-                label="Bauwerk"
-                options={bauwerkOptions}
-                value={
-                  settings.bauwerkId !== null ? String(settings.bauwerkId) : ""
-                }
-                onChange={handleBauwerkChange}
-              />
-            </div>
-            <Button
-              disabled={bauwerkeBusy}
-              label={bauwerkeBusy ? "Lädt…" : "Laden"}
-              onPress={() => void loadBauwerke()}
-            />
-          </div>
-          <DropdownField
-            label={projekteBusy ? "Projekt (lädt…)" : "Projekt"}
-            options={projektOptions}
-            value={
-              settings.projektId !== null ? String(settings.projektId) : ""
-            }
-            onChange={handleProjektChange}
-          />
-        </CollapsibleSection>
+        <PortalScopePicker
+          bauwerkOptions={bauwerkOptions}
+          bauwerkeBusy={bauwerkeBusy}
+          projektOptions={projektOptions}
+          projekteBusy={projekteBusy}
+          settings={settings}
+          onBauwerkChange={handleBauwerkChange}
+          onLoadBauwerke={() => void loadBauwerke()}
+          onProjektChange={handleProjektChange}
+        />
 
-        <div className="grid shrink-0 gap-2">
-          <SegmentedControl
-            options={TREE_TABS}
-            value={treeTab}
-            onChange={(value) =>
-              setTreeTab(value === "Monitoring" ? "Monitoring" : "Diagnostik")
-            }
-          />
-          <div className="flex items-center gap-2">
-            <Button
-              disabled={treeBusy || !canLoadTree}
-              label={treeBusy ? "Lädt…" : "Struktur laden"}
-              primary={roots.length === 0}
-              onPress={() => void loadTree()}
-            />
-            <Input
-              aria-label="Baum durchsuchen"
-              className="h-8 min-w-0 flex-1 text-sm"
-              placeholder="Suchen…"
-              value={query}
-              onChange={(event) => setQuery(event.currentTarget.value)}
-            />
-          </div>
-          {!canLoadTree ? (
-            <p className="text-[11px] text-muted-foreground">
-              {treeTab === "Diagnostik"
-                ? "Zum Laden zuerst Bauwerk und Projekt wählen (oder Mock-Daten aktivieren)."
-                : "Zum Laden zuerst ein Bauwerk wählen (oder Mock-Daten aktivieren)."}
-            </p>
-          ) : null}
-        </div>
-
-        {roots.length ? (
-          <div className="grid shrink-0 gap-0.5 rounded-lg border border-border/60 bg-card p-1.5">
-            {roots.map((root) => (
-              <PortalTreeRow
-                key={portalExternalId(root)}
-                depth={0}
-                expandedKeys={expandedKeys}
-                node={root}
-                selectedKey={selectedNodeKey}
-                token={token}
-                onSelect={setSelectedNodeKey}
-                onToggle={toggleKey}
-              />
-            ))}
-          </div>
-        ) : (
-          <div className="grid shrink-0 place-items-center rounded-xl border border-dashed bg-muted/20 p-6 text-center text-sm text-muted-foreground">
-            {treeTab === "Diagnostik"
-              ? "Noch keine Diagnostik-Struktur geladen."
-              : "Noch keine Monitoring-Struktur geladen."}
-          </div>
-        )}
+        <PortalTree
+          canLoadTree={canLoadTree}
+          expandedKeys={expandedKeys}
+          query={query}
+          roots={roots}
+          selectedNodeKey={selectedNodeKey}
+          treeBusy={treeBusy}
+          treeTab={treeTab}
+          onLoadTree={() => void loadTree()}
+          onQueryChange={setQuery}
+          onSelectNode={setSelectedNodeKey}
+          onToggleNode={toggleKey}
+          onTreeTabChange={setTreeTab}
+        />
 
         {linkedExternalId ? (
-          <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-card px-3 py-2 text-xs">
+          <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-card px-2.5 py-1.5 text-xs">
             <span className="text-muted-foreground">Verknüpft mit:</span>
-            <code className="font-mono text-foreground">
+            <code className="min-w-0 truncate font-mono text-foreground">
               {linkedExternalId}
             </code>
             <Button
               disabled={!nodeIndex.has(linkedExternalId)}
-              label="Im Baum zeigen"
-              onPress={showLinkedInTree}
-            />
+              title="Verknüpften Knoten im Baum zeigen"
+              onClick={showLinkedInTree}
+            >
+              <Locate aria-hidden className="size-3.5" />
+              Im Baum zeigen
+            </Button>
           </div>
         ) : null}
 
         {lastResult ? (
-          <div className="grid shrink-0 gap-1 rounded-lg border border-border/60 bg-card px-3 py-2">
-            <span className="text-sm font-medium text-foreground">
-              {lastResult.summary}
-            </span>
-            {lastResult.warnings.map((warning, index) => (
-              <span
-                key={`${index}-${warning}`}
-                className="text-xs text-amber-600 dark:text-amber-400"
-              >
-                {warning}
+          <div className="grid shrink-0 gap-1.5 rounded-lg border border-border/60 bg-card px-3 py-2">
+            <div className="flex items-start gap-2">
+              <CheckCircle2
+                aria-hidden
+                className="mt-0.5 size-3.5 shrink-0 text-success"
+              />
+              <span className="min-w-0 break-words text-sm font-medium text-foreground">
+                {lastResult.summary}
               </span>
-            ))}
+            </div>
+            {lastResult.warnings.length ? (
+              <InlineAlert tone="warning">
+                {lastResult.warnings.map((warning, index) => (
+                  <p key={`${index}-${warning}`}>{warning}</p>
+                ))}
+              </InlineAlert>
+            ) : null}
           </div>
         ) : null}
       </PanelShell>
 
-      <div className="grid shrink-0 gap-1.5">
-        <p className="px-1 text-[11px] text-muted-foreground">
-          Baum-Auswahl:{" "}
-          {selectedNode
-            ? `${selectedNode.name} (${portalExternalId(selectedNode)})`
-            : "keine"}{" "}
-          · Editor-Auswahl: {selectedId !== null ? `#${selectedId}` : "keine"}
-        </p>
-        <Toolbar>
-          <ToolbarGroup>
-            <Button
-              disabled={!canAssign}
-              label={busyAction === "assign" ? "Lädt…" : "Auswahl zuordnen"}
-              primary
-              onPress={handleAssign}
-            />
-            <Button
-              disabled={!canImportChildren}
-              label={
-                busyAction === "children" ? "Lädt…" : "Kinder importieren"
-              }
-              onPress={() => void handleImportChildren()}
-            />
-            <Button
-              disabled={!canImportStructure}
-              label={
-                busyAction === "structure"
-                  ? "Lädt…"
-                  : "Komplette Struktur importieren"
-              }
-              onPress={() => void handleImportStructure()}
-            />
-          </ToolbarGroup>
-          {linkedEntityForNode !== null ? (
-            <ToolbarGroup>
-              <Button
-                label={`Element #${linkedEntityForNode} wählen`}
-                onPress={() => onSelectEntity(linkedEntityForNode)}
-              />
-            </ToolbarGroup>
-          ) : null}
-        </Toolbar>
-      </div>
+      <PortalImportActions
+        busyAction={busyAction}
+        canAssign={canAssign}
+        canImportChildren={canImportChildren}
+        canImportStructure={canImportStructure}
+        linkedEntityId={linkedEntityForNode}
+        selectedId={selectedId}
+        selectedNode={selectedNode}
+        onAssign={handleAssign}
+        onImportChildren={() => void handleImportChildren()}
+        onImportStructure={() => void handleImportStructure()}
+        onSelectEntity={onSelectEntity}
+      />
     </PanelShell>
   );
 }
 
+// --- Interne Abschnitte -------------------------------------------------------------
+
+/** Anmeldeformular (Keycloak-Konto), kompakt mit Passwortfeld und Enter-Submit. */
+function PortalAuthSection({
+  busy,
+  error,
+  name,
+  password,
+  useMockData,
+  onLogin,
+  onNameChange,
+  onPasswordChange,
+}: {
+  busy: boolean;
+  error: string | null;
+  name: string;
+  password: string;
+  useMockData: boolean;
+  onLogin(): void;
+  onNameChange(value: string): void;
+  onPasswordChange(value: string): void;
+}) {
+  return (
+    <CollapsibleSection
+      defaultOpen={!useMockData}
+      title="Anmeldung"
+      meta={
+        useMockData
+          ? "Mock-Modus: Anmeldung optional"
+          : "MKP-Portal-Konto (Keycloak)"
+      }
+    >
+      <LabeledInput
+        label="Benutzername"
+        value={name}
+        onChangeText={onNameChange}
+      />
+      <label className="grid min-w-0 gap-1.5 text-xs text-muted-foreground">
+        Passwort
+        <Input
+          autoComplete="current-password"
+          className="text-foreground"
+          type="password"
+          value={password}
+          onChange={(event) => onPasswordChange(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              onLogin();
+            }
+          }}
+        />
+      </label>
+      {error ? <InlineAlert tone="danger">{error}</InlineAlert> : null}
+      <Button
+        disabled={busy || !name.trim() || !password}
+        title="Am MKP-Portal anmelden"
+        variant="default"
+        onClick={onLogin}
+      >
+        {busy ? (
+          <Loader2 aria-hidden className="size-3.5 animate-spin" />
+        ) : (
+          <LogIn aria-hidden className="size-3.5" />
+        )}
+        {busy ? "Lädt…" : "Anmelden"}
+      </Button>
+    </CollapsibleSection>
+  );
+}
+
+/** Auswahl von Bauwerk und Projekt als Import-Kontext. */
+function PortalScopePicker({
+  bauwerkOptions,
+  bauwerkeBusy,
+  projektOptions,
+  projekteBusy,
+  settings,
+  onBauwerkChange,
+  onLoadBauwerke,
+  onProjektChange,
+}: {
+  bauwerkOptions: DropdownOption[];
+  bauwerkeBusy: boolean;
+  projektOptions: DropdownOption[];
+  projekteBusy: boolean;
+  settings: PortalSettings;
+  onBauwerkChange(value: string): void;
+  onLoadBauwerke(): void;
+  onProjektChange(value: string): void;
+}) {
+  return (
+    <CollapsibleSection
+      defaultOpen
+      title="Bauwerk & Projekt"
+      meta={
+        settings.bauwerkId !== null
+          ? `${settings.bauwerkName || `Bauwerk ${settings.bauwerkId}`}${
+              settings.projektId !== null
+                ? ` · ${settings.projektName || `Projekt ${settings.projektId}`}`
+                : ""
+            }`
+          : "Nichts gewählt"
+      }
+    >
+      <div className="flex items-end gap-2">
+        <div className="min-w-0 flex-1">
+          <DropdownField
+            label="Bauwerk"
+            options={bauwerkOptions}
+            value={
+              settings.bauwerkId !== null ? String(settings.bauwerkId) : ""
+            }
+            onChange={onBauwerkChange}
+          />
+        </div>
+        <Button
+          disabled={bauwerkeBusy}
+          title="Bauwerksliste vom Portal laden"
+          onClick={onLoadBauwerke}
+        >
+          {bauwerkeBusy ? (
+            <Loader2 aria-hidden className="size-3.5 animate-spin" />
+          ) : (
+            <RefreshCw aria-hidden className="size-3.5" />
+          )}
+          {bauwerkeBusy ? "Lädt…" : "Laden"}
+        </Button>
+      </div>
+      <DropdownField
+        label={projekteBusy ? "Projekt (lädt…)" : "Projekt"}
+        options={projektOptions}
+        value={settings.projektId !== null ? String(settings.projektId) : ""}
+        onChange={onProjektChange}
+      />
+    </CollapsibleSection>
+  );
+}
+
+/** Tab-Umschalter, Lade-/Suchleiste und der rekursive Portal-Strukturbaum. */
+function PortalTree({
+  canLoadTree,
+  expandedKeys,
+  query,
+  roots,
+  selectedNodeKey,
+  treeBusy,
+  treeTab,
+  onLoadTree,
+  onQueryChange,
+  onSelectNode,
+  onToggleNode,
+  onTreeTabChange,
+}: {
+  canLoadTree: boolean;
+  expandedKeys: Set<string>;
+  query: string;
+  roots: PortalNode[];
+  selectedNodeKey: string | null;
+  treeBusy: boolean;
+  treeTab: PortalTreeTab;
+  onLoadTree(): void;
+  onQueryChange(value: string): void;
+  onSelectNode(key: string): void;
+  onToggleNode(key: string): void;
+  onTreeTabChange(tab: PortalTreeTab): void;
+}) {
+  const token = query.trim().toLowerCase();
+
+  return (
+    <>
+      <div className="grid shrink-0 gap-2">
+        <SegmentedControl
+          options={TREE_TAB_OPTIONS}
+          value={treeTab}
+          onChange={(value) =>
+            onTreeTabChange(value === "Monitoring" ? "Monitoring" : "Diagnostik")
+          }
+        />
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            disabled={treeBusy || !canLoadTree}
+            title="Struktur aus dem Portal laden"
+            variant={roots.length === 0 ? "default" : "outline"}
+            onClick={onLoadTree}
+          >
+            {treeBusy ? (
+              <Loader2 aria-hidden className="size-3.5 animate-spin" />
+            ) : (
+              <ListTree aria-hidden className="size-3.5" />
+            )}
+            {treeBusy ? "Lädt…" : "Struktur laden"}
+          </Button>
+          <Input
+            aria-label="Baum durchsuchen"
+            className="h-8 min-w-32 flex-1 text-sm"
+            placeholder="Suchen…"
+            value={query}
+            onChange={(event) => onQueryChange(event.currentTarget.value)}
+          />
+        </div>
+        {!canLoadTree ? (
+          <p className="text-[11px] text-muted-foreground">
+            {treeTab === "Diagnostik"
+              ? "Zum Laden zuerst Bauwerk und Projekt wählen (oder Mock-Daten aktivieren)."
+              : "Zum Laden zuerst ein Bauwerk wählen (oder Mock-Daten aktivieren)."}
+          </p>
+        ) : null}
+      </div>
+
+      {roots.length ? (
+        <div className="grid shrink-0 gap-0.5 rounded-lg border border-border/60 bg-card p-1.5">
+          {roots.map((root) => (
+            <PortalTreeRow
+              key={portalExternalId(root)}
+              depth={0}
+              expandedKeys={expandedKeys}
+              node={root}
+              selectedKey={selectedNodeKey}
+              token={token}
+              onSelect={onSelectNode}
+              onToggle={onToggleNode}
+            />
+          ))}
+        </div>
+      ) : (
+        <EmptyState
+          title={
+            treeTab === "Diagnostik"
+              ? "Noch keine Diagnostik-Struktur geladen."
+              : "Noch keine Monitoring-Struktur geladen."
+          }
+          description="Bauwerk bzw. Projekt wählen und anschließend „Struktur laden“ ausführen."
+        />
+      )}
+    </>
+  );
+}
+
+/** Fußleiste: Auswahl-Status und Import-Aktionen (Labels kollabieren bei schmalem Panel). */
+function PortalImportActions({
+  busyAction,
+  canAssign,
+  canImportChildren,
+  canImportStructure,
+  linkedEntityId,
+  selectedId,
+  selectedNode,
+  onAssign,
+  onImportChildren,
+  onImportStructure,
+  onSelectEntity,
+}: {
+  busyAction: PortalBusyAction;
+  canAssign: boolean;
+  canImportChildren: boolean;
+  canImportStructure: boolean;
+  linkedEntityId: number | null;
+  selectedId: number | null;
+  selectedNode: PortalNode | null;
+  onAssign(): void;
+  onImportChildren(): void;
+  onImportStructure(): void;
+  onSelectEntity(id: number): void;
+}) {
+  return (
+    <div className="@container grid shrink-0 gap-1.5">
+      <p className="min-w-0 truncate px-1 text-[11px] text-muted-foreground">
+        Baum-Auswahl:{" "}
+        {selectedNode
+          ? `${selectedNode.name} (${portalExternalId(selectedNode)})`
+          : "keine"}{" "}
+        · Editor-Auswahl: {selectedId !== null ? `#${selectedId}` : "keine"}
+      </p>
+      <Toolbar>
+        <ToolbarGroup>
+          <Button
+            disabled={!canAssign}
+            title="Auswahl zuordnen"
+            variant="default"
+            onClick={onAssign}
+          >
+            {busyAction === "assign" ? (
+              <Loader2 aria-hidden className="size-3.5 animate-spin" />
+            ) : (
+              <Link2 aria-hidden className="size-3.5" />
+            )}
+            <span className="hidden @lg:inline">
+              {busyAction === "assign" ? "Lädt…" : "Auswahl zuordnen"}
+            </span>
+          </Button>
+          <Button
+            disabled={!canImportChildren}
+            title="Kinder importieren"
+            onClick={onImportChildren}
+          >
+            {busyAction === "children" ? (
+              <Loader2 aria-hidden className="size-3.5 animate-spin" />
+            ) : (
+              <FolderDown aria-hidden className="size-3.5" />
+            )}
+            <span className="hidden @lg:inline">
+              {busyAction === "children" ? "Lädt…" : "Kinder importieren"}
+            </span>
+          </Button>
+          <Button
+            disabled={!canImportStructure}
+            title="Komplette Struktur importieren"
+            onClick={onImportStructure}
+          >
+            {busyAction === "structure" ? (
+              <Loader2 aria-hidden className="size-3.5 animate-spin" />
+            ) : (
+              <FolderTree aria-hidden className="size-3.5" />
+            )}
+            <span className="hidden @lg:inline">
+              {busyAction === "structure"
+                ? "Lädt…"
+                : "Komplette Struktur importieren"}
+            </span>
+          </Button>
+        </ToolbarGroup>
+        {linkedEntityId !== null ? (
+          <ToolbarGroup>
+            <Button
+              title={`Element #${linkedEntityId} wählen`}
+              onClick={() => onSelectEntity(linkedEntityId)}
+            >
+              <MousePointerClick aria-hidden className="size-3.5" />
+              <span className="hidden @lg:inline">
+                Element #{linkedEntityId} wählen
+              </span>
+            </Button>
+          </ToolbarGroup>
+        ) : null}
+      </Toolbar>
+    </div>
+  );
+}
+
+/** Rekursive, dichte Baumzeile (h-7) mit Kategorie-, Status- und Kinder-Badges. */
 function PortalTreeRow({
   depth,
   expandedKeys,
@@ -919,7 +1170,7 @@ function PortalTreeRow({
   return (
     <>
       <div
-        className="flex min-w-0 items-center gap-1"
+        className="flex h-7 min-w-0 shrink-0 items-center gap-1"
         style={{ paddingLeft: depth * 14 }}
       >
         <button
@@ -944,19 +1195,23 @@ function PortalTreeRow({
           title={key}
           onClick={() => onSelect(key)}
           className={cn(
-            "flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-sm text-foreground hover:bg-muted/50",
-            selected && "bg-primary/10 ring-1 ring-primary/40",
+            "flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 text-left text-xs",
+            selected
+              ? "bg-accent text-accent-foreground"
+              : "text-foreground hover:bg-muted/50",
           )}
         >
           <Icon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 truncate">{node.name}</span>
+          <span className="min-w-0 flex-1 truncate">{node.name}</span>
           {categoryLabel ? <Badge tone="info">{categoryLabel}</Badge> : null}
           {node.abgeschlossen ? (
             <Badge tone="success">Abgeschlossen</Badge>
           ) : null}
           {hasChildren ? (
-            <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">
-              {node.children.length}
+            <span className="shrink-0">
+              <Badge tone="neutral">
+                {node.children.length.toLocaleString("de-DE")}
+              </Badge>
             </span>
           ) : null}
         </button>
@@ -979,47 +1234,7 @@ function PortalTreeRow({
   );
 }
 
-function TextField({
-  label,
-  type,
-  value,
-  onChangeText,
-  onSubmit,
-}: {
-  label: string;
-  type?: "text" | "password";
-  value: string;
-  onChangeText(value: string): void;
-  onSubmit?(): void;
-}) {
-  return (
-    <label className="grid min-w-0 gap-1.5 text-xs text-muted-foreground">
-      {label}
-      <Input
-        className="text-foreground"
-        type={type ?? "text"}
-        value={value}
-        onChange={(event) => onChangeText(event.currentTarget.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            onSubmit?.();
-          }
-        }}
-      />
-    </label>
-  );
-}
-
-function AlertMessage({ message }: { message: string }) {
-  return (
-    <div
-      role="alert"
-      className="shrink-0 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-    >
-      {message}
-    </div>
-  );
-}
+// --- Helfer ---------------------------------------------------------------------------
 
 function nodeMatches(node: PortalNode, token: string): boolean {
   if (node.name.toLowerCase().includes(token)) {

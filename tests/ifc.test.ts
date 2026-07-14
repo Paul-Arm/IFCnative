@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { Matrix4, Vector3 } from "three";
 import * as WebIFC from "web-ifc";
 
+import { createBodyGeometry } from "../src/components/bodyGeometry";
+import {
+    createPositionMarkerProfile,
+    polygonArea,
+} from "../src/ifc/bodyProfiles";
 import { createMinimalIfcProject } from "../src/ifc/builder";
 import type { IfcObjectCatalog } from "../src/ifc/catalog";
 import {
@@ -59,11 +65,14 @@ import {
     createNativeSampleDocument,
     duplicateNativePropertySet,
     getNativeBodyRepresentation,
+    getNativeLengthUnitScale,
     getNativePlacement,
     getNativePlacementWorld,
+    nativeWorldDeltaInElementFrame,
     nativeWorldToLocalPlacementPoint,
     parseNativeIfcText,
     quote,
+    removeNativeBodyRepresentation,
     removeNativeEntity,
     removeNativePropertyFromSet,
     removeNativePropertySet,
@@ -78,7 +87,10 @@ import {
     updateNativePropertyValue,
     updateNativeRelationship,
 } from "../src/ifc/nativeDocument";
-import { buildNativeGraphNeighborhood } from "../src/ifc/nativeGraph";
+import {
+  buildNativeGraphNeighborhood,
+  resolveNativeGraphAnchorId,
+} from "../src/ifc/nativeGraph";
 import {
     buildObjectInfoIndex,
     validateObjectInfoReferences,
@@ -1235,8 +1247,16 @@ test("removing an element garbage-collects its exclusive resources but keeps sha
 
   // Exclusive resources of the deleted wall are cleaned up …
   assert.equal(removed.entityById.has(60), false, "exclusive pset removed");
-  assert.equal(removed.entityById.has(62), false, "exclusive pset value removed");
-  assert.equal(removed.entityById.has(71), false, "exclusive placement removed");
+  assert.equal(
+    removed.entityById.has(62),
+    false,
+    "exclusive pset value removed",
+  );
+  assert.equal(
+    removed.entityById.has(71),
+    false,
+    "exclusive placement removed",
+  );
   assert.equal(removed.entityById.has(75), false, "exclusive axis removed");
 
   // … while shared resources, catalog items and structural anchors survive.
@@ -2050,15 +2070,16 @@ test("native graph presets filter relationship neighborhoods", () => {
     selectedId: wall.id,
   });
   assert.ok(
-    properties.edges.some((edge) => edge.type === "IFCRELDEFINESBYPROPERTIES"),
+    properties.edges.every((edge) => edge.type === "IFCRELDEFINESBYTYPE"),
   );
-  assert.ok(properties.relationshipTypes.includes("IFCRELDEFINESBYPROPERTIES"));
-  assert.ok(
-    properties.edges.every(
-      (edge) =>
-        edge.type === "IFCRELDEFINESBYPROPERTIES" ||
-        edge.type === "IFCRELDEFINESBYTYPE",
-    ),
+  assert.deepEqual(properties.relationshipTypes, ["IFCRELDEFINESBYTYPE"]);
+  const attachedSet = withProperty.propertySetsByEntity.get(wall.id)?.[0];
+  assert.ok(attachedSet);
+  assert.ok(!properties.nodeIds.includes(attachedSet.id));
+  assert.equal(resolveNativeGraphAnchorId(withProperty, attachedSet.id), wall.id);
+  assert.equal(
+    resolveNativeGraphAnchorId(withProperty, attachedSet.values[0].id),
+    wall.id,
   );
 
   const explicit = buildNativeGraphNeighborhood(withProperty, {
@@ -2068,9 +2089,57 @@ test("native graph presets filter relationship neighborhoods", () => {
     selectedId: wall.id,
   });
   assert.deepEqual(explicit.relationshipTypes, ["IFCRELDEFINESBYPROPERTIES"]);
-  assert.ok(explicit.edges.length > 0);
+  assert.deepEqual(explicit.edges, []);
+  assert.deepEqual(explicit.nodeIds, [wall.id]);
+
+  const withMaterial = addNativeMaterial(
+    withProperty,
+    wall.id,
+    "Graph Concrete",
+    "Concrete",
+  );
+  const withClassification = addNativeClassification(
+    withMaterial,
+    wall.id,
+    "GRAPH-001",
+    "Graph Classification",
+    "https://example.test/classification",
+  );
+  const withDocument = addNativeDocumentReference(
+    withClassification,
+    wall.id,
+    "GRAPH-DOC",
+    "Graph Document",
+    "https://example.test/document",
+  );
+  const resources = buildNativeGraphNeighborhood(withDocument, {
+    depth: 1,
+    preset: "resources",
+    selectedId: wall.id,
+  });
+  const embeddedResourceTypes = new Set([
+    "IFCRELASSOCIATESMATERIAL",
+    "IFCRELASSOCIATESCLASSIFICATION",
+    "IFCRELASSOCIATESDOCUMENT",
+  ]);
+  const embeddedResourceIds = withDocument.relationships
+    .filter(
+      (relationship) =>
+        embeddedResourceTypes.has(relationship.type) &&
+        relationship.sourceIds.includes(wall.id),
+    )
+    .flatMap((relationship) => relationship.targetIds);
+  assert.ok(embeddedResourceIds.length >= 3);
+  assert.ok(embeddedResourceIds.every((id) => !resources.nodeIds.includes(id)));
   assert.ok(
-    explicit.edges.every((edge) => edge.type === "IFCRELDEFINESBYPROPERTIES"),
+    embeddedResourceIds.every(
+      (id) => resolveNativeGraphAnchorId(withDocument, id) === wall.id,
+    ),
+  );
+  assert.ok(
+    resources.edges.every(
+      (edge) => !embeddedResourceTypes.has(edge.type),
+    ),
   );
 });
 
@@ -2499,10 +2568,20 @@ test("native body preset can spawn at world coordinates under a selected parent"
   assert.ok(spawned);
   const placement = getNativePlacement(withSpawn, spawned.id);
   assert.ok(placement);
-  assert.equal(placement.relativeTo, undefined);
-  assert.equal(placement.x, 2.6699);
-  assert.equal(placement.y, 0);
-  assert.equal(placement.z, -0.6299);
+  // Weltmodus erbt die Platzierungskette des Parents (RelativeTo = dessen
+  // IFCLOCALPLACEMENT) und speichert kleine, projizierte lokale Koordinaten …
+  const parentPlacement = getNativePlacement(moved, block.id);
+  assert.ok(parentPlacement);
+  assert.equal(placement.relativeTo, parentPlacement.placementId);
+  assert.equal(roundCoordinate(placement.x), roundCoordinate(2.6699 - 10));
+  assert.equal(roundCoordinate(placement.y), 0);
+  assert.equal(roundCoordinate(placement.z), roundCoordinate(-0.6299));
+  // … landet aber exakt an der absoluten IFC-Weltposition.
+  const spawnedWorld = getNativePlacementWorld(withSpawn, spawned.id);
+  assert.ok(spawnedWorld);
+  assert.equal(roundCoordinate(spawnedWorld.worldX), roundCoordinate(2.6699));
+  assert.equal(roundCoordinate(spawnedWorld.worldY), 0);
+  assert.equal(roundCoordinate(spawnedWorld.worldZ), roundCoordinate(-0.6299));
   assert.ok(
     withSpawn.relationshipsByEntity
       .get(spawned.id)
@@ -3157,3 +3236,721 @@ function firstStepReference(value: string) {
   assert.ok(Number.isFinite(id));
   return id;
 }
+
+test("body mirror geometry preserves every builder profile", async () => {
+  const THREE = await import("three");
+  const rectangle = createBodyGeometry(THREE, {
+    depth: "2",
+    height: "3",
+    profile: "rectangle",
+    width: "4",
+  });
+  const cylinder = createBodyGeometry(THREE, {
+    depth: "2",
+    height: "3",
+    profile: "cylinder",
+    width: "4",
+  });
+  const ellipse = createBodyGeometry(THREE, {
+    depth: "2",
+    height: "3",
+    profile: "ellipse",
+    width: "4",
+  });
+  const triangle = createBodyGeometry(THREE, {
+    depth: "2",
+    height: "3",
+    profile: "triangle",
+    width: "4",
+  });
+  const marker = createBodyGeometry(THREE, {
+    depth: "2",
+    height: "3",
+    profile: "marker",
+    width: "4",
+  });
+
+  try {
+    assert.equal(rectangle.type, "BoxGeometry");
+    assert.equal(cylinder.type, "CylinderGeometry");
+    assert.equal(ellipse.type, "CylinderGeometry");
+    assert.equal(triangle.type, "ExtrudeGeometry");
+    assert.equal(marker.type, "ExtrudeGeometry");
+
+    const ellipseSize = ellipse.boundingBox?.getSize(new THREE.Vector3());
+    assert.ok(ellipseSize);
+    assert.equal(roundCoordinate(ellipseSize.x), 4);
+    assert.equal(roundCoordinate(ellipseSize.y), 3);
+    assert.equal(roundCoordinate(ellipseSize.z), 2);
+
+    for (const geometry of [triangle, marker]) {
+      const size = geometry.boundingBox?.getSize(new THREE.Vector3());
+      assert.ok(size);
+      assert.equal(roundCoordinate(size.x), 4);
+      assert.equal(roundCoordinate(size.y), 3);
+      assert.equal(roundCoordinate(size.z), 2);
+    }
+  } finally {
+    rectangle.dispose();
+    cylinder.dispose();
+    ellipse.dispose();
+    triangle.dispose();
+    marker.dispose();
+  }
+});
+
+test("native body presets create ellipse, triangle and position marker profiles that web-ifc can mesh", async () => {
+  const sample = createNativeSampleDocument();
+  const storey = sample.entities.find(
+    (entity) => entity.type === "IFCBUILDINGSTOREY",
+  );
+  assert.ok(storey);
+
+  const api = new WebIFC.IfcAPI();
+  await api.Init();
+
+  // Ellipse: Halbachsen 2/1 -> Flaeche pi*2*1 = 6.2832
+  const withEllipse = addNativeBodyElement(sample, {
+    depth: "2",
+    height: "1",
+    name: "Ellipse Body",
+    parentId: storey.id,
+    profile: "ellipse",
+    type: "IFCBUILTELEMENT",
+    width: "4",
+    x: "0",
+    y: "0",
+    z: "0",
+  });
+  const ellipseProfile = withEllipse.entities.find(
+    (entity) => entity.type === "IFCELLIPSEPROFILEDEF",
+  );
+  assert.ok(ellipseProfile);
+  assert.equal(ellipseProfile.args[3], "2.");
+  assert.equal(ellipseProfile.args[4], "1.");
+  const ellipseBody = withEllipse.entities.find(
+    (entity) => entity.name === "Ellipse Body",
+  );
+  assert.ok(ellipseBody);
+  assert.ok(
+    withEllipse.propertySetsByEntity
+      .get(ellipseBody.id)
+      ?.some((set) =>
+        set.values.some(
+          (value) => value.name === "FootprintArea" && value.value === "6.2832",
+        ),
+      ),
+  );
+  const ellipseModel = api.OpenModel(
+    new TextEncoder().encode(serializeNativeIfcDocument(withEllipse)),
+  );
+  assert.ok(streamGeometryVertexCount(api, ellipseModel) > 0);
+  api.CloseModel(ellipseModel);
+
+  // Dreieck: geschlossene Polylinie mit 3 Punkten (+ Schlusspunkt), Flaeche w*d/2
+  const withTriangle = addNativeBodyElement(sample, {
+    depth: "2",
+    height: "1",
+    name: "Triangle Body",
+    parentId: storey.id,
+    profile: "triangle",
+    type: "IFCBUILTELEMENT",
+    width: "4",
+    x: "0",
+    y: "0",
+    z: "0",
+  });
+  const triangleProfile = withTriangle.entities.find(
+    (entity) => entity.type === "IFCARBITRARYCLOSEDPROFILEDEF",
+  );
+  assert.ok(triangleProfile);
+  const trianglePolyline = withTriangle.entityById.get(
+    firstStepReference(triangleProfile.args[2] ?? ""),
+  );
+  assert.equal(trianglePolyline?.type, "IFCPOLYLINE");
+  assert.equal((trianglePolyline?.args[0]?.match(/#\d+/g) ?? []).length, 4);
+  const triangleBody = withTriangle.entities.find(
+    (entity) => entity.name === "Triangle Body",
+  );
+  assert.ok(triangleBody);
+  assert.ok(
+    withTriangle.propertySetsByEntity
+      .get(triangleBody.id)
+      ?.some((set) =>
+        set.values.some(
+          (value) => value.name === "FootprintArea" && value.value === "4.",
+        ),
+      ),
+  );
+  const triangleModel = api.OpenModel(
+    new TextEncoder().encode(serializeNativeIfcDocument(withTriangle)),
+  );
+  assert.ok(streamGeometryVertexCount(api, triangleModel) > 0);
+  api.CloseModel(triangleModel);
+
+  // Karten-Pin: aufrechte Silhouette (Spitze + Kreisbogen-Kopf, 26 Punkte
+  // + Schlusspunkt), dünn extrudiert entlang der Tiefe.
+  const withMarker = addNativeBodyElement(sample, {
+    depth: "0.2",
+    height: "3",
+    name: "Marker Body",
+    parentId: storey.id,
+    profile: "marker",
+    type: "IFCBUILDINGELEMENTPROXY",
+    width: "2",
+    x: "0",
+    y: "0",
+    z: "0",
+  });
+  const markerProfile = withMarker.entities.find(
+    (entity) => entity.type === "IFCARBITRARYCLOSEDPROFILEDEF",
+  );
+  assert.ok(markerProfile);
+  const markerPolyline = withMarker.entityById.get(
+    firstStepReference(markerProfile.args[2] ?? ""),
+  );
+  assert.equal(markerPolyline?.type, "IFCPOLYLINE");
+  assert.equal((markerPolyline?.args[0]?.match(/#\d+/g) ?? []).length, 27);
+  // Solid: Profil-Ebene vertikal gestellt, Extrusionslänge = Tiefe (Dicke).
+  const markerSolid = withMarker.entities.find(
+    (entity) =>
+      entity.type === "IFCEXTRUDEDAREASOLID" &&
+      firstStepReference(entity.args[0] ?? "") === markerProfile.id,
+  );
+  assert.ok(markerSolid);
+  assert.equal(markerSolid.args[3], "0.2");
+  const markerSolidAxis = withMarker.entityById.get(
+    firstStepReference(markerSolid.args[1] ?? ""),
+  );
+  const markerAxisDirection = withMarker.entityById.get(
+    firstStepReference(markerSolidAxis?.args[1] ?? ""),
+  );
+  assert.equal(markerAxisDirection?.args[0], "(0.,-1.,0.)");
+  const markerBody = withMarker.entities.find(
+    (entity) => entity.name === "Marker Body",
+  );
+  assert.ok(markerBody);
+  const expectedMarkerArea = polygonArea(createPositionMarkerProfile(2, 3));
+  assert.ok(
+    withMarker.propertySetsByEntity
+      .get(markerBody.id)
+      ?.some((set) =>
+        set.values.some(
+          (value) =>
+            value.name === "FootprintArea" &&
+            Math.abs(Number(value.value) - expectedMarkerArea) < 0.001,
+        ),
+      ),
+  );
+  const markerModel = api.OpenModel(
+    new TextEncoder().encode(serializeNativeIfcDocument(withMarker)),
+  );
+  assert.ok(streamGeometryVertexCount(api, markerModel) > 0);
+  api.CloseModel(markerModel);
+});
+
+test("removeNativeBodyRepresentation strips the exclusive geometry chain but keeps the product", () => {
+  const sample = createNativeSampleDocument();
+  const storey = sample.entities.find(
+    (entity) => entity.type === "IFCBUILDINGSTOREY",
+  );
+  assert.ok(storey);
+
+  const withBody = addNativeBodyElement(sample, {
+    depth: "2",
+    height: "1.5",
+    name: "Remove Me Body",
+    parentId: storey.id,
+    profile: "rectangle",
+    type: "IFCBUILTELEMENT",
+    width: "4",
+    x: "1",
+    y: "0",
+    z: "2",
+  });
+  const body = withBody.entities.find(
+    (entity) => entity.name === "Remove Me Body",
+  );
+  assert.ok(body);
+  const before = getNativeBodyRepresentation(withBody, body.id);
+  assert.ok(before.hasRepresentation);
+  assert.ok(before.shapeId);
+  const shapeCountBefore = withBody.entities.filter(
+    (entity) => entity.type === "IFCPRODUCTDEFINITIONSHAPE",
+  ).length;
+
+  const removed = removeNativeBodyRepresentation(withBody, body.id);
+  assert.notEqual(removed, withBody);
+
+  const bodyAfter = removed.entities.find(
+    (entity) => entity.name === "Remove Me Body",
+  );
+  assert.ok(bodyAfter, "Produkt bleibt nach dem Geometrie-Entfernen erhalten");
+  assert.equal(bodyAfter.args[6], "$");
+  assert.equal(
+    getNativeBodyRepresentation(removed, bodyAfter.id).hasRepresentation,
+    false,
+  );
+  // Die exklusive Shape-Kette ist abgeraeumt ...
+  assert.equal(removed.entityById.has(before.shapeId), false);
+  assert.equal(
+    removed.entities.filter(
+      (entity) => entity.type === "IFCPRODUCTDEFINITIONSHAPE",
+    ).length,
+    shapeCountBefore - 1,
+  );
+  // ... aber Platzierung und Psets/Quantities des Produkts bleiben.
+  assert.ok(bodyAfter.args[5]?.startsWith("#"));
+  assert.ok(
+    removed.propertySetsByEntity
+      .get(bodyAfter.id)
+      ?.some((set) => set.name === "IFCnative_BaseQuantities"),
+  );
+  // Fremde Geometrie (z. B. der Sample-Block) ist unangetastet.
+  const block = removed.entities.find(
+    (entity) =>
+      entity.type === "IFCBUILTELEMENT" && entity.name !== "Remove Me Body",
+  );
+  assert.ok(block);
+  assert.ok(getNativeBodyRepresentation(removed, block.id).hasRepresentation);
+
+  // Zweiter Aufruf ist ein No-op.
+  assert.equal(removeNativeBodyRepresentation(removed, bodyAfter.id), removed);
+});
+
+test("getNativeLengthUnitScale reads metre and milli-metre length units", () => {
+  const sample = createNativeSampleDocument();
+  assert.equal(getNativeLengthUnitScale(sample), 1);
+
+  const mmText = serializeNativeIfcDocument(sample).replace(
+    ".LENGTHUNIT.,$,.METRE.",
+    ".LENGTHUNIT.,.MILLI.,.METRE.",
+  );
+  const mmDocument = parseNativeIfcText(mmText, "mm.ifc");
+  assert.equal(getNativeLengthUnitScale(mmDocument), 0.001);
+});
+
+test("addNativeBodyElement converts metre inputs into millimetre model units", () => {
+  const sample = createNativeSampleDocument();
+  const mmText = serializeNativeIfcDocument(sample).replace(
+    ".LENGTHUNIT.,$,.METRE.",
+    ".LENGTHUNIT.,.MILLI.,.METRE.",
+  );
+  const mmDocument = parseNativeIfcText(mmText, "mm.ifc");
+  const storey = mmDocument.entities.find(
+    (entity) => entity.type === "IFCBUILDINGSTOREY",
+  );
+  assert.ok(storey);
+
+  const withBody = addNativeBodyElement(mmDocument, {
+    depth: "2",
+    height: "1.5",
+    name: "MM Body",
+    parentId: storey.id,
+    placementMode: "world",
+    profile: "rectangle",
+    type: "IFCBUILTELEMENT",
+    width: "4",
+    x: "66.84",
+    y: "26.135",
+    z: "15.489",
+  });
+  const body = withBody.entities.find((entity) => entity.name === "MM Body");
+  assert.ok(body);
+  // Platzierung: Meter-Eingaben landen als Millimeter im Modell.
+  const placement = withBody.entityById.get(
+    firstStepReference(body.args[5] ?? ""),
+  );
+  assert.ok(placement);
+  const axis = withBody.entityById.get(
+    firstStepReference(placement.args[1] ?? ""),
+  );
+  assert.ok(axis);
+  const point = withBody.entityById.get(firstStepReference(axis.args[0] ?? ""));
+  assert.equal(point?.args[0], "(66840.,26135.,15489.)");
+  // Abmessungen: 4 m x 2 m -> 4000 mm x 2000 mm.
+  const profiles = withBody.entities.filter(
+    (entity) => entity.type === "IFCRECTANGLEPROFILEDEF",
+  );
+  const profile = profiles[profiles.length - 1];
+  assert.equal(profile?.args[3], "4000.");
+  assert.equal(profile?.args[4], "2000.");
+});
+
+test("addNativeBodyElement falls back to IFCBUILDINGELEMENTPROXY in pre-IFC4X3 schemas", () => {
+  const sample = createNativeSampleDocument();
+  const ifc4Text = serializeNativeIfcDocument(sample).replace(
+    "IFC4X3_ADD2",
+    "IFC4",
+  );
+  const ifc4Document = parseNativeIfcText(ifc4Text, "ifc4.ifc");
+  assert.equal(ifc4Document.schema, "IFC4");
+  const storey = ifc4Document.entities.find(
+    (entity) => entity.type === "IFCBUILDINGSTOREY",
+  );
+  assert.ok(storey);
+
+  const withBody = addNativeBodyElement(ifc4Document, {
+    depth: "1",
+    height: "1",
+    name: "IFC4 Body",
+    parentId: storey.id,
+    profile: "cylinder",
+    type: "IFCBUILTELEMENT",
+    width: "1",
+    x: "0",
+    y: "0",
+    z: "0",
+  });
+  const body = withBody.entities.find((entity) => entity.name === "IFC4 Body");
+  assert.equal(body?.type, "IFCBUILDINGELEMENTPROXY");
+
+  // Im IFC4X3-Beispieldokument bleibt IFCBUILTELEMENT erhalten.
+  const withNativeType = addNativeBodyElement(sample, {
+    depth: "1",
+    height: "1",
+    name: "X3 Body",
+    parentId: storey.id,
+    profile: "rectangle",
+    type: "IFCBUILTELEMENT",
+    width: "1",
+    x: "0",
+    y: "0",
+    z: "0",
+  });
+  assert.equal(
+    withNativeType.entities.find((entity) => entity.name === "X3 Body")?.type,
+    "IFCBUILTELEMENT",
+  );
+});
+
+test("viewer coordinate mapping applies the length unit scale", () => {
+  // mm-Modell: 1 m Viewer-Delta = 1000 Modelleinheiten.
+  const delta = viewerWorldDeltaToIfcPlacementDelta(
+    { x: 1, y: 2, z: 3 },
+    0.001,
+  );
+  assert.deepEqual(delta, { x: 1000, y: -3000, z: 2000 });
+  // Rueckrichtung: Modelleinheiten -> Meter.
+  const viewer = ifcPlacementPointToViewerWorldPoint(
+    { x: 1000, y: -3000, z: 2000 },
+    0.001,
+  );
+  assert.deepEqual(viewer, { x: 1, y: 2, z: 3 });
+  // Meter-Modelle bleiben unveraendert.
+  assert.deepEqual(viewerWorldDeltaToIfcPlacementDelta({ x: 1, y: 2, z: 3 }), {
+    x: 1,
+    y: -3,
+    z: 2,
+  });
+});
+
+test("addNativeBodyElement writes pre-calibrated world coordinates verbatim in model units", () => {
+  // Simuliert einen zentrierten/georeferenzierten Fall: der Builder hat die
+  // echte IFC-Weltkoordinate bereits (in Modell-Einheiten) berechnet und
+  // markiert sie mit positionInModelUnits, damit sie NICHT erneut skaliert wird.
+  const sample = createNativeSampleDocument();
+  const mmText = serializeNativeIfcDocument(sample).replace(
+    ".LENGTHUNIT.,$,.METRE.",
+    ".LENGTHUNIT.,.MILLI.,.METRE.",
+  );
+  const mmDocument = parseNativeIfcText(mmText, "mm.ifc");
+  const storey = mmDocument.entities.find(
+    (entity) => entity.type === "IFCBUILDINGSTOREY",
+  );
+  assert.ok(storey);
+
+  // Große "Realwelt"-Koordinate (Gauß-Krüger-artig, bereits in mm).
+  const withBody = addNativeBodyElement(mmDocument, {
+    depth: "2",
+    height: "1.5",
+    name: "Calibrated Body",
+    parentId: storey.id,
+    placementMode: "world",
+    positionInModelUnits: true,
+    profile: "rectangle",
+    type: "IFCBUILTELEMENT",
+    width: "4",
+    x: "3480123456",
+    y: "5500987654",
+    z: "12345",
+  });
+  const body = withBody.entities.find(
+    (entity) => entity.name === "Calibrated Body",
+  );
+  assert.ok(body);
+  const placement = withBody.entityById.get(
+    firstStepReference(body.args[5] ?? ""),
+  );
+  assert.ok(placement);
+  const axis = withBody.entityById.get(
+    firstStepReference(placement.args[1] ?? ""),
+  );
+  assert.ok(axis);
+  const point = withBody.entityById.get(firstStepReference(axis.args[0] ?? ""));
+  // Position UNVERÄNDERT (keine erneute /1000-Skalierung), ...
+  assert.equal(point?.args[0], "(3480123456.,5500987654.,12345.)");
+  // ... die Abmessungen aber weiterhin Meter -> mm skaliert (4 m -> 4000 mm).
+  const profiles = withBody.entities.filter(
+    (entity) => entity.type === "IFCRECTANGLEPROFILEDEF",
+  );
+  const profile = profiles[profiles.length - 1];
+  assert.equal(profile?.args[3], "4000.");
+  assert.equal(profile?.args[4], "2000.");
+
+  // getNativePlacementWorld liest die große Weltkoordinate wieder zurück.
+  const world = getNativePlacementWorld(withBody, body.id);
+  assert.ok(world);
+  assert.equal(Math.round(world.worldX), 3480123456);
+  assert.equal(Math.round(world.worldY), 5500987654);
+  assert.equal(Math.round(world.worldZ), 12345);
+});
+
+test("picked-element calibration recovers the real IFC world coordinate of the pick", () => {
+  // End-to-End-Rechnung der Builder-Kalibrierung ohne UI:
+  //   ziel_ifc = O_ifc(Element) + axisUnswap(viewerPunkt - elementScene)/scale
+  // Für ein zentriertes Modell (Element real weit weg, im Viewer aber klein)
+  // muss der an der Picker-Stelle erzeugte Körper an der ECHTEN IFC-Welt landen.
+  const scale = 1; // Meter-Modell
+  // Echte IFC-Weltposition des gepickten Elements (weit vom Ursprung):
+  const originIfc = { x: 3480100, y: 5500200, z: 300 };
+  // Position desselben Elements im zentrierten Viewer (klein):
+  const elementScene = { x: 12, y: 300, z: -34 };
+  // Der Nutzer pickt einen Punkt 5 m rechts / 2 m höher / 1 m weiter:
+  const viewerPick = {
+    x: elementScene.x + 5,
+    y: elementScene.y + 2,
+    z: elementScene.z - 1,
+  };
+  const deltaIfc = viewerWorldPointToIfcPlacementPoint(
+    {
+      x: viewerPick.x - elementScene.x,
+      y: viewerPick.y - elementScene.y,
+      z: viewerPick.z - elementScene.z,
+    },
+    scale,
+  );
+  const targetIfc = {
+    x: originIfc.x + deltaIfc.x,
+    y: originIfc.y + deltaIfc.y,
+    z: originIfc.z + deltaIfc.z,
+  };
+  // Erwartung: Viewer-Delta (5, 2, -1) -> IFC-Delta (x=5, y=-(-1)=1, z=2).
+  assert.deepEqual(deltaIfc, { x: 5, y: 1, z: 2 });
+  assert.deepEqual(targetIfc, { x: 3480105, y: 5500201, z: 302 });
+  // Und zurück in den Viewer ergibt exakt den Pick-Punkt (relativ zum Element).
+  const backDelta = ifcPlacementPointToViewerWorldPoint(deltaIfc, scale);
+  assert.deepEqual(backDelta, {
+    x: viewerPick.x - elementScene.x,
+    y: viewerPick.y - elementScene.y,
+    z: viewerPick.z - elementScene.z,
+  });
+});
+
+test("picked body is placed RELATIVE to the georeferenced element with small local coords", () => {
+  // Simuliert ein georeferenziertes Modell: ein Element steht weit vom Ursprung
+  // (Gauß-Krüger-artig). Ein an einem gepickten Punkt erzeugter Körper muss
+  // relativ zur Platzierung dieses Elements liegen (kleine lokale Koordinaten),
+  // NICHT als riesige Absolutkoordinate (die float-Präzision verliert).
+  const sample = createNativeSampleDocument();
+  const block = sample.entities.find(
+    (entity) => entity.type === "IFCBUILTELEMENT",
+  );
+  assert.ok(block);
+  // Element weit weg schieben (echte IFC-Welt) …
+  const geo = updateNativePlacement(sample, block.id, {
+    x: "3255405.541",
+    y: "5792520.659",
+    z: "1.678",
+  });
+  const blockWorld = getNativePlacementWorld(geo, block.id);
+  assert.ok(blockWorld);
+  assert.equal(Math.round(blockWorld.worldX), 3255406);
+
+  // Nutzer pickt einen Punkt 5 m in +X, 2 m höher, 1 m in +Z relativ zum
+  // Element (worldDelta bereits offset-frei aus (Pick − ElementSzene) berechnet).
+  const worldDelta = { x: 5, y: -1, z: 2 };
+  const localDelta = nativeWorldDeltaInElementFrame(geo, block.id, worldDelta);
+  assert.ok(localDelta);
+  // Achsen des Elements sind identisch zur Welt → lokaler Versatz == Weltversatz.
+  assert.deepEqual(
+    {
+      x: Math.round(localDelta.x),
+      y: Math.round(localDelta.y),
+      z: Math.round(localDelta.z),
+    },
+    { x: 5, y: -1, z: 2 },
+  );
+
+  const storey = geo.entities.find(
+    (entity) => entity.type === "IFCBUILDINGSTOREY",
+  );
+  assert.ok(storey);
+  // Der Builder übergibt die ABSOLUTE IFC-Weltkoordinate des Zielpunkts;
+  // die Projektion in die Platzierungskette des Bezugselements übernimmt
+  // addNativeBodyElement selbst.
+  const withBody = addNativeBodyElement(geo, {
+    depth: "1",
+    height: "1",
+    name: "Picked Marker",
+    parentId: storey.id,
+    placementMode: "world",
+    placementRelativeToId: block.id,
+    positionInModelUnits: true,
+    profile: "marker",
+    type: "IFCBUILTELEMENT",
+    width: "1",
+    x: String(blockWorld.worldX + worldDelta.x),
+    y: String(blockWorld.worldY + worldDelta.y),
+    z: String(blockWorld.worldZ + worldDelta.z),
+  });
+  const body = withBody.entities.find(
+    (entity) => entity.name === "Picked Marker",
+  );
+  assert.ok(body);
+
+  // 1) Die IFCLOCALPLACEMENT des Körpers ist RELATIV zur Platzierung des
+  //    gepickten Elements (RelativeTo == dessen IFCLOCALPLACEMENT).
+  const bodyPlacement = withBody.entityById.get(
+    firstStepReference(body.args[5] ?? ""),
+  );
+  assert.ok(bodyPlacement);
+  assert.equal(bodyPlacement.type, "IFCLOCALPLACEMENT");
+  assert.equal(bodyPlacement.args[0], block.args[5]);
+
+  // 2) Die gespeicherten lokalen Koordinaten sind KLEIN (kein 3-Mio-Wert).
+  const axis = withBody.entityById.get(
+    firstStepReference(bodyPlacement.args[1] ?? ""),
+  );
+  assert.ok(axis);
+  const point = withBody.entityById.get(firstStepReference(axis.args[0] ?? ""));
+  assert.ok(point);
+  const coords = (point.args[0] ?? "")
+    .replace(/[()]/g, "")
+    .split(",")
+    .map((value) => Number(value));
+  for (const value of coords) {
+    assert.ok(Math.abs(value) < 1000, `lokale Koordinate zu groß: ${value}`);
+  }
+
+  // 3) Trotzdem sitzt der Körper an der ECHTEN Weltposition (Element + Versatz).
+  const bodyWorld = getNativePlacementWorld(withBody, body.id);
+  assert.ok(bodyWorld);
+  assert.equal(Math.round(bodyWorld.worldX), Math.round(blockWorld.worldX + 5));
+  assert.equal(Math.round(bodyWorld.worldY), Math.round(blockWorld.worldY - 1));
+  assert.equal(Math.round(bodyWorld.worldZ), Math.round(blockWorld.worldZ + 2));
+});
+
+test("rebased viewer pick converts back to the exact IFC world position (end-to-end)", async () => {
+  // Georeferenziertes Modell: web-ifc rebased die Geometrie bei
+  // COORDINATE_TO_ORIGIN an den Ursprung und liefert die dabei angewendete
+  // WELT→URSPRUNG-Matrix (dieselben Werte legt der IfcImporter in der
+  // Fragments-Datei ab). Der Viewer speichert deren UMKEHRUNG und rechnet
+  // Picks aus dem zentrierten Szenenraum in echte IFC-Weltkoordinaten um.
+  // Dieser Test bildet die komplette Kette Pick → Builder → Placement nach.
+  const sample = createNativeSampleDocument();
+  const block = sample.entities.find(
+    (entity) => entity.type === "IFCBUILTELEMENT",
+  );
+  assert.ok(block);
+  const geo = updateNativePlacement(sample, block.id, {
+    x: "32555405.364",
+    y: "5792521.487",
+    z: "5",
+  });
+
+  const api = new WebIFC.IfcAPI();
+  await api.Init();
+  const modelID = api.OpenModel(
+    new TextEncoder().encode(serializeNativeIfcDocument(geo)),
+    { COORDINATE_TO_ORIGIN: true },
+  );
+  const rebasedBounds = streamElementWorldBounds(api, modelID, block.id);
+  const coordination = api.GetCoordinationMatrix(modelID);
+  api.CloseModel(modelID);
+
+  // Szene ist rebased: Element liegt nahe dem Ursprung, nicht bei 32,5 Mio.
+  assert.ok(Math.abs(rebasedBounds.min[0]) < 100);
+  assert.ok(Math.abs(rebasedBounds.min[2]) < 100);
+
+  // Wie readFragmentCoordination: Position + X-/Y-Achse der Matrix.
+  const stored = [
+    coordination[12],
+    coordination[13],
+    coordination[14],
+    coordination[0],
+    coordination[1],
+    coordination[2],
+    coordination[4],
+    coordination[5],
+    coordination[6],
+  ];
+  // Wie coordinationToMatrix im Viewer: Welt→Modell und Umkehrung.
+  const [px, py, pz, xx, xy, xz, yx, yy, yz] = stored;
+  const xDir = new Vector3(xx, xy, xz);
+  const yDir = new Vector3(yx, yy, yz);
+  const zDir = new Vector3().crossVectors(xDir, yDir);
+  const worldToModel = new Matrix4().set(
+    xDir.x,
+    yDir.x,
+    zDir.x,
+    px,
+    xDir.y,
+    yDir.y,
+    zDir.y,
+    py,
+    xDir.z,
+    yDir.z,
+    zDir.z,
+    pz,
+    0,
+    0,
+    0,
+    1,
+  );
+  const modelToWorld = worldToModel.clone().invert();
+
+  // Pick: Mitte der Oberseite des Elements im (rebasten) Szenenraum …
+  const scenePick = new Vector3(
+    (rebasedBounds.min[0] + rebasedBounds.max[0]) / 2,
+    rebasedBounds.max[1],
+    (rebasedBounds.min[2] + rebasedBounds.max[2]) / 2,
+  );
+  // … zurück in IFC-Welt (Viewer-Achsen, wie sceneToIfcWorldPoint) …
+  const ifcViewerPoint = scenePick.clone().applyMatrix4(modelToWorld);
+  // … und in IFC-Placement-Achsen (wie addBodyElement im Workspace).
+  const ifcPoint = viewerWorldPointToIfcPlacementPoint(ifcViewerPoint);
+  // Block: 4 x 2 m Grundriss zentriert auf der Platzierung, 1.5 m hoch.
+  assert.ok(Math.abs(ifcPoint.x - 32555405.364) < 0.01, `x: ${ifcPoint.x}`);
+  assert.ok(Math.abs(ifcPoint.y - 5792521.487) < 0.01, `y: ${ifcPoint.y}`);
+  assert.ok(Math.abs(ifcPoint.z - 6.5) < 0.01, `z: ${ifcPoint.z}`);
+
+  // Builder: Weltmodus-Körper an der gepickten Stelle unter dem Storey.
+  const storey = geo.entities.find(
+    (entity) => entity.type === "IFCBUILDINGSTOREY",
+  );
+  assert.ok(storey);
+  const withBody = addNativeBodyElement(geo, {
+    depth: "1",
+    height: "1",
+    name: "Rebase Pick Marker",
+    parentId: storey.id,
+    placementMode: "world",
+    positionInModelUnits: true,
+    profile: "marker",
+    type: "IFCBUILTELEMENT",
+    width: "1",
+    x: String(ifcPoint.x),
+    y: String(ifcPoint.y),
+    z: String(ifcPoint.z),
+  });
+  const body = withBody.entities.find(
+    (entity) => entity.name === "Rebase Pick Marker",
+  );
+  assert.ok(body);
+  const bodyWorld = getNativePlacementWorld(withBody, body.id);
+  assert.ok(bodyWorld);
+  assert.ok(Math.abs(bodyWorld.worldX - ifcPoint.x) < 0.01);
+  assert.ok(Math.abs(bodyWorld.worldY - ifcPoint.y) < 0.01);
+  assert.ok(Math.abs(bodyWorld.worldZ - ifcPoint.z) < 0.01);
+});

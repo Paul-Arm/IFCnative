@@ -18,6 +18,25 @@ export interface RelationshipFlowClipboardNode {
   y: number;
 }
 
+export interface RelationshipFlowPropertySet {
+  id: number;
+  kind: string;
+  name: string;
+  values: Array<{
+    id: number;
+    name: string;
+    type: string;
+    value: string;
+  }>;
+}
+
+export interface RelationshipFlowEmbeddedResource {
+  id: number;
+  kind: "Material" | "Klassifikation" | "Dokument";
+  name: string;
+  type: string;
+}
+
 export interface RelationshipFlowNode {
   childCount: number;
   childrenLoaded: boolean;
@@ -28,8 +47,10 @@ export interface RelationshipFlowNode {
     name: string;
     type: string;
   };
+  embeddedResources: RelationshipFlowEmbeddedResource[];
   id: number;
   pinned: boolean;
+  propertySets: RelationshipFlowPropertySet[];
   searchMatch: boolean;
   selected: boolean;
   x: number;
@@ -63,9 +84,7 @@ export interface RelationshipFlowProps {
   focusNodeId?: number | null;
   focusNonce?: number;
   relationshipOptions: RelationshipFlowOption[];
-  relationshipCount: number;
   relationshipTypeFilters: string[];
-  relationshipTypes: string[];
   search: string;
   searchActiveId: number | null;
   searchActiveIndex: number;

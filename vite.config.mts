@@ -34,7 +34,6 @@ export default defineConfig({
       },
     ],
     dedupe: ["react", "react-dom"],
-    extensions: [".web.tsx", ".web.ts", ".tsx", ".ts", ".jsx", ".js", ".json"],
   },
   server: {
     host: "127.0.0.1",

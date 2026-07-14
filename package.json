@@ -23,14 +23,13 @@
     "sync-web-ifc-wasm": "node ./scripts/sync-web-ifc-wasm.js",
     "patch-thatopen-fragments": "node ./scripts/patch-thatopen-fragments.js",
     "patch-react-dnd-react19": "node ./scripts/patch-react-dnd-react19.js",
-    "react:build": "vite build",
-    "native:build:win": "vite build",
     "lint": "eslint . --max-warnings=0",
     "test:ifc": "tsx --test tests/ifc.test.ts tests/catalog.test.ts tests/versioning.test.ts tests/portal.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
     "@fontsource-variable/geist": "^5.2.9",
+    "@fontsource-variable/geist-mono": "^5.2.8",
     "@pierre/trees": "^1.0.0-beta.3",
     "@tailwindcss/vite": "^4.3.0",
     "@thatopen/components": "^3.4.6",
@@ -41,6 +40,7 @@
     "camera-controls": "^3.1.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "flatbuffers": "25.2.10",
     "lucide-react": "^0.475.0",
     "react": "19.2.0",
     "react-dom": "19.2.0",

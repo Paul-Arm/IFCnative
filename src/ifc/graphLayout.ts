@@ -104,9 +104,10 @@ function layoutAggregateTreeGraph(
     aggregateParticipants,
   );
   const treeNodeIds = nodeIds.filter((id) => !sideAttachments.targets.has(id));
-  const grouped = groupNodeIdsByLevel(
+  const grouped = orderGraphLevels(
     treeNodeIds.length ? treeNodeIds : nodeIds,
     levels,
+    edges,
   );
   const parentLookup = buildAggregateParentLookup(edges, nodeSet);
   const positions = new Map<number, Point>();
@@ -173,7 +174,7 @@ function layoutGraphColumns(
   edges: NativeGraphEdge[],
   manual: Map<number, Point>,
 ) {
-  const grouped = groupNodeIdsByLevel(nodeIds, levels);
+  const grouped = orderGraphLevels(nodeIds, levels, edges);
   const nodeSet = new Set(nodeIds);
   const parentLookup = buildDirectedParentLookup(edges, nodeSet, levels);
   const positions = new Map<number, Point>();
@@ -346,6 +347,90 @@ function groupNodeIdsByLevel(nodeIds: number[], levels: Map<number, number>) {
     }
   }
   return grouped;
+}
+
+/**
+ * Reorders each level by the average position of its neighbors on the adjacent
+ * level. Alternating top-down and bottom-up sweeps is a small, deterministic
+ * Sugiyama-style crossing reduction and gives much cleaner IFC relationship
+ * diagrams than sorting siblings by Express ID alone.
+ */
+function orderGraphLevels(
+  nodeIds: number[],
+  levels: Map<number, number>,
+  edges: NativeGraphEdge[],
+) {
+  const grouped = groupNodeIdsByLevel(nodeIds, levels);
+  const nodeSet = new Set(nodeIds);
+  const neighbors = buildUndirectedNeighborLookup(edges, nodeSet);
+  const levelEntries = sortedLevelEntries(grouped);
+  if (levelEntries.length < 2) {
+    return grouped;
+  }
+
+  for (let pass = 0; pass < 4; pass += 1) {
+    const topDown = pass % 2 === 0;
+    const entries = topDown ? levelEntries : [...levelEntries].reverse();
+    for (const [level, ids] of entries) {
+      const currentOrder = new Map(ids.map((id, index) => [id, index]));
+      const ranks = new Map<number, number>();
+      for (const [, rankedIds] of levelEntries) {
+        rankedIds.forEach((id, index) => ranks.set(id, index));
+      }
+      ids.sort((leftId, rightId) => {
+        const leftScore = adjacentLevelBarycenter(
+          leftId,
+          level,
+          topDown,
+          neighbors,
+          levels,
+          ranks,
+        );
+        const rightScore = adjacentLevelBarycenter(
+          rightId,
+          level,
+          topDown,
+          neighbors,
+          levels,
+          ranks,
+        );
+        if (leftScore !== undefined || rightScore !== undefined) {
+          if (leftScore === undefined) return 1;
+          if (rightScore === undefined) return -1;
+          if (leftScore !== rightScore) return leftScore - rightScore;
+        }
+        return (
+          (currentOrder.get(leftId) ?? 0) -
+            (currentOrder.get(rightId) ?? 0) ||
+          leftId - rightId
+        );
+      });
+    }
+  }
+  return grouped;
+}
+
+function adjacentLevelBarycenter(
+  id: number,
+  level: number,
+  topDown: boolean,
+  neighbors: Map<number, number[]>,
+  levels: Map<number, number>,
+  ranks: Map<number, number>,
+) {
+  const adjacentRanks = (neighbors.get(id) ?? []).flatMap((neighborId) => {
+    const neighborLevel = levels.get(neighborId) ?? level;
+    const relevant = topDown ? neighborLevel < level : neighborLevel > level;
+    const rank = ranks.get(neighborId);
+    return relevant && rank !== undefined ? [rank] : [];
+  });
+  if (!adjacentRanks.length) {
+    return undefined;
+  }
+  return (
+    adjacentRanks.reduce((total, rank) => total + rank, 0) /
+    adjacentRanks.length
+  );
 }
 
 function sortedLevelEntries(grouped: Map<number, number[]>) {
@@ -687,7 +772,6 @@ function buildSiblingLookup(
   }
   const siblings = new Map<number, { count: number; index: number }>();
   for (const group of groups.values()) {
-    group.sort((leftId, rightId) => leftId - rightId);
     group.forEach((id, index) => {
       siblings.set(id, { count: group.length, index });
     });

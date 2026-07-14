@@ -1,4 +1,12 @@
-import { app, BrowserWindow, Menu, net, protocol, shell } from "electron";
+import {
+  app,
+  BrowserWindow,
+  Menu,
+  nativeTheme,
+  net,
+  protocol,
+  shell,
+} from "electron";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -71,6 +79,15 @@ function registerRendererProtocol() {
   });
 }
 
+// Muss zu --background in src/global.css passen, damit beim Fensteraufbau
+// kein Farbblitz entsteht: hell oklch(0.975 0.003 197.1) ≈ #f7f8f8,
+// dunkel oklch(0.155 0.006 197.1) ≈ #090d0d. Best-Effort: der Main-Prozess
+// kennt nur das OS-Theme; weicht die App-Einstellung (localStorage) davon ab,
+// bleibt ein kurzer Flash.
+function windowBackgroundColor() {
+  return nativeTheme.shouldUseDarkColors ? "#090d0d" : "#f7f8f8";
+}
+
 async function createMainWindow() {
   const mainWindow = new BrowserWindow({
     title: "IFCnative",
@@ -78,7 +95,7 @@ async function createMainWindow() {
     height: 940,
     minWidth: 1024,
     minHeight: 720,
-    backgroundColor: "#f8fafc",
+    backgroundColor: windowBackgroundColor(),
     autoHideMenuBar: true,
     show: false,
     webPreferences: {
@@ -113,7 +130,7 @@ function configureAppWindow(window: BrowserWindow) {
         action: "allow",
         overrideBrowserWindowOptions: {
           autoHideMenuBar: true,
-          backgroundColor: "#f8fafc",
+          backgroundColor: windowBackgroundColor(),
           minHeight: 520,
           minWidth: 760,
           webPreferences: {

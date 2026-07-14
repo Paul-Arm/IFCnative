@@ -1,15 +1,12 @@
+import type { NativeBodyProfile } from "@/ifc";
+
 export type StructureMode = "tree" | "graph";
 
 export type InspectorMode =
-  | "info"
-  | "edit"
+  | "overview"
+  | "properties"
   | "placement"
-  | "psets"
-  | "object-info"
-  | "relations"
-  | "resources"
-  | "refs"
-  | "units";
+  | "relations";
 
 export type MosaicViewId =
   | "structure"
@@ -48,7 +45,7 @@ export interface BodyElementDraft {
   width: string;
   depth: string;
   height: string;
-  profile?: "rectangle" | "cylinder";
+  profile?: NativeBodyProfile;
   x: string;
   y: string;
   z: string;

@@ -1,3 +1,4 @@
+import { AlertTriangle } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import type { NativeIfcDocument, NativeIfcEntity } from "@/ifc";
@@ -6,12 +7,17 @@ import {
     layoutGraph,
     retainPinnedPositions,
 } from "@/ifc/graphLayout";
-import type { NativeGraphPreset, NativeGraphWarning } from "@/ifc/nativeGraph";
+import {
+  resolveNativeGraphAnchorId,
+  type NativeGraphPreset,
+  type NativeGraphWarning,
+} from "@/ifc/nativeGraph";
 
 import RelationshipFlow from "../relationship-flow";
 import type {
     RelationshipFlowClipboardNode,
     RelationshipFlowEdge,
+    RelationshipFlowEmbeddedResource,
     RelationshipFlowLayoutMode,
     RelationshipFlowMove,
     RelationshipFlowNode,
@@ -19,6 +25,13 @@ import type {
 import { GRAPH_PRESETS } from "./constants";
 import type { Point } from "./types";
 import type { DropdownOption } from "./ui";
+
+const EMBEDDED_GRAPH_RELATIONSHIP_TYPES = new Set([
+  "IFCRELDEFINESBYPROPERTIES",
+  "IFCRELASSOCIATESMATERIAL",
+  "IFCRELASSOCIATESCLASSIFICATION",
+  "IFCRELASSOCIATESDOCUMENT",
+]);
 
 export function GraphPanel({
   anchorId,
@@ -101,8 +114,14 @@ export function GraphPanel({
   const [searchCursor, setSearchCursor] = useState(0);
   const searchQuery = search.trim().toLowerCase();
   const searchMatchIds = useMemo(
-    () => new Set(searchMatches.map((entity) => entity.id)),
-    [searchMatches],
+    () =>
+      new Set(
+        searchMatches.flatMap((entity) => {
+          const graphId = resolveNativeGraphAnchorId(document, entity.id);
+          return graphId === undefined ? [] : [graphId];
+        }),
+      ),
+    [document, searchMatches],
   );
   const activeSearchIndex =
     searchQuery && searchMatches.length
@@ -111,8 +130,13 @@ export function GraphPanel({
   const activeSearchMatch =
     activeSearchIndex >= 0 ? searchMatches[activeSearchIndex] : undefined;
   const graphAnchorId = useMemo(() => {
-    return activeSearchMatch?.id ?? anchorId;
-  }, [activeSearchMatch, anchorId]);
+    return (
+      resolveNativeGraphAnchorId(
+        document,
+        activeSearchMatch?.id ?? anchorId,
+      ) ?? anchorId
+    );
+  }, [activeSearchMatch, anchorId, document]);
 
   useEffect(() => {
     if (!searchQuery || !searchMatches.length) {
@@ -182,10 +206,14 @@ export function GraphPanel({
               name: entity.name,
               type: entity.type,
             },
+            embeddedResources: embeddedResourcesForEntity(document, node.id),
             id: node.id,
             pinned: pinned.has(node.id),
+            propertySets: document.propertySetsByEntity.get(node.id) ?? [],
             searchMatch: searchMatchIds.has(node.id),
-            selected: node.id === selectedId,
+            selected:
+              node.id ===
+              (resolveNativeGraphAnchorId(document, selectedId) ?? selectedId),
             x: node.x,
             y: node.y,
           },
@@ -193,6 +221,7 @@ export function GraphPanel({
       }),
     [
       document.entityById,
+      document.propertySetsByEntity,
       graph.childCounts,
       graph.loadedSources,
       layout,
@@ -200,6 +229,13 @@ export function GraphPanel({
       searchMatchIds,
       selectedId,
     ],
+  );
+  const topologyRelationshipOptions = useMemo(
+    () =>
+      relationshipOptions.filter(
+        (option) => !EMBEDDED_GRAPH_RELATIONSHIP_TYPES.has(option.value),
+      ),
+    [relationshipOptions],
   );
   const flowEdges = useMemo<RelationshipFlowEdge[]>(
     () =>
@@ -254,16 +290,19 @@ export function GraphPanel({
           classOptions={classOptions}
           depth={depth}
           edges={flowEdges}
-          focusNodeId={focusRequest?.entityId ?? null}
+          focusNodeId={
+            focusRequest
+              ? (resolveNativeGraphAnchorId(document, focusRequest.entityId) ??
+                null)
+              : null
+          }
           focusNonce={focusRequest?.nonce ?? 0}
           layoutMode={layoutMode}
           nodes={flowNodes}
           preset={preset}
           presetOptions={GRAPH_PRESETS}
-          relationshipOptions={relationshipOptions}
-          relationshipCount={graph.edges.length}
+          relationshipOptions={topologyRelationshipOptions}
           relationshipTypeFilters={[...relationshipTypeFilters]}
-          relationshipTypes={graph.relationshipTypes}
           search={search}
           searchActiveId={activeSearchMatch?.id ?? null}
           searchActiveIndex={activeSearchIndex}
@@ -317,6 +356,44 @@ export function GraphPanel({
   );
 }
 
+const EMBEDDED_RESOURCE_KINDS = new Map<
+  string,
+  RelationshipFlowEmbeddedResource["kind"]
+>([
+  ["IFCRELASSOCIATESMATERIAL", "Material"],
+  ["IFCRELASSOCIATESCLASSIFICATION", "Klassifikation"],
+  ["IFCRELASSOCIATESDOCUMENT", "Dokument"],
+]);
+
+function embeddedResourcesForEntity(
+  document: NativeIfcDocument,
+  entityId: number,
+) {
+  const resources = new Map<number, RelationshipFlowEmbeddedResource>();
+  for (const relationship of document.relationshipsByEntity.get(entityId) ?? []) {
+    const kind = EMBEDDED_RESOURCE_KINDS.get(
+      relationship.type.trim().toUpperCase(),
+    );
+    if (!kind || !relationship.sourceIds.includes(entityId)) {
+      continue;
+    }
+    for (const resourceId of relationship.targetIds) {
+      const resource = document.entityById.get(resourceId);
+      if (!resource) {
+        continue;
+      }
+      resources.set(resourceId, {
+        id: resourceId,
+        kind,
+        name:
+          resource.name || resource.description || resource.globalId || `#${resourceId}`,
+        type: resource.type,
+      });
+    }
+  }
+  return [...resources.values()];
+}
+
 function GraphWarningsPanel({
   document,
   warnings,
@@ -326,30 +403,38 @@ function GraphWarningsPanel({
   warnings: NativeGraphWarning[];
   onRevealEntity(id: number): void;
 }) {
+  const count = warnings.length;
+  if (!count) {
+    return null;
+  }
   return (
-    <section className="ifc-graph-warnings-panel" aria-label="Graph warnings">
-      <div className="ifc-graph-warnings-header">
-        <strong>
-          {warnings.length} graph warning{warnings.length === 1 ? "" : "s"}
+    <details
+      className="group min-h-0 rounded-md border border-warning/30 bg-warning/10 px-2.5 py-1.5"
+    >
+      <summary className="flex cursor-pointer list-none items-center gap-1.5 [&::-webkit-details-marker]:hidden">
+        <AlertTriangle aria-hidden className="size-3.5 shrink-0 text-warning" />
+        <strong className="min-w-0 truncate text-xs font-semibold text-warning-foreground dark:text-warning">
+          {count.toLocaleString("de-DE")}{" "}
+          {count === 1 ? "Graph-Warnung" : "Graph-Warnungen"}
         </strong>
-      </div>
-      {warnings.length ? (
-        <div className="ifc-graph-warnings-list">
-          {warnings.map((warning, index) => (
-            <div
-              className="ifc-graph-warning-item"
-              key={`${warning.message}-${index}`}
-            >
-              <div className="ifc-graph-warning-message">
-                {renderWarningMessage(document, warning.message, onRevealEntity)}
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <p>No graph warnings for the visible graph.</p>
-      )}
-    </section>
+        <span className="ml-auto text-[10px] text-muted-foreground group-open:hidden">
+          Anzeigen
+        </span>
+        <span className="ml-auto hidden text-[10px] text-muted-foreground group-open:inline">
+          Ausblenden
+        </span>
+      </summary>
+      <ul className="mt-1.5 grid max-h-28 list-none gap-1 overflow-y-auto p-0">
+        {warnings.map((warning, index) => (
+          <li
+            key={`${warning.message}-${index}`}
+            className="min-w-0 border-t border-warning/25 pt-1 text-xs leading-relaxed text-foreground first:border-t-0 first:pt-0 [overflow-wrap:anywhere]"
+          >
+            {renderWarningMessage(document, warning.message, onRevealEntity)}
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 
@@ -372,10 +457,14 @@ function renderWarningMessage(
       entity ? (
         <button
           key={`${id}-${match.index}`}
+          className="mx-0.5 inline-flex max-w-full items-center rounded bg-primary/10 px-1 py-px align-baseline font-mono text-[11px] font-semibold text-primary transition-colors hover:bg-primary/20"
+          title={`#${id} ${entity.type} im Graphen anzeigen`}
           type="button"
           onClick={() => onRevealEntity(id)}
         >
-          #{id} {entity.type}
+          <span className="truncate">
+            #{id} {entity.type}
+          </span>
         </button>
       ) : (
         match[0]

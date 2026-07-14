@@ -63,12 +63,11 @@ const PRESET_RELATIONSHIPS: Record<NativeGraphPreset, string[] | undefined> = {
     'IFCINDEXEDPOLYGONALFACE',
     'IFCBOUNDINGBOX',
   ],
-  properties: ['IFCRELDEFINESBYPROPERTIES', 'IFCRELDEFINESBYTYPE'],
+  // Property and quantity sets are rendered inside their owning object nodes.
+  // Only type assignments remain part of the graph topology.
+  properties: ['IFCRELDEFINESBYTYPE'],
   resources: [
     'IFCRELASSIGNSTOGROUP',
-    'IFCRELASSOCIATESMATERIAL',
-    'IFCRELASSOCIATESCLASSIFICATION',
-    'IFCRELASSOCIATESDOCUMENT',
     'IFCRELASSOCIATESLIBRARY',
     'IFCRELASSOCIATESCONSTRAINT',
     'IFCRELASSOCIATESAPPROVAL',
@@ -80,6 +79,13 @@ const PRESET_RELATIONSHIPS: Record<NativeGraphPreset, string[] | undefined> = {
     'IFCRELREFERENCEDINSPATIALSTRUCTURE',
   ],
 };
+
+const EMBEDDED_RELATIONSHIP_TYPES = new Set([
+  'IFCRELDEFINESBYPROPERTIES',
+  'IFCRELASSOCIATESMATERIAL',
+  'IFCRELASSOCIATESCLASSIFICATION',
+  'IFCRELASSOCIATESDOCUMENT',
+]);
 
 export function relationshipTypesForPreset(preset: NativeGraphPreset) {
   return PRESET_RELATIONSHIPS[preset] ? [...(PRESET_RELATIONSHIPS[preset] as string[])] : [];
@@ -97,7 +103,11 @@ export function buildNativeGraphNeighborhood(
   const preset = options.preset ?? 'all';
   const relationshipTypes = effectiveRelationshipTypes(options.preset ?? 'all', options.relationshipTypes);
   const includeGeometryReferences = preset === 'geometry' && !options.relationshipTypes?.size;
-  const anchors = unique([options.selectedId, ...pinned].filter((id) => document.entityById.has(id)));
+  const anchors = unique(
+    [options.selectedId, ...pinned]
+      .map((id) => resolveNativeGraphAnchorId(document, id))
+      .filter((id): id is number => id !== undefined),
+  );
   const nodeSet = new Set(anchors);
   const levels = new Map<number, number>(anchors.map((id) => [id, 0]));
   const edges: NativeGraphEdge[] = [];
@@ -306,7 +316,49 @@ function relationshipsForSource(document: NativeIfcDocument, sourceId: number, r
 }
 
 function relationshipMatches(relationship: NativeIfcRelationship, relationshipTypes: Set<string>) {
-  return relationshipTypes.size === 0 || relationshipTypes.has(normalizeType(relationship.type));
+  const type = normalizeType(relationship.type);
+  return (
+    !EMBEDDED_RELATIONSHIP_TYPES.has(type) &&
+    (relationshipTypes.size === 0 || relationshipTypes.has(type))
+  );
+}
+
+/**
+ * Property/quantity set entities and their individual values are metadata, not
+ * topology nodes. Resolve them to the first owning IFC object so search and
+ * diagnostics can still focus a meaningful node in the graph.
+ */
+export function resolveNativeGraphAnchorId(
+  document: NativeIfcDocument,
+  entityId: number,
+) {
+  if (!document.entityById.has(entityId)) {
+    return undefined;
+  }
+  for (const [ownerId, sets] of document.propertySetsByEntity) {
+    if (
+      sets.some(
+        (set) =>
+          set.id === entityId || set.values.some((value) => value.id === entityId),
+      )
+    ) {
+      return ownerId;
+    }
+  }
+  for (const relationship of document.relationshipsByEntity.get(entityId) ?? []) {
+    if (
+      EMBEDDED_RELATIONSHIP_TYPES.has(normalizeType(relationship.type)) &&
+      relationship.targetIds.includes(entityId)
+    ) {
+      const ownerId = relationship.sourceIds.find((id) =>
+        document.entityById.has(id),
+      );
+      if (ownerId !== undefined) {
+        return ownerId;
+      }
+    }
+  }
+  return entityId;
 }
 
 function directChildCount(

@@ -1,51 +1,81 @@
 import {
-    Box,
-    Crosshair,
-    MousePointer2,
-    Plus,
-    Replace,
-    Ruler,
-    Target,
+  Box,
+  ClipboardPaste,
+  Crosshair,
+  MousePointer2,
+  Ruler,
+  Target,
+  Trash2,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
-import { type NativeIfcDocument, type NativeIfcEntity } from "@/ifc";
+import {
+  getNativeBodyRepresentation,
+  getNativeLengthUnitScale,
+  type NativeBodyProfile,
+  type NativeIfcDocument,
+} from "@/ifc";
 
 import { ENTITY_TYPES } from "./constants";
 import type { BodyElementDraft, CoordinateClipboard } from "./types";
 import {
-    Badge,
-    Button,
-    DropdownField,
-    LabeledInput,
-    PanelHeader,
-    PanelShell,
+  Badge,
+  Button,
+  DropdownField,
+  InlineAlert,
+  LabeledInput,
+  PanelHeader,
+  PanelShell,
+  shortType,
 } from "./ui";
+
+const BODY_PROFILE_OPTIONS: {
+  detail: string;
+  label: string;
+  value: NativeBodyProfile;
+}[] = [
+  { detail: "Extrudiertes Rechteck", label: "Rechteck", value: "rectangle" },
+  { detail: "Extrudierter Kreis", label: "Zylinder", value: "cylinder" },
+  { detail: "Extrudierte Ellipse", label: "Ellipse", value: "ellipse" },
+  {
+    detail: "Extrudiertes Dreieck (Keil)",
+    label: "Dreieck",
+    value: "triangle",
+  },
+  {
+    detail: "Aufrechter, flacher Karten-Pin",
+    label: "Positionsmarker",
+    value: "marker",
+  },
+];
+
+const ROUND_PROFILES: ReadonlySet<NativeBodyProfile> = new Set([
+  "cylinder",
+  "ellipse",
+]);
 
 export function BuilderPanel({
   coordinateClipboard,
   document,
   selectedId,
   onAddBodyElement,
-  onAssignBodyToSelected,
   onLoadSystemCoordinates,
+  onRemoveBodyFromSelected,
 }: {
   coordinateClipboard: CoordinateClipboard | null;
   document: NativeIfcDocument;
   selectedId: number;
   onAddBodyElement(options: BodyElementDraft): void;
-  onAssignBodyToSelected(options: BodyElementDraft): void;
   onLoadSystemCoordinates(): Promise<CoordinateClipboard | undefined>;
+  onRemoveBodyFromSelected(): void;
 }) {
-  const [bodyAction, setBodyAction] = useState<"new" | "replace">("new");
   const [bodyType, setBodyType] = useState("IFCBUILTELEMENT");
   const [bodyName, setBodyName] = useState("Neuer 3D-Körper");
   const [bodyWidth, setBodyWidth] = useState("4");
   const [bodyDepth, setBodyDepth] = useState("2");
   const [bodyHeight, setBodyHeight] = useState("1.5");
-  const [bodyProfile, setBodyProfile] = useState<"rectangle" | "cylinder">(
-    "rectangle",
-  );
+  const [bodyProfile, setBodyProfile] =
+    useState<NativeBodyProfile>("rectangle");
   const [bodyPlacementMode, setBodyPlacementMode] = useState<
     "parent" | "world"
   >("world");
@@ -55,7 +85,9 @@ export function BuilderPanel({
   const [bodyTag, setBodyTag] = useState("IFCNATIVE-BODY");
   const selectedEntity = document.entityById.get(selectedId);
   const selectedParentId = findHierarchyParentId(document, selectedId);
-  const canReplaceBody = isBodyTargetEntity(selectedEntity);
+  const selectedBody = getNativeBodyRepresentation(document, selectedId);
+  const unitScale = getNativeLengthUnitScale(document);
+  const unitLabel = describeLengthUnit(unitScale);
 
   const loadCoordinateClipboard = async () => {
     if (!coordinateClipboard) {
@@ -90,42 +122,27 @@ export function BuilderPanel({
     z: bodyZ,
   };
 
+  const coordinateSummary = coordinateClipboard
+    ? describeCoordinateClipboard(coordinateClipboard)
+    : "0, 0, 0";
+
   return (
     <PanelShell scroll>
       <PanelHeader
-        eyebrow={document.fileName}
-        title="Körper Builder"
-        description="Neue Fragment-Körper erstellen oder die Geometrie der aktuellen Auswahl ersetzen."
+        title="Körper-Builder"
         meta={
-          <Badge tone={canReplaceBody ? "success" : "neutral"}>
+          <Badge tone={selectedBody.hasRepresentation ? "success" : "neutral"}>
             #{selectedId}{" "}
-            {selectedEntity?.type.replace(/^IFC/i, "") ?? "Auswahl"}
+            {selectedEntity ? shortType(selectedEntity.type) : "Auswahl"}
           </Badge>
         }
       />
-      <section className="grid min-w-0 shrink-0 gap-3 pb-2">
-        <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(12rem,1fr))] gap-2">
-          <ModeButton
-            active={bodyAction === "new"}
-            icon={<Plus aria-hidden className="size-4" />}
-            title="Neues IFC-Element"
-            subtitle={`${shortIfc(bodyType)} mit eigener Fragment-Geometrie`}
-            onPress={() => setBodyAction("new")}
-          />
-          <ModeButton
-            active={bodyAction === "replace"}
-            icon={<Replace aria-hidden className="size-4" />}
-            title="Auswahl-Geometrie"
-            subtitle={`Geometrie von #${selectedId} ersetzen`}
-            onPress={() => setBodyAction("replace")}
-          />
-        </div>
-
-        <BuilderStatusGrid>
+      <section className="grid min-w-0 shrink-0 gap-2.5 pb-2">
+        <div className="grid min-w-0 gap-1.5 border-y border-border/60 py-2">
           <StatusPill
             icon={<Target aria-hidden className="size-3.5" />}
             label="Ziel"
-            value={`${document.fileName} / #${selectedId}`}
+            value={`#${selectedId}${selectedEntity ? ` · ${shortType(selectedEntity.type)}` : ""}`}
           />
           <StatusPill
             icon={<MousePointer2 aria-hidden className="size-3.5" />}
@@ -137,217 +154,206 @@ export function BuilderPanel({
             label="Position"
             value={`${bodyX}, ${bodyY}, ${bodyZ}`}
           />
-        </BuilderStatusGrid>
-
-        <FormRow compact>
-          <FormField>
-            <DropdownField
-              label="Elementklasse"
-              options={ENTITY_TYPES}
-              value={bodyType}
-              onChange={setBodyType}
-            />
-          </FormField>
-          <FormField>
-            <LabeledInput
-              label="Name"
-              value={bodyName}
-              onChangeText={setBodyName}
-            />
-          </FormField>
-          <FormField>
-            <LabeledInput
-              label="Kennzeichen"
-              value={bodyTag}
-              onChangeText={setBodyTag}
-            />
-          </FormField>
-        </FormRow>
-
-        <FormRow compact>
-          <FormField>
-            <DropdownField
-              label="Profil"
-              options={[
-                { label: "Rechteck", value: "rectangle" },
-                { label: "Zylinder", value: "cylinder" },
-              ]}
-              value={bodyProfile}
-              onChange={(value) =>
-                setBodyProfile(value as "rectangle" | "cylinder")
-              }
-            />
-          </FormField>
-          <FormField>
-            <LabeledInput
-              label={bodyProfile === "cylinder" ? "Durchmesser X" : "Breite X"}
-              keyboardType="numeric"
-              value={bodyWidth}
-              onChangeText={setBodyWidth}
-            />
-          </FormField>
-          <FormField>
-            <LabeledInput
-              label={bodyProfile === "cylinder" ? "Durchmesser Z" : "Tiefe Z"}
-              keyboardType="numeric"
-              value={bodyDepth}
-              onChangeText={setBodyDepth}
-            />
-          </FormField>
-          <FormField>
-            <LabeledInput
-              label="Höhe Y"
-              keyboardType="numeric"
-              value={bodyHeight}
-              onChangeText={setBodyHeight}
-            />
-          </FormField>
-        </FormRow>
-
-        <FormRow compact>
-          <FormField>
-            <LabeledInput
-              label="X"
-              keyboardType="numeric"
-              value={bodyX}
-              onChangeText={setBodyX}
-            />
-          </FormField>
-          <FormField>
-            <LabeledInput
-              label="Y (Höhe)"
-              keyboardType="numeric"
-              value={bodyY}
-              onChangeText={setBodyY}
-            />
-          </FormField>
-          <FormField>
-            <LabeledInput
-              label="Z"
-              keyboardType="numeric"
-              value={bodyZ}
-              onChangeText={setBodyZ}
-            />
-          </FormField>
-          <FormField>
-            <DropdownField
-              label="Position"
-              options={[
-                {
-                  detail: "Absolut im Modell (Viewer-Weltpunkt)",
-                  label: "Weltposition",
-                  value: "world",
-                },
-                {
-                  detail: "X/Y/Z als lokaler Versatz zum Parent",
-                  label: "Relativ zum Parent",
-                  value: "parent",
-                },
-              ]}
-              value={bodyPlacementMode}
-              onChange={(value) =>
-                setBodyPlacementMode(value as "parent" | "world")
-              }
-            />
-          </FormField>
-        </FormRow>
-
-        <div className="grid min-w-0 gap-2 border-t border-border/60 pt-2.5">
-          <div className="min-w-0">
-            <div className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              <Crosshair aria-hidden className="size-3.5" />
-              Koordinaten
-            </div>
-            <p className="mt-1 truncate text-sm text-foreground">
-              {coordinateClipboard
-                ? describeCoordinateClipboard(coordinateClipboard)
-                : "0, 0, 0"}
-            </p>
-          </div>
-          <Button
-            label={coordinateClipboard ? "Punkt übernehmen" : "Clipboard lesen"}
-            onPress={() => void loadCoordinateClipboard()}
+          <StatusPill
+            icon={<Ruler aria-hidden className="size-3.5" />}
+            label="Modelleinheit"
+            value={unitLabel}
           />
         </div>
 
-        {bodyAction === "new" ? (
-          <FormRow compact>
-            <FormField>
-              <PrimaryBodyButton
-                icon={<Box aria-hidden className="size-4" />}
-                label="Körper als Kind der Auswahl erstellen"
-                onPress={() =>
-                  onAddBodyElement({ ...bodyDraft, parentId: selectedId })
-                }
-              />
-            </FormField>
-            <FormField>
-              <PrimaryBodyButton
-                disabled={selectedParentId == null}
-                icon={<Box aria-hidden className="size-4" />}
-                label="Körper am Parent der Auswahl erstellen"
-                onPress={() => {
-                  if (selectedParentId == null) {
-                    return;
-                  }
-                  onAddBodyElement({
-                    ...bodyDraft,
-                    parentId: selectedParentId,
-                  });
-                }}
-              />
-            </FormField>
-          </FormRow>
-        ) : (
-          <FormRow compact>
-            <FormField>
-              <PrimaryBodyButton
-                disabled={!canReplaceBody}
-                icon={<Ruler aria-hidden className="size-4" />}
-                label="Geometrie der Auswahl ersetzen"
-                onPress={() => onAssignBodyToSelected(bodyDraft)}
-              />
-            </FormField>
-          </FormRow>
-        )}
-        {bodyAction === "new" && selectedParentId == null ? (
-          <HintLine>
-            Die Auswahl hat keinen Parent in der IFC-Struktur.
-          </HintLine>
-        ) : null}
-        {bodyAction === "replace" && !canReplaceBody ? (
-          <HintLine>
-            #{selectedId} ist kein geeignetes Produkt fuer eine sichtbare
-            Fragment-Geometrie.
-          </HintLine>
-        ) : null}
-      </section>
+        <FormGrid>
+          <DropdownField
+            label="Elementklasse"
+            options={ENTITY_TYPES}
+            value={bodyType}
+            onChange={setBodyType}
+          />
+          <LabeledInput
+            label="Name"
+            value={bodyName}
+            onChangeText={setBodyName}
+          />
+          <LabeledInput
+            label="Kennzeichen"
+            value={bodyTag}
+            onChangeText={setBodyTag}
+          />
+        </FormGrid>
 
-      <p className="text-sm text-muted-foreground">
-        Aktuelle Auswahl: #{selectedId}{" "}
-        {document.entityById.get(selectedId)?.type}
-      </p>
+        <FormGrid>
+          <DropdownField
+            label="Profil"
+            options={BODY_PROFILE_OPTIONS}
+            value={bodyProfile}
+            onChange={(value) => setBodyProfile(value as NativeBodyProfile)}
+          />
+          <LabeledInput
+            label={
+              ROUND_PROFILES.has(bodyProfile)
+                ? "Durchmesser X (m)"
+                : "Breite X (m)"
+            }
+            keyboardType="numeric"
+            value={bodyWidth}
+            onChangeText={setBodyWidth}
+          />
+          <LabeledInput
+            label={
+              ROUND_PROFILES.has(bodyProfile)
+                ? "Durchmesser Z (m)"
+                : "Tiefe Z (m)"
+            }
+            keyboardType="numeric"
+            value={bodyDepth}
+            onChangeText={setBodyDepth}
+          />
+          <LabeledInput
+            label="Höhe Y (m)"
+            keyboardType="numeric"
+            value={bodyHeight}
+            onChangeText={setBodyHeight}
+          />
+        </FormGrid>
+
+        <FormGrid>
+          <LabeledInput
+            label="X (m)"
+            keyboardType="numeric"
+            value={bodyX}
+            onChangeText={setBodyX}
+          />
+          <LabeledInput
+            label="Y (m, Höhe)"
+            keyboardType="numeric"
+            value={bodyY}
+            onChangeText={setBodyY}
+          />
+          <LabeledInput
+            label="Z (m)"
+            keyboardType="numeric"
+            value={bodyZ}
+            onChangeText={setBodyZ}
+          />
+          <DropdownField
+            label="Position"
+            options={[
+              {
+                detail: "Absolut im Modell (Viewer-Weltpunkt)",
+                label: "Weltposition",
+                value: "world",
+              },
+              {
+                detail: "X/Y/Z als lokaler Versatz zum Parent",
+                label: "Relativ zum Parent",
+                value: "parent",
+              },
+            ]}
+            value={bodyPlacementMode}
+            onChange={(value) =>
+              setBodyPlacementMode(value as "parent" | "world")
+            }
+          />
+        </FormGrid>
+
+        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-md border border-border/60 bg-muted/30 px-2.5 py-2">
+          <div className="min-w-0 flex-1 basis-40">
+            <div className="flex items-center gap-1.5 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+              <Crosshair aria-hidden className="size-3.5 shrink-0" />
+              Koordinaten
+            </div>
+            <p
+              className="mt-0.5 truncate text-xs text-foreground"
+              title={coordinateSummary}
+            >
+              {coordinateSummary}
+            </p>
+          </div>
+          <Button
+            title={
+              coordinateClipboard
+                ? "Gemerkten Punkt in die Positionsfelder übernehmen"
+                : "Koordinaten aus dem System-Clipboard lesen"
+            }
+            variant="outline"
+            onClick={() => void loadCoordinateClipboard()}
+          >
+            <ClipboardPaste aria-hidden className="size-3.5" />
+            {coordinateClipboard ? "Punkt übernehmen" : "Clipboard lesen"}
+          </Button>
+        </div>
+
+        <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-2">
+          <Button
+            className="w-full min-w-0"
+            title="Körper als Kind der Auswahl erstellen"
+            variant="default"
+            onClick={() =>
+              onAddBodyElement({ ...bodyDraft, parentId: selectedId })
+            }
+          >
+            <Box aria-hidden className="size-3.5" />
+            <span className="truncate">Als Kind der Auswahl erstellen</span>
+          </Button>
+          <Button
+            className="w-full min-w-0"
+            disabled={selectedParentId == null}
+            title="Körper am Parent der Auswahl erstellen"
+            variant="default"
+            onClick={() => {
+              if (selectedParentId == null) {
+                return;
+              }
+              onAddBodyElement({
+                ...bodyDraft,
+                parentId: selectedParentId,
+              });
+            }}
+          >
+            <Box aria-hidden className="size-3.5" />
+            <span className="truncate">Am Parent der Auswahl erstellen</span>
+          </Button>
+        </div>
+        {selectedParentId == null ? (
+          <InlineAlert tone="warning">
+            Die Auswahl hat keinen Parent in der IFC-Struktur.
+          </InlineAlert>
+        ) : null}
+
+        <div className="border-t border-border/60 pt-2.5">
+          <Button
+            className="w-full min-w-0 border-destructive/40 text-destructive hover:border-destructive hover:bg-destructive/10 hover:text-destructive"
+            disabled={!selectedBody.hasRepresentation}
+            title={
+              selectedBody.hasRepresentation
+                ? `Geometrie von #${selectedId} entfernen (Element, Platzierung und Psets bleiben erhalten)`
+                : `#${selectedId} hat keine Körper-Geometrie`
+            }
+            variant="outline"
+            onClick={onRemoveBodyFromSelected}
+          >
+            <Trash2 aria-hidden className="size-3.5" />
+            <span className="truncate">Ausgewählte Geometrie löschen</span>
+          </Button>
+        </div>
+      </section>
     </PanelShell>
   );
 }
 
-function isBodyTargetEntity(entity?: NativeIfcEntity) {
-  return (
-    Boolean(entity) &&
-    !entity?.type.startsWith("IFCREL") &&
-    !entity?.type.startsWith("IFCPROPERTY") &&
-    !entity?.type.startsWith("IFCQUANTITY") &&
-    ![
-      "IFCPROJECT",
-      "IFCSITE",
-      "IFCBUILDING",
-      "IFCBUILDINGSTOREY",
-      "IFCOWNERHISTORY",
-      "IFCAPPLICATION",
-      "IFCUNITASSIGNMENT",
-      "IFCSIUNIT",
-    ].includes(entity?.type ?? "")
-  );
+function describeLengthUnit(metersPerUnit: number) {
+  if (Math.abs(metersPerUnit - 1) < 1e-9) {
+    return "Meter (×1)";
+  }
+  if (Math.abs(metersPerUnit - 0.001) < 1e-9) {
+    return "Millimeter (×0,001)";
+  }
+  if (Math.abs(metersPerUnit - 0.01) < 1e-9) {
+    return "Zentimeter (×0,01)";
+  }
+  if (Math.abs(metersPerUnit - 0.3048) < 1e-6) {
+    return "Fuß (×0,3048)";
+  }
+  return `×${metersPerUnit}`;
 }
 
 function findHierarchyParentId(document: NativeIfcDocument, entityId: number) {
@@ -369,75 +375,9 @@ function isHierarchyRelationship(type: string) {
   );
 }
 
-function FormRow({
-  children,
-  compact,
-}: {
-  children: ReactNode;
-  compact?: boolean;
-}) {
+function FormGrid({ children }: { children: ReactNode }) {
   return (
-    <div
-      className={
-        compact
-          ? "grid min-w-0 grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-2"
-          : "grid min-w-0 grid-cols-[repeat(auto-fit,minmax(12rem,1fr))] gap-2"
-      }
-    >
-      {children}
-    </div>
-  );
-}
-
-function FormField({ children }: { children: ReactNode }) {
-  return <div className="min-w-0 max-w-full overflow-hidden">{children}</div>;
-}
-
-function HintLine({ children }: { children: ReactNode }) {
-  return (
-    <div className="text-xs leading-5 text-muted-foreground">{children}</div>
-  );
-}
-
-function ModeButton({
-  active,
-  icon,
-  onPress,
-  subtitle,
-  title,
-}: {
-  active: boolean;
-  icon: ReactNode;
-  onPress(): void;
-  subtitle: string;
-  title: string;
-}) {
-  return (
-    <button
-      className={`flex min-w-0 overflow-hidden items-start gap-2 rounded-md border p-2.5 text-left transition-colors ${
-        active
-          ? "border-primary bg-primary/10 text-primary"
-          : "border-border/70 bg-background hover:bg-muted/45"
-      }`}
-      type="button"
-      onClick={onPress}
-    >
-      <span className="mt-0.5 shrink-0">{icon}</span>
-      <span className="min-w-0 flex-1">
-        <span className="block text-sm font-semibold text-foreground">
-          {title}
-        </span>
-        <span className="block truncate text-xs text-muted-foreground">
-          {subtitle}
-        </span>
-      </span>
-    </button>
-  );
-}
-
-function BuilderStatusGrid({ children }: { children: ReactNode }) {
-  return (
-    <div className="grid min-w-0 gap-1.5 border-y border-border/60 py-2">
+    <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-2">
       {children}
     </div>
   );
@@ -453,39 +393,15 @@ function StatusPill({
   value: string;
 }) {
   return (
-    <div className="grid min-w-0 grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-2 text-xs">
-      <span className="flex min-w-0 items-center gap-1.5 font-semibold uppercase tracking-wide text-muted-foreground">
+    <div className="grid min-w-0 grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-2">
+      <span className="flex min-w-0 items-center gap-1.5 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
         <span className="shrink-0">{icon}</span>
         <span className="truncate">{label}</span>
       </span>
-      <span className="truncate text-sm text-foreground" title={value}>
+      <span className="truncate text-xs text-foreground" title={value}>
         {value}
       </span>
     </div>
-  );
-}
-
-function PrimaryBodyButton({
-  disabled,
-  icon,
-  label,
-  onPress,
-}: {
-  disabled?: boolean;
-  icon: ReactNode;
-  label: string;
-  onPress(): void;
-}) {
-  return (
-    <button
-      className="inline-flex h-9 min-w-0 w-full items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
-      disabled={disabled}
-      type="button"
-      onClick={onPress}
-    >
-      <span className="shrink-0">{icon}</span>
-      <span className="truncate">{label}</span>
-    </button>
   );
 }
 
@@ -526,8 +442,4 @@ function readCoordinateNumber(value: string) {
 function formatBodyCoordinate(value: number) {
   const rounded = Math.round(value * 1000) / 1000;
   return String(Object.is(rounded, -0) ? 0 : rounded);
-}
-
-function shortIfc(value: string) {
-  return value.replace(/^IFC/i, "");
 }

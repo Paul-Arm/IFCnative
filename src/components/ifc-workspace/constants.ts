@@ -22,6 +22,8 @@ export const MOSAIC_VIEW_IDS: MosaicViewId[] = [
   "portal-settings",
 ];
 
+// Der Diagnostik-Assistent ist bewusst NICHT im Standard-Layout — er bleibt
+// über das "Fenster"-Menü und die Review-/Prüf-Workspaces erreichbar.
 export const DEFAULT_MOSAIC_LAYOUT: MosaicNode<MosaicViewId> = {
   direction: "row",
   first: {
@@ -31,15 +33,10 @@ export const DEFAULT_MOSAIC_LAYOUT: MosaicNode<MosaicViewId> = {
     splitPercentage: 62,
   },
   second: {
-    direction: "column",
-    first: {
-      direction: "row",
-      first: "viewer",
-      second: "inspector",
-      splitPercentage: 66,
-    },
-    second: "diagnostics",
-    splitPercentage: 72,
+    direction: "row",
+    first: "viewer",
+    second: "inspector",
+    splitPercentage: 66,
   },
   splitPercentage: 27,
 };
@@ -148,17 +145,17 @@ export const BUILT_IN_WORKSPACES: WorkspaceDefinition[] = [
   },
   {
     builtIn: true,
-    description: "Grosses Modellfenster mit Pruefung und Notizen.",
+    description: "Großes Modellfenster mit Prüfung und Notizen.",
     id: "builtin:review",
     layout: REVIEW_MOSAIC_LAYOUT,
     name: "Review",
   },
   {
     builtIn: true,
-    description: "Pruefung mit Inspector, Ressourcen und Kontrollfreigaben.",
+    description: "Prüfung mit Inspector, Ressourcen und Kontrollfreigaben.",
     id: "builtin:inspection",
     layout: INSPECTION_MOSAIC_LAYOUT,
-    name: "Pruefung",
+    name: "Prüfung",
   },
   {
     builtIn: true,
@@ -179,7 +176,7 @@ export const BUILT_IN_WORKSPACES: WorkspaceDefinition[] = [
 export const MOSAIC_TITLES: Record<MosaicViewId, string> = {
   builder: "Baukasten",
   catalog: "Objektkatalog",
-  "catalog-review": "Objektkatalog: Pruefung",
+  "catalog-review": "Objektkatalog: Prüfung",
   diagnostics: "Diagnostik",
   inspector: "Inspector",
   notes: "Notizen",
@@ -187,11 +184,11 @@ export const MOSAIC_TITLES: Record<MosaicViewId, string> = {
   portal: "MKP Portal",
   "portal-settings": "Portal-Einstellungen",
   "pset-batch": "Pset Batch",
-  recent: "Kuerzlich verwendet",
+  recent: "Kürzlich verwendet",
   "resource-references": "Klassifikation & Dokumente",
   "resource-controls": "Freigaben & Constraints",
-  structure: "Structure",
-  viewer: "3D Viewer",
+  structure: "Struktur",
+  viewer: "3D-Viewer",
 };
 
 export const ENTITY_TYPES = [
@@ -427,25 +424,30 @@ export const GRAPH_PRESETS: Array<{
   label: string;
   detail: string;
 }> = [
-  { value: "all", label: "All", detail: "Every indexed relationship type" },
+  {
+    value: "all",
+    label: "Übersicht",
+    detail: "Alle semantischen Beziehungen; Psets und Qtos sind eingebettet",
+  },
   {
     value: "spatial",
-    label: "Spatial",
-    detail: "Aggregation, nesting and containment",
+    label: "Räumlich",
+    detail: "Aggregation, Verschachtelung und räumliche Zuordnung",
   },
   {
     value: "properties",
-    label: "Properties",
-    detail: "Psets, quantities and type definitions",
+    label: "Eigenschaften",
+    detail: "Eingebettete Psets und Qtos sowie Typdefinitionen",
   },
   {
     value: "resources",
-    label: "Resources",
-    detail: "Groups, materials, classification and documents",
+    label: "Ressourcen",
+    detail:
+      "Gruppen, Bibliotheken und Prüfressourcen; Material, Klassifikation und Dokumente sind eingebettet",
   },
   {
     value: "geometry",
-    label: "Geometry",
-    detail: "Placement and representation references when indexed",
+    label: "Geometrie",
+    detail: "Platzierungs- und Repräsentationsreferenzen",
   },
 ];

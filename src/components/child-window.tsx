@@ -53,10 +53,25 @@ export function ChildWindow({
     externalDocument.title = title;
     copyDocumentStyles(window.document, externalDocument);
 
-    externalDocument.documentElement.className =
-      window.document.documentElement.className;
+    const syncRootTheme = () => {
+      externalDocument.documentElement.className =
+        window.document.documentElement.className;
+      externalDocument.documentElement.style.colorScheme =
+        window.document.documentElement.style.colorScheme;
+      externalDocument.documentElement.style.fontSize =
+        window.document.documentElement.style.fontSize;
+    };
+    syncRootTheme();
     externalDocument.body.className = window.document.body.className;
     externalDocument.body.style.margin = "0";
+
+    // Theme-Wechsel (Hell/Dunkel) erreichen das Kindfenster sonst nicht:
+    // die .dark-Klasse wird nur am Haupt-documentElement umgeschaltet.
+    const themeObserver = new MutationObserver(syncRootTheme);
+    themeObserver.observe(window.document.documentElement, {
+      attributeFilter: ["class", "style"],
+      attributes: true,
+    });
 
     const mount = externalDocument.createElement("div");
     mount.style.height = "100vh";
@@ -72,6 +87,7 @@ export function ChildWindow({
     externalWindow.addEventListener("beforeunload", handleBeforeUnload);
 
     return () => {
+      themeObserver.disconnect();
       externalWindow.removeEventListener("beforeunload", handleBeforeUnload);
       externalWindow.close();
     };

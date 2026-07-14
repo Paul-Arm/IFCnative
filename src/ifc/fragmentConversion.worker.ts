@@ -1,5 +1,7 @@
 import { IfcImporter } from "@thatopen/fragments";
 
+import { readFragmentCoordination } from "./fragmentCoordination";
+
 import type {
     ConvertIfcToFragmentsWorkerRequest,
     ConvertIfcToFragmentsWorkerResponse,
@@ -30,9 +32,9 @@ async function convertIfcToFragments(
     };
     importer.webIfcSettings = {
       // Rebase far-from-origin (georeferenced) models so vertex data stays
-      // within float32 precision. The rebase transform is stored in the
-      // fragments file and re-applied to model.object at load time, so
-      // viewer world coordinates still equal IFC world coordinates.
+      // within float32 precision. The scene stays rebased; the stored
+      // transform is extracted below so picks/writes can be converted to
+      // real IFC world coordinates explicitly.
       COORDINATE_TO_ORIGIN: true,
     };
     importer.addAllAttributes();
@@ -43,7 +45,9 @@ async function convertIfcToFragments(
     const startedAt = performance.now();
     const fragments = await importer.process({
       bytes,
-      raw: request.raw ?? false,
+      // Unkomprimiert lassen: Koordinations-Transformation direkt aus dem
+      // Flatbuffer lesen; der Viewer lädt mit { raw: true }.
+      raw: true,
       progressCallback: (progress, data) => {
         if (progress - lastProgress < 0.03 && progress < 1) {
           return;
@@ -64,6 +68,7 @@ async function convertIfcToFragments(
     const buffer = toExactArrayBuffer(fragments);
     workerScope.postMessage(
       {
+        coordination: readFragmentCoordination(fragments),
         elapsedMs: performance.now() - startedAt,
         fragments: buffer,
         ok: true,

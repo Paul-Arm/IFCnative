@@ -1,3 +1,4 @@
+import { createPositionMarkerProfile, polygonArea } from "./bodyProfiles";
 import { createMinimalIfcProject } from "./builder";
 import {
     decodeStepString,
@@ -47,12 +48,23 @@ export interface NativeIfcTypeAssignment {
   objectIds: number[];
 }
 
-export type NativeBodyProfile = "rectangle" | "cylinder";
+export type NativeBodyProfile =
+  | "rectangle"
+  | "cylinder"
+  | "ellipse"
+  | "triangle"
+  | "marker";
 
 export interface NativeBodyElementOptions {
   type: string;
   name: string;
   parentId?: number;
+  /**
+   * "world": x/y/z sind ABSOLUTE IFC-Weltkoordinaten; sie werden in die
+   * Platzierungskette des Bezugselements (placementRelativeToId bzw. Parent)
+   * projiziert und als kleine lokale Koordinaten gespeichert.
+   * "parent" (Standard): x/y/z sind lokale Offsets relativ zum Bezug.
+   */
   placementMode?: "parent" | "world";
   width: number | string;
   depth: number | string;
@@ -61,6 +73,21 @@ export interface NativeBodyElementOptions {
   x?: number | string;
   y?: number | string;
   z?: number | string;
+  /**
+   * true = x/y/z liegen bereits in Modell-Einheiten und IFC-Achsen vor (z. B.
+   * vom Builder anhand des gepickten Elements kalibriert) und werden NICHT mehr
+   * von Metern in Modell-Einheiten umgerechnet. Abmessungen bleiben immer Meter.
+   */
+  positionInModelUnits?: boolean;
+  /**
+   * Optionale Entität, relativ zu deren IFCLOCALPLACEMENT der neue Körper
+   * platziert wird (statt der Platzierung des Parents). So erbt der Körper
+   * eine georeferenzierte Platzierungskette statt riesiger Absolutkoordinaten,
+   * die float-Präzision verlieren. Im Weltmodus werden absolute x/y/z
+   * automatisch in dieses Bezugssystem projiziert, sonst sind x/y/z kleine
+   * lokale Koordinaten. Die räumliche Einordnung (parentId) bleibt unberührt.
+   */
+  placementRelativeToId?: number;
   tag?: string;
 }
 
@@ -526,6 +553,30 @@ function getLocalPlacementWorldFrame(
   return frame;
 }
 
+/**
+ * Projiziert einen ABSOLUTEN IFC-Weltpunkt in das Koordinatensystem einer
+ * IFCLOCALPLACEMENT-Kette (inklusive deren eigener Platzierung). Ergebnis =
+ * lokale Koordinaten für einen Körper, dessen Placement RelativeTo auf diese
+ * Kette zeigt: klein bei georeferenzierten Modellen, Weltposition bleibt exakt.
+ */
+function worldPointInPlacementFrame(
+  document: NativeIfcDocument,
+  placementId: number | undefined,
+  world: NativeVector3,
+): NativeVector3 {
+  const frame = getLocalPlacementWorldFrame(document, placementId);
+  const delta = {
+    x: world.x - frame.origin.x,
+    y: world.y - frame.origin.y,
+    z: world.z - frame.origin.z,
+  };
+  return {
+    x: dotVectors(delta, frame.xAxis),
+    y: dotVectors(delta, frame.yAxis),
+    z: dotVectors(delta, frame.zAxis),
+  };
+}
+
 export interface NativeWorldPlacementSummary extends NativePlacementSummary {
   worldX: number;
   worldY: number;
@@ -557,6 +608,30 @@ export function getNativePlacementWorld(
   };
 }
 
+export interface NativeWorldPlacementFrame {
+  origin: { x: number; y: number; z: number };
+  xAxis: { x: number; y: number; z: number };
+  yAxis: { x: number; y: number; z: number };
+  zAxis: { x: number; y: number; z: number };
+}
+
+/**
+ * Welt-Frame (Ursprung + Achsen) der EIGENEN Platzierung einer Entität —
+ * inklusive aller geerbten Rotationen der Platzierungskette (relevant bei
+ * georeferenzierten Modellen mit rotierter Site). IFC-Achsen (Z-up),
+ * Ursprung in Modelleinheiten.
+ */
+export function getNativePlacementWorldFrame(
+  document: NativeIfcDocument,
+  entityId: number,
+): NativeWorldPlacementFrame | undefined {
+  const placement = getNativePlacement(document, entityId);
+  if (!placement) {
+    return undefined;
+  }
+  return getLocalPlacementWorldFrame(document, placement.placementId);
+}
+
 export function nativeWorldToLocalPlacementPoint(
   document: NativeIfcDocument,
   entityId: number,
@@ -577,6 +652,127 @@ export function nativeWorldToLocalPlacementPoint(
     y: dotVectors(delta, frame.yAxis),
     z: dotVectors(delta, frame.zAxis),
   };
+}
+
+/**
+ * Projiziert einen WELT-Versatz (IFC-Achsen, Modelleinheiten) in das EIGENE
+ * Platzierungs-Koordinatensystem einer Entität. Ergebnis = lokale Koordinaten
+ * für einen Körper, dessen IFCLOCALPLACEMENT relativ zur Platzierung dieser
+ * Entität liegt (placementRelativeToId). Damit erbt der Körper die
+ * georeferenzierte Kette und bleibt bei kleinen lokalen Koordinaten.
+ */
+export function nativeWorldDeltaInElementFrame(
+  document: NativeIfcDocument,
+  entityId: number,
+  worldDelta: { x: number; y: number; z: number },
+): { x: number; y: number; z: number } | undefined {
+  const placement = getNativePlacement(document, entityId);
+  if (!placement) {
+    return undefined;
+  }
+  const frame = getLocalPlacementWorldFrame(document, placement.placementId);
+  return {
+    x: dotVectors(worldDelta, frame.xAxis),
+    y: dotVectors(worldDelta, frame.yAxis),
+    z: dotVectors(worldDelta, frame.zAxis),
+  };
+}
+
+const SI_LENGTH_PREFIX_FACTORS: Record<string, number> = {
+  KILO: 1e3,
+  DECI: 1e-1,
+  CENTI: 1e-2,
+  MILLI: 1e-3,
+};
+
+function readEnumToken(arg?: string) {
+  const match = (arg ?? "").trim().match(/^\.(.+)\.$/);
+  return match ? match[1].toUpperCase() : undefined;
+}
+
+/**
+ * Meter pro Modell-Längeneinheit (Millimeter-Modell → 0.001, Meter → 1,
+ * Fuß → 0.3048). Der Fragments-Viewer skaliert Modelle mit demselben Faktor
+ * auf Meter; alle Schreibpfade, die Viewer-Koordinaten oder Meter-Eingaben in
+ * IFC-Placements/Geometrie übertragen, müssen damit zurückrechnen.
+ */
+export function getNativeLengthUnitScale(document: NativeIfcDocument): number {
+  const assignmentUnitIds = document.entities
+    .filter((entity) => entity.type === "IFCUNITASSIGNMENT")
+    .flatMap((entity) => readReferences(entity.args[0] ?? ""));
+  const fallbackUnitIds = document.entities
+    .filter(
+      (entity) =>
+        entity.type === "IFCSIUNIT" || entity.type === "IFCCONVERSIONBASEDUNIT",
+    )
+    .map((entity) => entity.id);
+  const candidateIds = assignmentUnitIds.length
+    ? assignmentUnitIds
+    : fallbackUnitIds;
+  for (const id of candidateIds) {
+    const scale = lengthUnitScaleFromEntity(
+      document,
+      document.entityById.get(id),
+      0,
+    );
+    if (scale !== undefined) {
+      return scale;
+    }
+  }
+  return 1;
+}
+
+function lengthUnitScaleFromEntity(
+  document: NativeIfcDocument,
+  entity: NativeIfcEntity | undefined,
+  depth: number,
+): number | undefined {
+  if (!entity || depth > 4) {
+    return undefined;
+  }
+  if (entity.type === "IFCSIUNIT") {
+    // args: Dimensions(*), UnitType, Prefix, Name
+    if (readEnumToken(entity.args[1]) !== "LENGTHUNIT") {
+      return undefined;
+    }
+    if (readEnumToken(entity.args[3]) !== "METRE") {
+      return undefined;
+    }
+    const prefix = readEnumToken(entity.args[2]);
+    return prefix ? (SI_LENGTH_PREFIX_FACTORS[prefix] ?? 1) : 1;
+  }
+  if (entity.type === "IFCCONVERSIONBASEDUNIT") {
+    // args: Dimensions, UnitType, Name, ConversionFactor(#IFCMEASUREWITHUNIT)
+    if (readEnumToken(entity.args[1]) !== "LENGTHUNIT") {
+      return undefined;
+    }
+    const measure = document.entityById.get(
+      readReferences(entity.args[3] ?? "")[0],
+    );
+    if (measure?.type === "IFCMEASUREWITHUNIT") {
+      const numeric = Number(
+        (measure.args[0] ?? "").match(/-?\d*\.?\d+(?:[eE][+-]?\d+)?/)?.[0],
+      );
+      const innerScale =
+        lengthUnitScaleFromEntity(
+          document,
+          document.entityById.get(readReferences(measure.args[1] ?? "")[0]),
+          depth + 1,
+        ) ?? 1;
+      if (Number.isFinite(numeric) && numeric > 0) {
+        return numeric * innerScale;
+      }
+    }
+    const name = (unquote(entity.args[2] ?? "") ?? "").toUpperCase();
+    if (name.includes("FOOT") || name.includes("FEET")) {
+      return 0.3048;
+    }
+    if (name.includes("INCH")) {
+      return 0.0254;
+    }
+    return undefined;
+  }
+  return undefined;
 }
 
 export function getNativeBodyRepresentation(
@@ -959,6 +1155,168 @@ export function addNativeElement(
   );
 }
 
+/**
+ * Erzeugt die Profil-Entitäten für einen extrudierten Körper.
+ *
+ * Parametrische Profile (Rechteck/Kreis/Ellipse) nutzen die vorab vergebenen
+ * profileAxis/profilePoint/profileDirection-Ids; Polylinien-Profile (Dreieck,
+ * Positionsmarker) erzeugen ihre Punkte/Polylinie über `allocateId` und lassen
+ * die Axis-Ids ungenutzt (STEP-Ids müssen nicht lückenlos sein).
+ */
+function buildBodyProfileEntities(options: {
+  allocateId(): number;
+  depth: string;
+  height: string;
+  profile: NativeBodyProfile;
+  profileAxisId: number;
+  profileDirectionId: number;
+  profileId: number;
+  profilePointId: number;
+  width: string;
+}): { entities: NativeIfcEntity[]; footprintArea: string } {
+  const { profile, profileId, width, depth } = options;
+  const w = Number(width);
+  const d = Number(depth);
+
+  const parametricProfile = (
+    type: string,
+    name: string,
+    dimensionArgs: string[],
+  ): { entities: NativeIfcEntity[]; footprintArea: string } => ({
+    entities: [
+      {
+        args: [
+          ".AREA.",
+          quote(name),
+          `#${options.profileAxisId}`,
+          ...dimensionArgs,
+        ],
+        description: "",
+        globalId: "",
+        id: profileId,
+        name,
+        type,
+      },
+      {
+        args: [`#${options.profilePointId}`, `#${options.profileDirectionId}`],
+        description: "",
+        globalId: "",
+        id: options.profileAxisId,
+        name: "",
+        type: "IFCAXIS2PLACEMENT2D",
+      },
+      {
+        args: ["(0.,0.)"],
+        description: "",
+        globalId: "",
+        id: options.profilePointId,
+        name: "",
+        type: "IFCCARTESIANPOINT",
+      },
+      {
+        args: ["(1.,0.)"],
+        description: "",
+        globalId: "",
+        id: options.profileDirectionId,
+        name: "",
+        type: "IFCDIRECTION",
+      },
+    ],
+    footprintArea: "0.",
+  });
+
+  const polylineProfile = (
+    name: string,
+    coordinates: ReadonlyArray<readonly [number, number]>,
+    footprintArea: string,
+  ): { entities: NativeIfcEntity[]; footprintArea: string } => {
+    const pointIds = coordinates.map(() => options.allocateId());
+    const polylineId = options.allocateId();
+    return {
+      entities: [
+        {
+          args: [".AREA.", quote(name), `#${polylineId}`],
+          description: "",
+          globalId: "",
+          id: profileId,
+          name,
+          type: "IFCARBITRARYCLOSEDPROFILEDEF",
+        },
+        {
+          // Geschlossene Polylinie: erster Punkt am Ende wiederholt.
+          args: [
+            `(${[...pointIds, pointIds[0]].map((id) => `#${id}`).join(",")})`,
+          ],
+          description: "",
+          globalId: "",
+          id: polylineId,
+          name: "",
+          type: "IFCPOLYLINE",
+        },
+        ...coordinates.map(([x, y], index) => ({
+          args: [`(${formatDecimal(x)},${formatDecimal(y)})`],
+          description: "",
+          globalId: "",
+          id: pointIds[index],
+          name: "",
+          type: "IFCCARTESIANPOINT",
+        })),
+      ],
+      footprintArea,
+    };
+  };
+
+  if (profile === "cylinder") {
+    const radius = formatDecimal(Math.max(w, d) / 2);
+    const result = parametricProfile(
+      "IFCCIRCLEPROFILEDEF",
+      "Cylindrical Body",
+      [radius],
+    );
+    return { ...result, footprintArea: circleAreaStepNumber(radius) };
+  }
+  if (profile === "ellipse") {
+    const semiX = Math.max(w / 2, 0.0001);
+    const semiY = Math.max(d / 2, 0.0001);
+    const result = parametricProfile(
+      "IFCELLIPSEPROFILEDEF",
+      "Elliptical Body",
+      [formatDecimal(semiX), formatDecimal(semiY)],
+    );
+    return { ...result, footprintArea: formatDecimal(Math.PI * semiX * semiY) };
+  }
+  if (profile === "triangle") {
+    const hw = w / 2;
+    const hd = d / 2;
+    return polylineProfile(
+      "Triangular Body",
+      [
+        [-hw, -hd],
+        [hw, -hd],
+        [0, hd],
+      ],
+      formatDecimal((w * d) / 2),
+    );
+  }
+  if (profile === "marker") {
+    // Aufrechter Karten-Pin: Silhouette in Breite × Höhe (Profil-X/Y wird
+    // über die gedrehte Solid-Platzierung vertikal gestellt); die Tiefe ist
+    // die dünne Extrusionsdicke.
+    const markerPoints = createPositionMarkerProfile(w, Number(options.height));
+    return polylineProfile(
+      "Position Marker Body",
+      markerPoints,
+      formatDecimal(polygonArea(markerPoints)),
+    );
+  }
+  const result = parametricProfile(
+    "IFCRECTANGLEPROFILEDEF",
+    "Rectangular Body",
+    [width, depth],
+  );
+  return { ...result, footprintArea: multiplyStepNumbers(width, depth) };
+}
+
 export function addNativeBodyElement(
   document: NativeIfcDocument,
   options: NativeBodyElementOptions,
@@ -987,27 +1345,82 @@ export function addNativeBodyElement(
   const parent = options.parentId
     ? document.entityById.get(options.parentId)
     : undefined;
-  const parentPlacementRef =
-    options.placementMode === "world"
-      ? "$"
-      : parent?.args[5]?.startsWith("#")
-        ? parent.args[5]
-        : "$";
+  // Platzierungsbezug (RelativeTo der IFCLOCALPLACEMENT): immer die Kette
+  // eines Bezugselements erben (explizit gewähltes Element, sonst der Parent),
+  // damit georeferenzierte Modelle kleine lokale Koordinaten behalten — auch
+  // im Weltmodus. Nur ohne Bezugsplatzierung wird absolut ($) geschrieben.
+  const placementRelativeToEntity =
+    options.placementRelativeToId != null
+      ? document.entityById.get(options.placementRelativeToId)
+      : undefined;
+  const referencePlacementRef = placementRelativeToEntity?.args[5]?.startsWith(
+    "#",
+  )
+    ? placementRelativeToEntity.args[5]
+    : parent?.args[5]?.startsWith("#")
+      ? parent.args[5]
+      : undefined;
+  const parentPlacementRef = referencePlacementRef ?? "$";
   const contextRef = `#${document.entities.find((entity) => entity.type === "IFCGEOMETRICREPRESENTATIONCONTEXT")?.id ?? 10}`;
-  const width = positiveStepNumber(options.width, 1);
-  const depth = positiveStepNumber(options.depth, 1);
-  const height = positiveStepNumber(options.height, 1);
+  // Eingaben (Abmessungen und X/Y/Z) sind METER — die Einheit des Viewers und
+  // der UI. Reale Modelle stehen oft in Millimetern; ohne Umrechnung landet
+  // der Körper 1000-fach zu klein nahe dem Ursprung.
+  const metersPerUnit = getNativeLengthUnitScale(document);
+  const toModelUnits = (meters: string) =>
+    formatDecimal(Number(meters) / metersPerUnit);
+  const width = toModelUnits(positiveStepNumber(options.width, 1));
+  const depth = toModelUnits(positiveStepNumber(options.depth, 1));
+  const height = toModelUnits(positiveStepNumber(options.height, 1));
   const profile = normalizeBodyProfile(options.profile);
-  const radius = formatDecimal(Math.max(Number(width), Number(depth)) / 2);
-  const footprintArea =
-    profile === "cylinder"
-      ? circleAreaStepNumber(radius)
-      : multiplyStepNumbers(width, depth);
-  const netVolume = multiplyStepNumbers(footprintArea, height);
-  const x = numericStepNumber(options.x, 0);
-  const y = numericStepNumber(options.y, 0);
-  const z = numericStepNumber(options.z, 0);
-  const productType = normalizeType(options.type || "IFCBUILTELEMENT");
+  // Marker: aufrechter, flacher Karten-Pin. Das Profil (Breite × Höhe) steht
+  // vertikal (gedrehte Solid-Platzierung), extrudiert wird dünn um die Tiefe.
+  const isMarker = profile === "marker";
+  const extrusionLength = isMarker ? depth : height;
+  // Polylinien-Profile (Dreieck/Marker) vergeben zusätzliche Ids hinter dem
+  // festen Block productId+0..+19.
+  let extraEntityId = quantityRelId + 1;
+  const profileBuild = buildBodyProfileEntities({
+    allocateId: () => extraEntityId++,
+    depth,
+    height,
+    profile,
+    profileAxisId,
+    profileDirectionId,
+    profileId,
+    profilePointId,
+    width,
+  });
+  const markerAxisDirectionId = isMarker ? extraEntityId++ : undefined;
+  const markerRefDirectionId = isMarker ? extraEntityId++ : undefined;
+  const footprintArea = profileBuild.footprintArea;
+  const netVolume = multiplyStepNumbers(footprintArea, extrusionLength);
+  // Position: entweder bereits Modell-Einheiten (IFC-Achsen) oder Meter → skalieren.
+  const toPositionUnits = options.positionInModelUnits
+    ? (value: string) => value
+    : toModelUnits;
+  const inputPoint = {
+    x: Number(toPositionUnits(numericStepNumber(options.x, 0))),
+    y: Number(toPositionUnits(numericStepNumber(options.y, 0))),
+    z: Number(toPositionUnits(numericStepNumber(options.z, 0))),
+  };
+  // Weltmodus: x/y/z sind ABSOLUTE IFC-Weltkoordinaten und werden in das
+  // Bezugssystem der referenzierten Platzierungskette projiziert. Ohne
+  // Bezugsplatzierung (RelativeTo = $) ist lokal == Welt.
+  const localPoint =
+    options.placementMode === "world" && referencePlacementRef
+      ? worldPointInPlacementFrame(
+          document,
+          readReferences(referencePlacementRef)[0],
+          inputPoint,
+        )
+      : inputPoint;
+  const x = formatDecimal(localPoint.x);
+  const y = formatDecimal(localPoint.y);
+  const z = formatDecimal(localPoint.z);
+  const productType = normalizeProductTypeForSchema(
+    document.schema,
+    normalizeType(options.type || "IFCBUILTELEMENT"),
+  );
   const name = options.name.trim() || "New Body Element";
   const tag = options.tag?.trim() || `IFCNATIVE-BODY-${productId}`;
 
@@ -1074,7 +1487,7 @@ export function addNativeBodyElement(
         `#${profileId}`,
         `#${solidAxisId}`,
         `#${extrusionDirectionId}`,
-        height,
+        extrusionLength,
       ],
       description: "",
       globalId: "",
@@ -1083,7 +1496,17 @@ export function addNativeBodyElement(
       type: "IFCEXTRUDEDAREASOLID",
     },
     {
-      args: [`#${solidPointId}`, "$", "$"],
+      // Marker: Profil-Ebene vertikal stellen (Achse -Y, RefDirection +X)
+      // => Profil-X bleibt Welt-X, Profil-Y zeigt nach Welt-Z (oben); die
+      // Extrusion läuft entlang -Y und wird über den Startpunkt zentriert.
+      args:
+        isMarker && markerAxisDirectionId && markerRefDirectionId
+          ? [
+              `#${solidPointId}`,
+              `#${markerAxisDirectionId}`,
+              `#${markerRefDirectionId}`,
+            ]
+          : [`#${solidPointId}`, "$", "$"],
       description: "",
       globalId: "",
       id: solidAxisId,
@@ -1091,46 +1514,12 @@ export function addNativeBodyElement(
       type: "IFCAXIS2PLACEMENT3D",
     },
     {
-      args: ["(0.,0.,0.)"],
+      args: [
+        isMarker ? `(0.,${formatDecimal(Number(depth) / 2)},0.)` : "(0.,0.,0.)",
+      ],
       description: "",
       globalId: "",
       id: solidPointId,
-      name: "",
-      type: "IFCCARTESIANPOINT",
-    },
-    {
-      args:
-        profile === "cylinder"
-          ? [".AREA.", quote("Cylindrical Body"), `#${profileAxisId}`, radius]
-          : [
-              ".AREA.",
-              quote("Rectangular Body"),
-              `#${profileAxisId}`,
-              width,
-              depth,
-            ],
-      description: "",
-      globalId: "",
-      id: profileId,
-      name: profile === "cylinder" ? "Cylindrical Body" : "Rectangular Body",
-      type:
-        profile === "cylinder"
-          ? "IFCCIRCLEPROFILEDEF"
-          : "IFCRECTANGLEPROFILEDEF",
-    },
-    {
-      args: [`#${profilePointId}`, `#${profileDirectionId}`],
-      description: "",
-      globalId: "",
-      id: profileAxisId,
-      name: "",
-      type: "IFCAXIS2PLACEMENT2D",
-    },
-    {
-      args: ["(0.,0.)"],
-      description: "",
-      globalId: "",
-      id: profilePointId,
       name: "",
       type: "IFCCARTESIANPOINT",
     },
@@ -1142,14 +1531,27 @@ export function addNativeBodyElement(
       name: "",
       type: "IFCDIRECTION",
     },
-    {
-      args: ["(1.,0.)"],
-      description: "",
-      globalId: "",
-      id: profileDirectionId,
-      name: "",
-      type: "IFCDIRECTION",
-    },
+    ...(isMarker && markerAxisDirectionId && markerRefDirectionId
+      ? [
+          {
+            args: ["(0.,-1.,0.)"],
+            description: "",
+            globalId: "",
+            id: markerAxisDirectionId,
+            name: "",
+            type: "IFCDIRECTION",
+          },
+          {
+            args: ["(1.,0.,0.)"],
+            description: "",
+            globalId: "",
+            id: markerRefDirectionId,
+            name: "",
+            type: "IFCDIRECTION",
+          },
+        ]
+      : []),
+    ...profileBuild.entities,
   );
 
   if (parent) {
@@ -3130,6 +3532,53 @@ export function removeNativeEntity(
 }
 
 /**
+ * Entfernt die Körper-Geometrie eines Produkts: löst die Referenz auf das
+ * IFCPRODUCTDEFINITIONSHAPE und räumt die dadurch verwaiste Repräsentations-
+ * Kette (Shape → Representations → Solids → Placements/Punkte/Richtungen) per
+ * Referenzzählung ab. Von anderen Produkten geteilte Shapes/Profile bleiben
+ * erhalten; Platzierung, Psets und Beziehungen des Produkts bleiben unberührt.
+ */
+export function removeNativeBodyRepresentation(
+  document: NativeIfcDocument,
+  entityId: number,
+) {
+  const entity = document.entityById.get(entityId);
+  if (!entity) {
+    return document;
+  }
+  const shapeArgIndex = entity.args.findIndex((arg) => {
+    const trimmed = arg.trim();
+    if (!/^#\d+$/.test(trimmed)) {
+      return false;
+    }
+    return (
+      document.entityById.get(Number(trimmed.slice(1)))?.type ===
+      "IFCPRODUCTDEFINITIONSHAPE"
+    );
+  });
+  if (shapeArgIndex < 0) {
+    return document;
+  }
+  const shapeId = Number(entity.args[shapeArgIndex].trim().slice(1));
+
+  const survivors = cloneDocumentEntities(document);
+  const product = survivors.find((item) => item.id === entityId);
+  if (!product) {
+    return document;
+  }
+  setArg(product.args, shapeArgIndex, "$");
+
+  const removedIds = new Set<number>();
+  collectOrphanedResources(document, survivors, removedIds, [shapeId]);
+
+  const next = survivors.filter((item) => !removedIds.has(item.id));
+  return parseNativeIfcText(
+    serializeEntities(document, next),
+    document.fileName,
+  );
+}
+
+/**
  * Structural / catalog anchors that must never be auto-deleted just because the
  * element that referenced them is gone, even when they end up unreferenced.
  */
@@ -3180,6 +3629,7 @@ function collectOrphanedResources(
   document: NativeIfcDocument,
   survivors: NativeIfcEntity[],
   removedIds: Set<number>,
+  extraSeedIds?: Iterable<number>,
 ) {
   const survivorById = new Map(survivors.map((entity) => [entity.id, entity]));
 
@@ -3206,8 +3656,10 @@ function collectOrphanedResources(
     }
   }
 
-  // Seed candidates from everything the removed entities referenced.
-  const queue: number[] = [];
+  // Seed candidates from everything the removed entities referenced, plus
+  // explicitly detached resources (e.g. a geometry subtree whose product
+  // reference was just cleared).
+  const queue: number[] = [...(extraSeedIds ?? [])];
   for (const entity of document.entities) {
     if (removedIds.has(entity.id)) {
       queue.push(...readUniqueReferencesFromArgs(entity.args));
@@ -5191,10 +5643,32 @@ function parseMaterialPropertyRows(
   return rows.length ? rows : fallback;
 }
 
-function normalizeBodyProfile(profile: string | undefined) {
-  return String(profile ?? "rectangle").toLowerCase() === "cylinder"
-    ? "cylinder"
-    : "rectangle";
+const BODY_PROFILES: ReadonlySet<string> = new Set([
+  "rectangle",
+  "cylinder",
+  "ellipse",
+  "triangle",
+  "marker",
+]);
+
+/**
+ * IFCBUILTELEMENT existiert erst ab IFC4X3 — in IFC4/IFC2X3-Dateien fällt die
+ * Klasse auf den überall gültigen IFCBUILDINGELEMENTPROXY zurück, damit die
+ * Datei schema-konform bleibt und Fremd-Viewer das Element nicht verwerfen.
+ */
+function normalizeProductTypeForSchema(schema: string, type: string) {
+  if (
+    type === "IFCBUILTELEMENT" &&
+    !schema.toUpperCase().startsWith("IFC4X3")
+  ) {
+    return "IFCBUILDINGELEMENTPROXY";
+  }
+  return type;
+}
+
+function normalizeBodyProfile(profile: string | undefined): NativeBodyProfile {
+  const token = String(profile ?? "rectangle").toLowerCase();
+  return BODY_PROFILES.has(token) ? (token as NativeBodyProfile) : "rectangle";
 }
 
 function normalizeGroupType(type: string) {

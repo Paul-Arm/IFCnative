@@ -1,5 +1,6 @@
 import { Badge as ShadcnBadge } from "@/components/ui/badge";
 import { Button as ShadcnButton, buttonVariants } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
     Collapsible,
     CollapsibleContent,
@@ -34,34 +35,58 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import type { NativeIfcDocument, NativeIfcEntity } from "@/ifc";
 import { cn } from "@/lib/utils";
-import { ChevronDown, LayoutGrid } from "lucide-react";
-import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import type { VariantProps } from "class-variance-authority";
+import {
+    AlertTriangle,
+    ChevronDown,
+    Info,
+    LayoutGrid,
+    OctagonX,
+} from "lucide-react";
+import {
+    useMemo,
+    useState,
+    type CSSProperties,
+    type ReactNode,
+} from "react";
 
 import { MOSAIC_TITLES } from "./constants";
 import type { MosaicViewId } from "./types";
 
-type StyleProp<T> = T | false | null | undefined | StyleProp<T>[];
-type ViewStyle = CSSProperties & Record<string, unknown>;
+type ButtonVariant = VariantProps<typeof buttonVariants>["variant"];
+type ButtonSize = VariantProps<typeof buttonVariants>["size"];
 
+/** Panel-Button: shadcn-Button mit kompakten Panel-Defaults (sm/outline). */
 export function Button({
+  children,
+  className,
   disabled,
-  label,
-  onPress,
-  primary,
+  onClick,
+  size = "sm",
+  title,
+  type,
+  variant = "outline",
 }: {
+  children?: ReactNode;
+  className?: string;
   disabled?: boolean;
-  label: string;
-  onPress(): void;
-  primary?: boolean;
+  onClick?(): void;
+  size?: ButtonSize;
+  title?: string;
+  type?: "button" | "submit";
+  variant?: ButtonVariant;
 }) {
   return (
     <ShadcnButton
+      className={className}
       disabled={disabled}
-      size="sm"
-      variant={primary ? "default" : "outline"}
-      onClick={onPress}
+      size={size}
+      title={title}
+      type={type ?? "button"}
+      variant={variant}
+      onClick={onClick}
     >
-      {label}
+      {children}
     </ShadcnButton>
   );
 }
@@ -107,7 +132,7 @@ export function PanelHeader({
           </div>
         ) : null}
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <h2 className="min-w-0 truncate text-base font-semibold leading-tight text-foreground">
+          <h2 className="min-w-0 truncate text-sm font-semibold leading-tight text-foreground">
             {title}
           </h2>
           {meta}
@@ -141,32 +166,29 @@ export function ToolbarGroup({ children }: { children: ReactNode }) {
   );
 }
 
+export type BadgeTone = "neutral" | "success" | "warning" | "danger" | "info";
+
 export function Badge({
   children,
   tone = "neutral",
 }: {
   children: ReactNode;
-  tone?: "neutral" | "success" | "warning" | "danger" | "info";
+  tone?: BadgeTone;
 }) {
-  const variant =
-    tone === "danger"
-      ? "destructive"
-      : tone === "neutral"
-        ? "outline"
-        : "secondary";
-
   return (
     <ShadcnBadge
       className={cn(
         "h-5 rounded-md border px-1.5 text-[0.65rem] font-semibold uppercase tracking-wider",
         tone === "neutral" &&
           "border-border/70 bg-background text-muted-foreground",
-        tone === "success" &&
-          "border-emerald-200/70 bg-emerald-50 text-emerald-700",
-        tone === "warning" && "border-amber-200/70 bg-amber-50 text-amber-800",
-        tone === "info" && "border-sky-200/70 bg-sky-50 text-sky-700",
+        tone === "success" && "border-success/25 bg-success/10 text-success",
+        tone === "warning" &&
+          "border-warning/30 bg-warning/10 text-warning-foreground dark:text-warning",
+        tone === "danger" &&
+          "border-destructive/25 bg-destructive/10 text-destructive",
+        tone === "info" && "border-info/25 bg-info/10 text-info",
       )}
-      variant={variant}
+      variant="outline"
     >
       {children}
     </ShadcnBadge>
@@ -249,12 +271,12 @@ export function DataTableCell({
 }: {
   children: ReactNode;
   column: DataTableColumn;
-  style?: StyleProp<ViewStyle>;
+  style?: CSSProperties;
 }) {
   return (
     <TableCell
       className="h-8 px-1.5 py-0 align-middle"
-      style={mergeTableCellStyle(column, style)}
+      style={{ ...dataTableColumnStyle(column), ...style }}
     >
       {children}
     </TableCell>
@@ -266,43 +288,6 @@ function dataTableColumnStyle(column: DataTableColumn): CSSProperties {
     minWidth: column.minWidth ?? 0,
     width: column.width,
   };
-}
-
-function mergeTableCellStyle(
-  column: DataTableColumn,
-  style?: StyleProp<ViewStyle>,
-): CSSProperties {
-  return {
-    ...dataTableColumnStyle(column),
-    ...normalizeCssStyle(style),
-  };
-}
-
-function normalizeCssStyle(style?: StyleProp<ViewStyle>): CSSProperties {
-  const merged: CSSProperties = {};
-  const stylesToMerge = Array.isArray(style) ? style : [style];
-
-  for (const item of stylesToMerge) {
-    if (!item || typeof item !== "object") {
-      continue;
-    }
-    for (const [key, value] of Object.entries(item)) {
-      if (value === undefined || value === null || value === false) {
-        continue;
-      }
-      if (key === "paddingHorizontal") {
-        merged.paddingLeft = value as CSSProperties["paddingLeft"];
-        merged.paddingRight = value as CSSProperties["paddingRight"];
-      } else if (key === "paddingVertical") {
-        merged.paddingTop = value as CSSProperties["paddingTop"];
-        merged.paddingBottom = value as CSSProperties["paddingBottom"];
-      } else if (key !== "flex") {
-        (merged as Record<string, unknown>)[key] = value;
-      }
-    }
-  }
-
-  return merged;
 }
 
 export function MosaicWindowMenu({
@@ -321,7 +306,7 @@ export function MosaicWindowMenu({
         )}
       >
         <LayoutGrid aria-hidden className="size-3.5" />
-        <span>Fenster</span>
+        <span className="hidden sm:inline">Fenster</span>
         {closedIds.length ? (
           <span className="rounded-full bg-primary/15 px-1.5 text-[0.65rem] font-semibold text-primary">
             {closedIds.length}
@@ -353,15 +338,29 @@ export function MosaicWindowMenu({
   );
 }
 
+export interface SegmentedOption {
+  value: string;
+  label: string;
+}
+
 export function SegmentedControl({
   options,
   value,
   onChange,
 }: {
-  options: string[];
+  options: (string | SegmentedOption)[];
   value: string;
   onChange(value: string): void;
 }) {
+  const normalized = useMemo(
+    () =>
+      options.map((option) =>
+        typeof option === "string"
+          ? { label: option.replace(/-/g, " "), value: option }
+          : option,
+      ),
+    [options],
+  );
   return (
     <Tabs
       value={value}
@@ -373,14 +372,14 @@ export function SegmentedControl({
       className="min-w-0"
     >
       <TabsList className="flex h-auto w-full flex-wrap justify-start gap-0.5 group-data-horizontal/tabs:h-auto">
-        {options.map((option) => (
+        {normalized.map((option) => (
           <TabsTrigger
-            key={option}
-            value={option}
-            className="h-7 min-w-0 flex-none px-2 text-[11px] font-medium whitespace-nowrap capitalize"
-            title={option.replace(/-/g, " ")}
+            key={option.value}
+            value={option.value}
+            className="h-7 min-w-0 flex-none px-2 text-[11px] font-medium whitespace-nowrap"
+            title={option.label}
           >
-            <span className="truncate">{option.replace(/-/g, " ")}</span>
+            <span className="truncate">{option.label}</span>
           </TabsTrigger>
         ))}
       </TabsList>
@@ -424,6 +423,151 @@ export function LabeledInput({
         />
       )}
     </label>
+  );
+}
+
+/**
+ * Eingabefeld, das erst bei Blur/Enter committet; Escape verwirft den
+ * Entwurf. Unkontrolliert (key={value} remountet bei externen Änderungen),
+ * damit externe Updates nicht mitten ins Tippen grätschen.
+ */
+export function CommitInput({
+  className,
+  disabled,
+  mono,
+  onCommit,
+  placeholder,
+  trim = true,
+  value,
+}: {
+  className?: string;
+  disabled?: boolean;
+  mono?: boolean;
+  onCommit(value: string): void;
+  placeholder?: string;
+  /** Entwurf vor dem Commit trimmen (Standard: an). */
+  trim?: boolean;
+  value: string;
+}) {
+  return (
+    <Input
+      key={value}
+      className={cn("h-7 text-xs", mono && "font-mono", className)}
+      defaultValue={value}
+      disabled={disabled}
+      placeholder={placeholder}
+      onBlur={(event) => {
+        const raw = event.currentTarget.value;
+        const next = trim ? raw.trim() : raw;
+        if (next !== value) {
+          onCommit(next);
+        }
+        // Anzeige mit dem tatsächlich übergebenen Wert synchron halten:
+        // bei No-op-Commits (z. B. nur Whitespace-Änderung) den alten Wert
+        // wiederherstellen, sonst den normalisierten Entwurf zeigen, bis
+        // die value-Prop nachzieht.
+        event.currentTarget.value = next === value ? value : next;
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.currentTarget.blur();
+        } else if (event.key === "Escape") {
+          event.currentTarget.value = value;
+          event.currentTarget.blur();
+        }
+      }}
+    />
+  );
+}
+
+export function CheckboxField({
+  checked,
+  description,
+  disabled,
+  label,
+  onCheckedChange,
+}: {
+  checked: boolean;
+  description?: string;
+  disabled?: boolean;
+  label: string;
+  onCheckedChange(checked: boolean): void;
+}) {
+  return (
+    <label className="flex min-w-0 cursor-pointer items-start gap-2">
+      <Checkbox
+        checked={checked}
+        disabled={disabled}
+        onCheckedChange={(state) => onCheckedChange(state === true)}
+        className="mt-0.5"
+      />
+      <span className="grid min-w-0 gap-0.5">
+        <span className="text-xs font-medium text-foreground">{label}</span>
+        {description ? (
+          <span className="text-xs text-muted-foreground">{description}</span>
+        ) : null}
+      </span>
+    </label>
+  );
+}
+
+export function InlineAlert({
+  children,
+  tone = "info",
+}: {
+  children: ReactNode;
+  tone?: "info" | "warning" | "danger";
+}) {
+  const IconComponent =
+    tone === "danger" ? OctagonX : tone === "warning" ? AlertTriangle : Info;
+  return (
+    <div
+      className={cn(
+        "flex items-start gap-2 rounded-md border px-2.5 py-2 text-xs leading-relaxed",
+        tone === "info" && "border-info/30 bg-info/10 text-foreground",
+        tone === "warning" && "border-warning/35 bg-warning/10 text-foreground",
+        tone === "danger" &&
+          "border-destructive/35 bg-destructive/10 text-foreground",
+      )}
+      role={tone === "danger" ? "alert" : "status"}
+    >
+      <IconComponent
+        aria-hidden
+        className={cn(
+          "mt-0.5 size-3.5 shrink-0",
+          tone === "info" && "text-info",
+          tone === "warning" && "text-warning",
+          tone === "danger" && "text-destructive",
+        )}
+      />
+      <div className="min-w-0">{children}</div>
+    </div>
+  );
+}
+
+export function EmptyState({
+  action,
+  description,
+  title,
+}: {
+  action?: ReactNode;
+  description?: string;
+  title: string;
+}) {
+  return (
+    <div className="grid flex-1 place-items-center rounded-lg border border-dashed border-border/70 bg-muted/20 p-6 text-center">
+      <div className="grid max-w-sm gap-1.5">
+        <p className="text-sm font-medium text-foreground">{title}</p>
+        {description ? (
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            {description}
+          </p>
+        ) : null}
+        {action ? (
+          <div className="mt-2 flex justify-center gap-2">{action}</div>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -473,8 +617,8 @@ export function DropdownField({
     [options],
   );
   const selected = normalized.find((option) => option.value === value) ?? {
-    detail: "custom value",
-    label: value || "Select",
+    detail: "Eigener Wert",
+    label: value || "Auswählen",
     value,
   };
 
@@ -690,7 +834,7 @@ export function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function shortType(type: string) {
+export function shortType(type: string): string {
   const [kind, firstType, secondType] = type.split(":");
   if (kind === "IFCPROPERTYLISTVALUE") {
     return `List ${shortType(firstType ?? "IFCLABEL")}`;

@@ -2,7 +2,6 @@ export interface ConvertIfcToFragmentsRequest {
   bytes?: ArrayBuffer | null;
   file?: File | null;
   fileName: string;
-  raw?: boolean;
   text?: string;
   wasmPath: string;
 }
@@ -24,6 +23,11 @@ type ConvertIfcToFragmentsWorkerResponse =
       ok: true;
       elapsedMs: number;
       fragments: ArrayBuffer;
+      /**
+       * Rebase-Transformation (Welt → Ursprung, Viewer-Achsen/Meter) aus der
+       * Konvertierung — siehe FragmentCoordination. null = kein Rebase.
+       */
+      coordination: number[] | null;
     }
   | {
       requestId: number;
@@ -38,7 +42,9 @@ type ConvertIfcToFragmentsWorkerResponse =
 
 export interface ConvertIfcToFragmentsResult {
   elapsedMs: number;
+  /** UNKOMPRIMIERTE Fragments-Bytes — mit { raw: true } laden. */
   fragments: ArrayBuffer;
+  coordination: number[] | null;
 }
 
 let nextRequestId = 0;
@@ -83,6 +89,7 @@ export function convertIfcToFragmentsInWorker(
       dispose();
       if (message.ok) {
         resolve({
+          coordination: message.coordination,
           elapsedMs: message.elapsedMs,
           fragments: message.fragments,
         });
@@ -111,15 +118,19 @@ async function convertIfcToFragmentsOnMainThread(
   request: ConvertIfcToFragmentsRequest,
   onProgress?: (progress: ConvertIfcToFragmentsProgress) => void,
 ) {
-  const { IfcImporter } = await import("@thatopen/fragments");
+  const [{ IfcImporter }, { readFragmentCoordination }] = await Promise.all([
+    import("@thatopen/fragments"),
+    import("./fragmentCoordination"),
+  ]);
   const importer = new IfcImporter();
   importer.wasm = {
     absolute: true,
     path: request.wasmPath,
   };
   importer.webIfcSettings = {
-    // Rebase for float32 precision; the transform is re-applied at load time
-    // via model.getCoordinationMatrix() so viewer world == IFC world.
+    // Rebase far-from-origin (georeferenced) models so vertex data stays
+    // within float32 precision. The scene stays rebased; the transform is
+    // extracted below and used to convert picks/writes to IFC world.
     COORDINATE_TO_ORIGIN: true,
   };
   importer.addAllAttributes();
@@ -129,7 +140,9 @@ async function convertIfcToFragmentsOnMainThread(
   const startedAt = performance.now();
   const fragments = await importer.process({
     bytes,
-    raw: request.raw ?? false,
+    // Unkomprimiert lassen: die Koordinations-Transformation wird direkt aus
+    // dem Flatbuffer gelesen und der Viewer lädt mit { raw: true }.
+    raw: true,
     progressCallback: (progress, data) =>
       onProgress?.({
         fileName: request.fileName,
@@ -139,6 +152,7 @@ async function convertIfcToFragmentsOnMainThread(
       }),
   });
   return {
+    coordination: readFragmentCoordination(fragments),
     elapsedMs: performance.now() - startedAt,
     fragments: toExactArrayBuffer(fragments),
   };

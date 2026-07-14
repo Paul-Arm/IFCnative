@@ -1,8 +1,9 @@
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Clock3, FileText, Trash2 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Focus, FileText, Trash2 } from "lucide-react";
 
-import { Badge, PanelHeader, PanelShell } from "./ui";
+import { Badge, EmptyState, PanelHeader, PanelShell } from "./ui";
 import type { RecentIfcFileEntry } from "./workspaceStorage";
 
 export function RecentFilesPanel({
@@ -19,13 +20,14 @@ export function RecentFilesPanel({
   return (
     <PanelShell scroll>
       <PanelHeader
-        title="Kuerzlich verwendet"
-        meta={<Badge tone="info">{entries.length.toLocaleString()}</Badge>}
+        title="Kürzlich verwendet"
+        meta={<Badge tone="info">{entries.length.toLocaleString("de-DE")}</Badge>}
         actions={
           entries.length ? (
             <Button
               size="sm"
-              variant="outline"
+              variant="ghost"
+              className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
               title="Liste leeren"
               onClick={onClear}
             >
@@ -36,59 +38,76 @@ export function RecentFilesPanel({
         }
       />
       {entries.length ? (
-        <div className="grid gap-2">
+        <div className="divide-y divide-border/50 overflow-hidden rounded-md border border-border/60 bg-card">
           {entries.map((entry) => {
-            const isActive = entry.documentId === activeDocumentId;
+            const isActive =
+              Boolean(entry.documentId) &&
+              entry.documentId === activeDocumentId;
+            const canFocus = Boolean(entry.documentId) && !isActive;
+            const meta = [
+              entry.schema,
+              entry.entityCount
+                ? `${entry.entityCount.toLocaleString("de-DE")} Entitäten`
+                : null,
+              entry.size ? formatByteSize(entry.size) : null,
+              formatDateTime(entry.openedAt),
+            ].filter((part): part is string => Boolean(part));
             return (
-              <article
+              <div
                 key={entry.id}
-                className="grid gap-2 rounded-md border border-border/60 bg-card px-3 py-2"
+                className={cn(
+                  "group flex min-w-0 items-center gap-2 px-2 py-1.5 transition-colors",
+                  canFocus && "cursor-pointer hover:bg-muted/45",
+                  isActive && "bg-primary/5",
+                )}
+                title={entry.path || entry.name}
+                onClick={
+                  canFocus
+                    ? () => onSelectDocument(entry.documentId as string)
+                    : undefined
+                }
               >
-                <div className="flex min-w-0 items-start gap-2">
-                  <FileText
-                    aria-hidden
-                    className="mt-0.5 size-4 shrink-0 text-primary"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium text-foreground">
-                      {entry.name}
-                    </div>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-                      <span>{formatDateTime(entry.openedAt)}</span>
-                      {entry.schema ? <span>{entry.schema}</span> : null}
-                      {entry.entityCount ? (
-                        <span>
-                          {entry.entityCount.toLocaleString()} Entities
-                        </span>
-                      ) : null}
-                      {entry.size ? <span>{formatByteSize(entry.size)}</span> : null}
-                    </div>
+                <FileText
+                  aria-hidden
+                  className={cn(
+                    "size-4 shrink-0",
+                    isActive ? "text-primary" : "text-muted-foreground",
+                  )}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-xs font-medium text-foreground">
+                    {entry.name}
                   </div>
-                  {entry.documentId ? (
-                    <Button
-                      disabled={isActive}
-                      size="sm"
-                      variant={isActive ? "secondary" : "outline"}
-                      onClick={() => onSelectDocument(entry.documentId as string)}
-                    >
-                      {isActive ? "Aktiv" : "Fokus"}
-                    </Button>
-                  ) : null}
+                  <div className="truncate text-[11px] text-muted-foreground">
+                    {meta.join(" · ")}
+                  </div>
                 </div>
-                {entry.path ? (
-                  <div className="truncate rounded bg-muted/45 px-2 py-1 font-mono text-[11px] text-muted-foreground">
-                    {entry.path}
-                  </div>
+                {isActive ? (
+                  <Badge tone="success">Aktiv</Badge>
+                ) : entry.documentId ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 shrink-0 px-2 text-xs opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
+                    title="Dokument im Editor fokussieren"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onSelectDocument(entry.documentId as string);
+                    }}
+                  >
+                    <Focus aria-hidden className="size-3.5" />
+                    Fokus
+                  </Button>
                 ) : null}
-              </article>
+              </div>
             );
           })}
         </div>
       ) : (
-        <div className="flex min-h-40 flex-col items-center justify-center gap-2 rounded-md border border-dashed border-border/70 bg-muted/30 text-center text-sm text-muted-foreground">
-          <Clock3 aria-hidden className="size-5" />
-          Noch keine IFC-Dateien geladen.
-        </div>
+        <EmptyState
+          title="Noch keine IFC-Dateien geladen"
+          description="Geöffnete Dateien erscheinen hier mit Schema, Entitäten und Größe."
+        />
       )}
     </PanelShell>
   );
@@ -103,16 +122,16 @@ export function NotesPanel({
 }) {
   return (
     <PanelShell>
-      <PanelHeader
-        title="Notizen"
-        meta={<Badge tone="success">sync</Badge>}
-      />
+      <PanelHeader title="Notizen" meta={<Badge tone="success">sync</Badge>} />
       <Textarea
         className="min-h-0 flex-1 resize-none text-sm leading-relaxed"
-        placeholder="Notizen zum Modell..."
+        placeholder="Notizen zum Modell …"
         value={notes}
         onChange={(event) => onNotesChange(event.currentTarget.value)}
       />
+      <p className="shrink-0 text-[11px] text-muted-foreground">
+        Änderungen werden automatisch lokal gespeichert.
+      </p>
     </PanelShell>
   );
 }
@@ -122,18 +141,21 @@ function formatDateTime(value: string) {
   if (Number.isNaN(date.valueOf())) {
     return value;
   }
-  return date.toLocaleString();
+  return date.toLocaleString("de-DE", {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
 }
 
 function formatByteSize(bytes: number) {
   if (bytes >= 1024 * 1024 * 1024) {
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toLocaleString("de-DE", { maximumFractionDigits: 1, minimumFractionDigits: 1 })} GB`;
   }
   if (bytes >= 1024 * 1024) {
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(bytes / (1024 * 1024)).toLocaleString("de-DE", { maximumFractionDigits: 1, minimumFractionDigits: 1 })} MB`;
   }
   if (bytes >= 1024) {
-    return `${Math.round(bytes / 1024).toLocaleString()} KB`;
+    return `${Math.round(bytes / 1024).toLocaleString("de-DE")} KB`;
   }
-  return `${bytes.toLocaleString()} B`;
+  return `${bytes.toLocaleString("de-DE")} B`;
 }

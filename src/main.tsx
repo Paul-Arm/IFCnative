@@ -5,7 +5,12 @@ import "react-mosaic-component/react-mosaic-component.css";
 import { ErrorBoundary } from "./components/error-boundary";
 import IfcWorkspace from "./components/ifc-workspace";
 import { resetWorkspaceUi } from "./components/ifc-workspace/workspaceStorage";
+import { initTheme } from "./hooks/use-theme";
+import { initUiScale } from "./hooks/use-ui-scale";
 import "./global.css";
+
+initTheme();
+initUiScale();
 
 const root = globalThis.document.getElementById("root");
 
