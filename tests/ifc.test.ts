@@ -88,8 +88,8 @@ import {
     updateNativeRelationship,
 } from "../src/ifc/nativeDocument";
 import {
-  buildNativeGraphNeighborhood,
-  resolveNativeGraphAnchorId,
+    buildNativeGraphNeighborhood,
+    resolveNativeGraphAnchorId,
 } from "../src/ifc/nativeGraph";
 import {
     buildObjectInfoIndex,
@@ -2076,7 +2076,10 @@ test("native graph presets filter relationship neighborhoods", () => {
   const attachedSet = withProperty.propertySetsByEntity.get(wall.id)?.[0];
   assert.ok(attachedSet);
   assert.ok(!properties.nodeIds.includes(attachedSet.id));
-  assert.equal(resolveNativeGraphAnchorId(withProperty, attachedSet.id), wall.id);
+  assert.equal(
+    resolveNativeGraphAnchorId(withProperty, attachedSet.id),
+    wall.id,
+  );
   assert.equal(
     resolveNativeGraphAnchorId(withProperty, attachedSet.values[0].id),
     wall.id,
@@ -2137,9 +2140,7 @@ test("native graph presets filter relationship neighborhoods", () => {
     ),
   );
   assert.ok(
-    resources.edges.every(
-      (edge) => !embeddedResourceTypes.has(edge.type),
-    ),
+    resources.edges.every((edge) => !embeddedResourceTypes.has(edge.type)),
   );
 });
 
