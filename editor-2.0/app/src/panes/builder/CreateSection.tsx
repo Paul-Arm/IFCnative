@@ -177,7 +177,7 @@ export default function CreateSection({
           pick
             ? `Übernimmt ${formatPointStatus(pick)} (Weltkoordinaten — passt, ` +
               "solange der Elternknoten im Ursprung liegt)."
-            : "Erst im Viewer mit „Koordinaten picken" einen Punkt wählen."
+            : "Erst im Viewer mit „Koordinaten picken“ einen Punkt wählen."
         }
         onClick={() =>
           pick &&

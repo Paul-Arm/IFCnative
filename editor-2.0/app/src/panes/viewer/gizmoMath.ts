@@ -69,7 +69,9 @@ export function axisRayParam(
   const ab = dot(axisDir, ray.direction);
   const denominator = 1 - ab * ab;
   if (Math.abs(denominator) < 1e-6) return null;
-  const s = (dot(d, ray.direction) * ab - dot(d, axisDir)) / denominator;
+  // Normalgleichungen zweier Geraden, aufgelöst nach s (d = P_ray − O_achse):
+  //   s = (d·a − (a·b)(d·b)) / (1 − (a·b)²)
+  const s = (dot(d, axisDir) - ab * dot(d, ray.direction)) / denominator;
   return Number.isFinite(s) ? s : null;
 }
 

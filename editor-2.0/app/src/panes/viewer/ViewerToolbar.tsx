@@ -43,10 +43,10 @@ const AUTO_TITLE =
   "Standardmäßig aus: Der Export großer Modelle ist teuer.";
 
 const MOVE_TITLE =
-  "Werkzeug „Verschieben" (Taste W): Achsenpfeile am ausgewählten Bauteil " +
+  "Werkzeug „Verschieben“ (Taste W): Achsenpfeile am ausgewählten Bauteil " +
   "ziehen; beim Loslassen wird die Verschiebung als Command ausgeführt.";
 const PICK_TITLE =
-  "Werkzeug „Koordinaten picken": Klick auf Geometrie liefert den Weltpunkt " +
+  "Werkzeug „Koordinaten picken“: Klick auf Geometrie liefert den Weltpunkt " +
   "in Metern (Statuszeile + Zwischenablage).";
 
 const PRESETS: ReadonlyArray<{ id: PresetView; label: string }> = [
