@@ -44,6 +44,8 @@ Ziel: die drei größten technischen Annahmen beweisen, bevor Struktur entsteht.
 
 ## M3 — Batch-Psets + Objektkatalog
 
+> **Stand 2026-07-28: umgesetzt.** Batch-Pset-Matrix mit Abdeckungs-Badge, Divergenz-Hervorhebung, Vorschau-Dialog vor jeder Massenaktion (alt→neu je Objekt), abfragebasierter Auswahl (Klasse + Property-Filter über BulkQueryEngine inkl. Overlay-Sicht) und CSV-Roundtrip (Semikolon+BOM, GlobalId-Matching, nur echte Diffs, ein Undo-Schritt). Objektkatalog: openSIM-Import (Diagnostik+Monitoring) in der domain-Schicht, Prüfung mit 6 Befundarten + Quick-Fixes, „Pset(s) auf Auswahl anwenden", **Katalog→IDS-Generator** mit LoI-Filter. Listen-Pane über @ifc-lite/lists (Presets, Spalten-Discovery, mehrstufige Gruppierung mit Summen, CSV). 39 Tests grün. Hinweis: @ifc-lite/query.whereProperty ist wegen der leeren PropertyTable des kolumnaren Parses nicht nutzbar (dokumentiert) — Abfragen laufen über BulkQueryEngine/entityIndex.
+
 - Batch-Pset-Matrix (Parität) + Vorschau über `BulkQueryEngine.preview()`.
 - Abfrage-basierte Auswahl (`@ifc-lite/query`).
 - xlsx/CSV-Roundtrip (`CsvConnector`), Datums-/Typ-Validierung.
