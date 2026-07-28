@@ -17,6 +17,13 @@ export interface EditorCommand {
   label: string;
   run(): void;
   undo(): void;
+  /**
+   * Optionaler Redo-Pfad (Review-Befund 12): `run()` schreibt ohne skipHistory
+   * in die append-only Mutationshistorie — ein Redo über `run()` verdoppelt
+   * dort Einträge. Commands, bei denen das zählt, wiederholen den Endzustand
+   * hier mit skipHistory. Fehlt `redo`, fällt die Pipeline auf `run()` zurück.
+   */
+  redo?(): void;
 }
 
 export interface AuditEntry {
@@ -97,7 +104,8 @@ export const useCommands = create<CommandState>((set, get) => ({
     const history = get().byDocument[docId];
     const command = history?.redoStack.at(-1);
     if (!command) return;
-    command.run();
+    if (command.redo) command.redo();
+    else command.run();
     set((state) => ({
       byDocument: {
         ...state.byDocument,
@@ -111,6 +119,25 @@ export const useCommands = create<CommandState>((set, get) => ({
     useDocuments.getState().touch(docId);
   },
 }));
+
+/**
+ * DIE dokumentweite Revisionsquelle (Review: einzige Cache-/Memo-Abhängigkeit
+ * für Modell-Lesestände in allen Panes). Steigt bei do, undo UND redo —
+ * anders als `changeCount` (append-only Historie, Befund B4/3) und anders als
+ * komponentenlokale revision-Zähler (Befund 5).
+ */
+export function useDocRevision(docId: string | null): number {
+  return useCommands((s) =>
+    docId ? (s.byDocument[docId]?.audit.length ?? 0) : 0,
+  );
+}
+
+/** Undo-Stack-Tiefe = ehrliche „ungespeicherte Änderungen"-Anzeige (Befund 3/15). */
+export function usePendingChangeCount(docId: string | null): number {
+  return useCommands((s) =>
+    docId ? (s.byDocument[docId]?.undoStack.length ?? 0) : 0,
+  );
+}
 
 /** Nächste Undo-/Redo-Beschriftung für Tooltips (null = nichts vorhanden). */
 export function useUndoRedoLabels(docId: string | null): {
