@@ -9,7 +9,12 @@
  * schmale, typisierte Fassade (`ViewerHandle`) zur Verfügung.
  */
 import type { CoordinateInfo, GeometryProcessor } from "@ifc-lite/geometry";
-import type { RenderOptions, Renderer, SectionPlane } from "@ifc-lite/renderer";
+import type {
+  ClipBox,
+  RenderOptions,
+  Renderer,
+  SectionPlane,
+} from "@ifc-lite/renderer";
 
 export type ViewerColor = [number, number, number, number];
 
@@ -22,6 +27,9 @@ export interface ViewerViewState {
   hiddenIds: ReadonlySet<number>;
   isolatedIds: ReadonlySet<number> | null;
   sectionPlane: SectionPlane | null;
+  /** Achsparallele Clip-Box (Renderer-Weltraum); null = aus. Unabhängig von
+   *  der Schnittebene — der Renderer erlaubt beide gleichzeitig (M9). */
+  clipBox: ClipBox | null;
   xray: boolean;
 }
 
@@ -57,6 +65,11 @@ export interface ViewerHandle {
   resize(width: number, height: number): void;
   /** Overlay-Zugriff (M9); null ohne laufenden Renderer (IDLE-Handle). */
   overlay(): ViewerOverlayAccess | null;
+  /** Modell-Bounds im Renderer-Rahmen (Y-up, Meter); null ohne Geometrie. */
+  modelBounds(): {
+    min: { x: number; y: number; z: number };
+    max: { x: number; y: number; z: number };
+  } | null;
 }
 
 export type ViewerStatus =
@@ -82,6 +95,9 @@ const IDLE: ViewerHandle = {
   zoom() {},
   resize() {},
   overlay() {
+    return null;
+  },
+  modelBounds() {
     return null;
   },
 };
@@ -125,6 +141,7 @@ function buildOptions(
     isStreaming: streaming,
   };
   if (view.sectionPlane) options.sectionPlane = view.sectionPlane;
+  if (view.clipBox?.enabled) options.clipBox = view.clipBox;
   if (view.xray) {
     // Ghost-Kontext: alles außer der Auswahl wird transparent (Auswahl ist
     // laut Renderer-Vertrag immer von ghostAlpha ausgenommen).
@@ -147,6 +164,7 @@ function createSession(
     hiddenIds: new Set<number>(),
     isolatedIds: null,
     sectionPlane: null,
+    clipBox: null,
     xray: false,
   };
   let options = buildOptions(view, true);
@@ -319,6 +337,10 @@ function createSession(
         isStreaming: () => streaming,
         originShift: () => coordInfo?.originShift ?? { x: 0, y: 0, z: 0 },
       };
+    },
+
+    modelBounds() {
+      return renderer.getModelBounds();
     },
   };
 }

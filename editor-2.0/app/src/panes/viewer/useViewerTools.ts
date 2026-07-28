@@ -84,6 +84,14 @@ export function useViewerTools(
         !event.altKey
       ) {
         selectTool("move");
+      } else if (
+        (event.key === "x" || event.key === "X") &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey
+      ) {
+        // Wie im ifc-lite-Viewer: X toggelt das Schnitt-Werkzeug.
+        selectTool("slice");
       } else if (event.key === "Escape") {
         // Ein laufender Gizmo-Drag fängt Esc selbst ab (capture-Phase).
         setTool("none");
@@ -146,6 +154,11 @@ export function useViewerTools(
   }
   if (tool === "pick" && !pickPoint) {
     extraParts.push("Koordinaten picken: Klick auf Geometrie");
+  }
+  if (tool === "slice") {
+    extraParts.push(
+      "Schneiden: Ziehen verschiebt die Ebene — Umschalt+Rad 1 %, Alt+Rad 0,1 %",
+    );
   }
   if (pickPoint && pickPoint.docId === docId) {
     extraParts.push(

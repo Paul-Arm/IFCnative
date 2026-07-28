@@ -22,11 +22,15 @@ import { attachViewerControls } from "./controls";
 import { useGeometryRebuild } from "./useGeometryRebuild";
 import { useViewerOverrides } from "./overrides";
 import { useViewerTools } from "./useViewerTools";
-import { DEFAULT_SECTION, toSectionPlane, type SectionState } from "./section";
+import { toSectionPlane } from "./section";
+import { useSectionStore } from "./sectionStore";
+import { useSliceTool } from "./useSliceTool";
+import { useClipBox } from "./useClipBox";
 import ViewerToolbar from "./ViewerToolbar";
 import ViewerStatusLine from "./ViewerStatusLine";
 import MoveGizmo from "./MoveGizmo";
 import PickMarker from "./PickMarker";
+import { ClipBoxLayer } from "./ClipBoxOverlay";
 
 const NO_IDS: ReadonlySet<number> = new Set<number>();
 
@@ -59,8 +63,13 @@ export default function ViewerPane() {
   const [hidden, setHidden] = useState<ReadonlySet<number>>(NO_IDS);
   const [isolated, setIsolated] = useState<ReadonlySet<number> | null>(null);
   const [xray, setXray] = useState(false);
-  const [section, setSection] = useState<SectionState>(DEFAULT_SECTION);
   const [note, setNote] = useState<string | null>(null);
+
+  // — Schnitt + Clip-Box: geteilter Store (Ribbon „Ansicht → Schnitt") —
+  const section = useSectionStore((s) => s.section);
+  const patchSection = useSectionStore((s) => s.patchSection);
+  const boxEnabled = useSectionStore((s) => s.boxEnabled);
+  const requestBoxOnSelection = useSectionStore((s) => s.requestBoxOnSelection);
 
   // — Viewer-Instanz pro Geometrie-Stand: bei Wechsel neu laden, alte disposen —
   useEffect(() => {
@@ -97,9 +106,15 @@ export default function ViewerPane() {
     setHidden(NO_IDS);
     setIsolated(null);
     setXray(false);
-    setSection(DEFAULT_SECTION);
+    useSectionStore.getState().reset();
     setNote(null);
   }, [docId]);
+
+  // Ribbon-Gruppe „Schnitt" nur mit laufendem Viewer freischalten.
+  useEffect(() => {
+    useSectionStore.getState().setViewerReady(handle !== null);
+    return () => useSectionStore.getState().setViewerReady(false);
+  }, [handle]);
 
   // — Canvas-Größe an das Pane koppeln —
   useEffect(() => {
@@ -127,9 +142,11 @@ export default function ViewerPane() {
     return merged;
   }, [hidden, lensHidden]);
 
-  // — Werkzeuge (M9): Verschieben-Gizmo + Koordinaten-Pick —
+  // — Werkzeuge (M9): Verschieben-Gizmo + Koordinaten-Pick + Schneiden —
   // prettier-ignore
   const tools = useViewerTools(access, doc, docId, selection, hiddenIds, isolated, setNote);
+  const slice = useSliceTool(tools.tool);
+  const clip = useClipBox(handle, access, selection);
 
   // — Picking: Treffer wählen, Leerklick löscht die Auswahl —
   const { tool, performPick } = tools; // stabil, anders als das tools-Objekt
@@ -155,8 +172,8 @@ export default function ViewerPane() {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !handle) return;
-    return attachViewerControls(canvas, handle, { onPick: pickHandler });
-  }, [handle, pickHandler]);
+    return attachViewerControls(canvas, handle, { onPick: pickHandler, slice });
+  }, [handle, pickHandler, slice]);
 
   useEffect(() => {
     handle?.apply({
@@ -164,9 +181,10 @@ export default function ViewerPane() {
       hiddenIds,
       isolatedIds: isolated,
       sectionPlane: toSectionPlane(section),
+      clipBox: clip.clipBox,
       xray,
     });
-  }, [handle, selectedIds, hiddenIds, isolated, section, xray]);
+  }, [handle, selectedIds, hiddenIds, isolated, section, clip.clipBox, xray]);
 
   useEffect(() => {
     handle?.setColorOverrides(lensColors);
@@ -234,7 +252,9 @@ export default function ViewerPane() {
         onHide={hideSelection}
         onShowAll={showAll}
         onToggleXray={() => setXray((value) => !value)}
-        onSection={(patch) => setSection((current) => ({ ...current, ...patch }))}
+        onSection={patchSection}
+        clipBoxActive={boxEnabled && clip.boxIfc !== null}
+        onClipBoxOnSelection={requestBoxOnSelection}
         onPreset={(view: PresetView) => handle?.presetView(view)}
       />
 
@@ -243,7 +263,12 @@ export default function ViewerPane() {
         style={{
           position: "relative",
           overflow: "hidden",
-          cursor: tool === "pick" ? "crosshair" : undefined,
+          cursor:
+            tool === "pick"
+              ? "crosshair"
+              : tool === "slice"
+                ? "ew-resize"
+                : undefined,
         }}
       >
         <canvas
@@ -265,6 +290,9 @@ export default function ViewerPane() {
             onDone={onGizmoDone}
             onBoundsMissing={onGizmoBoundsMissing}
           />
+        )}
+        {access && canvasRef.current && (
+          <ClipBoxLayer access={access} canvas={canvasRef.current} clip={clip} />
         )}
         {!doc && <Overlay text="Kein Dokument geöffnet." />}
         {doc && status?.kind === "unavailable" && <Overlay text={status.reason} />}

@@ -4,6 +4,11 @@
  *
  * Links ziehen  = Orbit, Mitte/Rechts oder Shift+Links = Pan, Rad = Zoom.
  * Ein Klick ohne nennenswerte Bewegung löst Picking aus.
+ *
+ * Werkzeug „Schneiden" (M9): solange `slice` gesetzt ist, verschiebt
+ * Links-Ziehen die aktive Schnittebene statt zu orbiten (Mausdelta →
+ * Position), und das Mausrad mit Umschalt/Alt justiert fein — ohne Modifier
+ * bleibt das Rad Zoom. Pan (Mitte/Rechts/Shift+Links) bleibt verfügbar.
  */
 import type { ViewerHandle } from "../../core/viewer";
 
@@ -13,6 +18,13 @@ const CLICK_SLOP = 4;
 export interface ControlCallbacks {
   /** Klick auf Geometrie oder ins Leere (CSS-Pixel relativ zum Canvas). */
   onPick(x: number, y: number, additive: boolean): void;
+  /** Werkzeug „Schneiden" aktiv: Drag/Rad steuern die Schnittebene. */
+  slice?: {
+    /** Mausdelta eines Links-Drags (CSS-Pixel) + Canvas-Maße. */
+    onDrag(dx: number, dy: number, width: number, height: number): void;
+    /** Umschalt/Alt+Rad; `fine` = Alt gedrückt (0,1-%-Schritte). */
+    onWheel(deltaY: number, fine: boolean): void;
+  };
 }
 
 export function attachViewerControls(
@@ -21,7 +33,7 @@ export function attachViewerControls(
   callbacks: ControlCallbacks,
 ): () => void {
   let activePointer: number | null = null;
-  let mode: "orbit" | "pan" | null = null;
+  let mode: "orbit" | "pan" | "slice" | null = null;
   let lastX = 0;
   let lastY = 0;
   let travelled = 0;
@@ -29,7 +41,9 @@ export function attachViewerControls(
   const onPointerDown = (event: PointerEvent): void => {
     if (activePointer !== null) return;
     activePointer = event.pointerId;
-    mode = event.button === 0 && !event.shiftKey ? "orbit" : "pan";
+    if (event.button === 0 && !event.shiftKey)
+      mode = callbacks.slice ? "slice" : "orbit";
+    else mode = "pan";
     lastX = event.clientX;
     lastY = event.clientY;
     travelled = 0;
@@ -43,7 +57,9 @@ export function attachViewerControls(
     lastX = event.clientX;
     lastY = event.clientY;
     travelled += Math.abs(dx) + Math.abs(dy);
-    if (mode === "orbit") handle.orbit(dx, dy);
+    if (mode === "slice")
+      callbacks.slice?.onDrag(dx, dy, canvas.clientWidth, canvas.clientHeight);
+    else if (mode === "orbit") handle.orbit(dx, dy);
     else handle.pan(dx, dy);
   };
 
@@ -65,6 +81,12 @@ export function attachViewerControls(
 
   const onWheel = (event: WheelEvent): void => {
     event.preventDefault();
+    if (callbacks.slice && (event.shiftKey || event.altKey)) {
+      // Shift+Rad läuft auf manchen Systemen als deltaX statt deltaY auf.
+      const delta = event.deltaY !== 0 ? event.deltaY : event.deltaX;
+      callbacks.slice.onWheel(delta, event.altKey);
+      return;
+    }
     const rect = canvas.getBoundingClientRect();
     handle.zoom(event.deltaY, event.clientX - rect.left, event.clientY - rect.top);
   };
