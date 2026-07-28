@@ -22,7 +22,7 @@ import { parseDraft, toDraft, kindOf } from "../inspector/values";
 import { typeIndex, type Matrix } from "./matrix";
 
 export const CSV_DELIMITER = ";";
-const BOM = "﻿";
+const BOM = "\uFEFF";
 const ID_COLUMN = "GlobalId";
 const NAME_COLUMN = "Name";
 
@@ -95,7 +95,7 @@ export function readCsvDiffs(
   const connector = new CsvConnector(session.store.entities, session.view);
   // Der Parser von ifc-lite kennt keine BOM — sie würde sonst im ersten
   // Spaltenkopf landen und das GlobalId-Matching aushebeln.
-  const rows = connector.parse(content.replace(/^﻿/, ""), {
+  const rows = connector.parse(content.replace(/^\uFEFF/, ""), {
     delimiter: CSV_DELIMITER,
   });
 

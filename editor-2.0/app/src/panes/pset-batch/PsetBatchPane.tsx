@@ -8,40 +8,32 @@
  *
  * Regel für alle Schreibpfade: eine einzelne Zelle geht direkt als
  * `cmdSetProperty` durch die Pipeline; jede Massenänderung läuft erst durch
- * den Vorschau-Dialog und wird dann als EIN Command ausgeführt — ein
- * Undo-Schritt, ein Audit-Eintrag.
+ * den Vorschau-Dialog (siehe `previews.ts`) und wird dann als EIN Command
+ * ausgeführt — ein Undo-Schritt, ein Audit-Eintrag.
  */
 import { useMemo, useRef, useState } from "react";
 import type { PropertyValueType } from "@ifc-lite/data";
 import { useCommands, type EditorCommand } from "../../commands/pipeline";
-import {
-  cmdSetProperty,
-  cmdSetPropertyOnMany,
-} from "../../commands/propertyCommands";
+import { cmdSetProperty } from "../../commands/propertyCommands";
 import {
   cmdAddPropertyOnMany,
   cmdCreatePsetOnMany,
-  cmdDeletePropertyOnMany,
-  cmdSetCells,
 } from "../../commands/batchCommands";
 import { useActiveDocument, type DocumentEntry } from "../../store/documents";
 import { useSelection, useSelectionOf } from "../../store/selection";
 import { kindOf, parseDraft } from "../inspector/values";
-import PreviewDialog, { type PreviewRow } from "./PreviewDialog";
+import PreviewDialog from "./PreviewDialog";
 import PsetMatrix from "./PsetMatrix";
 import QueryBar from "./QueryBar";
 import { buildMatrix, type MatrixRow } from "./matrix";
-import { csvFileName, downloadCsv, matrixToCsv, readCsvDiffs } from "./csv";
+import { csvFileName, downloadCsv, matrixToCsv } from "./csv";
+import {
+  csvImportPreview,
+  deleteRowPreview,
+  setAllPreview,
+  type Pending,
+} from "./previews";
 import "./pset-batch.css";
-
-/** Eine bestätigungspflichtige Massenänderung. */
-interface Pending {
-  title: string;
-  note?: string;
-  confirmLabel: string;
-  rows: PreviewRow[];
-  command: EditorCommand;
-}
 
 export default function PsetBatchPane() {
   const doc = useActiveDocument();
@@ -90,54 +82,7 @@ function BatchBody({ doc }: { doc: DocumentEntry }) {
     );
   }
 
-  /** „Wert für alle setzen" — ein Command, vorher Vorschau. */
-  function previewSetAll(psetName: string, row: MatrixRow, draft: string): void {
-    const parsed = parseDraft(draft, row.kind);
-    if (!parsed.ok) return;
-    const after = draft;
-    setPending({
-      title: `${psetName}.${row.propName} für alle setzen`,
-      confirmLabel: "Übernehmen",
-      rows: matrix.columns.map((column, index) => ({
-        key: String(column.expressId),
-        object: column.title,
-        before: row.cells[index]?.draft ?? "",
-        after,
-      })),
-      command: cmdSetPropertyOnMany(
-        session,
-        selection,
-        psetName,
-        row.propName,
-        parsed.value,
-        row.type,
-      ),
-    });
-  }
-
-  /** Zeile auf allen Objekten löschen — ein Command, vorher Vorschau. */
-  function previewDeleteRow(psetName: string, row: MatrixRow): void {
-    const affected = row.cells.filter((cell) => cell.present);
-    setPending({
-      title: `${psetName}.${row.propName} überall löschen`,
-      note: `Betrifft ${affected.length} von ${selection.length} Objekten.`,
-      confirmLabel: "Löschen",
-      rows: affected.map((cell) => ({
-        key: String(cell.expressId),
-        object: session.labelOf(cell.expressId),
-        before: cell.draft,
-        after: "",
-      })),
-      command: cmdDeletePropertyOnMany(
-        session,
-        affected.map((cell) => cell.expressId),
-        psetName,
-        row.propName,
-        row.type,
-      ),
-    });
-  }
-
+  /** Neue Property auf allen Objekten; fehlende Psets entstehen dabei mit. */
   function addProperty(
     psetName: string,
     propName: string,
@@ -166,29 +111,9 @@ function BatchBody({ doc }: { doc: DocumentEntry }) {
   }
 
   async function importCsv(file: File): Promise<void> {
-    const report = readCsvDiffs(session, matrix, await file.text());
-    const notes = [`${report.rowCount} Zeile(n) gelesen.`];
-    if (report.unmatched > 0)
-      notes.push(`${report.unmatched} ohne passende GlobalId.`);
-    if (report.ignoredColumns.length > 0)
-      notes.push(`Ignoriert: ${report.ignoredColumns.join(", ")}.`);
-    setPending({
-      title: `CSV-Import „${file.name}"`,
-      note: notes.join(" "),
-      confirmLabel: "Übernehmen",
-      rows: report.diffs.map((diff, index) => ({
-        key: String(index),
-        object: diff.objectLabel,
-        property: diff.property,
-        before: diff.before,
-        after: diff.after,
-      })),
-      command: cmdSetCells(
-        session,
-        report.diffs.map((diff) => diff.change),
-        `CSV-Import: ${report.diffs.length} Werte aus „${file.name}"`,
-      ),
-    });
+    setPending(
+      csvImportPreview(session, matrix, file.name, await file.text()),
+    );
   }
 
   const hasSelection = selection.length > 0;
@@ -281,9 +206,27 @@ function BatchBody({ doc }: { doc: DocumentEntry }) {
                 commitCell(block.psetName, row, expressId, draft)
               }
               onSetForAll={(row, draft) =>
-                previewSetAll(block.psetName, row, draft)
+                setPending(
+                  setAllPreview(
+                    session,
+                    selection,
+                    matrix,
+                    block.psetName,
+                    row,
+                    draft,
+                  ),
+                )
               }
-              onDeleteRow={(row) => previewDeleteRow(block.psetName, row)}
+              onDeleteRow={(row) =>
+                setPending(
+                  deleteRowPreview(
+                    session,
+                    selection.length,
+                    block.psetName,
+                    row,
+                  ),
+                )
+              }
               onAddProperty={(propName, type, draft) =>
                 addProperty(block.psetName, propName, type, draft)
               }
