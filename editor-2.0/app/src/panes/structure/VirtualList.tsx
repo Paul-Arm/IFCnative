@@ -49,14 +49,11 @@ export default function VirtualList({
     setScrollTop(0);
   }, [resetKey]);
 
-  const first = Math.max(
-    0,
-    Math.min(count, Math.floor(scrollTop / rowHeight) - overscan),
-  );
-  const last = Math.min(
-    count,
-    Math.ceil((scrollTop + Math.max(viewport, rowHeight)) / rowHeight) + overscan,
-  );
+  // Beim Schrumpfen der Liste kann `scrollTop` kurz veraltet sein.
+  const height = Math.max(viewport, rowHeight);
+  const top = Math.max(0, Math.min(scrollTop, count * rowHeight - height));
+  const first = Math.max(0, Math.floor(top / rowHeight) - overscan);
+  const last = Math.min(count, Math.ceil((top + height) / rowHeight) + overscan);
 
   const rows: ReactNode[] = [];
   for (let i = first; i < last; i++) rows.push(renderRow(i));
