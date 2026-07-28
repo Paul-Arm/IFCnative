@@ -1,0 +1,139 @@
+/* Graph-Pane: React Flow an die Design-Token der App koppeln. */
+.graph-pane .react-flow {
+  --xy-background-color: var(--bg);
+  --xy-node-background-color: var(--bg-panel);
+  --xy-node-color: var(--text);
+  --xy-node-border: 1px solid var(--border);
+  --xy-node-border-radius: 6px;
+  --xy-node-boxshadow-hover: 0 0 0 1px var(--accent);
+  --xy-node-boxshadow-selected: 0 0 0 1px var(--accent);
+  --xy-edge-stroke: var(--text-dim);
+  --xy-edge-stroke-selected: var(--accent);
+  --xy-edge-label-background-color: var(--bg-panel);
+  --xy-edge-label-color: var(--text-dim);
+  --xy-handle-background-color: var(--border);
+  --xy-handle-border-color: var(--border);
+  --xy-controls-button-background-color: var(--bg-panel);
+  --xy-controls-button-background-color-hover: var(--bg-hover);
+  --xy-controls-button-color: var(--text);
+  --xy-controls-button-color-hover: var(--text);
+  --xy-controls-button-border-color: var(--border);
+  --xy-controls-box-shadow: none;
+  --xy-attribution-background-color: transparent;
+  --xy-minimap-background-color: var(--bg-panel);
+  --xy-minimap-node-background-color: var(--text-dim);
+  --xy-minimap-mask-background-color: color-mix(in srgb, var(--bg) 70%, transparent);
+  background: var(--bg);
+}
+
+.graph-flow {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Eigene Knoten bringen ihren Rahmen selbst mit. */
+.graph-pane .react-flow__node-ifc {
+  background: transparent;
+  border: none;
+  padding: 0;
+  width: auto;
+  box-shadow: none;
+}
+
+.graph-node {
+  display: flex;
+  align-items: center;
+  max-width: 200px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: 0.75rem;
+  line-height: 1.3;
+  cursor: pointer;
+}
+.graph-node-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.graph-node[data-picked="true"] {
+  background: var(--bg-active);
+}
+.graph-node[data-match="true"] {
+  border-color: var(--warn);
+  box-shadow: 0 0 0 1px var(--warn);
+}
+.graph-node[data-anchor="true"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent);
+  font-weight: 600;
+}
+
+.graph-handle {
+  width: 5px;
+  height: 5px;
+  min-width: 5px;
+  min-height: 5px;
+  border: none;
+  background: var(--border);
+  opacity: 0.6;
+}
+
+.graph-pane .react-flow__edge-text {
+  fill: var(--text-dim);
+  font-size: 8px;
+}
+.graph-pane .react-flow__edge-textbg {
+  fill: var(--bg-panel);
+  opacity: 0.85;
+}
+.graph-pane .react-flow__attribution {
+  display: none;
+}
+
+/* Mehrfachauswahl der Beziehungsarten */
+.graph-filter {
+  position: relative;
+}
+.graph-filter-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 220px;
+  max-height: 280px;
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  box-shadow: 0 6px 16px rgb(0 0 0 / 25%);
+}
+.graph-filter-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.graph-filter-item:hover {
+  background: var(--bg-hover);
+}
+.graph-filter-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+.graph-filter-actions {
+  display: flex;
+  gap: 6px;
+  padding: 4px 4px 2px;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
