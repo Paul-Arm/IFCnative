@@ -68,7 +68,7 @@ Ziel: die drei größten technischen Annahmen beweisen, bevor Struktur entsteht.
 
 - Föderations-/Koordinations-Workspace (`merge`), 2D-Ableitungen (`drawing-2d`), Export-Menü (glTF/CSV/JSON-LD/Parquet/IFC5), ifcZIP.
 - Performance-Pass (1-GB-Modell), Handbuch (deutsch).
-- Installer-Finalisierung: Code-Signing, Auto-Update (Tauri Updater), MSI-Variante für Firmen-Rollout, „Als Standard festlegen"-Hinweisdialog beim ersten Start.
+- Installer-Finalisierung: Auto-Update (Tauri Updater), „Als Standard festlegen"-Hinweisdialog beim ersten Start. Code-Signing-Schritt im Build vorbereitet, aber deaktiviert (Zertifikat vorhanden, Einsatz zurückgestellt — E12); MSI-Variante im Backlog (E13).
 
 ## Nachgelagert (Backlog, in dieser Reihenfolge)
 
@@ -77,7 +77,9 @@ Ziel: die drei größten technischen Annahmen beweisen, bevor Struktur entsteht.
 3. MCP/KI-Assistent (`mcp`).
 4. Echtzeit-Kollaboration (`collab`/`collab-server`, CRDT auf IFCX).
 5. Embedding (`embed-sdk`), Punktwolken (`pointcloud`), Solar (`solar`).
-6. **Ganz am Ende: MKP-Portal-Migration** (Login, Bäume, Zuordnen/Import, Mapping-Editor, Mock-Modus; `tests/portal.test.ts` als Referenz). Bis dahin bleibt 1.x für Portal-Arbeit im Einsatz.
+6. IFC-Modell-Branches + Entity-Merge auf `/server` (Drei-Wege-Vergleich, Konfliktdialog je Entity) — Empfehlung aus `05-risiken-entscheidungen.md` Frage 1.
+7. MSI/WiX-Installer für Firmen-Rollout (E13); Code-Signing aktivieren, sobald gewünscht (E12).
+8. **Ganz am Ende: MKP-Portal-Migration** (Login, Bäume, Zuordnen/Import, Mapping-Editor, Mock-Modus; `tests/portal.test.ts` als Referenz). Bis dahin bleibt 1.x für Portal-Arbeit im Einsatz.
 
 ## TestStrategie (durchgängig)
 

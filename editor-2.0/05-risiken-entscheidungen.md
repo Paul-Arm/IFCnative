@@ -32,9 +32,7 @@ ifc-lite-Server (Geometrie/Cache) und `/server` (Versionierung) sind getrennte D
 
 ## Offene Fragen (Entscheidung beim Auftraggeber)
 
-1. **Versionierungs-UI:** reicht Commit/Diff gegen `/server` (M6), oder sind Branches/Merge (Server-„Later phases") für 2.0 gewünscht?
-2. **Code-Signing:** Authenticode-Zertifikat vorhanden/beschaffbar (EV-Zertifikat für sofortige SmartScreen-Reputation)? Ohne Signatur warnt SmartScreen beim Installer-Download.
-3. **MSI-Variante:** wird ein Firmen-Rollout per Gruppenrichtlinie gebraucht (dann MSI/WiX zusätzlich zu NSIS in M7), oder reicht NSIS + Auto-Update?
+1. **Versionierungs-UI — IFC-Modell-Branches (nicht git):** Der `/server` versioniert IFC-Stände pro Modell (Commits = GlobalId-gehashte Entity-Manifeste, Diff = semantisch je Bauteil). „Branches/Merge" hieße: parallele Bearbeitungsstände desselben Modells (z. B. Hauptstand vs. Planungsvariante) mit Drei-Wege-Zusammenführung und Konflikterkennung **pro Entity** — im Server-README als „later phases" markiert, UI und Merge-Logik existieren noch nicht. **Empfehlung:** 2.0 startet mit linearer Commit-Historie + Diff (M6); Branch-UI + Entity-Merge als Backlog-Punkt dahinter.
 
 ## Getroffene Entscheidungen
 
@@ -51,6 +49,8 @@ ifc-lite-Server (Geometrie/Cache) und `/server` (Versionierung) sind getrennte D
 | E9 | **Kein i18n, UI nur deutsch** (Vorgabe Auftraggeber, 2026-07-28) | keine Fremdsprachen nötig; ifc-lite-Reports auf `de` konfiguriert; spart Abstraktionsschicht |
 | E10 | **Portal ganz ans Ende** (Vorgabe Auftraggeber, 2026-07-28) | MKP-Portal-Migration als letzter Backlog-Punkt nach M7; 1.x bleibt bis dahin für Portal-Arbeit im Einsatz |
 | E11 | **Richtiger Installer + `.ifc`-Standardprogramm** (Vorgabe Auftraggeber, 2026-07-28) | NSIS-Installer ab M0 mit fileAssociations (`.ifc`, `.ifczip`, `.ifcx`, `.ids`, `.bcf`), RegisteredApplications/Capabilities für „Standard-Apps", Single-Instance-Doppelklick-Öffnen; Windows-`UserChoice`-Schutz beachtet (App bietet „Als Standard festlegen"-Hinweis, erzwingt nichts) |
+| E12 | **Code-Signing zurückgestellt** (Auftraggeber, 2026-07-28) | Authenticode-Zertifikat ist vorhanden, wird aber vorerst nicht eingebunden; Aktivierung jederzeit möglich (Signier-Schritt im Build vorbereiten, aber deaktiviert lassen). Bis dahin SmartScreen-Warnung beim Installer-Download akzeptiert |
+| E13 | **MSI später** (Auftraggeber, 2026-07-28) | nur NSIS + Auto-Update im Planungsumfang; MSI/WiX für Firmen-Rollout wandert in den Backlog |
 
 ## Referenzen
 
