@@ -10,6 +10,15 @@ import {
 import { MutablePropertyView } from "@ifc-lite/mutations";
 import { StepExporter } from "@ifc-lite/export";
 import { PropertyValueType } from "@ifc-lite/data";
+import { buildSpatialTree, type SpatialTreeNode } from "./model/spatial";
+import { relationsOf, type RelationRow } from "./model/relations";
+import {
+  entityLabel,
+  identityOf,
+  quantitiesOf,
+  type EntityIdentity,
+  type QuantityView,
+} from "./model/attributes";
 
 export interface ModelInfo {
   fileName: string;
@@ -74,19 +83,7 @@ export class ModelSession {
   }
 
   private entityName(expressId: number): string {
-    const source = this.entitySourceLine(expressId);
-    // IfcRoot: GlobalId, OwnerHistory, Name, ... → drittes Argument ist der Name
-    const m = source?.match(/^[^(]*\((?:'[^']*'|[^,])*,(?:[^,]*),\s*'([^']*)'/);
-    return m?.[1] ?? "";
-  }
-
-  private entitySourceLine(expressId: number): string | null {
-    const idx = this.store.entityIndex.byId;
-    const range = (idx as { get?: (id: number) => unknown }).get?.(expressId);
-    if (!range || typeof range !== "object") return null;
-    const r = range as { start?: number; end?: number };
-    if (r.start === undefined || r.end === undefined) return null;
-    return new TextDecoder().decode(this.store.source.slice(r.start, r.end));
+    return this.store.entities.getName(expressId);
   }
 
   psetsOf(expressId: number): PsetView[] {
@@ -121,6 +118,33 @@ export class ModelSession {
 
   get changeCount(): number {
     return this.view.getMutations().length;
+  }
+
+  // — Lese-APIs für Panes (M1). Teure Ergebnisse werden pro Sitzung gecacht. —
+
+  private spatialTreeCache: SpatialTreeNode | null | undefined;
+
+  spatialTree(): SpatialTreeNode | null {
+    if (this.spatialTreeCache === undefined) {
+      this.spatialTreeCache = buildSpatialTree(this.store);
+    }
+    return this.spatialTreeCache;
+  }
+
+  identityOf(expressId: number): EntityIdentity {
+    return identityOf(this.store, expressId);
+  }
+
+  quantitiesOf(expressId: number): QuantityView[] {
+    return quantitiesOf(this.store, expressId);
+  }
+
+  relationsOf(expressId: number): RelationRow[] {
+    return relationsOf(this.store, expressId);
+  }
+
+  labelOf(expressId: number): string {
+    return entityLabel(this.store, expressId);
   }
 
   exportStep(): Uint8Array {

@@ -20,13 +20,17 @@
     "@ifc-lite/encoding": "1.14.11",
     "@ifc-lite/export": "2.6.0",
     "@ifc-lite/geometry": "3.4.0",
+    "@ifc-lite/lens": "1.17.2",
     "@ifc-lite/mutations": "1.21.0",
     "@ifc-lite/parser": "3.10.1",
     "@ifc-lite/query": "1.14.13",
     "@ifc-lite/renderer": "1.39.0",
     "@ifc-lite/wasm": "4.1.4",
+    "@xyflow/react": "12.11.2",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "react-mosaic-component": "7.0.0",
+    "zustand": "5.0.14"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.4",

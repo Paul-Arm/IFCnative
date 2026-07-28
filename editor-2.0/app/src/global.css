@@ -1,0 +1,169 @@
+@import "react-mosaic-component/react-mosaic-component.css";
+
+/* Design-Token: hell/dunkel über data-theme am <html>. */
+:root {
+  --bg: #f7f7f8;
+  --bg-panel: #ffffff;
+  --bg-hover: #ececef;
+  --bg-active: #dfe4ff;
+  --border: #d9d9de;
+  --text: #1c1c21;
+  --text-dim: #6b6b76;
+  --accent: #3b5bdb;
+  --warn: #b45309;
+  --error: #b91c1c;
+  --canvas-bg: #16181d;
+}
+
+:root[data-theme="dark"] {
+  --bg: #17181c;
+  --bg-panel: #1f2126;
+  --bg-hover: #2a2d34;
+  --bg-active: #2f3a5e;
+  --border: #33353c;
+  --text: #e8e8ec;
+  --text-dim: #9a9aa6;
+  --accent: #748ffc;
+  --canvas-bg: #101216;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: system-ui, "Segoe UI", sans-serif;
+  font-size: 0.875rem;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* — Bausteine für alle Panes — */
+.pane {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+.pane-toolbar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.pane-body {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+.pane-loading,
+.pane-empty {
+  padding: 16px;
+  color: var(--text-dim);
+}
+
+.btn {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.8125rem;
+}
+.btn:hover {
+  background: var(--bg-hover);
+}
+.btn[data-active="true"] {
+  background: var(--bg-active);
+  border-color: var(--accent);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.input,
+select.input {
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: 0.8125rem;
+}
+
+.row-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 2px 8px;
+  border: none;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.8125rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.row-item:hover {
+  background: var(--bg-hover);
+}
+.row-item[data-selected="true"] {
+  background: var(--bg-active);
+}
+
+.kv-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+.kv-table td,
+.kv-table th {
+  padding: 2px 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+.kv-table td.dim {
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.text-dim {
+  color: var(--text-dim);
+}
+
+/* Mosaic-Anpassung an die Token */
+.mosaic {
+  background: var(--bg);
+}
+.mosaic-window {
+  border-radius: 6px;
+}
+.mosaic-window .mosaic-window-toolbar {
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  box-shadow: none;
+}
+.mosaic-window .mosaic-window-title {
+  color: var(--text);
+  font-size: 0.8125rem;
+}
+.mosaic-window .mosaic-window-body {
+  background: var(--bg-panel);
+}
+.mosaic-split:hover {
+  background: var(--accent);
+}
