@@ -399,6 +399,44 @@ export const TYPE_CLASSES = [
 
 export const GROUP_TYPES = ["IFCGROUP", "IFCSYSTEM", "IFCZONE", "IFCASSET"];
 
+/**
+ * Gruppenartige IFC-Klassen (IfcGroup-Zweig) für die Gruppen-Ansicht und den
+ * Gruppen-Dialog, gegliedert für die oberste Baumebene.
+ */
+export const GROUP_VIEW_CATEGORIES: { label: string; types: string[] }[] = [
+  {
+    label: "Systeme",
+    types: [
+      "IFCSYSTEM",
+      "IFCBUILDINGSYSTEM",
+      "IFCBUILTSYSTEM",
+      "IFCDISTRIBUTIONSYSTEM",
+      "IFCDISTRIBUTIONCIRCUIT",
+    ],
+  },
+  { label: "Zonen", types: ["IFCZONE"] },
+  {
+    label: "Gruppen",
+    // IFCCONDITION/-CRITERION: IFC2x3-Altlasten (in IFC4 entfernt) — nur
+    // für die Anzeige alter Dateien, nicht zum Anlegen anbieten.
+    types: ["IFCGROUP", "IFCCONDITION", "IFCCONDITIONCRITERION"],
+  },
+  { label: "Anlagen & Inventar", types: ["IFCASSET", "IFCINVENTORY"] },
+  {
+    label: "Tragwerk",
+    types: [
+      "IFCSTRUCTURALANALYSISMODEL",
+      "IFCSTRUCTURALLOADGROUP",
+      "IFCSTRUCTURALLOADCASE",
+      "IFCSTRUCTURALRESULTGROUP",
+    ],
+  },
+];
+
+export const GROUP_ENTITY_TYPES = new Set(
+  GROUP_VIEW_CATEGORIES.flatMap((category) => category.types),
+);
+
 export const CONSTRAINT_GRADES = [
   "HARD",
   "SOFT",

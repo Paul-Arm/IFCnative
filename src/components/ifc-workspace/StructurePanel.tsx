@@ -1,5 +1,5 @@
 import { FileTree, useFileTree } from "@pierre/trees/react";
-import { Crosshair, Plus, Trash2 } from "lucide-react";
+import { Boxes, Crosshair, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 
@@ -39,6 +39,7 @@ export function StructurePanel({
   selectedId,
   onAddChild,
   onCenterCamera,
+  onManageGroups,
   onRemove,
   onSelect,
   onSelectMany,
@@ -50,6 +51,7 @@ export function StructurePanel({
   selectedId: number;
   onAddChild(parentId: number, type: string, name: string): void;
   onCenterCamera(id: number): void;
+  onManageGroups(id: number): void;
   onRemove(id: number): void;
   onSelect(id: number, source?: string): void;
   onSelectMany(ids: number[]): void;
@@ -63,11 +65,13 @@ export function StructurePanel({
   const typeByIdRef = useRef(treeModel.typeById);
   const onAddChildRef = useRef(onAddChild);
   const onCenterCameraRef = useRef(onCenterCamera);
+  const onManageGroupsRef = useRef(onManageGroups);
   const onSelectRef = useRef(onSelect);
   const onSelectManyRef = useRef(onSelectMany);
   const onRemoveRef = useRef(onRemove);
   onAddChildRef.current = onAddChild;
   onCenterCameraRef.current = onCenterCamera;
+  onManageGroupsRef.current = onManageGroups;
   onSelectRef.current = onSelect;
   onSelectManyRef.current = onSelectMany;
   onRemoveRef.current = onRemove;
@@ -364,6 +368,24 @@ export function StructurePanel({
               <span className="min-w-0 flex-1 truncate">Kamera zentrieren</span>
               <kbd className="ml-auto text-[10px] text-muted-foreground">.</kbd>
             </button>
+            {!isProtected ? (
+              <button
+                type="button"
+                className={menuItemClass}
+                onClick={() => {
+                  context.close({ restoreFocus: false });
+                  onManageGroupsRef.current(id);
+                }}
+              >
+                <Boxes
+                  aria-hidden
+                  className="size-3.5 shrink-0 text-muted-foreground"
+                />
+                <span className="min-w-0 flex-1 truncate">
+                  Gruppen verwalten…
+                </span>
+              </button>
+            ) : null}
             {childGroups.length ? (
               <>
                 <div aria-hidden className="-mx-1 my-1 h-px bg-border" />

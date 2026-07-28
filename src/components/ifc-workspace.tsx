@@ -49,6 +49,7 @@ import {
     addNativeDocumentReference,
     addNativeElement,
     addNativeEmptyPropertySet,
+    addNativeEntityToGroup,
     addNativeGroupAssignment,
     addNativeLibraryReference,
     addNativeMaterial,
@@ -74,6 +75,7 @@ import {
     createNativeSampleDocument,
     duplicateNativePropertySet,
     findCatalogObject,
+    getNativeBodyRepresentation,
     getNativeLengthUnitScale,
     getNativePlacement,
     getNativePlacementWorld,
@@ -84,6 +86,7 @@ import {
     parseNativeIfcFileInWorker,
     planNativeEntityRemoval,
     removeNativeBodyRepresentation,
+    removeNativeGroupMembership,
     removeNativePropertyFromSet,
     removeNativePropertySet,
     removeNativeRelationship,
@@ -149,10 +152,18 @@ import {
     ResourceControlsPanel,
     ResourceReferencesPanel,
 } from "./ifc-workspace/InspectorPanel";
+import {
+    clearRecoveryDocuments,
+    readRecoveryDocuments,
+    writeRecoveryDocuments,
+    type RecoveredDocument,
+} from "./ifc-workspace/documentRecovery";
 import { ObjectInfoPanel } from "./ifc-workspace/ObjectInfoPanel";
 import { PortalPanel } from "./ifc-workspace/PortalPanel";
 import { PortalSettingsPanel } from "./ifc-workspace/PortalSettingsPanel";
 import { PsetBatchPanel } from "./ifc-workspace/PsetBatchPanel";
+import { GroupManagerDialog } from "./ifc-workspace/GroupManagerDialog";
+import { GroupsPanel } from "./ifc-workspace/GroupsPanel";
 import { StructurePanel } from "./ifc-workspace/StructurePanel";
 import { ThemeToggle } from "./ifc-workspace/ThemeToggle";
 import type {
@@ -185,6 +196,7 @@ import {
     saveRecentIfcFiles,
     type RecentIfcFileEntry,
 } from "./ifc-workspace/workspaceStorage";
+import { recordDiagnostic } from "../diagnostics/watchdog";
 import type { RelationshipFlowClipboardNode } from "./relationship-flow.types";
 import ThatOpenViewer from "./that-open-viewer";
 import type {
@@ -396,19 +408,31 @@ export default function IfcWorkspace() {
   const [portalTokens, setPortalTokens] = useState(loadPortalTokens);
   const [coordinateClipboard, setCoordinateClipboard] =
     useState<CoordinateClipboard | null>(null);
+  const [groupManagerEntityId, setGroupManagerEntityId] = useState<
+    number | null
+  >(null);
   const [deleteRequest, setDeleteRequest] = useState<{
     documentId: string;
     entity: NativeIfcEntity;
     plan: NativeEntityRemovalPlan;
     sourceDocument: NativeIfcDocument;
-    source: "tree" | "graph" | "viewer" | "keyboard";
+    source: "tree" | "graph" | "groups" | "viewer" | "keyboard";
   } | null>(null);
   const [detachedViews, setDetachedViews] = useState<Set<MosaicViewId>>(
     () => new Set(),
   );
+  // Sichtbare Rückmeldung für Aktionen, die bisher nur in die DEV-Konsole
+  // geloggt haben (Öffnen, Hinzufügen, Export, Katalogimport). Ohne sie sah
+  // ein Fehlschlag exakt so aus wie "der Knopf tut nichts".
+  const [statusAlert, setStatusAlert] = useState<{
+    message: string;
+    tone: "danger" | "success";
+  } | null>(null);
+  const [recoveredDocuments, setRecoveredDocuments] = useState<
+    RecoveredDocument[]
+  >([]);
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
   const { scale: uiScale, setScale: setUiScale } = useUiScale();
-  const desktopApi =
-    typeof window === "undefined" ? undefined : window.ifcNativeDesktop;
   const allWorkspaces = useMemo(
     () => [...BUILT_IN_WORKSPACES, ...customWorkspaces],
     [customWorkspaces],
@@ -1115,7 +1139,7 @@ export default function IfcWorkspace() {
       );
       rememberRecentIfc(session, "opened", asset.file);
     } catch (error) {
-      logAction(`ui.error(${JSON.stringify(String(error))});`);
+      reportFailure("IFC konnte nicht geöffnet werden", error);
     } finally {
       setLoadingIfcName("");
     }
@@ -1152,7 +1176,7 @@ export default function IfcWorkspace() {
       });
       logAction(`ui.addIfc({ files: ${nextSessions.length} });`);
     } catch (error) {
-      logAction(`ui.error(${JSON.stringify(String(error))});`);
+      reportFailure("IFC-Dateien konnten nicht hinzugefügt werden", error);
     } finally {
       setLoadingIfcName("");
     }
@@ -1191,7 +1215,7 @@ export default function IfcWorkspace() {
         `ui.importCatalog({ file: '${asset.name}', kind: '${parsed.kind}', classes: ${parsed.objectTypes.length} });`,
       );
     } catch (error) {
-      logAction(`ui.error(${JSON.stringify(String(error))});`);
+      reportFailure("Katalogimport fehlgeschlagen", error);
     } finally {
       setCatalogImporting(false);
     }
@@ -1285,40 +1309,62 @@ export default function IfcWorkspace() {
     );
   };
 
-  const loadSample = () => {
-    const session = replaceDocument(
-      createNativeSampleDocument(),
-      undefined,
-      "ui.loadSample('IFCnative Builder Sample.ifc');",
-    );
-    rememberRecentIfc(session, "sample");
+  // Der Export ist der einzige Weg, Arbeit aus der App herauszubekommen —
+  // er darf niemals stumm scheitern. Jeder Fehler (Serialisierung, Blob-Größe,
+  // blockierter Download) landet sichtbar im Header und in der Diagnose.
+  const exportIfc = async () => {
+    const fileName = document.fileName.replace(/\.ifc$/i, "") || "IFCnative";
+    try {
+      const contents: BlobPart = documentTextDirty
+        ? serializeNativeIfcDocument(document)
+        : documentText ||
+          activeSession.sourceIfcBytes ||
+          serializeNativeIfcDocument(document);
+      const blob = new Blob([contents], { type: "application/x-step" });
+      if (!blob.size) {
+        throw new Error("Serialisierung ergab ein leeres Dokument.");
+      }
+      const geometry = summarizeNativeIfcGeometry(document);
+      const url = URL.createObjectURL(blob);
+      const anchor = globalThis.document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${fileName}.ifc`;
+      anchor.hidden = true;
+      globalThis.document.body.append(anchor);
+      try {
+        anchor.click();
+      } finally {
+        anchor.remove();
+        // Keep the object URL alive until the browser has consumed the click.
+        globalThis.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+      }
+      setStatusAlert({
+        message: `${fileName}.ifc exportiert (${(blob.size / 1_048_576).toFixed(1)} MB).`,
+        tone: "success",
+      });
+      logAction(
+        `ui.exportIfc({ file: '${fileName}.ifc', bytes: ${blob.size}, representedProducts: ${geometry.representedProductCount}, shapeRepresentations: ${geometry.shapeRepresentationCount}, geometryItems: ${geometry.geometryItemCount} });`,
+      );
+    } catch (error) {
+      reportFailure(`Export von ${fileName}.ifc fehlgeschlagen`, error);
+    }
   };
 
-  const exportIfc = async () => {
-    const contents: BlobPart = documentTextDirty
-      ? serializeNativeIfcDocument(document)
-      : documentText ||
-        activeSession.sourceIfcBytes ||
-        serializeNativeIfcDocument(document);
-    const fileName = document.fileName.replace(/\.ifc$/i, "") || "IFCnative";
-    const blob = new Blob([contents], { type: "application/x-step" });
-    const geometry = summarizeNativeIfcGeometry(document);
-    const url = URL.createObjectURL(blob);
-    const anchor = globalThis.document.createElement("a");
-    anchor.href = url;
-    anchor.download = `${fileName}.ifc`;
-    anchor.hidden = true;
-    globalThis.document.body.append(anchor);
-    try {
-      anchor.click();
-    } finally {
-      anchor.remove();
-      // Keep the object URL alive until the browser has consumed the click.
-      globalThis.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+  // Erfolgsmeldungen verschwinden von selbst; Fehler bleiben stehen, bis sie
+  // gelesen und weggeklickt wurden.
+  useEffect(() => {
+    if (statusAlert?.tone !== "success") {
+      return;
     }
-    logAction(
-      `ui.exportIfc({ file: '${fileName}.ifc', bytes: ${blob.size}, representedProducts: ${geometry.representedProductCount}, shapeRepresentations: ${geometry.shapeRepresentationCount}, geometryItems: ${geometry.geometryItemCount} });`,
-    );
+    const handle = window.setTimeout(() => setStatusAlert(null), 6_000);
+    return () => window.clearTimeout(handle);
+  }, [statusAlert]);
+
+  const reportFailure = (context: string, error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    setStatusAlert({ message: `${context}: ${message}`, tone: "danger" });
+    recordDiagnostic("error", `${context}: ${message}`);
+    logAction(`ui.error(${JSON.stringify(`${context}: ${message}`)});`);
   };
 
   useEffect(() => {
@@ -1373,64 +1419,195 @@ export default function IfcWorkspace() {
         saveActiveWorkspaceId(
           snapshot.activeWorkspaceId || DEFAULT_WORKSPACE_ID,
         );
+        // Die IFC-Dokumente selbst gehen sonst verloren: der Error-Boundary
+        // hängt den Baum ab und React verwirft dessen kompletten State.
+        autosaveRef.current(true);
       }),
     [],
   );
 
-  useEffect(() => {
-    if (!desktopApi) {
+  // --- Absturzsicherung der Dokumente -------------------------------------
+  //
+  // Bearbeitete Dokumente lebten bisher ausschließlich im React-State. Der
+  // Autosave schreibt den serialisierten Stand jedes geänderten Dokuments nach
+  // IndexedDB; beim nächsten Start wird er zur Wiederherstellung angeboten.
+  const [recoveryChecked, setRecoveryChecked] = useState(false);
+  /**
+   * Zuletzt persistierter Stand je Session. Dokumente sind unveränderlich, ein
+   * Identitätsvergleich genügt also, um die teure Serialisierung (O(Dokument))
+   * nur bei echten Änderungen zu bezahlen.
+   */
+  const persistedDocumentsRef = useRef(
+    new Map<string, { document: NativeIfcDocument; ifcText: string }>(),
+  );
+  const autosaveSessionsRef = useRef(documentSessions);
+  autosaveSessionsRef.current = documentSessions;
+  const autosaveBlockedRef = useRef(true);
+  autosaveBlockedRef.current = !recoveryChecked || recoveredDocuments.length > 0;
+
+  const autosaveRef = useRef<(force?: boolean) => void>(() => {});
+  autosaveRef.current = (force = false) => {
+    // Solange ein wiederherstellbarer Stand aussteht, darf nicht geschrieben
+    // werden — sonst überschreibt die leere Startsitzung die Rettung.
+    if (autosaveBlockedRef.current && !force) {
       return;
     }
-
-    return desktopApi.onCommand((command) => {
-      switch (command.type) {
-        case "add-ifc":
-          if (!loadingIfcName) {
-            void addIfcFiles();
-          }
-          break;
-        case "open-ifc":
-          if (!loadingIfcName) {
-            void openIfc();
-          }
-          break;
-        case "load-sample":
-          loadSample();
-          break;
-        case "import-catalog":
-          if (!catalogImporting) {
-            void importCatalog();
-          }
-          break;
-        case "export-ifc":
-          if (!loadingIfcName) {
-            void exportIfc();
-          }
-          break;
-        case "reset-layout":
-          resetMosaicLayout();
-          break;
-        case "restore-window":
-          if (MOSAIC_VIEW_IDS.includes(command.viewId)) {
-            restoreMosaicView(command.viewId);
-          }
-          break;
+    const dirty = autosaveSessionsRef.current.filter(
+      (session) => session.documentTextDirty,
+    );
+    // Im Notfall-Pfad nichts schreiben, wenn es nichts zu retten gibt: sonst
+    // löscht ein Absturz einen noch nicht zurückgeholten Stand.
+    if (force && !dirty.length) {
+      return;
+    }
+    const cache = persistedDocumentsRef.current;
+    const unchanged =
+      dirty.length === cache.size &&
+      dirty.every((session) => cache.get(session.id)?.document === session.document);
+    if (unchanged) {
+      return;
+    }
+    const nextCache = new Map<
+      string,
+      { document: NativeIfcDocument; ifcText: string }
+    >();
+    const entries: RecoveredDocument[] = [];
+    try {
+      for (const session of dirty) {
+        const cached = cache.get(session.id);
+        const ifcText =
+          cached?.document === session.document
+            ? cached.ifcText
+            : serializeNativeIfcDocument(session.document);
+        nextCache.set(session.id, { document: session.document, ifcText });
+        entries.push({
+          entityCount: session.document.entities.length,
+          fileName: session.document.fileName,
+          id: session.id,
+          ifcText,
+          savedAt: new Date().toISOString(),
+          schema: session.document.schema,
+          selectedId: session.selectedId,
+        });
       }
-    });
-  });
-
-  useEffect(() => {
-    if (!desktopApi) {
+    } catch (error) {
+      recordDiagnostic(
+        "error",
+        `Autosave-Serialisierung fehlgeschlagen: ${String(error)}`,
+      );
       return;
     }
+    void writeRecoveryDocuments(entries)
+      .then(() => {
+        persistedDocumentsRef.current = nextCache;
+      })
+      .catch((error: unknown) => {
+        recordDiagnostic("error", `Autosave fehlgeschlagen: ${String(error)}`);
+      });
+  };
 
-    desktopApi.setMenuState({
-      catalogImporting,
-      closedWindowIds: closedMosaicIds,
-      hasCatalog: Boolean(catalog),
-      loadingIfcName,
-    });
-  }, [catalog, catalogImporting, closedMosaicIds, desktopApi, loadingIfcName]);
+  useEffect(() => {
+    let cancelled = false;
+    readRecoveryDocuments()
+      .then((entries) => {
+        if (cancelled) {
+          return;
+        }
+        if (entries.length) {
+          recordDiagnostic(
+            "note",
+            `Wiederherstellbare Dokumente gefunden: ${entries.length}`,
+          );
+          setRecoveredDocuments(entries);
+        }
+      })
+      .catch((error: unknown) => {
+        recordDiagnostic(
+          "error",
+          `Wiederherstellung nicht lesbar: ${String(error)}`,
+        );
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setRecoveryChecked(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Debounce nach der letzten Änderung plus ein periodischer Rückfall, damit
+  // auch durchgehendes Arbeiten regelmäßig gesichert wird. Der
+  // Identitätsvergleich macht den periodischen Lauf im Leerlauf kostenlos.
+  useEffect(() => {
+    const debounce = window.setTimeout(() => autosaveRef.current(), 4_000);
+    return () => window.clearTimeout(debounce);
+  }, [documentSessions, recoveryChecked, recoveredDocuments.length]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => autosaveRef.current(), 30_000);
+    const flushOnHide = () => autosaveRef.current();
+    window.addEventListener("pagehide", flushOnHide);
+    globalThis.document.addEventListener("visibilitychange", flushOnHide);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("pagehide", flushOnHide);
+      globalThis.document.removeEventListener("visibilitychange", flushOnHide);
+    };
+  }, []);
+
+  const restoreRecoveredDocuments = async () => {
+    setRecoveryBusy(true);
+    try {
+      const restored: WorkspaceDocumentSession[] = [];
+      for (const entry of recoveredDocuments) {
+        // Über den Worker parsen: bei großen Dokumenten blockiert das sonst
+        // den Main-Thread für Sekunden.
+        const file = new File([entry.ifcText], entry.fileName, {
+          type: "application/x-step",
+        });
+        const parsed = await parseNativeIfcFileInWorker(file, entry.fileName);
+        restored.push({
+          ...createWorkspaceDocumentSession(parsed.document, {
+            selectedId: entry.selectedId,
+            text: entry.ifcText,
+          }),
+          // Der Stand ist weiterhin nicht exportiert — Kennzeichnung und
+          // Autosave müssen das widerspiegeln.
+          documentTextDirty: true,
+        });
+      }
+      if (!restored.length) {
+        return;
+      }
+      setDocumentSessions((current) => [...current, ...restored]);
+      setActiveDocumentId(restored[0].id);
+      setRecoveredDocuments([]);
+      setStatusAlert({
+        message: `${restored.length} Dokument(e) wiederhergestellt. Bitte exportieren, um sie dauerhaft zu sichern.`,
+        tone: "success",
+      });
+      logAction(`recovery.restore({ documents: ${restored.length} });`);
+    } catch (error) {
+      reportFailure("Wiederherstellung fehlgeschlagen", error);
+    } finally {
+      setRecoveryBusy(false);
+    }
+  };
+
+  const discardRecoveredDocuments = async () => {
+    setRecoveryBusy(true);
+    try {
+      await clearRecoveryDocuments();
+      setRecoveredDocuments([]);
+      logAction(`recovery.discard();`);
+    } catch (error) {
+      reportFailure("Wiederherstellung konnte nicht verworfen werden", error);
+    } finally {
+      setRecoveryBusy(false);
+    }
+  };
 
   const saveSelectedEdit = (draft: EntityEditDraft) => {
     const next = updateNativeEntity(document, selectedId, {
@@ -2502,7 +2679,7 @@ export default function IfcWorkspace() {
 
   const requestDeleteEntity = (
     entityId: number,
-    source: "tree" | "graph" | "viewer" | "keyboard",
+    source: "tree" | "graph" | "groups" | "viewer" | "keyboard",
   ) => {
     const entity = document.entityById.get(entityId);
     if (!entity || entity.type === "IFCPROJECT") {
@@ -2538,6 +2715,14 @@ export default function IfcWorkspace() {
     }
     const entityId = currentEntity.id;
     const next = currentPlan.document;
+    // Kaskadiert mitgelöschte Produkte mit eigener Geometrie (Inhalt einer
+    // Site/eines Buildings) — der Mirror muss sie mit ausblenden, sonst
+    // bleibt ihre Geometrie im Viewer stehen.
+    const cascadeEntityIds = currentPlan.removedEntityIds.filter(
+      (id) =>
+        id !== entityId &&
+        getNativeBodyRepresentation(document, id).hasRepresentation,
+    );
 
     const nextSelection = findNextSelectionAfterEntityDelete(
       document,
@@ -2566,8 +2751,63 @@ export default function IfcWorkspace() {
       {
         pendingKey: `hide:${entityId}`,
         reloadViewer: true,
-        viewerMirror: { entityId, kind: "remove" },
+        viewerMirror: { cascadeEntityIds, entityId, kind: "remove" },
       },
+    );
+  };
+
+  // Weist ein Objekt einer bestehenden Gruppe zu (keine Geometrie-Änderung).
+  const assignEntityToGroup = (entityId: number, groupId: number) => {
+    const next = addNativeEntityToGroup(document, entityId, groupId);
+    if (next === document) {
+      return;
+    }
+    const group = document.entityById.get(groupId);
+    commitDocument(
+      next,
+      selectedId,
+      `Assign #${entityId} to ${group?.name || `#${groupId}`}`,
+      `groups.assignToGroup({ entityId: ${entityId}, groupId: ${groupId} });`,
+    );
+  };
+
+  // Legt eine neue Gruppe an und weist das Objekt direkt zu.
+  const createGroupForEntity = (
+    entityId: number,
+    groupType: string,
+    groupName: string,
+  ) => {
+    const next = addNativeGroupAssignment(
+      document,
+      entityId,
+      groupType,
+      groupName,
+    );
+    if (next === document) {
+      return;
+    }
+    commitDocument(
+      next,
+      selectedId,
+      `Create group '${groupName || groupType}' for #${entityId}`,
+      `groups.createGroup({ entityId: ${entityId}, type: ${JSON.stringify(groupType)}, name: ${JSON.stringify(groupName)} });`,
+    );
+  };
+
+  // Löst nur die Gruppenmitgliedschaft (IFCRELASSIGNSTOGROUP-Eintrag) —
+  // Objekt und Gruppe bleiben bestehen, keine Geometrie-Änderung.
+  const removeGroupMembership = (memberId: number, groupId: number) => {
+    const next = removeNativeGroupMembership(document, memberId, groupId);
+    if (next === document) {
+      return;
+    }
+    const member = document.entityById.get(memberId);
+    const group = document.entityById.get(groupId);
+    commitDocument(
+      next,
+      selectedId,
+      `Remove #${memberId} from ${group?.name || `#${groupId}`}`,
+      `groups.removeMembership({ memberId: ${memberId}, class: '${member?.type ?? "?"}', groupId: ${groupId} });`,
     );
   };
 
@@ -2837,6 +3077,7 @@ export default function IfcWorkspace() {
         options={[
           { value: "tree", label: "Baum" },
           { value: "graph", label: "Graph" },
+          { value: "groups", label: "Gruppen" },
         ]}
         value={structureMode}
         onChange={(value) => setStructureMode(value as StructureMode)}
@@ -2856,7 +3097,21 @@ export default function IfcWorkspace() {
           selectedId={selectedId}
           onAddChild={addChildElement}
           onCenterCamera={(id) => centerViewerCamera(id, "tree")}
+          onManageGroups={setGroupManagerEntityId}
           onRemove={(id) => requestDeleteEntity(id, "tree")}
+          onSelect={selectEntity}
+          onSelectMany={selectEntities}
+        />
+      ) : structureMode === "groups" ? (
+        <GroupsPanel
+          document={document}
+          revealSelectionNonce={treeRevealNonce}
+          search={search}
+          selectedId={selectedId}
+          onCenterCamera={(id) => centerViewerCamera(id, "groups")}
+          onManageGroups={setGroupManagerEntityId}
+          onRemove={(id) => requestDeleteEntity(id, "groups")}
+          onRemoveMembership={removeGroupMembership}
           onSelect={selectEntity}
           onSelectMany={selectEntities}
         />
@@ -3525,6 +3780,58 @@ export default function IfcWorkspace() {
         </div>
       </header>
 
+      {recoveredDocuments.length ? (
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-warning/40 bg-warning/10 px-3 py-1.5 text-xs">
+          <span className="font-medium">
+            Nicht exportierte Änderungen aus einer früheren Sitzung gefunden:
+          </span>
+          <span className="text-muted-foreground">
+            {recoveredDocuments
+              .map(
+                (entry) =>
+                  `${entry.fileName} (${entry.entityCount.toLocaleString("de-DE")} Entitäten, ${new Date(entry.savedAt).toLocaleString("de-DE")})`,
+              )
+              .join(" · ")}
+          </span>
+          <Button
+            disabled={recoveryBusy}
+            variant="default"
+            onClick={() => void restoreRecoveredDocuments()}
+          >
+            {recoveryBusy ? "Stellt wieder her…" : "Wiederherstellen"}
+          </Button>
+          <Button
+            disabled={recoveryBusy}
+            onClick={() => void discardRecoveredDocuments()}
+          >
+            Verwerfen
+          </Button>
+        </div>
+      ) : null}
+
+      {statusAlert ? (
+        <div
+          className={`flex shrink-0 items-center gap-2 border-b px-3 py-1.5 text-xs ${
+            statusAlert.tone === "danger"
+              ? "border-destructive/40 bg-destructive/10 text-destructive"
+              : "border-border/70 bg-muted/40 text-muted-foreground"
+          }`}
+          role={statusAlert.tone === "danger" ? "alert" : "status"}
+        >
+          <span className="min-w-0 flex-1 break-words">
+            {statusAlert.message}
+          </span>
+          <button
+            aria-label="Meldung schließen"
+            className="shrink-0 rounded-sm p-0.5 hover:bg-foreground/10"
+            type="button"
+            onClick={() => setStatusAlert(null)}
+          >
+            <X aria-hidden className="size-3" />
+          </button>
+        </div>
+      ) : null}
+
       <main className="min-h-0 flex-1 p-1.5">
         <div className="h-full overflow-hidden rounded-lg border border-border/60 bg-muted/30">
           <Mosaic<MosaicViewId>
@@ -3549,6 +3856,19 @@ export default function IfcWorkspace() {
         plan={deleteRequest?.plan ?? null}
         onCancel={() => setDeleteRequest(null)}
         onConfirm={confirmDeleteEntity}
+      />
+
+      <GroupManagerDialog
+        document={document}
+        entity={
+          groupManagerEntityId != null
+            ? (document.entityById.get(groupManagerEntityId) ?? null)
+            : null
+        }
+        onAssignToGroup={assignEntityToGroup}
+        onClose={() => setGroupManagerEntityId(null)}
+        onCreateGroup={createGroupForEntity}
+        onRemoveMembership={removeGroupMembership}
       />
 
       <footer className="flex h-6 shrink-0 items-center gap-3 overflow-hidden border-t border-border/70 bg-card px-3 text-[11px] text-muted-foreground">

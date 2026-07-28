@@ -1,21 +1,22 @@
+import { portalFetch } from "./http";
 import {
-  MOCK_BAUWERKE,
-  MOCK_PROJEKTE,
-  createMockHierarchy,
-  createMockMonitoringTree,
-  createMockVerfahrenRecords,
+    MOCK_BAUWERKE,
+    MOCK_PROJEKTE,
+    createMockHierarchy,
+    createMockMonitoringTree,
+    createMockVerfahrenRecords,
 } from "./mock";
 import {
-  asRecord,
-  normalizeHierarchyPayload,
-  normalizeMonitoringPayload,
-  readForeignKey,
-  readString,
-  type PortalBauwerk,
-  type PortalNode,
-  type PortalProjekt,
-  type PortalSettings,
-  type PortalTokens,
+    asRecord,
+    normalizeHierarchyPayload,
+    normalizeMonitoringPayload,
+    readForeignKey,
+    readString,
+    type PortalBauwerk,
+    type PortalNode,
+    type PortalProjekt,
+    type PortalSettings,
+    type PortalTokens,
 } from "./types";
 
 const MAX_ERROR_DETAIL_LENGTH = 300;
@@ -311,7 +312,7 @@ export class PortalApiClient {
   private async requestTokens(
     form: Record<string, string>,
   ): Promise<PortalTokens> {
-    const response = await fetch(this.settings.tokenUrl, {
+    const response = await portalFetch(this.settings.tokenUrl, {
       body: new URLSearchParams(form).toString(),
       headers: {
         Accept: "application/json",
@@ -378,7 +379,7 @@ export class PortalApiClient {
     if (this.tokens?.accessToken) {
       headers.Authorization = `Bearer ${this.tokens.accessToken}`;
     }
-    return fetch(url, { headers });
+    return portalFetch(url, { headers });
   }
 
   private async requestJson(url: string): Promise<unknown> {

@@ -1,0 +1,17 @@
+[package]
+name = "ifcnative"
+version = "1.4.8"
+description = "Desktop IFC builder and viewer"
+authors = ["MKP"]
+edition = "2021"
+
+[lib]
+name = "ifcnative_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-http = "2"

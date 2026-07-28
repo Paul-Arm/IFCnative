@@ -142,7 +142,16 @@ export type ViewerMirrorOp =
       /** Verschiebung relativ zur aktuellen Position (Szenen-Delta). */
       delta: { x: number; y: number; z: number };
     }
-  | { kind: "remove"; entityId: number };
+  | {
+      kind: "remove";
+      entityId: number;
+      /**
+       * Kaskadiert mitgelöschte Produkte (z. B. Inhalt einer gelöschten
+       * Site/eines Buildings) — der Container selbst hat meist keine eigene
+       * Geometrie, seine Elemente müssen mit aus der Anzeige verschwinden.
+       */
+      cascadeEntityIds?: number[];
+    };
 
 export interface ViewerMirrorRequest {
   documentId: string;

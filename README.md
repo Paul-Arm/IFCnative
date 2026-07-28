@@ -10,11 +10,15 @@ Use Node.js 22.13.0 or newer before installing dependencies.
 npm install
 npm run start
 npm run build
-npm run electron:dev
-npm run desktop:pack
+npm run tauri:dev
+npm run desktop:build
 npm run desktop:dist
 npm run desktop:installer
 npm run test:ifc
 ```
 
-Electron desktop builds use the existing Vite renderer. `npm run electron:dev` starts Vite and opens the desktop shell, `npm run desktop:pack` creates an unpacked app under `release/electron`, `npm run desktop:dist` creates a Windows zip bundle, and `npm run desktop:installer` creates an NSIS installer when the local Windows/electron-builder cache supports it.
+The Windows desktop app uses Tauri 2 with the existing Vite renderer. Install the
+[Tauri Windows prerequisites](https://v2.tauri.app/start/prerequisites/), then use
+`npm run tauri:dev` for development. `npm run desktop:build` creates the unpackaged
+Windows executable and `npm run desktop:dist` (or `desktop:installer`) creates an
+NSIS installer under `src-tauri/target/release/bundle/nsis`.
