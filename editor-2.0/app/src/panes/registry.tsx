@@ -21,6 +21,7 @@ const RecentsPane = lazy(() => import("./recents/RecentsPane"));
 const PsetBatchPane = lazy(() => import("./pset-batch/PsetBatchPane"));
 const CatalogPane = lazy(() => import("./catalog/CatalogPane"));
 const ListsPane = lazy(() => import("./lists/ListsPane"));
+const BuilderPane = lazy(() => import("./builder/BuilderPane"));
 
 const COMPONENTS: Record<PaneId, ComponentType> = {
   structure: StructurePane,
@@ -33,6 +34,7 @@ const COMPONENTS: Record<PaneId, ComponentType> = {
   "pset-batch": PsetBatchPane,
   catalog: CatalogPane,
   lists: ListsPane,
+  builder: BuilderPane,
 };
 
 /** Platzhalter für Ids, die es in dieser Version nicht (mehr) gibt. */

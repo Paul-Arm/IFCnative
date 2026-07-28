@@ -10,6 +10,7 @@ export const PANE_IDS = [
   "pset-batch",
   "catalog",
   "lists",
+  "builder",
 ] as const;
 
 export type PaneId = (typeof PANE_IDS)[number];
@@ -25,4 +26,5 @@ export const PANE_TITLES: Record<PaneId, string> = {
   "pset-batch": "Pset Batch",
   catalog: "Objektkatalog",
   lists: "Listen",
+  builder: "Baukasten",
 };
