@@ -1,9 +1,13 @@
 /**
  * Viewer-Pane: WebGPU-3D-Ansicht des aktiven Dokuments.
  *
- * Geometrie wird streamend geladen (siehe core/viewer.ts), Auswahl läuft in
- * beide Richtungen über den Selection-Store, Farb-Overrides kommen vom
- * Lens-Pane über den Overrides-Store.
+ * Geometrie wird streamend geladen (core/viewer.ts), Auswahl läuft beidseitig
+ * über den Selection-Store, Farb-Overrides über den Overrides-Store der Lens.
+ *
+ * Geometrie-Stand: Die Szene stammt aus EINEM Byte-Stand und kennt danach keine
+ * Sitzungsänderungen. Stand und Neuberechnung liegen in `useGeometryRebuild`;
+ * dieses Pane startet den Viewer bei jedem neuen Stand neu (alte Instanz wird
+ * disposed).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -15,6 +19,7 @@ import {
 import { useActiveDocument } from "../../store/documents";
 import { useSelection, useSelectionOf } from "../../store/selection";
 import { attachViewerControls } from "./controls";
+import { useGeometryRebuild } from "./useGeometryRebuild";
 import { useViewerOverrides } from "./overrides";
 import { DEFAULT_SECTION, toSectionPlane, type SectionState } from "./section";
 import ViewerToolbar from "./ViewerToolbar";
@@ -24,7 +29,6 @@ const NO_IDS: ReadonlySet<number> = new Set<number>();
 export default function ViewerPane() {
   const doc = useActiveDocument();
   const docId = doc?.id ?? null;
-  const bytes = doc?.bytes ?? null;
 
   const selection = useSelectionOf(docId);
   const select = useSelection((s) => s.select);
@@ -42,6 +46,9 @@ export default function ViewerPane() {
   );
   const clearOverrides = useViewerOverrides((s) => s.clear);
 
+  const geometry = useGeometryRebuild(doc);
+  const source = geometry.source;
+
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [handle, setHandle] = useState<ViewerHandle | null>(null);
   const [status, setStatus] = useState<ViewerStatus | null>(null);
@@ -51,17 +58,17 @@ export default function ViewerPane() {
   const [section, setSection] = useState<SectionState>(DEFAULT_SECTION);
   const [note, setNote] = useState<string | null>(null);
 
-  // — Viewer-Instanz pro Dokument: bei Wechsel neu laden, alte disposen —
+  // — Viewer-Instanz pro Geometrie-Stand: bei Wechsel neu laden, alte disposen —
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !bytes) {
+    if (!canvas || !source) {
       setStatus(null);
       return;
     }
     let cancelled = false;
     let instance: ViewerHandle | null = null;
     setStatus({ kind: "loading", meshCount: 0 });
-    void startViewer(canvas, bytes, (next) => {
+    void startViewer(canvas, source.bytes, (next) => {
       if (!cancelled) setStatus(next);
     }).then((created) => {
       if (cancelled) {
@@ -76,7 +83,7 @@ export default function ViewerPane() {
       setHandle(null);
       instance?.dispose();
     };
-  }, [docId, bytes]);
+  }, [source]);
 
   // Sicht-Zustand ist dokumentgebunden.
   useEffect(() => {
@@ -109,9 +116,9 @@ export default function ViewerPane() {
     (x: number, y: number, additive: boolean): void => {
       if (!handle || !docId) return;
       void handle.pick(x, y).then((expressId) => {
-        // Review-Befund 4c: Die Geometrie stammt aus den Originalbytes und
-        // kennt keine Tombstones. Ein Treffer auf ein gelöschtes Objekt zählt
-        // deshalb wie ein Klick ins Leere.
+        // Review-Befund 4c: Solange der Geometrie-Stand älter ist als die
+        // Löschung, kennt die Szene keine Tombstones — ein Treffer auf ein
+        // gelöschtes Objekt zählt deshalb wie ein Klick ins Leere.
         const deleted = expressId !== null && (doc?.session.isDeleted(expressId) ?? false);
         if (expressId === null || deleted) clearSelection(docId);
         else select(docId, expressId, additive);
@@ -197,6 +204,11 @@ export default function ViewerPane() {
         isolated={isolated !== null}
         xray={xray}
         section={section}
+        pendingRebuild={geometry.pending}
+        rebuilding={geometry.rebuilding}
+        autoRebuild={geometry.auto}
+        onRebuild={geometry.rebuild}
+        onToggleAutoRebuild={geometry.toggleAuto}
         onZoomAll={() => handle?.zoomToModel()}
         onIsolate={toggleIsolation}
         onHide={hideSelection}
@@ -221,7 +233,9 @@ export default function ViewerPane() {
         hiddenCount={hiddenIds.size}
         isolatedCount={isolated?.size ?? null}
         lensSource={lensSource}
-        note={note}
+        note={geometry.error ?? note}
+        geometryRevision={source?.revision ?? null}
+        pendingRebuild={geometry.pending}
       />
     </div>
   );
@@ -249,17 +263,27 @@ function StatusLine({
   isolatedCount,
   lensSource,
   note,
+  geometryRevision,
+  pendingRebuild,
 }: {
   status: ViewerStatus | null;
   hiddenCount: number;
   isolatedCount: number | null;
   lensSource: string | null;
   note: string | null;
+  geometryRevision: number | null;
+  pendingRebuild: number;
 }) {
   const parts: string[] = [];
   if (status?.kind === "loading") parts.push(`Lade … ${status.meshCount} Meshes`);
   else if (status?.kind === "ready") parts.push(`${status.meshCount} Meshes`);
   else if (status) parts.push(status.reason);
+  if (pendingRebuild > 0 && geometryRevision !== null) {
+    parts.push(
+      `Geometrie-Stand: Revision ${geometryRevision} / ${pendingRebuild} ` +
+        `${pendingRebuild === 1 ? "Änderung" : "Änderungen"} offen`,
+    );
+  }
   if (hiddenCount > 0) parts.push(`${hiddenCount} ausgeblendet`);
   if (isolatedCount !== null) parts.push(`${isolatedCount} isoliert`);
   if (lensSource) parts.push(`Lens: ${lensSource}`);

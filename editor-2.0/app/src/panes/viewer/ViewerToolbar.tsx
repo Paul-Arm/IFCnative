@@ -13,6 +13,11 @@ export interface ViewerToolbarProps {
   isolated: boolean;
   xray: boolean;
   section: SectionState;
+  /** Offene Modelländerungen seit dem letzten Geometrie-Stand (Badge-Zähler). */
+  pendingRebuild: number;
+  /** Export läuft gerade — Neuberechnung sperren. */
+  rebuilding: boolean;
+  autoRebuild: boolean;
   onZoomAll(): void;
   onIsolate(): void;
   onHide(): void;
@@ -20,7 +25,16 @@ export interface ViewerToolbarProps {
   onToggleXray(): void;
   onSection(patch: Partial<SectionState>): void;
   onPreset(view: PresetView): void;
+  onRebuild(): void;
+  onToggleAutoRebuild(): void;
 }
+
+const REBUILD_TITLE =
+  "Sitzung exportieren und die Geometrie daraus neu aufbauen — " +
+  "danach sind neue Körper, Maßänderungen und Löschungen in 3D sichtbar.";
+const AUTO_TITLE =
+  "Automatisch 2 s nach der letzten Änderung neu berechnen. " +
+  "Standardmäßig aus: Der Export großer Modelle ist teuer.";
 
 const PRESETS: ReadonlyArray<{ id: PresetView; label: string }> = [
   { id: "iso", label: "Iso" },
@@ -114,6 +128,51 @@ export default function ViewerToolbar(props: ViewerToolbarProps) {
           {preset.label}
         </button>
       ))}
+
+      <button
+        className="btn"
+        style={{ marginLeft: 8 }}
+        data-active={props.pendingRebuild > 0}
+        disabled={disabled || props.rebuilding}
+        title={REBUILD_TITLE}
+        onClick={props.onRebuild}
+      >
+        {props.rebuilding ? "Berechne …" : "Modell neu berechnen"}
+        {props.pendingRebuild > 0 && <Badge count={props.pendingRebuild} />}
+      </button>
+      <label className="text-dim" title={AUTO_TITLE} style={LABEL_STYLE}>
+        <input
+          type="checkbox"
+          checked={props.autoRebuild}
+          onChange={props.onToggleAutoRebuild}
+        />
+        automatisch
+      </label>
     </div>
+  );
+}
+
+const LABEL_STYLE = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 4,
+  fontSize: "0.8125rem",
+} as const;
+
+/** Zähler der offenen Änderungen direkt am Button. */
+function Badge({ count }: { count: number }) {
+  return (
+    <span
+      style={{
+        marginLeft: 6,
+        padding: "0 5px",
+        borderRadius: 8,
+        background: "var(--accent)",
+        color: "var(--bg-panel)",
+        fontSize: "0.6875rem",
+      }}
+    >
+      {count}
+    </span>
   );
 }

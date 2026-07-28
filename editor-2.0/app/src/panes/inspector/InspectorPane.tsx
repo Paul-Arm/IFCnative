@@ -1,8 +1,8 @@
 /**
- * Inspector: zeigt Details des zuletzt ausgewählten Objekts in vier Modi
- * (Übersicht, Eigenschaften, Mengen, Beziehungen). Attribute, Eigenschaften
- * und Mengen sind editierbar; jeder Schreibpfad läuft als Command durch die
- * Pipeline (`useCommands.execute`).
+ * Inspector: zeigt Details des zuletzt ausgewählten Objekts in fünf Modi
+ * (Übersicht, Eigenschaften, Mengen, Beziehungen, Platzierung). Attribute,
+ * Eigenschaften und Mengen sind editierbar; jeder Schreibpfad läuft als Command
+ * durch die Pipeline (`useCommands.execute`). „Platzierung" ist reine Anzeige.
  *
  * Aktualität (Befund 5): Die Abschnitte hängen ihre Memos an
  * `useDocRevision(docId)` — die dokumentweite Revision aus der Pipeline, die
@@ -13,17 +13,24 @@ import { useState } from "react";
 import { useActiveDocument } from "../../store/documents";
 import { useSelectionOf } from "../../store/selection";
 import OverviewSection from "./OverviewSection";
+import PlacementSection from "./PlacementSection";
 import PropertiesSection from "./PropertiesSection";
 import QuantitiesSection from "./QuantitiesSection";
 import RelationsSection from "./RelationsSection";
 
-type InspectorMode = "overview" | "properties" | "quantities" | "relations";
+type InspectorMode =
+  | "overview"
+  | "properties"
+  | "quantities"
+  | "relations"
+  | "placement";
 
 const MODES: ReadonlyArray<{ id: InspectorMode; label: string }> = [
   { id: "overview", label: "Übersicht" },
   { id: "properties", label: "Eigenschaften" },
   { id: "quantities", label: "Mengen" },
   { id: "relations", label: "Beziehungen" },
+  { id: "placement", label: "Platzierung" },
 ];
 
 export default function InspectorPane() {
@@ -96,6 +103,13 @@ export default function InspectorPane() {
             )}
             {mode === "relations" && (
               <RelationsSection
+                docId={doc.id}
+                session={doc.session}
+                expressId={expressId}
+              />
+            )}
+            {mode === "placement" && (
+              <PlacementSection
                 docId={doc.id}
                 session={doc.session}
                 expressId={expressId}
