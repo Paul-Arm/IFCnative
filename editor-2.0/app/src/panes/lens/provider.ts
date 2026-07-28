@@ -1,7 +1,12 @@
 /**
  * Brücke IfcDataStore → @ifc-lite/lens. Der Lens-Motor liest ausschließlich
- * über dieses Interface, deshalb genügt eine dünne Adapterschicht auf die
- * On-Demand-Extraktoren des Parsers.
+ * über dieses Interface, deshalb genügt eine dünne Adapterschicht.
+ *
+ * Befund 6: Psets/Mengen kommen über `session.view` (MutablePropertyView) —
+ * also `extractPropertiesOnDemand`/`extractQuantitiesOnDemand` (in
+ * `ModelSession.open` verdrahtet) PLUS Mutations-Overlay, genau wie im
+ * Listen-Provider. Ein direkter Extraktor-Aufruf sähe Sitzungsänderungen nicht,
+ * und die Einfärbung wiche von Inspector/Listen/Export ab.
  *
  * Bewertet werden nur Entitäten MIT Geometrie — alles andere kann der Viewer
  * ohnehin nicht einfärben, und die Farb-Map bliebe unnötig groß.
@@ -10,16 +15,28 @@ import {
   collectMaterialLeaves,
   extractClassificationsOnDemand,
   extractMaterialsOnDemand,
-  extractPropertiesOnDemand,
-  extractQuantitiesOnDemand,
   resolveMaterialDefId,
   type IfcDataStore,
 } from "@ifc-lite/parser";
 import type { LensDataProvider, PropertySetInfo } from "@ifc-lite/lens";
 import type { ModelSession } from "../../core/session";
 
-/** Ab dieser Größe wird der Pset-Cache verworfen (Speicherschutz). */
+/** Ab dieser Größe wird der älteste Cache-Eintrag verdrängt (Speicherschutz). */
 const PSET_CACHE_LIMIT = 5000;
+
+/**
+ * FIFO statt `clear()` (Befund 14b): Ein kompletter Cache-Wurf ließ jede
+ * weitere Entität über der Grenze neu parsen — mit `clear()` fiel die Trefferrate
+ * am Limit auf null. Jetzt fliegt nur der älteste Schlüssel.
+ */
+function putCapped<T>(cache: Map<number, T>, key: number, value: T): T {
+  if (cache.size >= PSET_CACHE_LIMIT) {
+    const oldest = cache.keys().next();
+    if (!oldest.done) cache.delete(oldest.value);
+  }
+  cache.set(key, value);
+  return value;
+}
 
 function collectEntityIds(store: IfcDataStore): number[] {
   const table = store.entities;
@@ -46,26 +63,41 @@ export function createLensProvider(
   const store = session.store;
   let ids: number[] | null = null;
   const psetCache = new Map<number, PropertySetInfo[]>();
+  const qsetCache = new Map<number, QuantitySet[]>();
 
   const entityIds = (): number[] => (ids ??= collectEntityIds(store));
 
   const psetsOf = (expressId: number): PropertySetInfo[] => {
-    const cached = psetCache.get(expressId);
-    if (cached) return cached;
-    const sets = extractPropertiesOnDemand(store, expressId).map((pset) => ({
-      name: pset.name,
-      properties: pset.properties.map((property) => ({
-        name: property.name,
-        value: property.value as unknown,
+    const hit = psetCache.get(expressId);
+    if (hit) return hit;
+    return putCapped(
+      psetCache,
+      expressId,
+      session.view.getForEntity(expressId).map((pset) => ({
+        name: pset.name,
+        properties: pset.properties.map((property) => ({
+          name: property.name,
+          value: property.value as unknown,
+        })),
       })),
-    }));
-    if (psetCache.size >= PSET_CACHE_LIMIT) psetCache.clear();
-    psetCache.set(expressId, sets);
-    return sets;
+    );
   };
 
-  const qsetsOf = (expressId: number): QuantitySet[] =>
-    extractQuantitiesOnDemand(store, expressId) as QuantitySet[];
+  const qsetsOf = (expressId: number): QuantitySet[] => {
+    const hit = qsetCache.get(expressId);
+    if (hit) return hit;
+    return putCapped(
+      qsetCache,
+      expressId,
+      session.view.getQuantitiesForEntity(expressId).map((qset) => ({
+        name: qset.name,
+        quantities: qset.quantities.map((quantity) => ({
+          name: quantity.name,
+          value: quantity.value as unknown,
+        })),
+      })),
+    );
+  };
 
   return {
     getEntityCount() {

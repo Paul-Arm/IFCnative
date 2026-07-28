@@ -6,7 +6,11 @@
  */
 import { useMemo, useState } from "react";
 import { QuantityType } from "@ifc-lite/data";
-import { useCommands, type EditorCommand } from "../../commands/pipeline";
+import {
+  useCommands,
+  useDocRevision,
+  type EditorCommand,
+} from "../../commands/pipeline";
 import {
   cmdCreateQuantitySet,
   cmdSetQuantity,
@@ -21,18 +25,16 @@ interface QuantitiesSectionProps {
   docId: string;
   session: ModelSession;
   expressId: number;
-  /** Steigt bei jeder Mutation — erzwingt Neuladen der Mengen. */
-  revision: number;
-  onMutate(): void;
 }
 
 export default function QuantitiesSection({
   docId,
   session,
   expressId,
-  revision,
-  onMutate,
 }: QuantitiesSectionProps) {
+  // Dokumentweite Revision (do/undo/redo) statt pane-lokalem Zähler.
+  const revision = useDocRevision(docId);
+
   const sets = useMemo(
     () => readQuantitySets(session, expressId),
     [session, expressId, revision],
@@ -40,7 +42,6 @@ export default function QuantitiesSection({
 
   function run(command: EditorCommand): void {
     useCommands.getState().execute(docId, command);
-    onMutate();
   }
 
   return (

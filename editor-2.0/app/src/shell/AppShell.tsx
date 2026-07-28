@@ -63,7 +63,7 @@ export function AppShell() {
           renderTile={(id, path) => (
             <MosaicWindow<PaneId>
               path={path}
-              title={PANE_TITLES[id]}
+              title={PANE_TITLES[id] ?? `Unbekannt: ${id}`}
               toolbarControls={[]}
             >
               {renderPane(id)}

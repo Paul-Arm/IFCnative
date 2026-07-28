@@ -3,7 +3,11 @@ import { useDocuments } from "../store/documents";
 import { useUi } from "../store/ui";
 import { BUILTIN_WORKSPACE_NAMES } from "../panes/workspaces";
 import { saveViaDialog } from "../core/tauri";
-import { useCommands, useUndoRedoLabels } from "../commands/pipeline";
+import {
+  useCommands,
+  usePendingChangeCount,
+  useUndoRedoLabels,
+} from "../commands/pipeline";
 
 function UndoRedoButtons({ docId }: { docId: string | null }) {
   const { undoLabel, redoLabel } = useUndoRedoLabels(docId);
@@ -36,6 +40,9 @@ export function HeaderBar() {
   const active = useDocuments((s) =>
     s.documents.find((d) => d.id === s.activeId),
   );
+  // Befund 15: Badge = offene (undo-bare) Änderungen, nicht die append-only
+  // Mutationszahl — sonst blieb die Zahl nach einem Undo stehen.
+  const pending = usePendingChangeCount(active?.id ?? null);
   const addRecent = useUi((s) => s.addRecent);
   const {
     theme,
@@ -112,10 +119,15 @@ export function HeaderBar() {
       <button
         className="btn"
         disabled={!active}
+        title={
+          pending > 0
+            ? `${pending} ${pending === 1 ? "Änderung" : "Änderungen"} noch nicht exportiert`
+            : "Modell als IFC exportieren"
+        }
         onClick={() => void exportIfc()}
       >
         Exportieren
-        {active && active.changeCount > 0 ? ` (${active.changeCount})` : ""}
+        {pending > 0 ? ` (${pending})` : ""}
       </button>
       <UndoRedoButtons docId={active?.id ?? null} />
 

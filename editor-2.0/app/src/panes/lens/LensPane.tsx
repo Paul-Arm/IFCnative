@@ -12,6 +12,7 @@ import {
   type Lens,
   type LensEvaluationResult,
 } from "@ifc-lite/lens";
+import { useDocRevision } from "../../commands/pipeline";
 import { useActiveDocument } from "../../store/documents";
 import { useViewerOverrides } from "../viewer/overrides";
 import { createLensProvider } from "./provider";
@@ -49,9 +50,12 @@ interface LensResult {
 export default function LensPane() {
   const doc = useActiveDocument();
   const docId = doc?.id ?? null;
-  // Session statt Dokument als Abhängigkeit: `touch()` (Property-Edit) darf
-  // keine komplette Neuauswertung auslösen.
+  // Session statt Dokument als Abhängigkeit: Ein `touch()` allein darf keine
+  // komplette Neuauswertung auslösen. Die Dokument-Revision (do/undo/redo)
+  // dagegen schon — sonst bliebe die Einfärbung nach einem Edit stehen
+  // (Befund 6), obwohl der Provider die neuen Werte liest.
   const session = doc?.session ?? null;
+  const revision = useDocRevision(docId);
   const applyOverrides = useViewerOverrides((s) => s.setColorOverrides);
   const clearOverrides = useViewerOverrides((s) => s.clear);
   const activeSource = useViewerOverrides((s) =>
@@ -122,7 +126,7 @@ export default function LensPane() {
       }
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [session, docId, lens, applyOverrides]);
+  }, [session, docId, lens, applyOverrides, revision]);
 
   function reset(): void {
     setLensId("");

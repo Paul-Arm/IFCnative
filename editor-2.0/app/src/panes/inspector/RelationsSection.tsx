@@ -1,8 +1,13 @@
 /**
  * Modus „Beziehungen": Nachbarn des Objekts, gruppiert nach Beziehungsart.
  * Klick wählt die Gegenseite aus, Doppelklick zentriert zusätzlich den Viewer.
+ *
+ * Befund 7: Beziehungen leben im Sitzungs-Overlay (`relationRevision`), das
+ * Graph-Pane und Kaskaden-Dialog mitschreiben. Zusätzlich hängt das Memo an
+ * der Dokument-Revision, damit ein Undo einer Beziehungsänderung hier ankommt.
  */
 import { useMemo } from "react";
+import { useDocRevision } from "../../commands/pipeline";
 import type { ModelSession } from "../../core/session";
 import type { RelationRow } from "../../core/model/relations";
 import { useSelection } from "../../store/selection";
@@ -26,10 +31,11 @@ export default function RelationsSection({
 }: RelationsSectionProps) {
   const select = useSelection((s) => s.select);
   const requestFocus = useSelection((s) => s.requestFocus);
+  const revision = useDocRevision(docId);
 
   const groups = useMemo(
     () => groupByLabel(session.relationsOf(expressId)),
-    [session, expressId],
+    [session, expressId, revision],
   );
 
   if (groups.length === 0) {

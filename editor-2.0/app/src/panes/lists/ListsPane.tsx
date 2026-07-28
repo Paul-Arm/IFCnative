@@ -15,6 +15,7 @@ import {
   type ColumnDefinition,
   type ListDefinition,
 } from "@ifc-lite/lists";
+import { useDocRevision } from "../../commands/pipeline";
 import { useActiveDocument } from "../../store/documents";
 import { useSelection, useSelectionOf } from "../../store/selection";
 import ColumnPicker from "./ColumnPicker";
@@ -68,13 +69,14 @@ export default function ListsPane() {
   );
   const [groupColumnIds, setGroupColumnIds] = useState<string[]>([]);
 
-  // Der Provider cached Psets/Mengen; nach einer Mutation (changeCount) wird er
-  // neu gebaut, damit die Liste bearbeitete Werte zeigt.
+  // Der Provider cached Psets/Mengen; nach jedem do/undo/redo wird er neu
+  // gebaut (Befund 5), damit die Liste bearbeitete Werte zeigt. `changeCount`
+  // taugt dafür nicht — er ist append-only und schrumpft beim Undo nicht.
   const session = doc?.session ?? null;
-  const changeCount = doc?.changeCount ?? 0;
+  const revision = useDocRevision(doc?.id ?? null);
   const provider = useMemo(
     () => (session ? createListProvider(session) : null),
-    [session, changeCount],
+    [session, revision],
   );
 
   const discovered = useMemo(

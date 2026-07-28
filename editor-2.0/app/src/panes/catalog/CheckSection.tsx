@@ -6,7 +6,7 @@
  */
 import { useMemo } from "react";
 
-import { useCommands } from "../../commands/pipeline";
+import { useCommands, useDocRevision } from "../../commands/pipeline";
 import {
   cmdApplyCatalogPsets,
   cmdCatalogQuickFix,
@@ -42,22 +42,22 @@ export default function CheckSection({
   const execute = useCommands((s) => s.execute);
   const select = useCatalog((s) => s.select);
   const session = doc?.session ?? null;
-  const changeCount = doc?.changeCount ?? 0;
+  // Dokument-Revision (do/undo/redo) statt `changeCount` — nach einem Undo
+  // muss die Prüfung wieder die alten Befunde zeigen (Befund 5).
+  const revision = useDocRevision(doc?.id ?? null);
   const checked = useMemo(() => selection.slice(0, CHECK_CAP), [selection]);
 
   const findings = useMemo<CatalogValidationFinding[]>(() => {
     if (!session) return [];
-    // changeCount hängt die Prüfung an jede Modelländerung.
-    void changeCount;
     return checked.flatMap((expressId) =>
       validateEntityAgainstCatalogObject(session, expressId, objectType),
     );
-  }, [session, checked, objectType, changeCount]);
+  }, [session, checked, objectType, revision]);
 
   const suggestion = useMemo(() => {
     if (!session || checked.length === 0) return undefined;
     return suggestCatalogObjectForEntity(session, checked[0], objectTypes);
-  }, [session, checked, objectTypes]);
+  }, [session, checked, objectTypes, revision]);
 
   if (!doc || !session) {
     return (

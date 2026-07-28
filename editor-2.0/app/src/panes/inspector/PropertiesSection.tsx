@@ -6,7 +6,11 @@
  */
 import { useMemo, useState } from "react";
 import type { PropertyValueType } from "@ifc-lite/data";
-import { useCommands, type EditorCommand } from "../../commands/pipeline";
+import {
+  useCommands,
+  useDocRevision,
+  type EditorCommand,
+} from "../../commands/pipeline";
 import {
   cmdDeleteProperty,
   cmdSetProperty,
@@ -29,10 +33,6 @@ interface PropertiesSectionProps {
   expressId: number;
   /** Freitextfilter über Pset-Name, Property-Name und Wert. */
   query: string;
-  /** Steigt bei jeder Mutation — erzwingt Neuladen der Psets. */
-  revision: number;
-  /** Meldet dem Pane eine erfolgte Änderung (Refresh). */
-  onMutate(): void;
 }
 
 export default function PropertiesSection({
@@ -40,11 +40,11 @@ export default function PropertiesSection({
   session,
   expressId,
   query,
-  revision,
-  onMutate,
 }: PropertiesSectionProps) {
+  // Dokumentweite Revision (do/undo/redo) statt pane-lokalem Zähler.
+  const revision = useDocRevision(docId);
+
   const psets = useMemo(
-    // revision lädt die Psets nach jedem Command neu
     () => readPsets(session, expressId),
     [session, expressId, revision],
   );
@@ -52,7 +52,6 @@ export default function PropertiesSection({
 
   function run(command: EditorCommand): void {
     useCommands.getState().execute(docId, command);
-    onMutate();
   }
 
   function setProperty(

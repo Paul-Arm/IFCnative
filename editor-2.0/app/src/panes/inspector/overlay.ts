@@ -2,18 +2,14 @@
  * Lesebrücke zwischen Inspector und Mutations-Overlay.
  *
  * `parseColumnar()` baut absichtlich leere Property-/Quantity-Tabellen und
- * verweist auf die On-Demand-Extraktoren. Ohne diese Extraktoren sieht
- * `MutablePropertyView` die Basisdaten nicht: `getForEntity()` lieferte dann
- * nur neu angelegte Psets, und der STEP-Export würde beim Ändern einer
- * einzelnen Property die übrigen Properties desselben Psets verlieren.
- * `ensureOverlayExtractors()` hängt die Extraktoren einmal je Sitzung ein;
- * danach ist das Overlay die einzige Wahrheit für Lesen UND Schreiben.
+ * verweist auf die On-Demand-Extraktoren. Diese Extraktoren hängt
+ * `ModelSession.open()` einmalig in die `MutablePropertyView` ein (Befund 11:
+ * eine zweite Verdrahtung hier hat das Quantity-Mapping der Sitzung
+ * überschrieben). Für die Panes gilt deshalb: Das Overlay ist die einzige
+ * Wahrheit für Lesen UND Schreiben — `session.view.getForEntity()` liefert
+ * Basisdaten plus Mutationen.
  */
-import {
-  extractEntityAttributesOnDemand,
-  extractPropertiesOnDemand,
-  extractQuantitiesOnDemand,
-} from "@ifc-lite/parser";
+import { extractEntityAttributesOnDemand } from "@ifc-lite/parser";
 import type {
   PropertyValue,
   PropertyValueType,
@@ -52,34 +48,11 @@ export interface EditableAttributes {
   objectType: string;
 }
 
-const wired = new WeakSet<ModelSession>();
-
-/** Extraktoren einmal je Sitzung einhängen (idempotent). */
-export function ensureOverlayExtractors(session: ModelSession): void {
-  if (wired.has(session)) return;
-  wired.add(session);
-  const store = session.store;
-  session.view.setOnDemandExtractor((entityId) =>
-    extractPropertiesOnDemand(store, entityId),
-  );
-  session.view.setQuantityExtractor((entityId) =>
-    extractQuantitiesOnDemand(store, entityId).map((qset) => ({
-      name: qset.name,
-      quantities: qset.quantities.map((quantity) => ({
-        name: quantity.name,
-        type: quantity.type as QuantityType,
-        value: quantity.value,
-      })),
-    })),
-  );
-}
-
 /** Alle Psets eines Objekts inklusive Overlay-Änderungen. */
 export function readPsets(
   session: ModelSession,
   expressId: number,
 ): EditablePset[] {
-  ensureOverlayExtractors(session);
   return session.view.getForEntity(expressId).map((pset) => ({
     name: pset.name,
     properties: pset.properties.map((property) => ({
@@ -96,7 +69,6 @@ export function readQuantitySets(
   session: ModelSession,
   expressId: number,
 ): EditableQuantitySet[] {
-  ensureOverlayExtractors(session);
   return session.view.getQuantitiesForEntity(expressId).map((qset) => ({
     name: qset.name,
     quantities: qset.quantities.map((quantity) => ({
@@ -120,7 +92,6 @@ export function readAttributes(
   session: ModelSession,
   expressId: number,
 ): EditableAttributes {
-  ensureOverlayExtractors(session);
   const identity = session.identityOf(expressId);
   let base: EditableAttributes = {
     name: identity.name,

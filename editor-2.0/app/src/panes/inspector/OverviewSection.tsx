@@ -5,7 +5,7 @@
  * Klasse und expressId bleiben bewusst schreibgeschützt.
  */
 import { useMemo, useState } from "react";
-import { useCommands } from "../../commands/pipeline";
+import { useCommands, useDocRevision } from "../../commands/pipeline";
 import { cmdSetAttribute } from "../../commands/propertyCommands";
 import type { ModelSession } from "../../core/session";
 import ValueEditor from "./ValueEditor";
@@ -16,9 +16,6 @@ interface OverviewSectionProps {
   docId: string;
   session: ModelSession;
   expressId: number;
-  /** Steigt bei jeder Mutation — erzwingt Neuberechnung. */
-  revision: number;
-  onMutate(): void;
 }
 
 const EDITABLE: ReadonlyArray<{
@@ -35,15 +32,16 @@ export default function OverviewSection({
   docId,
   session,
   expressId,
-  revision,
-  onMutate,
 }: OverviewSectionProps) {
+  // Dokumentweite Revision (do/undo/redo) — die einzige Memo-Abhängigkeit
+  // für Lesestände aus der Sitzung.
+  const revision = useDocRevision(docId);
+
   const identity = useMemo(
     () => session.identityOf(expressId),
-    [session, expressId],
+    [session, expressId, revision],
   );
   const attributes = useMemo(
-    // revision hält die Werte nach einem Commit aktuell
     () => readAttributes(session, expressId),
     [session, expressId, revision],
   );
@@ -61,7 +59,6 @@ export default function OverviewSection({
     useCommands
       .getState()
       .execute(docId, cmdSetAttribute(session, expressId, attr, value, oldValue));
-    onMutate();
   }
 
   return (

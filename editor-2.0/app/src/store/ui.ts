@@ -5,8 +5,55 @@
 import { create } from "zustand";
 import type { MosaicNode } from "react-mosaic-component";
 import { loadJson, saveJson } from "../core/storage";
-import type { PaneId } from "../panes/ids";
+import { PANE_IDS, type PaneId } from "../panes/ids";
 import { BUILTIN_WORKSPACES } from "../panes/workspaces";
+
+const KNOWN_PANES = new Set<string>(PANE_IDS);
+
+/**
+ * Befund 10: Gespeicherte Layouts stammen aus dem localStorage und können
+ * Pane-Ids enthalten, die es in dieser Version nicht mehr gibt (umbenannt,
+ * entfernt). Ein solcher Baum ließe das Mosaic-Rendering auflaufen, deshalb
+ * wird jedes Blatt rekursiv gegen PANE_IDS geprüft — Split-Knoten über
+ * `children`, Tabs-Knoten über `tabs`.
+ */
+function isValidLayout(node: unknown): node is MosaicNode<PaneId> {
+  if (typeof node === "string") return KNOWN_PANES.has(node);
+  if (!node || typeof node !== "object") return false;
+  const candidate = node as {
+    type?: unknown;
+    children?: unknown;
+    tabs?: unknown;
+  };
+  if (candidate.type === "split") {
+    return (
+      Array.isArray(candidate.children) &&
+      candidate.children.length > 0 &&
+      candidate.children.every(isValidLayout)
+    );
+  }
+  if (candidate.type === "tabs") {
+    return (
+      Array.isArray(candidate.tabs) &&
+      candidate.tabs.length > 0 &&
+      candidate.tabs.every(
+        (tab: unknown) => typeof tab === "string" && KNOWN_PANES.has(tab),
+      )
+    );
+  }
+  return false;
+}
+
+/** Verwirft Workspaces, deren Layout unbekannte Panes enthält. */
+function validWorkspaces(entries: CustomWorkspace[]): CustomWorkspace[] {
+  return entries.filter(
+    (entry) =>
+      entry &&
+      typeof entry.name === "string" &&
+      entry.name.length > 0 &&
+      isValidLayout(entry.layout),
+  );
+}
 
 export type Theme = "light" | "dark";
 
@@ -53,7 +100,9 @@ function applyScale(scale: number): void {
 const initialTheme = loadJson<Theme>("theme", "light");
 const initialScale = loadJson<number>("uiScale", 100);
 const initialWorkspace = loadJson<string>("workspace", "Editor");
-const initialCustom = loadJson<CustomWorkspace[]>("customWorkspaces", []);
+const initialCustom = validWorkspaces(
+  loadJson<CustomWorkspace[]>("customWorkspaces", []) ?? [],
+);
 
 function layoutFor(
   name: string,

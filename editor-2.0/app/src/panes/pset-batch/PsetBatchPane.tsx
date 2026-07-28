@@ -13,7 +13,11 @@
  */
 import { useMemo, useRef, useState } from "react";
 import type { PropertyValueType } from "@ifc-lite/data";
-import { useCommands, type EditorCommand } from "../../commands/pipeline";
+import {
+  useCommands,
+  useDocRevision,
+  type EditorCommand,
+} from "../../commands/pipeline";
 import { cmdSetProperty } from "../../commands/propertyCommands";
 import {
   cmdAddPropertyOnMany,
@@ -45,20 +49,21 @@ function BatchBody({ doc }: { doc: DocumentEntry }) {
   const session = doc.session;
   const selection = useSelectionOf(doc.id);
   const setSelection = useSelection((s) => s.setSelection);
-  const [revision, setRevision] = useState(0);
   const [pending, setPending] = useState<Pending | null>(null);
   const [newPset, setNewPset] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
 
+  // Befund 3: Dokument-Revision aus der Pipeline statt pane-lokalem Zähler —
+  // sie steigt auch bei Undo/Redo und bei Edits aus Inspector/Graph/Katalog.
+  const revision = useDocRevision(doc.id);
+
   const matrix = useMemo(
-    // revision erzwingt das Neulesen nach jedem Command
     () => buildMatrix(session, selection),
     [session, selection, revision],
   );
 
   function run(command: EditorCommand): void {
     useCommands.getState().execute(doc.id, command);
-    setRevision((value) => value + 1);
   }
 
   /** Einzelne Zelle — direkt, ohne Vorschau. */
