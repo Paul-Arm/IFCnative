@@ -8,6 +8,16 @@
  * Anlage immer ein Löschen (und umgekehrt). Vor einem Löschen sichert der
  * Command die vorhandenen Properties über `getForEntity`, damit das Undo den
  * Satz wertgetreu — inklusive Werttypen und Einheiten — wiederherstellt.
+ *
+ * Review-Befund 12 (Redo): Diese Familie hat bewusst KEIN eigenes `redo()`.
+ * Die d.ts von `MutablePropertyView` zeigt, dass weder `createPropertySet`
+ * noch `deletePropertySet` einen `skipHistory`-Parameter kennen — ein Redo
+ * kann die append-only Historie hier also gar nicht umgehen. Der Fallback der
+ * Pipeline auf `run()` ist damit der einzige korrekte Weg und harmlos: der
+ * StepExporter backt Psets aus der Overlay-Map (`getForEntity`), nicht aus
+ * der Mutationsliste, und `run()` ist auf denselben Endzustand idempotent.
+ * Die Historie wächst pro Redo um genau die Pflichteinträge
+ * (CREATE_/DELETE_PROPERTY_SET), die auch `run()` erzeugt.
  */
 import type { PropertyValue, PropertyValueType } from "@ifc-lite/data";
 import type { ModelSession } from "../core/session";

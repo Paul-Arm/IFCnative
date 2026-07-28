@@ -241,7 +241,6 @@ export function cmdDeleteRelation(
           relId,
           trimmed.slot,
           trimmed.previousValue,
-          trimmed.previousValue,
         );
         for (const id of trimmed.removed) {
           session.relationOverlay.unsuppressMember(relId, id);

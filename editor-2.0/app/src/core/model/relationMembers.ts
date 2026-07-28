@@ -150,9 +150,10 @@ export function writeRelationMembers(
 }
 
 /**
- * Related-Liste auf den Stand vor einer Kürzung zurücksetzen. `previous`
- * ist der Wert, den `getPositionalMutationsForEntity` vorher lieferte —
- * `undefined` bedeutet „es gab keine Mutation", die Kürzung wird also
+ * Related-Liste auf den Stand vor einer Kürzung zurücksetzen. `previous` ist
+ * der Wert, den `readRelationMembers` vorgefunden hat: bei Overlay-Records
+ * das ursprüngliche Attribut, sonst die vorherige positionale Mutation.
+ * `undefined` bedeutet „es gab keine Mutation" — die Kürzung wird dann
  * vollständig entfernt.
  */
 export function restoreRelationMembers(
@@ -160,12 +161,11 @@ export function restoreRelationMembers(
   relId: number,
   slot: RelationMembers,
   previous: IfcAttributeValue | undefined,
-  overlayPrevious: IfcAttributeValue | undefined,
 ): void {
   if (slot.overlay) {
     const entity = view.getNewEntity(relId);
-    if (entity && overlayPrevious !== undefined) {
-      entity.attributes[slot.index] = overlayPrevious;
+    if (entity && previous !== undefined) {
+      entity.attributes[slot.index] = previous;
     }
     return;
   }

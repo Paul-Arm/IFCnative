@@ -5,6 +5,8 @@
  */
 import { create } from "zustand";
 import { ModelSession } from "../core/session";
+import { useCommands } from "../commands/pipeline";
+import { useSelection } from "./selection";
 
 export interface DocumentEntry {
   id: string;
@@ -29,12 +31,31 @@ interface DocumentsState {
 
 let nextId = 1;
 
+/** Anzeigedauer einer Öffnen-Fehlermeldung in der Statusleiste (Befund 9). */
+const ERROR_TIMEOUT_MS = 8000;
+let errorTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Flache Kopie ohne einen Schlüssel (Befund 8). */
+function withoutKey<T>(
+  record: Record<string, T>,
+  key: string,
+): Record<string, T> {
+  if (!(key in record)) return record;
+  const next = { ...record };
+  delete next[key];
+  return next;
+}
+
 export const useDocuments = create<DocumentsState>((set, get) => ({
   documents: [],
   activeId: null,
   progress: null,
 
   async openDocument(fileName, buffer) {
+    if (errorTimer !== null) {
+      clearTimeout(errorTimer);
+      errorTimer = null;
+    }
     set({ progress: "Parse …" });
     try {
       const session = await ModelSession.open(fileName, buffer, (percent, phase) =>
@@ -51,8 +72,18 @@ export const useDocuments = create<DocumentsState>((set, get) => ({
         documents: [...state.documents, entry],
         activeId: id,
       }));
-    } finally {
       set({ progress: null });
+    } catch (error) {
+      // Review-Befund 9: Ohne dieses catch endete jede kaputte Datei als
+      // unhandled rejection — die Statusleiste blieb stumm. Der Fehler wird
+      // im progress-Feld gemeldet und nach ERROR_TIMEOUT_MS (oder beim
+      // nächsten Öffnen) wieder gelöscht.
+      const message = error instanceof Error ? error.message : String(error);
+      set({ progress: `Fehler beim Öffnen von ${fileName}: ${message}` });
+      errorTimer = setTimeout(() => {
+        errorTimer = null;
+        set({ progress: null });
+      }, ERROR_TIMEOUT_MS);
     }
   },
 
@@ -65,6 +96,17 @@ export const useDocuments = create<DocumentsState>((set, get) => ({
           : state.activeId;
       return { documents, activeId };
     });
+    // Review-Befund 8: Undo-/Redo-Stapel, Audit-Log und Auswahl sind je
+    // Dokument abgelegt und überlebten das Schließen — ein Leck, das bei
+    // langen Sitzungen wächst und (bei wiederverwendeten docIds) fremde
+    // Historie zurückbringen könnte. Aufgeräumt wird per setState, weil
+    // pipeline.ts keine passende Aktion anbietet.
+    useCommands.setState((state) => ({
+      byDocument: withoutKey(state.byDocument, id),
+    }));
+    useSelection.setState((state) => ({
+      byDocument: withoutKey(state.byDocument, id),
+    }));
   },
 
   setActive(id) {

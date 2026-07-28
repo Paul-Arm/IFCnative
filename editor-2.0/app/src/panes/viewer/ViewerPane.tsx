@@ -109,11 +109,15 @@ export default function ViewerPane() {
     (x: number, y: number, additive: boolean): void => {
       if (!handle || !docId) return;
       void handle.pick(x, y).then((expressId) => {
-        if (expressId === null) clearSelection(docId);
+        // Review-Befund 4c: Die Geometrie stammt aus den Originalbytes und
+        // kennt keine Tombstones. Ein Treffer auf ein gelöschtes Objekt zählt
+        // deshalb wie ein Klick ins Leere.
+        const deleted = expressId !== null && (doc?.session.isDeleted(expressId) ?? false);
+        if (expressId === null || deleted) clearSelection(docId);
         else select(docId, expressId, additive);
       });
     },
-    [handle, docId, select, clearSelection],
+    [handle, docId, doc, select, clearSelection],
   );
 
   useEffect(() => {

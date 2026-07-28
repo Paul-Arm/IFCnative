@@ -37,7 +37,11 @@ import type {
 import { storeyOf } from "../../core/model/spatial";
 import type { ModelSession } from "../../core/session";
 
-/** Ab dieser Größe werden die Caches verworfen (Speicherschutz). */
+/**
+ * Ab dieser Größe verdrängt ein neuer Eintrag den ältesten (Review-Befund
+ * 14a). Früher wurde der ganze Cache geleert — beim Scrollen durch ein Modell
+ * knapp über der Grenze fiel dadurch reihum jede Extraktion neu an.
+ */
 const CACHE_LIMIT = 20000;
 
 /** Rohform der On-Demand-Extraktoren (numerische `type`-Codes statt Enums). */
@@ -123,7 +127,12 @@ export function createListProvider(session: ModelSession): ListDataProvider {
     const hit = cache.get(expressId);
     if (hit !== undefined) return hit;
     const value = compute();
-    if (cache.size >= CACHE_LIMIT) cache.clear();
+    // FIFO-Verdrängung: Map hält Einfügereihenfolge, der erste Key ist der
+    // älteste Eintrag.
+    if (cache.size >= CACHE_LIMIT) {
+      const oldest = cache.keys().next();
+      if (!oldest.done) cache.delete(oldest.value);
+    }
     cache.set(expressId, value);
     return value;
   }
@@ -139,18 +148,35 @@ export function createListProvider(session: ModelSession): ListDataProvider {
     return id === null ? "" : table.getName(id);
   };
 
+  /**
+   * Review-Befund 4: gelöschte (tombstonete) Objekte dürfen in keiner Liste
+   * mehr auftauchen — sie sind nach dem Export nicht mehr im Modell. Der
+   * Filter sitzt an den beiden Einstiegen des Listen-Motors, damit jede
+   * Spalte, Gruppierung und Auswertung ihn automatisch mitbekommt.
+   */
+  const alive = (ids: readonly number[]): number[] =>
+    ids.filter((id) => !session.isDeleted(id));
+
+  /** Tombstone-Stand, an dem `allIds` gebaut wurde. */
+  let allIdsTombstones = -1;
+
   return {
     getEntitiesByType(type) {
       const name = IfcTypeEnumToString(type);
       if (name === "Unknown") return [];
-      return byType.get(name.toUpperCase()) ?? table.getByType(type);
+      return alive(byType.get(name.toUpperCase()) ?? table.getByType(type));
     },
 
     getAllEntityIds() {
-      if (allIds) return allIds;
-      const ids = new Array<number>(table.count);
-      for (let i = 0; i < table.count; i++) ids[i] = table.expressId[i];
+      const tombstones = session.view.getTombstones().size;
+      if (allIds && allIdsTombstones === tombstones) return allIds;
+      const ids: number[] = [];
+      for (let i = 0; i < table.count; i++) {
+        const id = table.expressId[i];
+        if (!session.isDeleted(id)) ids.push(id);
+      }
       allIds = ids;
+      allIdsTombstones = tombstones;
       return ids;
     },
 

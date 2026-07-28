@@ -90,6 +90,20 @@ export function cmdSetCells(
         }
       }
     },
+    /** Befund 12: Endzustand history-neutral wiederherstellen. */
+    redo() {
+      for (const change of payload) {
+        view.setProperty(
+          change.expressId,
+          change.psetName,
+          change.propName,
+          change.value,
+          change.valueType,
+          undefined,
+          true,
+        );
+      }
+    },
   };
 }
 
@@ -125,6 +139,10 @@ export function cmdDeletePropertyOnMany(
           true,
         );
       }
+    },
+    /** Befund 12: `deleteProperty` kennt skipHistory. */
+    redo() {
+      for (const id of ids) view.deleteProperty(id, psetName, propName, true);
     },
   };
 }
@@ -202,6 +220,16 @@ export function cmdAddPropertyOnMany(
       }
       for (let index = createdPsetOn.length - 1; index >= 0; index -= 1) {
         view.deletePropertySet(createdPsetOn[index], psetName);
+      }
+    },
+    /**
+     * Befund 12: `setProperty` legt das Pset bei Bedarf mit an und hebt den
+     * DELETE-Marker des Undo auf — skipHistory genügt hier also für den
+     * kompletten Endzustand.
+     */
+    redo() {
+      for (const id of ids) {
+        view.setProperty(id, psetName, propName, value, valueType, undefined, true);
       }
     },
   };

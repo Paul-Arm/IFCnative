@@ -1,6 +1,13 @@
 /**
  * Kern-Commands für Eigenschaften und Attribute. Weitere Command-Familien
  * (Psets, Beziehungen, Entities) liegen in eigenen Dateien dieses Ordners.
+ *
+ * Review-Befund 12: Jeder Command, dessen `run()` ohne `skipHistory` in die
+ * append-only Mutationshistorie schreibt, bekommt ein `redo()`, das denselben
+ * Endzustand mit `skipHistory` herstellt — sonst wächst die Historie bei
+ * jedem Undo/Redo-Zyklus. Einzige Ausnahme ist `cmdSetAttribute`: der
+ * StepExporter liest UPDATE_ATTRIBUTE aus der Historie (Befund B3), dort MUSS
+ * das Redo history-anhängend bleiben.
  */
 import { PropertyValueType } from "@ifc-lite/data";
 import type { ModelSession } from "../core/session";
@@ -31,6 +38,9 @@ export function cmdSetProperty(
         view.setProperty(expressId, psetName, propName, oldValue, valueType, undefined, true);
       }
     },
+    redo() {
+      view.setProperty(expressId, psetName, propName, value, valueType, undefined, true);
+    },
   };
 }
 
@@ -53,6 +63,9 @@ export function cmdDeleteProperty(
       if (oldValue !== null) {
         view.setProperty(expressId, psetName, propName, oldValue, valueType, undefined, true);
       }
+    },
+    redo() {
+      view.deleteProperty(expressId, psetName, propName, true);
     },
   };
 }
@@ -79,6 +92,14 @@ export function cmdSetAttribute(
       // Gegen-setAttribute sein.
       view.setAttribute(expressId, attrName, oldValue, value);
     },
+    /**
+     * Befund 12, Sonderfall: Aus demselben Grund (B3) MUSS auch das Redo
+     * history-anhängend sein — mit skipHistory bliebe im Export der alte Wert
+     * des Undo-Eintrags stehen. Identisch zu `run()`, aber explizit notiert.
+     */
+    redo() {
+      view.setAttribute(expressId, attrName, value, oldValue);
+    },
   };
 }
 
@@ -101,6 +122,9 @@ export function cmdSetPropertyOnMany(
     },
     undo() {
       for (const c of [...commands].reverse()) c.undo();
+    },
+    redo() {
+      for (const c of commands) c.redo?.();
     },
   };
 }

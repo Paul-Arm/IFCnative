@@ -80,10 +80,25 @@ export function cmdSetQuantity(
         view.removeQuantityMutation(expressId, qsetName, quantName);
       }
     },
+    /**
+     * Befund 12: `setQuantity` kennt `skipHistory`; der Exporter backt
+     * Mengensätze aus der Overlay-Map, nicht aus der Historie — das Redo
+     * stellt den Endzustand daher history-neutral her.
+     */
+    redo() {
+      view.setQuantity(expressId, qsetName, quantName, value, type, nextUnit, true);
+    },
   };
 }
 
-/** Neuen Mengensatz mit einer oder mehreren Mengen anlegen. */
+/**
+ * Neuen Mengensatz mit einer oder mehreren Mengen anlegen.
+ *
+ * Befund 12: `createQuantitySet` kennt kein `skipHistory` — ein Redo über
+ * `run()` ist der einzige Weg und hängt zwangsläufig CREATE_QUANTITY-Einträge
+ * an. Das ist exportneutral (der Exporter liest die Overlay-Map) und wird
+ * deshalb bewusst nicht durch ein eigenes `redo()` verschleiert.
+ */
 export function cmdCreateQuantitySet(
   session: ModelSession,
   expressId: number,
