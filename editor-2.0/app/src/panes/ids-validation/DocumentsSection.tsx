@@ -40,9 +40,9 @@ export default function DocumentsSection({ onChanged }: DocumentsSectionProps) {
   }
 
   return (
-    <section style={{ borderBottom: "1px solid var(--border)" }}>
-      <div className="pane-toolbar" style={{ border: 0 }}>
-        <strong style={{ fontWeight: 600 }}>Anforderungen (IDS)</strong>
+    <section style={{ borderBottom: "1px solid var(--border-60)" }}>
+      <div className="pane-toolbar">
+        <strong className="card-title">Anforderungen (IDS)</strong>
         <input
           ref={fileInput}
           type="file"
@@ -94,44 +94,46 @@ export default function DocumentsSection({ onChanged }: DocumentsSectionProps) {
       </div>
 
       {error && (
-        <p style={{ color: "var(--error)", margin: 0, padding: "0 8px 6px" }}>
+        <p className="msg msg-error" style={{ margin: "0 0 6px" }}>
           {error}
         </p>
       )}
 
       {entries.length === 0 ? (
-        <p className="text-dim" style={{ margin: 0, padding: "0 8px 6px" }}>
+        <p className="list-note" style={{ paddingBottom: 6 }}>
           Kein IDS geladen — ohne Anforderungsdokument gibt es nichts zu prüfen.
         </p>
       ) : (
         <ul style={{ listStyle: "none", margin: 0, padding: "0 0 6px" }}>
           {entries.map((entry) => (
-            <li
-              key={entry.id}
-              style={{
-                alignItems: "baseline",
-                display: "flex",
-                gap: 6,
-                padding: "1px 8px",
-              }}
-            >
-              <span style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+            <li key={entry.id} className="list-row">
+              <span
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
                 {entry.name}
               </span>
-              <span className="text-dim">
+              <span className="badge">
                 {entry.specCount} Spezifikation(en)
               </span>
-              <button
-                className="btn"
-                onClick={() => {
-                  remove(entry.id);
-                  onChanged();
-                }}
-                title="Dieses IDS-Dokument entfernen"
-                type="button"
-              >
-                Entfernen
-              </button>
+              <span className="row-actions">
+                <button
+                  className="btn btn-sm"
+                  onClick={() => {
+                    remove(entry.id);
+                    onChanged();
+                  }}
+                  title="Dieses IDS-Dokument entfernen"
+                  type="button"
+                >
+                  Entfernen
+                </button>
+              </span>
             </li>
           ))}
         </ul>

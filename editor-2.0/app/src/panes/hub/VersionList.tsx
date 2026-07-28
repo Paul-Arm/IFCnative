@@ -35,11 +35,15 @@ export default function VersionList({
   );
 
   if (sorted.length === 0) {
-    return <p className="pane-empty">{emptyText}</p>;
+    return (
+      <p className="empty-state" style={{ margin: 4 }}>
+        {emptyText}
+      </p>
+    );
   }
 
   return (
-    <table className="kv-table">
+    <table className="kv-table table-hover">
       <thead>
         <tr>
           <th style={{ width: 24 }} title="Für den Vergleich wählen">
@@ -59,7 +63,7 @@ export default function VersionList({
           return (
             <tr
               key={version.id}
-              style={checked ? { background: "var(--bg-active)" } : undefined}
+              style={checked ? { background: "var(--accent-10)" } : undefined}
             >
               <td>
                 <input
@@ -76,19 +80,21 @@ export default function VersionList({
                   {version.blobHash ? ` · ${version.blobHash.slice(0, 8)}` : ""}
                 </div>
               </td>
-              <td className="dim">{formatDate(version.createdAt)}</td>
+              <td className="dim mono">{formatDate(version.createdAt)}</td>
               <td className="dim">{version.schema || "—"}</td>
-              <td className="dim">{formatCount(version.entityCount)}</td>
-              <td className="dim">{formatBytes(version.byteSize)}</td>
-              <td className="dim">
-                <button
-                  className="btn"
-                  onClick={() => onOpen(version)}
-                  title="Diesen Stand als neuen Tab öffnen"
-                  type="button"
-                >
-                  Öffnen
-                </button>
+              <td className="dim mono">{formatCount(version.entityCount)}</td>
+              <td className="dim mono">{formatBytes(version.byteSize)}</td>
+              <td>
+                <span className="row-actions">
+                  <button
+                    className="btn btn-sm"
+                    onClick={() => onOpen(version)}
+                    title="Diesen Stand als neuen Tab öffnen"
+                    type="button"
+                  >
+                    Öffnen
+                  </button>
+                </span>
               </td>
             </tr>
           );

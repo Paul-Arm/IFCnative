@@ -56,11 +56,8 @@ export default function ValueEditor({
   return (
     <input
       className="input"
-      style={{
-        width: "100%",
-        borderColor: valid ? undefined : "var(--error)",
-        color: valid ? undefined : "var(--error)",
-      }}
+      style={{ width: "100%" }}
+      data-invalid={valid ? undefined : true}
       value={draft}
       title={
         valid

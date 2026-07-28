@@ -47,7 +47,7 @@ export default function EntityList({ docId, rows }: EntityListProps) {
                 style={{ background: STATUS_CSS[status] }}
               />
               <span style={{ flex: 1, minWidth: 0 }}>{row.label}</span>
-              <span className="text-dim">#{row.expressId}</span>
+              <span className="text-dim mono">#{row.expressId}</span>
             </button>
             {row.failures.map((failure, index) => (
               <div className="ids-detail" key={`${row.key}-${index}`}>

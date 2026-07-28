@@ -39,18 +39,8 @@ export function useFormStatus(): [FormStatus, (status: FormStatus) => void] {
 /** Beschriftete Zeile: schmales Label links, Feld rechts. */
 export function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label
-      style={{
-        display: "grid",
-        gridTemplateColumns: "7.5rem 1fr",
-        alignItems: "center",
-        gap: 6,
-        marginBottom: 4,
-      }}
-    >
-      <span className="text-dim" style={{ fontSize: "0.75rem" }}>
-        {label}
-      </span>
+    <label className="field-row">
+      <span className="field-label">{label}</span>
       {children}
     </label>
   );
@@ -158,33 +148,18 @@ export function ResourceForm({
     onSubmit();
   };
   return (
-    <details style={{ margin: "2px 8px 8px" }}>
-      <summary
-        className="text-dim"
-        style={{ cursor: "pointer", fontSize: "0.75rem", userSelect: "none" }}
-      >
-        {title}
-      </summary>
-      <form
-        onSubmit={submit}
-        style={{
-          margin: "6px 0 0",
-          padding: "8px",
-          border: "1px solid var(--border)",
-          borderRadius: 6,
-        }}
-      >
+    <details className="form-details" style={{ margin: "0 8px 8px" }}>
+      <summary>{title}</summary>
+      <form className="form-card" onSubmit={submit}>
         {children}
-        <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6 }}>
-          <button className="btn" type="submit" disabled={disabled}>
+        <div className="form-actions">
+          <button className="btn btn-sm" type="submit" disabled={disabled}>
             {submitLabel}
           </button>
           {status.text && (
             <span
-              style={{
-                fontSize: "0.75rem",
-                color: status.error ? "var(--danger, #c0392b)" : "var(--text-dim)",
-              }}
+              className="form-status"
+              data-error={status.error ? true : undefined}
             >
               {status.text}
             </span>

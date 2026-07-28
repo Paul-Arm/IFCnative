@@ -1,8 +1,11 @@
 /**
- * Dokument-Tabs. Der Dirty-Punkt und die Schließen-Rückfrage hängen an der
- * Undo-Stack-Tiefe (`usePendingChangeCount`, Befund 3/15) — `changeCount` zählt
- * die append-only Mutationsliste und bliebe nach einem vollständigen Undo
- * stehen, sodass der Tab „ungespeichert" meldete, obwohl nichts offen ist.
+ * Dokument-Tabs in der Kopfleiste — Browser-Tab-Optik nach dem Vorbild der
+ * ersten React-App: zweizeilig (Name + Schema/Entitäten), Status-Punkt links,
+ * Schließen-Kreuz erst bei Hover. Der Dirty-Punkt und die Schließen-Rückfrage
+ * hängen an der Undo-Stack-Tiefe (`usePendingChangeCount`, Befund 3/15) —
+ * `changeCount` zählt die append-only Mutationsliste und bliebe nach einem
+ * vollständigen Undo stehen, sodass der Tab „ungespeichert" meldete, obwohl
+ * nichts offen ist.
  */
 import { usePendingChangeCount } from "../commands/pipeline";
 import { useDocuments, type DocumentEntry } from "../store/documents";
@@ -12,16 +15,7 @@ export function DocumentTabs() {
   if (documents.length === 0) return null;
 
   return (
-    <div
-      style={{
-        display: "flex",
-        gap: 4,
-        padding: "4px 10px 0",
-        borderBottom: "1px solid var(--border)",
-        background: "var(--bg)",
-        overflowX: "auto",
-      }}
-    >
+    <div className="doc-tabs">
       {documents.map((doc) => (
         <DocumentTab
           key={doc.id}
@@ -47,35 +41,32 @@ function DocumentTab({ doc, isActive, onActivate, onClose }: DocumentTabProps) {
   const pending = usePendingChangeCount(doc.id);
 
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 6,
-        padding: "4px 10px",
-        borderRadius: "6px 6px 0 0",
-        border: "1px solid var(--border)",
-        borderBottom: "none",
-        background: isActive ? "var(--bg-panel)" : "var(--bg-hover)",
-        cursor: "pointer",
-        whiteSpace: "nowrap",
-      }}
-      onClick={onActivate}
-      title={`${info.schema} · ${info.entityCount.toLocaleString("de-DE")} Entities`}
-    >
-      <span>{info.fileName}</span>
-      {pending > 0 && (
-        <span
-          title={`${pending} ${pending === 1 ? "Änderung" : "Änderungen"} — noch nicht exportiert`}
-          style={{ color: "var(--warn)" }}
-        >
-          ●
-        </span>
-      )}
+    <div className="doc-tab" data-active={isActive ? "true" : undefined}>
       <button
-        className="btn"
-        style={{ padding: "0 6px", border: "none" }}
+        type="button"
+        className="doc-tab-btn"
+        onClick={onActivate}
+        title={`${info.fileName} · ${info.schema} · ${info.entityCount.toLocaleString("de-DE")} Entities`}
+      >
+        <span className="doc-tab-name">
+          <span className="doc-tab-dot" aria-hidden="true" />
+          <span>{info.fileName}</span>
+          {pending > 0 ? (
+            <span
+              className="doc-tab-dirty"
+              title={`${pending} ${pending === 1 ? "Änderung" : "Änderungen"} — noch nicht exportiert`}
+            />
+          ) : null}
+        </span>
+        <span className="doc-tab-sub">
+          {info.schema} · {info.entityCount.toLocaleString("de-DE")} Entitäten
+        </span>
+      </button>
+      <button
+        type="button"
+        className="doc-tab-close"
         title="Schließen"
+        aria-label={`„${info.fileName}“ schließen`}
         onClick={(event) => {
           event.stopPropagation();
           if (

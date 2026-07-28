@@ -28,7 +28,8 @@ import { useSliceTool } from "./useSliceTool";
 import { useClipBox } from "./useClipBox";
 import ViewerToolbar from "./ViewerToolbar";
 import ViewerStatusLine from "./ViewerStatusLine";
-import MoveGizmo from "./MoveGizmo";
+import TransformGizmo from "./TransformGizmo";
+import DrawPolygonOverlay from "./DrawPolygonOverlay";
 import PickMarker from "./PickMarker";
 import { ClipBoxLayer } from "./ClipBoxOverlay";
 
@@ -63,6 +64,8 @@ export default function ViewerPane() {
   const [hidden, setHidden] = useState<ReadonlySet<number>>(NO_IDS);
   const [isolated, setIsolated] = useState<ReadonlySet<number> | null>(null);
   const [xray, setXray] = useState(false);
+  const [sky, setSky] = useState(true);
+  const [grid, setGrid] = useState(true);
   const [note, setNote] = useState<string | null>(null);
 
   // — Schnitt + Clip-Box: geteilter Store (Ribbon „Ansicht → Schnitt") —
@@ -183,8 +186,10 @@ export default function ViewerPane() {
       sectionPlane: toSectionPlane(section),
       clipBox: clip.clipBox,
       xray,
+      sky,
+      grid,
     });
-  }, [handle, selectedIds, hiddenIds, isolated, section, clip.clipBox, xray]);
+  }, [handle, selectedIds, hiddenIds, isolated, section, clip.clipBox, xray, sky, grid]);
 
   useEffect(() => {
     handle?.setColorOverrides(lensColors);
@@ -232,32 +237,16 @@ export default function ViewerPane() {
   }
 
   const pickPoint = tools.pickPoint;
+  const onDrawDone = useCallback(
+    (text: string | null, _finished: boolean) => {
+      setNote(text);
+      tools.selectTool("none");
+    },
+    [tools],
+  );
+
   return (
     <div className="pane">
-      <ViewerToolbar
-        disabled={!handle}
-        hasSelection={selection.length > 0}
-        isolated={isolated !== null}
-        xray={xray}
-        section={section}
-        tool={tool}
-        onSelectTool={tools.selectTool}
-        pendingRebuild={geometry.pending}
-        rebuilding={geometry.rebuilding}
-        autoRebuild={geometry.auto}
-        onRebuild={geometry.rebuild}
-        onToggleAutoRebuild={geometry.toggleAuto}
-        onZoomAll={() => handle?.zoomToModel()}
-        onIsolate={toggleIsolation}
-        onHide={hideSelection}
-        onShowAll={showAll}
-        onToggleXray={() => setXray((value) => !value)}
-        onSection={patchSection}
-        clipBoxActive={boxEnabled && clip.boxIfc !== null}
-        onClipBoxOnSelection={requestBoxOnSelection}
-        onPreset={(view: PresetView) => handle?.presetView(view)}
-      />
-
       <div
         className="pane-body"
         style={{
@@ -275,20 +264,63 @@ export default function ViewerPane() {
           ref={canvasRef}
           style={{ display: "block", width: "100%", height: "100%" }}
         />
+        <ViewerToolbar
+          disabled={!handle}
+          hasSelection={selection.length > 0}
+          isolated={isolated !== null}
+          xray={xray}
+          section={section}
+          tool={tool}
+          onSelectTool={tools.selectTool}
+          pendingRebuild={geometry.pending}
+          rebuilding={geometry.rebuilding}
+          autoRebuild={geometry.auto}
+          sky={sky}
+          grid={grid}
+          onToggleSky={() => setSky((value) => !value)}
+          onToggleGrid={() => setGrid((value) => !value)}
+          onRebuild={geometry.rebuild}
+          onToggleAutoRebuild={geometry.toggleAuto}
+          onZoomAll={() => handle?.zoomToModel()}
+          onIsolate={toggleIsolation}
+          onHide={hideSelection}
+          onShowAll={showAll}
+          onToggleXray={() => setXray((value) => !value)}
+          onSection={patchSection}
+          clipBoxActive={boxEnabled && clip.boxIfc !== null}
+          onClipBoxOnSelection={requestBoxOnSelection}
+          onPreset={(view: PresetView) => handle?.presetView(view)}
+        />
         {access && canvasRef.current && pickPoint && pickPoint.docId === docId && (
           <PickMarker access={access} canvas={canvasRef.current} point={pickPoint} />
         )}
-        {access && canvasRef.current && doc && docId && tools.moveTarget !== null && (
-          <MoveGizmo
-            key={tools.moveTarget}
+        {access &&
+          canvasRef.current &&
+          doc &&
+          docId &&
+          tools.transformMode !== null &&
+          tools.moveTarget !== null && (
+            <TransformGizmo
+              // geometry.pending im Key: nach jedem Commit neu montieren,
+              // damit der Anker der (mitgezogenen) Geometrie folgt.
+              key={`${tools.transformMode}:${tools.moveTarget}:${geometry.pending}`}
+              access={access}
+              canvas={canvasRef.current}
+              docId={docId}
+              session={doc.session}
+              elementId={tools.moveTarget}
+              mode={tools.transformMode}
+              onLiveDelta={tools.setMoveDelta}
+              onDone={onGizmoDone}
+              onBoundsMissing={onGizmoBoundsMissing}
+            />
+          )}
+        {access && canvasRef.current && docId && tool === "draw" && (
+          <DrawPolygonOverlay
             access={access}
             canvas={canvasRef.current}
             docId={docId}
-            session={doc.session}
-            elementId={tools.moveTarget}
-            onLiveDelta={tools.setMoveDelta}
-            onDone={onGizmoDone}
-            onBoundsMissing={onGizmoBoundsMissing}
+            onDone={onDrawDone}
           />
         )}
         {access && canvasRef.current && (

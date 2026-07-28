@@ -1,10 +1,11 @@
 /**
  * Eigenes Kontextmenü des Strukturbaums (M9) — kein natives contextmenu.
- * Nutzt die Menü-Klassen aus global.css (.ribbon-menu/.ribbon-menu-item);
+ * Nutzt die Menü-Klassen aus global.css (.tb-menu/.tb-menu-item);
  * „Kind anlegen →" klappt die legalen Kindklassen je Parent-Typ inline auf.
  * Schließt bei Klick auf den transparenten Backdrop und bei Escape.
  */
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { childGroupsForParent, isDeleteProtected, type ChildOption } from "./contextModel";
 
 export interface MenuTarget {
@@ -20,6 +21,7 @@ export interface ContextMenuProps {
   onFocus(expressId: number): void;
   onDelete(expressId: number): void;
   onCreateChild(parentId: number, option: ChildOption): void;
+  onManageGroups(expressId: number): void;
   onClose(): void;
 }
 
@@ -28,6 +30,7 @@ export default function ContextMenu({
   onFocus,
   onDelete,
   onCreateChild,
+  onManageGroups,
   onClose,
 }: ContextMenuProps) {
   const [childrenOpen, setChildrenOpen] = useState(false);
@@ -43,7 +46,9 @@ export default function ContextMenu({
   const groups = childGroupsForParent(target.type);
   const deleteProtected = isDeleteProtected(target.type);
 
-  return (
+  // Portal an <body> — sonst fängt der Stacking-Kontext des Mosaic-Fensters
+  // das Menü und spätere Fenster (Viewer-Canvas) übermalen es.
+  return createPortal(
     <div
       style={{ position: "fixed", inset: 0, zIndex: 50 }}
       onMouseDown={onClose}
@@ -53,7 +58,7 @@ export default function ContextMenu({
       }}
     >
       <div
-        className="ribbon-menu"
+        className="tb-menu"
         role="menu"
         aria-label={`Aktionen für ${target.label}`}
         style={{
@@ -79,7 +84,7 @@ export default function ContextMenu({
         </div>
 
         <button
-          className="ribbon-menu-item"
+          className="tb-menu-item"
           onClick={() => {
             onFocus(target.expressId);
             onClose();
@@ -88,9 +93,19 @@ export default function ContextMenu({
           Kamera zentrieren
         </button>
 
+        <button
+          className="tb-menu-item"
+          onClick={() => {
+            onManageGroups(target.expressId);
+            onClose();
+          }}
+        >
+          Gruppen verwalten …
+        </button>
+
         {groups.length > 0 && (
           <button
-            className="ribbon-menu-item"
+            className="tb-menu-item"
             aria-expanded={childrenOpen}
             onClick={() => setChildrenOpen((open) => !open)}
           >
@@ -109,7 +124,7 @@ export default function ContextMenu({
               {group.options.map((option) => (
                 <button
                   key={option.ifcClass}
-                  className="ribbon-menu-item"
+                  className="tb-menu-item"
                   style={{ paddingLeft: "1.25rem" }}
                   onClick={() => {
                     onCreateChild(target.expressId, option);
@@ -123,7 +138,7 @@ export default function ContextMenu({
           ))}
 
         <button
-          className="ribbon-menu-item"
+          className="tb-menu-item"
           disabled={deleteProtected}
           title={deleteProtected ? "IfcProject ist löschgeschützt." : undefined}
           style={deleteProtected ? { opacity: 0.45, cursor: "default" } : undefined}
@@ -136,6 +151,7 @@ export default function ContextMenu({
           Löschen …
         </button>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -16,7 +16,7 @@ const PAPER = PAPER_SIZES.A3_LANDSCAPE;
 /** Dateiname aus Modellname und Zeichnungstitel, ohne Sonderzeichen. */
 export function svgFileName(modelName: string, title: string): string {
   const base = `${modelName.replace(/\.[^.]+$/, "")}-${title}`;
-  return `${base.replace(/[^\w\-]+/g, "_")}.svg`;
+  return `${base.replace(/[^\w-]+/g, "_")}.svg`;
 }
 
 export function drawingToSvg(

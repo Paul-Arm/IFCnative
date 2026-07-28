@@ -1,10 +1,20 @@
 /**
- * Fenster-Logik des Ribbons: Panes im aktuellen Mosaic-Layout ein- und
- * ausblenden. Reine Layout-Arbeit über `useUi.setLayout` — es entstehen
- * keine neuen Fachfunktionen, nur andere Bäume aus bekannten Pane-Ids.
+ * Fenster-Logik der Kopfleiste. Seit dem Sidebar-Umbau zweigleisig:
+ *  - HAUPTFENSTER (MainPaneId) werden im Mosaic-Layout ein-/ausgeblendet
+ *    (reine Layout-Arbeit über `useUi.setLayout`),
+ *  - WERKZEUGE (ToolPaneId) öffnen/schließen das Panel der rechten Sidebar
+ *    (`useUi.toggleSidebarTool` — genau ein Werkzeug offen).
+ * Die Schalter-API (`togglePane`/`usePaneVisible`) bleibt für beide gleich,
+ * damit Ribbon-Schnellzugriffe nicht wissen müssen, wo ein Pane lebt.
  */
 import type { MosaicNode } from "react-mosaic-component";
-import { PANE_IDS, PANE_TITLES, type PaneId } from "../../panes/ids";
+import {
+  PANE_IDS,
+  PANE_TITLES,
+  isToolPane,
+  type MainPaneId,
+  type PaneId,
+} from "../../panes/ids";
 import { useUi } from "../../store/ui";
 
 const KNOWN_PANES = new Set<string>(PANE_IDS);
@@ -23,16 +33,16 @@ export function paneTitle(id: PaneId): string {
   return PANE_TITLES[id] ?? id;
 }
 
-function contains(node: MosaicNode<PaneId>, id: PaneId): boolean {
+function contains(node: MosaicNode<MainPaneId>, id: MainPaneId): boolean {
   if (typeof node === "string") return node === id;
   if (node.type === "tabs") return node.tabs.includes(id);
   return node.children.some((child) => contains(child, id));
 }
 
 function withoutPane(
-  node: MosaicNode<PaneId>,
-  id: PaneId,
-): MosaicNode<PaneId> | null {
+  node: MosaicNode<MainPaneId>,
+  id: MainPaneId,
+): MosaicNode<MainPaneId> | null {
   if (typeof node === "string") return node === id ? null : node;
   if (node.type === "tabs") {
     const tabs = node.tabs.filter((tab) => tab !== id);
@@ -46,7 +56,7 @@ function withoutPane(
   }
   const children = node.children
     .map((child) => withoutPane(child, id))
-    .filter((child): child is MosaicNode<PaneId> => child !== null);
+    .filter((child): child is MosaicNode<MainPaneId> => child !== null);
   if (children.length === 0) return null;
   if (children.length === 1) return children[0];
   return {
@@ -60,8 +70,8 @@ function withoutPane(
   };
 }
 
-/** Pane sichtbar machen (rechts andocken), falls es noch nicht im Baum ist. */
-export function showPane(id: PaneId): void {
+/** Hauptfenster sichtbar machen (rechts andocken), falls nicht im Baum. */
+function showMainPane(id: MainPaneId): void {
   const { layout, setLayout } = useUi.getState();
   if (layout === null) {
     setLayout(id);
@@ -76,8 +86,8 @@ export function showPane(id: PaneId): void {
   });
 }
 
-/** Pane schließen; das letzte verbleibende Pane bleibt bestehen. */
-export function hidePane(id: PaneId): void {
+/** Hauptfenster schließen; das letzte verbleibende Pane bleibt bestehen. */
+function hideMainPane(id: MainPaneId): void {
   const { layout, setLayout } = useUi.getState();
   if (layout === null) return;
   const next = withoutPane(layout, id);
@@ -85,14 +95,32 @@ export function hidePane(id: PaneId): void {
   setLayout(next);
 }
 
-/** Office-Verhalten der Fenster-Schalter: gedrückt = sichtbar. */
+/** Office-Verhalten der Fenster-Schalter: gedrückt = sichtbar/offen. */
 export function togglePane(id: PaneId): void {
+  if (isToolPane(id)) {
+    useUi.getState().toggleSidebarTool(id);
+    return;
+  }
   const { layout } = useUi.getState();
-  if (layout !== null && contains(layout, id)) hidePane(id);
-  else showPane(id);
+  const main = id as MainPaneId;
+  if (layout !== null && contains(layout, main)) hideMainPane(main);
+  else showMainPane(main);
+}
+
+/** Pane anzeigen (Werkzeug: Sidebar öffnen; Hauptfenster: andocken). */
+export function showPane(id: PaneId): void {
+  if (isToolPane(id)) {
+    useUi.getState().setSidebarTool(id);
+    return;
+  }
+  showMainPane(id as MainPaneId);
 }
 
 /** Reaktive Sichtbarkeit für den Gedrückt-Zustand der Schalter. */
 export function usePaneVisible(id: PaneId | null): boolean {
-  return useUi((s) => id !== null && s.layout !== null && contains(s.layout, id));
+  return useUi((s) => {
+    if (id === null) return false;
+    if (isToolPane(id)) return s.sidebarTool === id;
+    return s.layout !== null && contains(s.layout, id as MainPaneId);
+  });
 }

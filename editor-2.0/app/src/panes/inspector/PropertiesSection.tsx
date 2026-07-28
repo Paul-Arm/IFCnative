@@ -64,19 +64,19 @@ export default function PropertiesSection({
   }
 
   return (
-    <div>
+    <div className="pane-stack">
       <NewPsetForm
         existing={psets.map((p) => p.name)}
         onCreate={(name) => run(cmdCreatePset(session, expressId, name))}
       />
 
       {psets.length === 0 && (
-        <p className="pane-empty">
+        <p className="empty-state">
           Keine Eigenschaftssätze für dieses Objekt — oben einen anlegen.
         </p>
       )}
       {psets.length > 0 && visible.length === 0 && (
-        <p className="pane-empty">Kein Treffer für „{query}".</p>
+        <p className="empty-state">Kein Treffer für „{query}".</p>
       )}
 
       {visible.map((pset) => (
@@ -131,25 +131,12 @@ function NewPsetForm({ existing, onCreate }: NewPsetFormProps) {
   }
 
   return (
-    <div
-      style={{
-        display: "flex",
-        gap: 6,
-        alignItems: "center",
-        padding: "8px",
-        borderBottom: "1px solid var(--border)",
-      }}
-    >
-      <span className="text-dim" style={{ fontSize: "0.75rem" }}>
-        Neues Pset
-      </span>
+    <div className="form-row">
+      <span className="field-label">Neues Pset</span>
       <input
         className="input"
-        style={{
-          flex: 1,
-          minWidth: 90,
-          borderColor: duplicate ? "var(--error)" : undefined,
-        }}
+        style={{ flex: 1, minWidth: 90 }}
+        data-invalid={duplicate ? true : undefined}
         placeholder="z. B. Pset_WallCommon"
         value={name}
         title={duplicate ? "Dieser Name ist bereits vergeben" : undefined}

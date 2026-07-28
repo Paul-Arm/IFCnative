@@ -182,7 +182,7 @@ export default function IdsValidationPane() {
         />
         {summary && <span className="text-dim">{summary}</span>}
         {stale && (
-          <span style={{ color: "var(--warn)" }}>
+          <span className="badge badge-warn">
             Modell geändert (Revision {revision}) — erneut validieren
           </span>
         )}
@@ -190,7 +190,9 @@ export default function IdsValidationPane() {
 
       <div className="pane-body">
         {state.error && (
-          <p style={{ color: "var(--error)", padding: "6px 8px" }}>{state.error}</p>
+          <p className="msg msg-error" style={{ margin: "0 0 8px" }}>
+            {state.error}
+          </p>
         )}
         {!result ? (
           <p className="pane-empty">

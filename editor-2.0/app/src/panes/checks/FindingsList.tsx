@@ -35,31 +35,25 @@ export default function FindingsList({
         <li
           key={finding.id}
           style={{
-            borderBottom: "1px solid var(--border)",
+            borderBottom: "1px solid var(--border-60)",
             display: "flex",
-            gap: 6,
-            padding: "4px 8px",
+            gap: 8,
+            padding: "6px 8px",
           }}
         >
           <span
             aria-label={SEVERITY_LABELS[finding.severity]}
             title={SEVERITY_LABELS[finding.severity]}
-            style={{
-              background: SEVERITY_CSS[finding.severity],
-              borderRadius: "50%",
-              flex: "0 0 auto",
-              height: 8,
-              marginTop: 5,
-              width: 8,
-            }}
+            className="dot"
+            style={{ background: SEVERITY_CSS[finding.severity], marginTop: 5 }}
           />
-          <div style={{ minWidth: 0 }}>
-            <div>
+          <div style={{ minWidth: 0, display: "grid", gap: 3 }}>
+            <div style={{ fontSize: "0.75rem" }}>
               <span className="text-dim">{SOURCE_LABELS[finding.source]} · </span>
               {finding.message}
             </div>
             {finding.detail && (
-              <div className="text-dim" style={{ fontSize: "0.75rem" }}>
+              <div className="text-dim" style={{ fontSize: "0.7rem" }}>
                 {finding.detail}
               </div>
             )}
@@ -67,8 +61,7 @@ export default function FindingsList({
               {finding.entityIds.slice(0, MAX_CHIPS).map((entityId) => (
                 <button
                   key={entityId}
-                  className="btn"
-                  style={{ fontSize: "0.75rem", padding: "0 6px" }}
+                  className="chip"
                   onClick={() => {
                     select(docId, entityId);
                     requestFocus(docId, entityId);
@@ -76,11 +69,12 @@ export default function FindingsList({
                   title="Auswählen und im Viewer fokussieren"
                   type="button"
                 >
-                  #{entityId} {session.labelOf(entityId)}
+                  <span className="mono">#{entityId}</span>{" "}
+                  {session.labelOf(entityId)}
                 </button>
               ))}
               {finding.entityIds.length > MAX_CHIPS && (
-                <span className="text-dim" style={{ fontSize: "0.75rem" }}>
+                <span className="text-dim" style={{ fontSize: "0.7rem" }}>
                   … und {finding.entityIds.length - MAX_CHIPS} weitere
                 </span>
               )}

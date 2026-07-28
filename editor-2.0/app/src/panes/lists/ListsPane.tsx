@@ -221,7 +221,7 @@ export default function ListsPane() {
           return (
             <button
               key={id}
-              className="btn"
+              className="chip"
               data-active="true"
               title="Gruppierung entfernen"
               onClick={() =>

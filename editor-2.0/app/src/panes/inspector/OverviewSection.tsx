@@ -9,7 +9,7 @@ import { useCommands, useDocRevision } from "../../commands/pipeline";
 import { cmdSetAttribute } from "../../commands/propertyCommands";
 import type { ModelSession } from "../../core/session";
 import ValueEditor from "./ValueEditor";
-import { DimValue, SectionHeading } from "./parts";
+import { DimValue } from "./parts";
 import { readAttributes, readPsets, readQuantitySets } from "./overlay";
 
 interface OverviewSectionProps {
@@ -62,10 +62,13 @@ export default function OverviewSection({
   }
 
   return (
-    <div>
-      <SectionHeading>Identität</SectionHeading>
-      <table className="kv-table">
-        <tbody>
+    <div className="pane-stack">
+      <div className="card">
+        <div className="card-head">
+          <span className="card-title">Identität</span>
+        </div>
+        <table className="kv-table">
+          <tbody>
           <tr>
             <td className="dim">Klasse</td>
             <td>{identity.type}</td>
@@ -97,7 +100,7 @@ export default function OverviewSection({
                   justifyContent: "space-between",
                 }}
               >
-                <span style={{ fontFamily: "ui-monospace, monospace" }}>
+                <span className="mono">
                   <DimValue value={identity.globalId} />
                 </span>
                 <CopyButton text={identity.globalId} />
@@ -106,28 +109,33 @@ export default function OverviewSection({
           </tr>
           <tr>
             <td className="dim">expressId</td>
-            <td>#{identity.expressId}</td>
+            <td className="mono">#{identity.expressId}</td>
           </tr>
-        </tbody>
-      </table>
+          </tbody>
+        </table>
+      </div>
 
-      <SectionHeading>Zusammenfassung</SectionHeading>
-      <table className="kv-table">
-        <tbody>
-          <tr>
-            <td className="dim">Eigenschaftssätze</td>
-            <td>{summary.psets}</td>
-          </tr>
-          <tr>
-            <td className="dim">Mengensätze</td>
-            <td>{summary.quantities}</td>
-          </tr>
-          <tr>
-            <td className="dim">Beziehungen</td>
-            <td>{summary.relations}</td>
-          </tr>
-        </tbody>
-      </table>
+      <div className="card">
+        <div className="card-head">
+          <span className="card-title">Zusammenfassung</span>
+        </div>
+        <table className="kv-table">
+          <tbody>
+            <tr>
+              <td className="dim">Eigenschaftssätze</td>
+              <td className="mono">{summary.psets}</td>
+            </tr>
+            <tr>
+              <td className="dim">Mengensätze</td>
+              <td className="mono">{summary.quantities}</td>
+            </tr>
+            <tr>
+              <td className="dim">Beziehungen</td>
+              <td className="mono">{summary.relations}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -147,7 +155,7 @@ function CopyButton({ text }: { text: string }) {
 
   return (
     <button
-      className="btn"
+      className="btn btn-sm"
       onClick={() => void copy()}
       disabled={!text}
       title="GlobalId in die Zwischenablage kopieren"

@@ -56,11 +56,9 @@ export default function PsetMatrix({
   }
 
   return (
-    <div style={{ borderBottom: "1px solid var(--border)" }}>
+    <div className="batch-block">
       <div className="batch-block-head">
-        <span style={{ fontWeight: 600, fontSize: "0.8125rem", flex: 1 }}>
-          {block.psetName}
-        </span>
+        <span className="card-head-label">{block.psetName}</span>
         <span
           className="batch-badge"
           data-warn={incomplete}
@@ -97,20 +95,22 @@ export default function PsetMatrix({
                   {row.propName}
                 </td>
                 <td style={{ whiteSpace: "nowrap" }}>
-                  <button
-                    className="btn"
-                    title={`Wert für alle ${total} Objekte setzen`}
-                    onClick={() => startAll(row)}
-                  >
-                    ✎
-                  </button>
-                  <button
-                    className="btn"
-                    title={`Property „${row.propName}" auf allen Objekten löschen`}
-                    onClick={() => onDeleteRow(row)}
-                  >
-                    ×
-                  </button>
+                  <span className="row-actions">
+                    <button
+                      className="icon-btn"
+                      title={`Wert für alle ${total} Objekte setzen`}
+                      onClick={() => startAll(row)}
+                    >
+                      ✎
+                    </button>
+                    <button
+                      className="icon-btn"
+                      title={`Property „${row.propName}" auf allen Objekten löschen`}
+                      onClick={() => onDeleteRow(row)}
+                    >
+                      ×
+                    </button>
+                  </span>
                 </td>
                 {editing === row.propName ? (
                   <td colSpan={columns.length}>
@@ -118,12 +118,10 @@ export default function PsetMatrix({
                       <input
                         className="input"
                         autoFocus
-                        style={{
-                          flex: 1,
-                          borderColor: isValidDraft(draft, row.kind)
-                            ? undefined
-                            : "var(--error)",
-                        }}
+                        style={{ flex: 1 }}
+                        data-invalid={
+                          isValidDraft(draft, row.kind) ? undefined : true
+                        }
                         placeholder={`Wert für alle ${total} Objekte`}
                         value={draft}
                         onChange={(event) => setDraft(event.target.value)}
@@ -137,13 +135,16 @@ export default function PsetMatrix({
                         }}
                       />
                       <button
-                        className="btn"
+                        className="btn btn-sm"
                         disabled={!isValidDraft(draft, row.kind)}
                         onClick={() => commitAll(row)}
                       >
                         Vorschau
                       </button>
-                      <button className="btn" onClick={() => setEditing(null)}>
+                      <button
+                        className="btn btn-sm"
+                        onClick={() => setEditing(null)}
+                      >
                         Abbrechen
                       </button>
                     </div>
@@ -200,9 +201,7 @@ function NewPropertyRow({ psetName, total, onAdd }: NewPropertyRowProps) {
 
   return (
     <div className="batch-block-foot">
-      <span className="text-dim" style={{ fontSize: "0.75rem" }}>
-        Neue Property in „{psetName}"
-      </span>
+      <span className="field-label">Neue Property in „{psetName}"</span>
       <input
         className="input"
         style={{ flex: "1 1 120px", minWidth: 90 }}
@@ -235,11 +234,8 @@ function NewPropertyRow({ psetName, total, onAdd }: NewPropertyRowProps) {
       ) : (
         <input
           className="input"
-          style={{
-            flex: "1 1 120px",
-            minWidth: 90,
-            borderColor: parseDraft(value, kind).ok ? undefined : "var(--error)",
-          }}
+          style={{ flex: "1 1 120px", minWidth: 90 }}
+          data-invalid={parseDraft(value, kind).ok ? undefined : true}
           placeholder="Wert"
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
@@ -252,7 +248,7 @@ function NewPropertyRow({ psetName, total, onAdd }: NewPropertyRowProps) {
         />
       )}
       <button
-        className="btn"
+        className="btn btn-sm"
         disabled={!ready}
         title={`Property auf allen ${total} Objekten anlegen`}
         onClick={add}

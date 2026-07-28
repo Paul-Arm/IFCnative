@@ -122,3 +122,46 @@ export function isMovableTypeName(type: string): boolean {
 export function gizmoArmLength(diagonal: number): number {
   return Math.min(4, Math.max(0.6, diagonal * 0.35));
 }
+
+/**
+ * Schnitt des Mausstrahls mit der horizontalen Ebene y = planeY
+ * (Renderer-Rahmen) — Basis des Rotations-Drags und des Zeichenwerkzeugs.
+ * null bei (fast) parallelem Strahl.
+ */
+export function rayPlaneY(ray: WorldRay, planeY: number): WorldVec3 | null {
+  if (Math.abs(ray.direction.y) < 1e-6) return null;
+  const t = (planeY - ray.origin.y) / ray.direction.y;
+  if (!Number.isFinite(t) || t < 0) return null;
+  return {
+    x: ray.origin.x + ray.direction.x * t,
+    y: planeY,
+    z: ray.origin.z + ray.direction.z * t,
+  };
+}
+
+/**
+ * IFC-Yaw (rad) eines Punkts um einen Pivot, aus Renderer-XZ-Koordinaten:
+ * Renderer z = −IFC y  ⇒  φ_ifc = −atan2(z−pz, x−px).
+ */
+export function ifcYawAround(point: WorldVec3, pivot: WorldVec3): number {
+  return -Math.atan2(point.z - pivot.z, point.x - pivot.x);
+}
+
+/** Kürzeste Winkeldifferenz a−b, normalisiert auf (−π, π]. */
+export function angleDelta(a: number, b: number): number {
+  let d = a - b;
+  while (d <= -Math.PI) d += 2 * Math.PI;
+  while (d > Math.PI) d -= 2 * Math.PI;
+  return d;
+}
+
+/** Unterhalb dieser Schwelle (rad ≈ 0,1°) gilt eine Drehung als „nichts". */
+export const ROTATE_EPSILON_RAD = 0.0017;
+
+/** Skalierfaktor aus der Parameterdifferenz entlang einer Achse. */
+export function scaleFactorFrom(ds: number, armLength: number): number {
+  return Math.max(0.05, 1 + ds / Math.max(armLength, 1e-3));
+}
+
+/** Faktor ≈ 1 gilt als „nicht skaliert". */
+export const SCALE_EPSILON = 0.005;

@@ -1,8 +1,9 @@
 /**
- * Werkzeug-Zustand des Viewers (M9): exklusiver Modus „Verschieben" /
- * „Koordinaten picken", Tastatur (W-Toggle, Esc), Koordinaten-Pick über
- * raycastScene inklusive Zwischenablage, und die Gizmo-Zielbestimmung
- * (genau EIN bewegliches Bauteil, Typname-Heuristik).
+ * Werkzeug-Zustand des Viewers (M9/M10): exklusive Modi Verschieben (W),
+ * Rotieren (R), Skalieren (S), Koordinaten picken, Schneiden (X) und
+ * Polygon zeichnen (P). Tastatur-Toggles, Koordinaten-Pick über raycastScene
+ * inklusive Zwischenablage, und die Gizmo-Zielbestimmung (genau EIN
+ * bewegliches Bauteil, Typname-Heuristik).
  *
  * Aus dem ViewerPane ausgelagert, damit das Pane unter der
  * 300-Zeilen-Grenze bleibt und die Werkzeuglogik an einer Stelle liegt.
@@ -13,17 +14,24 @@ import type { DocumentEntry } from "../../store/documents";
 import type { ViewerTool } from "./ViewerToolbar";
 import { usePickStore, type PickPoint } from "./pickStore";
 import { isMovableTypeName } from "./gizmoMath";
+import type { TransformMode } from "./TransformGizmo";
 import {
   formatPointClipboard,
   formatPointStatus,
+  formatMeter,
   rendererToIfcPoint,
   type WorldVec3,
 } from "./worldCoords";
+
+/** Werkzeuge, die das Transform-Gizmo aktivieren. */
+const TRANSFORM_TOOLS = new Set<ViewerTool>(["move", "rotate", "scale"]);
 
 export interface ViewerTools {
   tool: ViewerTool;
   /** Toolbar-/Tastatur-Umschaltung (gleiches Werkzeug erneut = aus). */
   selectTool(next: ViewerTool): void;
+  /** Gizmo-Modus, wenn ein Transform-Werkzeug aktiv ist. */
+  transformMode: TransformMode | null;
   /** expressId für das Gizmo oder null (kein/ungeeignetes Ziel). */
   moveTarget: number | null;
   setMoveDelta(delta: WorldVec3 | null): void;
@@ -64,9 +72,16 @@ export function useViewerTools(
     [setNote],
   );
 
-  // — Tastatur: W toggelt Verschieben, Esc schaltet das Werkzeug aus —
+  // — Tastatur: W/R/S Transformationen, X Schnitt, P Zeichnen, Esc aus —
   useEffect(() => {
     if (!access) return;
+    const HOTKEYS: Record<string, ViewerTool> = {
+      w: "move",
+      r: "rotate",
+      s: "scale",
+      x: "slice",
+      p: "draw",
+    };
     const onKey = (event: KeyboardEvent): void => {
       const target = event.target as HTMLElement | null;
       if (
@@ -77,23 +92,12 @@ export function useViewerTools(
           target.isContentEditable)
       )
         return;
-      if (
-        (event.key === "w" || event.key === "W") &&
-        !event.ctrlKey &&
-        !event.metaKey &&
-        !event.altKey
-      ) {
-        selectTool("move");
-      } else if (
-        (event.key === "x" || event.key === "X") &&
-        !event.ctrlKey &&
-        !event.metaKey &&
-        !event.altKey
-      ) {
-        // Wie im ifc-lite-Viewer: X toggelt das Schnitt-Werkzeug.
-        selectTool("slice");
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      const mapped = HOTKEYS[event.key.toLowerCase()];
+      if (mapped) {
+        selectTool(mapped);
       } else if (event.key === "Escape") {
-        // Ein laufender Gizmo-Drag fängt Esc selbst ab (capture-Phase).
+        // Ein laufender Gizmo-/Zeichen-Drag fängt Esc selbst ab (capture).
         setTool("none");
         setMoveDelta(null);
       }
@@ -135,22 +139,48 @@ export function useViewerTools(
   );
   useEffect(() => () => window.clearTimeout(copyTimer.current), []);
 
+  const transformMode: TransformMode | null = TRANSFORM_TOOLS.has(tool)
+    ? (tool as TransformMode)
+    : null;
+
   // — Gizmo-Ziel: genau EIN bewegliches Bauteil (Typname-Heuristik) —
   const moveTarget = useMemo(() => {
-    if (tool !== "move" || !doc || selection.length !== 1) return null;
+    if (transformMode === null || !doc || selection.length !== 1) return null;
     const id = selection[0];
     if (doc.session.isDeleted(id)) return null;
     return isMovableTypeName(doc.session.identityOf(id).type) ? id : null;
-  }, [tool, doc, selection]);
+  }, [transformMode, doc, selection]);
 
   // — Werkzeug-Anzeigen der Statuszeile —
   const extraParts: string[] = [];
-  if (tool === "move") {
-    if (moveDelta)
-      extraParts.push(`Verschieben Δ ${formatPointStatus(moveDelta)}`);
-    else if (moveTarget !== null)
-      extraParts.push("Verschieben: Achsenpfeil ziehen, Esc bricht ab");
-    else extraParts.push("Verschieben: genau EIN bewegliches Bauteil wählen");
+  if (transformMode !== null) {
+    const verb =
+      transformMode === "move"
+        ? "Verschieben"
+        : transformMode === "rotate"
+          ? "Rotieren"
+          : "Skalieren";
+    if (moveDelta) {
+      if (transformMode === "move") {
+        extraParts.push(`${verb} Δ ${formatPointStatus(moveDelta)}`);
+      } else if (transformMode === "rotate") {
+        extraParts.push(`${verb} ${formatMeter(moveDelta.x)}°`);
+      } else {
+        extraParts.push(
+          `${verb} ×${formatMeter(moveDelta.x)} / ×${formatMeter(moveDelta.y)} / ×${formatMeter(moveDelta.z)}`,
+        );
+      }
+    } else if (moveTarget !== null) {
+      extraParts.push(
+        transformMode === "rotate"
+          ? "Rotieren: Ring ziehen (Yaw um Z), Esc bricht ab"
+          : transformMode === "scale"
+            ? "Skalieren: Achsgriff ziehen, Umschalt = uniform"
+            : "Verschieben: Achsenpfeil ziehen, Esc bricht ab",
+      );
+    } else {
+      extraParts.push(`${verb}: genau EIN bewegliches Bauteil wählen`);
+    }
   }
   if (tool === "pick" && !pickPoint) {
     extraParts.push("Koordinaten picken: Klick auf Geometrie");
@@ -158,6 +188,11 @@ export function useViewerTools(
   if (tool === "slice") {
     extraParts.push(
       "Schneiden: Ziehen verschiebt die Ebene — Umschalt+Rad 1 %, Alt+Rad 0,1 %",
+    );
+  }
+  if (tool === "draw") {
+    extraParts.push(
+      "Polygon zeichnen: Klick setzt Punkte, Doppelklick/Enter schließt, Backspace löscht, Esc bricht ab",
     );
   }
   if (pickPoint && pickPoint.docId === docId) {
@@ -169,6 +204,7 @@ export function useViewerTools(
   return {
     tool,
     selectTool,
+    transformMode,
     moveTarget,
     setMoveDelta,
     performPick,

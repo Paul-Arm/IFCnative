@@ -38,7 +38,7 @@ export default function ClassList({ catalog }: { catalog: IfcObjectCatalog }) {
   return (
     <div
       style={{
-        borderRight: "1px solid var(--border)",
+        borderRight: "1px solid var(--border-60)",
         display: "flex",
         flexDirection: "column",
         minWidth: 220,
@@ -71,10 +71,12 @@ export default function ClassList({ catalog }: { catalog: IfcObjectCatalog }) {
           </button>
         ))}
         {found.length === 0 ? (
-          <p className="pane-empty">Keine Klasse passt zur Suche.</p>
+          <p className="empty-state" style={{ margin: "4px 8px" }}>
+            Keine Klasse passt zur Suche.
+          </p>
         ) : null}
         {found.length > shown.length ? (
-          <p className="text-dim" style={{ padding: "6px 8px" }}>
+          <p className="list-note">
             {found.length - shown.length} weitere Klassen ausgeblendet — Suche
             verfeinern.
           </p>

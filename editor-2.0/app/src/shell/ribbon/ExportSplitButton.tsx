@@ -1,10 +1,10 @@
 /**
- * Exportieren als Office-Splitbutton: der große Teil exportiert wie bisher
- * IFC (inkl. Speichern-Dialog bzw. Download), der Pfeil öffnet das Menü der
- * übrigen Formate. Logik, Formatliste und Badge (offene Änderungen) sind
- * unverändert aus `shell/HeaderBar.tsx` übernommen.
+ * Exportieren als Splitbutton: der linke Teil exportiert wie bisher IFC
+ * (inkl. Speichern-Dialog bzw. Download), der Pfeil öffnet das Menü der
+ * übrigen Formate. Optik im Stil der ersten React-App (Outline-Button mit
+ * Teal-Badge für offene Änderungen); Logik und Formatliste unverändert.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   CSV_MODE_LABELS,
   FORMAT_LABELS,
@@ -14,6 +14,7 @@ import {
   type ExportRequest,
 } from "../../domain/export";
 import type { ModelSession } from "../../core/session";
+import { DropMenu } from "./DropMenu";
 import { IconChevronDown, IconExport } from "./icons";
 
 const CSV_MODES: readonly CsvMode[] = [
@@ -45,15 +46,7 @@ export function ExportSplitButton({
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const box = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: MouseEvent) => {
-      if (!box.current?.contains(event.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onPointerDown);
-    return () => document.removeEventListener("mousedown", onPointerDown);
-  }, [open]);
+  const close = useCallback(() => setOpen(false), []);
 
   const run = useCallback(
     async (request: ExportRequest, label: string) => {
@@ -79,10 +72,10 @@ export function ExportSplitButton({
       : "Modell als IFC exportieren";
 
   return (
-    <div className="ribbon-split" ref={box}>
+    <div className="tb-menu-box tb-split" ref={box}>
       <button
         type="button"
-        className="ribbon-btn ribbon-btn-large ribbon-split-main"
+        className="tb-btn tb-btn-outline tb-split-main"
         title={pendingTitle}
         aria-label={pendingTitle}
         disabled={disabled}
@@ -91,19 +84,17 @@ export function ExportSplitButton({
           void run({ format: "ifc" }, FORMAT_LABELS.ifc);
         }}
       >
-        <IconExport className="ribbon-icon-lg" />
-        <span className="ribbon-btn-label">
-          <span className="ribbon-btn-text">
-            {busy ? `${busy} …` : "Exportieren"}
-          </span>
+        <IconExport className="tb-icon" />
+        <span className="rb-btn-text">
+          {busy ? `${busy} …` : "Exportieren"}
         </span>
         {!busy && pending > 0 ? (
-          <span className="ribbon-badge">{pending}</span>
+          <span className="tb-badge">{pending}</span>
         ) : null}
       </button>
       <button
         type="button"
-        className="ribbon-split-arrow"
+        className="tb-btn tb-btn-outline tb-split-arrow"
         title="Weitere Exportformate"
         aria-label="Weitere Exportformate"
         aria-expanded={open}
@@ -111,23 +102,21 @@ export function ExportSplitButton({
         disabled={disabled}
         onClick={() => setOpen((value) => !value)}
       >
-        <IconChevronDown className="ribbon-icon-xs" />
+        <IconChevronDown className="tb-icon-xs" />
       </button>
-      {open ? (
-        <div role="menu" className="ribbon-menu">
-          {MENU_ITEMS.map((item) => (
-            <button
-              key={item.label}
-              type="button"
-              role="menuitem"
-              className="ribbon-menu-item"
-              onClick={() => void run(item.request, item.label)}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-      ) : null}
+      <DropMenu anchorRef={box} open={open} onDismiss={close}>
+        {MENU_ITEMS.map((item) => (
+          <button
+            key={item.label}
+            type="button"
+            role="menuitem"
+            className="tb-menu-item"
+            onClick={() => void run(item.request, item.label)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </DropMenu>
     </div>
   );
 }

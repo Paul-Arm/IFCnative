@@ -19,7 +19,13 @@ import {
   findExtrusion,
   findPlacementPoint,
 } from "./chain";
-import { toNative, type RecordView } from "./records";
+import {
+  numberOf,
+  readRecord,
+  refOf,
+  toNative,
+  type RecordView,
+} from "./records";
 import type { DimensionChange } from "./types";
 
 interface Source {
@@ -71,6 +77,73 @@ export function planDimensionEdits(
     throw new Error("Keine passende Maßänderung für dieses Profil.");
   }
   return edits;
+}
+
+/** IfcAxis2Placement3D: positionaler Index von RefDirection. */
+export const AXIS_REFDIRECTION_INDEX = 2;
+
+export interface RotationPlan {
+  /** IfcAxis2Placement3D der Platzierung */
+  axis: RecordView;
+  /** aktueller Yaw aus RefDirection (rad; 0 = ungesetzt/Standard +X) */
+  currentRad: number;
+}
+
+/**
+ * Drehung (Yaw um die IFC-Z-Achse) auf die RefDirection des
+ * IfcAxis2Placement3D der Platzierung abbilden. Gelesen wird der aktuelle
+ * Winkel, damit Deltas relativ wirken.
+ */
+export function planRotation(
+  source: Source,
+  elementId: number,
+): RotationPlan {
+  const place = findPlacementPoint(source, elementId);
+  if (!place) {
+    throw new Error(
+      `#${elementId} hat keine drehbare Platzierung (IfcLocalPlacement).`,
+    );
+  }
+  const axis = readRecord(source.store, source.view, place.axisId);
+  if (!axis) {
+    throw new Error(`Platzierungsachse von #${elementId} nicht lesbar.`);
+  }
+  let currentRad = 0;
+  const dirId = refOf(axis.attributes[AXIS_REFDIRECTION_INDEX]);
+  if (dirId !== null) {
+    const direction = readRecord(source.store, source.view, dirId);
+    const ratios = direction?.attributes[0];
+    if (Array.isArray(ratios)) {
+      const x = numberOf(ratios[0]) ?? 1;
+      const y = numberOf(ratios[1]) ?? 0;
+      currentRad = Math.atan2(y, x);
+    }
+  }
+  return { axis, currentRad };
+}
+
+/**
+ * Skalierung als Maßänderung an der parametrischen Extrusion: Faktoren auf
+ * XDim/YDim (Rechteck) bzw. Radius (Kreis, xy-uniform) und Depth. Wirft bei
+ * nicht-parametrischen Körpern (Polygon, B-Rep, Mesh).
+ */
+export function planScale(
+  source: Source,
+  elementId: number,
+  factors: { x: number; y: number; z: number },
+): PlannedEdit[] {
+  const info = findExtrusion(source, elementId);
+  if (!info) {
+    throw new Error(`#${elementId} hat keinen parametrischen Extrusionskörper.`);
+  }
+  const change: DimensionChange = {};
+  if (info.xDim !== null && factors.x !== 1) change.xDim = info.xDim * factors.x;
+  if (info.yDim !== null && factors.y !== 1) change.yDim = info.yDim * factors.y;
+  if (info.radius !== null && (factors.x !== 1 || factors.y !== 1)) {
+    change.radius = info.radius * Math.max(factors.x, factors.y);
+  }
+  if (info.depth !== null && factors.z !== 1) change.depth = info.depth * factors.z;
+  return planDimensionEdits(source, elementId, change);
 }
 
 /**

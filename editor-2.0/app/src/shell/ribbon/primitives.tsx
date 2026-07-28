@@ -3,15 +3,15 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 /**
- * Ribbon-Bausteine. Aufbau und Benennung folgen dem Ribbon des ifc-lite-
- * Viewers (LTplus-AG/ifc-lite, `apps/viewer/src/components/viewer/ribbon/
- * primitives.tsx`, MPL-2.0): eine beschriftete Gruppe hält entweder große
- * Ein-Befehl-Schalter (Icon über zweizeiliger Beschriftung) oder Stapel
- * kleiner Icon+Text-Zeilen, der Gruppenname steht darunter in Kapitälchen.
+ * Ribbon-Bausteine, zweite Generation: statt des Office-Bands (große
+ * Icon-über-Text-Schalter, Stapel, Gruppenlabels) eine einzeilige, kompakte
+ * Befehlsleiste im Design der ersten React-App — 28px-Buttons mit Icon und
+ * Text nebeneinander, Toggles als Teal-Tönung, Gruppen nur noch durch
+ * Haarlinien getrennt (der Gruppenname bleibt als aria-label erhalten).
  *
- * Nachgebaut statt kopiert: das Original hängt an Tailwind, shadcn/ui und
- * lucide-react — hier tragen die Klassen aus `global.css` das Aussehen und
- * binden es an unsere Token (--bg-panel/--border/--accent/--text-dim).
+ * Die Export-Namen (RibbonLargeButton/RibbonSmallButton/RibbonSmallStack)
+ * bleiben bestehen, damit die Register-Dateien unverändert weiterlaufen —
+ * groß und klein rendern jetzt denselben Baustein.
  */
 import type { MouseEvent, ReactNode } from "react";
 import type { IconComponent } from "./icons";
@@ -30,6 +30,8 @@ export interface RibbonButtonProps {
   /** Zeigt den Menü-Pfeil an. */
   hasMenu?: boolean;
   badge?: ReactNode;
+  /** "primary" = gefüllter Teal-Button (Hauptbefehl des Registers). */
+  variant?: "primary";
   onClick?: (event: MouseEvent<HTMLButtonElement>) => void;
 }
 
@@ -39,8 +41,8 @@ function titleOf(label: string, tooltip?: string, shortcut?: string): string {
 }
 
 /**
- * Fokusring nach dem Klick abwerfen — wie im Original, sonst bleibt der
- * zuletzt gedrückte Ribbon-Schalter dauerhaft hervorgehoben.
+ * Fokusring nach dem Klick abwerfen — sonst bleibt der zuletzt gedrückte
+ * Schalter dauerhaft hervorgehoben.
  */
 function blurThenRun(
   event: MouseEvent<HTMLButtonElement>,
@@ -50,7 +52,7 @@ function blurThenRun(
   onClick?.(event);
 }
 
-export function RibbonLargeButton({
+function RibbonButton({
   icon: Icon,
   label,
   tooltip,
@@ -59,12 +61,15 @@ export function RibbonLargeButton({
   disabled,
   hasMenu,
   badge,
+  variant,
   onClick,
 }: RibbonButtonProps) {
+  const variantClass =
+    variant === "primary" ? "tb-btn-primary" : "tb-btn-ghost";
   return (
     <button
       type="button"
-      className="ribbon-btn ribbon-btn-large"
+      className={`tb-btn ${variantClass} rb-btn`}
       title={titleOf(label, tooltip, shortcut)}
       aria-label={tooltip ?? label}
       aria-pressed={active}
@@ -72,52 +77,28 @@ export function RibbonLargeButton({
       disabled={disabled}
       onClick={(event) => blurThenRun(event, onClick)}
     >
-      <Icon className="ribbon-icon-lg" />
-      <span className="ribbon-btn-label">
-        <span className="ribbon-btn-text">{label}</span>
-        {hasMenu ? <IconChevronDown className="ribbon-icon-xs" /> : null}
-      </span>
+      <Icon className="tb-icon" />
+      <span className="rb-btn-text">{label}</span>
+      {hasMenu ? <IconChevronDown className="tb-icon-xs" /> : null}
       {badge}
     </button>
   );
 }
 
-export function RibbonSmallButton({
-  icon: Icon,
-  label,
-  tooltip,
-  shortcut,
-  active,
-  disabled,
-  hasMenu,
-  badge,
-  onClick,
-}: RibbonButtonProps) {
-  return (
-    <button
-      type="button"
-      className="ribbon-btn ribbon-btn-small"
-      title={titleOf(label, tooltip, shortcut)}
-      aria-label={tooltip ?? label}
-      aria-pressed={active}
-      data-active={active ? "true" : undefined}
-      disabled={disabled}
-      onClick={(event) => blurThenRun(event, onClick)}
-    >
-      <Icon className="ribbon-icon-sm" />
-      <span className="ribbon-btn-text">{label}</span>
-      {hasMenu ? <IconChevronDown className="ribbon-icon-xs" /> : null}
-      {badge}
-    </button>
-  );
+export function RibbonLargeButton(props: RibbonButtonProps) {
+  return <RibbonButton {...props} />;
 }
 
-/** Senkrechter Stapel kleiner Schalter (bis zu drei je Ribbon-Höhe). */
+export function RibbonSmallButton(props: RibbonButtonProps) {
+  return <RibbonButton {...props} />;
+}
+
+/** Früher ein senkrechter Stapel — jetzt fließen die Schalter in der Zeile. */
 export function RibbonSmallStack({ children }: { children: ReactNode }) {
-  return <div className="ribbon-stack">{children}</div>;
+  return <>{children}</>;
 }
 
-/** Beschriftete Befehlsgruppe: Inhalt oben, Gruppenname darunter. */
+/** Befehlsgruppe: nur noch logisch (aria-label), optisch eine Button-Reihe. */
 export function RibbonGroup({
   label,
   children,
@@ -126,14 +107,13 @@ export function RibbonGroup({
   children: ReactNode;
 }) {
   return (
-    <div role="group" aria-label={label} className="ribbon-group">
-      <div className="ribbon-group-items">{children}</div>
-      <div className="ribbon-group-label">{label}</div>
+    <div role="group" aria-label={label} className="rb-group">
+      {children}
     </div>
   );
 }
 
 /** Haarlinie zwischen zwei Gruppen. */
 export function RibbonGroupDivider() {
-  return <div aria-hidden="true" className="ribbon-divider" />;
+  return <span aria-hidden="true" className="rb-divider" />;
 }

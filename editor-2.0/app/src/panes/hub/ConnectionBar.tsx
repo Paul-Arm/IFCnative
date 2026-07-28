@@ -88,7 +88,7 @@ export default function ConnectionBar({
 }: ConnectionBarProps) {
   return (
     <div className="pane-toolbar">
-      <label className="text-dim">Hub</label>
+      <label className="card-title">Hub</label>
       <DraftInput
         value={baseUrl}
         width={190}
@@ -123,13 +123,8 @@ export default function ConnectionBar({
       <span
         aria-label={DOT_LABEL[state]}
         title={DOT_LABEL[state]}
-        style={{
-          background: DOT_COLOR[state],
-          borderRadius: "50%",
-          display: "inline-block",
-          height: 8,
-          width: 8,
-        }}
+        className="dot"
+        style={{ background: DOT_COLOR[state] }}
       />
       <span className="text-dim">
         {state === "online"

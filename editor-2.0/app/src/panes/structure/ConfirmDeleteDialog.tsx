@@ -5,6 +5,7 @@
  * deshalb hier Inline-Styles auf global.css-Token).
  */
 import { useEffect, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import type { RemovalPlan } from "../../commands/entityCommands";
 
 export interface PendingTreeRemoval {
@@ -56,7 +57,9 @@ export default function ConfirmDeleteDialog({
 
   const { entities, relations } = pending.plan;
 
-  return (
+  // Portal an <body> — sonst fängt der Stacking-Kontext des Mosaic-Fensters
+  // den Dialog und spätere Fenster (Viewer-Canvas) übermalen ihn.
+  return createPortal(
     <div style={BACKDROP} onMouseDown={onCancel}>
       <div
         style={PANEL}
@@ -82,7 +85,8 @@ export default function ConfirmDeleteDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

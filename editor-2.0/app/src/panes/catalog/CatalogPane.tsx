@@ -81,13 +81,11 @@ export default function CatalogPane() {
       </div>
 
       {error ? (
-        <p className="pane-empty" style={{ color: "var(--error)" }}>
-          Import fehlgeschlagen: {error}
-        </p>
+        <p className="msg msg-error">Import fehlgeschlagen: {error}</p>
       ) : null}
 
       {!catalog ? (
-        <p className="pane-empty">
+        <p className="empty-state">
           Noch kein Objektkatalog geladen. Die openSIM-Arbeitsmappe (.xlsx) für
           Diagnostik (BWD) oder Monitoring (MON) importieren — die Variante wird
           automatisch erkannt.
@@ -100,7 +98,8 @@ export default function CatalogPane() {
               <ul
                 className="text-dim"
                 style={{
-                  borderBottom: "1px solid var(--border)",
+                  borderBottom: "1px solid var(--border-60)",
+                  fontSize: "0.75rem",
                   margin: 0,
                   padding: "6px 10px 6px 26px",
                 }}

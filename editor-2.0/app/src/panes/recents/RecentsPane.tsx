@@ -13,18 +13,18 @@ export default function RecentsPane() {
       </div>
       <div className="pane-body">
         {recents.length === 0 ? (
-          <p className="pane-empty">Noch keine Dateien geöffnet.</p>
+          <p className="empty-state">Noch keine Dateien geöffnet.</p>
         ) : (
-          <table className="kv-table">
+          <table className="kv-table table-hover">
             <tbody>
               {recents.map((r) => (
                 <tr key={r.fileName + r.openedAt}>
                   <td>{r.fileName}</td>
                   <td className="dim">{r.schema}</td>
-                  <td className="dim">
+                  <td className="dim mono">
                     {r.entityCount.toLocaleString("de-DE")} Entities
                   </td>
-                  <td className="dim">
+                  <td className="dim mono">
                     {new Date(r.openedAt).toLocaleString("de-DE")}
                   </td>
                 </tr>

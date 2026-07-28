@@ -86,7 +86,7 @@ export default function ResourcesSection({
           <TypeForm docId={docId} session={session} expressId={expressId} revision={revision} />
         </>
       ) : (
-        <p className="pane-empty">
+        <p className="empty-state" style={{ margin: "4px 2px" }}>
           Kein Objekt ausgewählt — Material, Klassifikation, Dokumente, Gruppen
           und Typ beziehen sich auf die Auswahl. Die Einheiten unten gelten
           modellweit.
@@ -111,18 +111,16 @@ function ResourceBlock({
   return (
     <div>
       <SectionHeading>
-        {title} <span className="text-dim">({rows.length})</span>
+        {title} <span>({rows.length})</span>
       </SectionHeading>
       {rows.length === 0 ? (
-        <p className="text-dim" style={{ margin: "0 8px 6px", fontSize: "0.75rem" }}>
-          Keine Einträge.
-        </p>
+        <p className="list-note">Keine Einträge.</p>
       ) : (
         rows.map((entry, index) => (
           <button
             key={`${entry.origin}-${entry.id}-${index}`}
             className="row-item"
-            style={{ display: "flex", gap: 6, alignItems: "baseline" }}
+            style={{ display: "flex", gap: 6, alignItems: "center" }}
             title={entry.id > 0 ? `#${entry.id} auswählen` : undefined}
             onClick={() => onPick(entry)}
           >
@@ -141,12 +139,18 @@ function ResourceBlock({
               </span>
             )}
             <span
-              className="text-dim"
+              className="text-dim mono"
               style={{ marginLeft: "auto", fontSize: "0.7rem", flex: "0 0 auto" }}
             >
-              {entry.id > 0 ? `#${entry.id} · ` : ""}
-              {entry.origin === "overlay" ? "Overlay" : "geparst"}
+              {entry.id > 0 ? `#${entry.id}` : ""}
             </span>
+            {entry.origin === "overlay" ? (
+              <span className="badge badge-accent" title="Zuordnung aus dieser Sitzung — erscheint nach Export/Reparse als geparst">
+                Overlay
+              </span>
+            ) : (
+              <span className="badge">geparst</span>
+            )}
           </button>
         ))
       )}

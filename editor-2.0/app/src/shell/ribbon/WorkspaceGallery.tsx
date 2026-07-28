@@ -1,98 +1,71 @@
 /**
- * Workspace-Galerie im Office-Stil: jede Kachel zeigt eine Miniatur des
- * Layouts (aus dem Mosaic-Baum abgeleitet) über dem Namen; die aktive
- * Kachel ist markiert. Auswahl = `useUi.switchWorkspace`.
+ * Workspace-Wechsler im Register „Ansicht" — kompaktes Dropdown im Stil der
+ * ersten React-App: eingebaute und eigene Arbeitsbereiche in einem Menü, der
+ * aktive ist markiert. Das Menü hängt als Portal am <body> (DropMenu), weil
+ * die Befehlsleiste per overflow clippt. Sichern/Löschen bleiben als eigene
+ * Schalter daneben (AnsichtTab).
  */
-import type { MosaicNode } from "react-mosaic-component";
-import type { PaneId } from "../../panes/ids";
-import { BUILTIN_WORKSPACES, BUILTIN_WORKSPACE_NAMES } from "../../panes/workspaces";
+import { useCallback, useRef, useState } from "react";
+import { BUILTIN_WORKSPACE_NAMES } from "../../panes/workspaces";
 import { useUi } from "../../store/ui";
-
-/** Miniaturansicht: Splits werden zu geschachtelten Flex-Kästchen. */
-function LayoutPreview({
-  node,
-  grow,
-}: {
-  node: MosaicNode<PaneId>;
-  grow: number;
-}) {
-  if (typeof node === "string" || node.type === "tabs") {
-    return <span className="ribbon-gallery-cell" style={{ flexGrow: grow }} />;
-  }
-  return (
-    <span
-      className="ribbon-gallery-split"
-      style={{
-        flexGrow: grow,
-        flexDirection: node.direction === "row" ? "row" : "column",
-      }}
-    >
-      {node.children.map((child, index) => (
-        <LayoutPreview
-          key={index}
-          node={child}
-          grow={node.splitPercentages?.[index] ?? 50}
-        />
-      ))}
-    </span>
-  );
-}
+import { DropMenu } from "./DropMenu";
+import { IconChevronDown, IconWorkspace } from "./icons";
 
 export function WorkspaceGallery() {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+
   const workspaceName = useUi((s) => s.workspaceName);
   const customWorkspaces = useUi((s) => s.customWorkspaces);
   const switchWorkspace = useUi((s) => s.switchWorkspace);
 
-  const entries: ReadonlyArray<{
-    name: string;
-    layout: MosaicNode<PaneId>;
-    custom: boolean;
-  }> = [
-    ...BUILTIN_WORKSPACE_NAMES.map((name) => ({
-      name,
-      layout: BUILTIN_WORKSPACES[name],
-      custom: false,
-    })),
-    ...customWorkspaces.map((entry) => ({
-      name: entry.name,
-      layout: entry.layout,
-      custom: true,
-    })),
-  ];
+  const pick = (name: string) => {
+    switchWorkspace(name);
+    setOpen(false);
+  };
+
+  const item = (name: string) => (
+    <button
+      key={name}
+      type="button"
+      role="menuitem"
+      className="tb-menu-item"
+      data-active={name === workspaceName ? "true" : undefined}
+      onClick={() => pick(name)}
+    >
+      <span className="tb-menu-item-text">{name}</span>
+      <span className="tb-menu-check" aria-hidden="true">
+        {name === workspaceName ? "✓" : ""}
+      </span>
+    </button>
+  );
 
   return (
-    <div
-      className="ribbon-gallery"
-      role="listbox"
-      aria-label="Arbeitsbereich wählen"
-    >
-      {entries.map((entry) => {
-        const selected = entry.name === workspaceName;
-        return (
-          <button
-            key={`${entry.custom ? "custom" : "builtin"}:${entry.name}`}
-            type="button"
-            role="option"
-            aria-selected={selected}
-            data-active={selected ? "true" : undefined}
-            className="ribbon-gallery-item"
-            title={
-              entry.custom
-                ? `Eigener Arbeitsbereich „${entry.name}“`
-                : `Arbeitsbereich „${entry.name}“`
-            }
-            onClick={(event) => {
-              event.currentTarget.blur();
-              switchWorkspace(entry.name);
-            }}
-          >
-            <span className="ribbon-gallery-preview">
-              <LayoutPreview node={entry.layout} grow={100} />
-            </span>
-            <span className="ribbon-gallery-name">{entry.name}</span>
-          </button>
-        );
-      })}
+    <div className="tb-menu-box" ref={box}>
+      <button
+        type="button"
+        className="tb-btn tb-btn-outline tb-workspace"
+        title="Arbeitsbereich wechseln"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <IconWorkspace className="tb-icon" />
+        <span className="tb-btn-text">{workspaceName}</span>
+        <IconChevronDown className="tb-icon-xs" />
+      </button>
+      <DropMenu anchorRef={box} open={open} onDismiss={close}>
+        <div className="tb-menu-heading">Arbeitsbereiche</div>
+        {BUILTIN_WORKSPACE_NAMES.map(item)}
+        {customWorkspaces.length > 0 ? (
+          <>
+            <div className="tb-menu-separator" />
+            <div className="tb-menu-heading">Eigene</div>
+            {customWorkspaces.map((w) => item(w.name))}
+          </>
+        ) : null}
+      </DropMenu>
     </div>
   );
 }

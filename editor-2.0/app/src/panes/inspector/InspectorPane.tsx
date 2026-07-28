@@ -70,10 +70,10 @@ export default function InspectorPane() {
         )}
       </div>
 
-      <div className="pane-body">
+      <div className="pane-body pane-stack">
         {/* „Ressourcen" rendert auch ohne Auswahl — die Einheiten gelten modellweit. */}
         {!doc || (expressId === null && mode !== "resources") ? (
-          <p className="pane-empty">
+          <p className="empty-state">
             {doc
               ? "Nichts ausgewählt — Objekt in Struktur, Viewer oder Graph wählen."
               : "Kein Dokument geöffnet."}
@@ -138,18 +138,13 @@ export default function InspectorPane() {
 
 function SelectionHeader({ count, label }: { count: number; label: string }) {
   return (
-    <div
-      style={{
-        padding: "6px 8px",
-        borderBottom: "1px solid var(--border)",
-      }}
-    >
+    <div className="sel-head">
       {count > 1 && (
-        <div className="text-dim" style={{ fontSize: "0.75rem" }}>
+        <div className="sel-head-count">
           {count} Objekte ausgewählt — Details für zuletzt gewähltes
         </div>
       )}
-      <div style={{ fontWeight: 600 }}>{label}</div>
+      <div className="sel-head-label">{label}</div>
     </div>
   );
 }

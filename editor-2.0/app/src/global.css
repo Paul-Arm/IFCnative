@@ -1,30 +1,81 @@
 @import "react-mosaic-component/react-mosaic-component.css";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+@import "./panels.css";
 
-/* Design-Token: hell/dunkel über data-theme am <html>. */
+/* ---------------------------------------------------------------------------
+ * Design-Token — Palette und Optik der ersten React-App (IFCnative/src):
+ * Teal/Petrol in oklch, zwei Flächen (getöntes --bg als Bühne, --bg-panel
+ * für Header/Fenster/Karten), Borders mit Alpha, Radien aus einer Basis.
+ * hell/dunkel über data-theme am <html>. Die Token-Namen bleiben unverändert,
+ * weil Panes sie auch in Inline-Styles referenzieren.
+ * ------------------------------------------------------------------------- */
 :root {
-  --bg: #f7f7f8;
-  --bg-panel: #ffffff;
-  --bg-hover: #ececef;
-  --bg-active: #dfe4ff;
-  --border: #d9d9de;
-  --text: #1c1c21;
-  --text-dim: #6b6b76;
-  --accent: #3b5bdb;
-  --warn: #b45309;
-  --error: #b91c1c;
-  --canvas-bg: #16181d;
+  --bg: oklch(0.975 0.003 197.1);
+  --bg-panel: oklch(1 0 0);
+  --bg-popover: oklch(1 0 0);
+  --bg-hover: oklch(0.955 0.005 197.1);
+  --bg-active: oklch(0.945 0.012 186.4);
+  --border: oklch(0.915 0.005 197.1);
+  --text: oklch(0.145 0 0);
+  --text-dim: oklch(0.5 0.01 197.1);
+  --accent: oklch(0.511 0.096 186.4);
+  --accent-contrast: oklch(0.985 0 0);
+  --ring: oklch(0.704 0.14 182.5);
+  --warn: oklch(0.414 0.112 45.9);
+  --warn-solid: oklch(0.666 0.179 58.3);
+  --error: oklch(0.577 0.245 27.325);
+  --danger: var(--error);
+  --canvas-bg: #f8fafc;
+
+  --radius: 0.5rem;
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+
+  /* Abgeleitete Flächen/Linien (Alpha-Mischungen wie in der alten App) */
+  --border-60: color-mix(in oklab, var(--border) 60%, transparent);
+  --border-70: color-mix(in oklab, var(--border) 70%, transparent);
+  --muted-30: color-mix(in oklab, var(--bg-hover) 30%, transparent);
+  --muted-40: color-mix(in oklab, var(--bg-hover) 40%, transparent);
+  --muted-50: color-mix(in oklab, var(--bg-hover) 50%, transparent);
+  --accent-10: color-mix(in oklab, var(--accent) 10%, transparent);
+  --accent-15: color-mix(in oklab, var(--accent) 15%, transparent);
+  --ring-soft: color-mix(in oklab, var(--ring) 50%, transparent);
+
+  --font-sans:
+    "Geist Variable", "Inter", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  --font-mono:
+    "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Consolas,
+    monospace;
+
+  --shadow-panel: 0 1px 2px oklch(0.145 0 0 / 5%);
+  --shadow-popover:
+    0 4px 12px oklch(0.145 0 0 / 12%),
+    0 0 0 1px color-mix(in oklab, var(--text) 10%, transparent);
 }
 
 :root[data-theme="dark"] {
-  --bg: #17181c;
-  --bg-panel: #1f2126;
-  --bg-hover: #2a2d34;
-  --bg-active: #2f3a5e;
-  --border: #33353c;
-  --text: #e8e8ec;
-  --text-dim: #9a9aa6;
-  --accent: #748ffc;
-  --canvas-bg: #101216;
+  --bg: oklch(0.155 0.006 197.1);
+  --bg-panel: oklch(0.205 0.008 197.1);
+  --bg-popover: oklch(0.225 0.008 197.1);
+  --bg-hover: oklch(0.269 0.008 197.1);
+  --bg-active: oklch(0.305 0.03 186.4);
+  --border: oklch(1 0 0 / 12%);
+  --text: oklch(0.965 0 0);
+  --text-dim: oklch(0.72 0.01 197.1);
+  --accent: oklch(0.777 0.152 181.9);
+  --accent-contrast: oklch(0.277 0.046 192.5);
+  --ring: oklch(0.6 0.104 191.6);
+  --warn: oklch(0.828 0.189 84.4);
+  --warn-solid: oklch(0.828 0.189 84.4);
+  --error: oklch(0.704 0.191 22.216);
+  --canvas-bg: #26292b;
+
+  --shadow-panel: 0 1px 2px oklch(0 0 0 / 30%);
+  --shadow-popover:
+    0 4px 12px oklch(0 0 0 / 40%),
+    0 0 0 1px color-mix(in oklab, var(--text) 10%, transparent);
 }
 
 * {
@@ -39,27 +90,708 @@ body,
 }
 
 body {
-  font-family: system-ui, "Segoe UI", sans-serif;
+  font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01";
   font-size: 0.875rem;
   background: var(--bg);
   color: var(--text);
+  overflow: hidden;
 }
 
-/* — Bausteine für alle Panes — */
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+/* Einheitlicher Focus-Zustand wie in der alten App: Ring statt Outline. */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  border-color: var(--ring);
+  box-shadow: 0 0 0 3px var(--ring-soft);
+}
+
+/* ---------------------------------------------------------------------------
+ * App-Gerüst: Kopfleiste, gerahmter Arbeitsbereich, Statusleiste.
+ * ------------------------------------------------------------------------- */
+.app-shell {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 0.375rem;
+  padding: 0.375rem;
+}
+
+.app-main-frame {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  border: 1px solid var(--border-60);
+  border-radius: var(--radius-lg);
+  background: var(--muted-30);
+}
+
+/* — Rechte Werkzeug-Sidebar: Panel + Icon-Leiste — */
+.sidebar-panel {
+  position: relative;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+  box-shadow: var(--shadow-panel);
+}
+
+.sidebar-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 7px;
+  cursor: col-resize;
+  z-index: 5;
+  touch-action: none;
+}
+.sidebar-resize:hover {
+  background: color-mix(in oklab, var(--accent) 25%, transparent);
+}
+
+.sidebar-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 0.375rem;
+  height: 1.875rem;
+  padding: 0 0.25rem 0 0.5rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-dim);
+}
+.sidebar-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.sidebar-close {
+  font-size: 0.875rem;
+  line-height: 1;
+}
+
+.sidebar-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  padding: 8px;
+  overflow: hidden;
+}
+.sidebar-body > * {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.tool-rail {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  width: 2.25rem;
+  padding: 0.25rem 0;
+}
+
+.rail-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.875rem;
+  height: 1.875rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+.rail-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.rail-btn[data-active="true"] {
+  background: var(--accent-10);
+  border-color: color-mix(in oklab, var(--accent) 35%, transparent);
+  color: var(--accent);
+}
+
+.rail-icon {
+  width: 1rem;
+  height: 1rem;
+}
+
+/* — Ribbon-Kopfleiste: Registerzeile + einzeilige Befehlsleiste + Tabs — */
+.ribbon {
+  position: relative;
+  z-index: 20;
+  flex: none;
+  border-bottom: 1px solid var(--border-70);
+  background: color-mix(in oklab, var(--bg-panel) 95%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: var(--shadow-panel);
+}
+
+.ribbon-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  height: 2.375rem;
+  padding: 0 0.75rem;
+}
+
+.ribbon-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-right: 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.ribbon-brand::before {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.ribbon-tablist {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+}
+
+.ribbon-tab {
+  position: relative;
+  height: 1.75rem;
+  padding: 0 0.625rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+.ribbon-tab:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.ribbon-tab[data-active="true"] {
+  color: var(--accent);
+}
+.ribbon-tab[data-active="true"]::after {
+  content: "";
+  position: absolute;
+  left: 0.5rem;
+  right: 0.5rem;
+  bottom: -0.3125rem;
+  height: 0.125rem;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.ribbon-spacer {
+  flex: 1;
+}
+
+/* Einzeilige Befehlsleiste unter den Registern */
+.ribbon-band {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.75rem 0.5rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.rb-group {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.rb-divider {
+  flex: none;
+  width: 1px;
+  height: 1.25rem;
+  margin: 0 0.375rem;
+  background: var(--border-70);
+}
+
+.rb-btn {
+  flex: none;
+}
+.rb-btn-text {
+  white-space: nowrap;
+}
+.rb-group-icon {
+  flex: none;
+  margin: 0 0.125rem;
+  color: var(--text-dim);
+}
+
+/* Regler im Band (UI-Zoom) */
+.rb-field {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0 0.375rem;
+  font-size: 0.6875rem;
+  color: var(--text-dim);
+}
+.rb-field-label {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.rb-field input[type="range"] {
+  width: 6.5rem;
+  accent-color: var(--accent);
+}
+.rb-field-value {
+  min-width: 2.25rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Dokument-Tabs unten im Ribbon, sitzen auf der Unterkante */
+.ribbon-doctabs {
+  display: flex;
+  padding: 0.25rem 0.5rem 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+/* — Buttons der Kopfleiste (shadcn-Größen: sm = 28px) — */
+.tb-btn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  height: 1.75rem;
+  padding: 0 0.625rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+.tb-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.tb-btn:disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.tb-btn-primary {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+.tb-btn-primary:hover {
+  background: color-mix(in oklab, var(--accent) 80%, var(--bg-panel));
+}
+
+.tb-btn-outline {
+  border-color: var(--border);
+  background: var(--bg-panel);
+}
+.tb-btn-outline:hover,
+.tb-btn-outline[aria-expanded="true"] {
+  background: var(--bg-hover);
+}
+
+.tb-btn-ghost:hover,
+.tb-btn-ghost[aria-expanded="true"] {
+  background: var(--bg-hover);
+}
+
+/* Gedrückte Toggles (Fenster-Schalter, Achsen …): Teal-Tönung wie die
+   Auswahl in Listen der alten App. */
+.tb-btn[data-active="true"] {
+  background: var(--accent-10);
+  color: var(--accent);
+}
+
+.tb-btn-icon {
+  width: 1.75rem;
+  padding: 0;
+}
+
+.tb-icon {
+  width: 0.875rem;
+  height: 0.875rem;
+  flex: none;
+}
+.tb-icon-xs {
+  width: 0.75rem;
+  height: 0.75rem;
+  flex: none;
+  color: var(--text-dim);
+}
+
+.tb-divider {
+  flex: none;
+  width: 1px;
+  height: 1.25rem;
+  margin: 0 0.25rem;
+  background: var(--border-70);
+}
+
+.tb-badge {
+  flex: none;
+  padding: 0 0.375rem;
+  border-radius: 999px;
+  background: var(--accent-15);
+  color: var(--accent);
+  font-size: 0.65rem;
+  font-weight: 600;
+  line-height: 1.1rem;
+}
+
+/* Workspace-Wechsler links: feste Breite, Label linksbündig. */
+.tb-workspace {
+  min-width: 11rem;
+  justify-content: flex-start;
+}
+.tb-workspace .tb-btn-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+}
+
+/* Splitbutton Export */
+.tb-split {
+  display: inline-flex;
+  align-items: stretch;
+}
+.tb-split-main {
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
+}
+.tb-split-arrow {
+  width: 1.25rem;
+  padding: 0;
+  margin-left: -1px;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+
+/* — Dropdown-Menüs der Kopfleiste — */
+.tb-menu-box {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.tb-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 40;
+  min-width: 11rem;
+  max-height: min(70vh, 30rem);
+  padding: 0.25rem;
+  overflow-y: auto;
+  border-radius: var(--radius-lg);
+  background: var(--bg-popover);
+  box-shadow: var(--shadow-popover);
+}
+.tb-menu-right {
+  right: 0;
+  left: auto;
+}
+
+.tb-menu-heading {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+}
+
+.tb-menu-separator {
+  height: 1px;
+  margin: 0.25rem 0;
+  background: var(--border);
+}
+
+.tb-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  width: 100%;
+  padding: 0.3125rem 0.5rem;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text);
+  font-size: 0.75rem;
+  text-align: left;
+  cursor: pointer;
+}
+.tb-menu-item:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.tb-menu-item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.tb-menu-item[data-active="true"] {
+  color: var(--accent);
+  font-weight: 500;
+}
+.tb-menu-item-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tb-menu-check {
+  flex: none;
+  width: 1em;
+  color: var(--accent);
+  font-size: 0.6875rem;
+  text-align: right;
+}
+
+.tb-menu-field {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.3125rem 0.5rem;
+  font-size: 0.6875rem;
+  color: var(--text-dim);
+}
+.tb-menu-field input[type="range"] {
+  flex: 1;
+  min-width: 6rem;
+  accent-color: var(--accent);
+}
+.tb-menu-field-value {
+  min-width: 2.25rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* — Dokument-Tabs (Browser-Tab-Optik, unten mit dem Rahmen verbunden) — */
+.doc-tabs {
+  display: flex;
+  gap: 0.25rem;
+  min-width: max-content;
+  padding: 0 0.25rem;
+}
+
+.doc-tab {
+  position: relative;
+  display: flex;
+}
+
+.doc-tab-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.125rem;
+  min-width: 9rem;
+  max-width: 14rem;
+  padding: 0.375rem 1.75rem 0.375rem 0.625rem;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+.doc-tab-btn:hover {
+  background: var(--muted-40);
+}
+/* Der aktive Tab „verbindet" sich mit der Fläche darunter: 1px Schatten in
+   Panelfarbe überdeckt die Unterkante der Kopfleiste. */
+.doc-tab[data-active="true"] .doc-tab-btn {
+  border-color: var(--border);
+  background: var(--bg-panel);
+  box-shadow: 0 1px 0 0 var(--bg-panel);
+}
+
+.doc-tab-name {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  width: 100%;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+.doc-tab-name > span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-tab-dot {
+  flex: none;
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--text-dim) 40%, transparent);
+}
+.doc-tab[data-active="true"] .doc-tab-dot {
+  background: var(--accent);
+}
+.doc-tab-dirty {
+  flex: none;
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 999px;
+  background: var(--warn-solid);
+}
+
+.doc-tab-sub {
+  width: 100%;
+  padding-left: 0.75rem;
+  font-size: 0.65rem;
+  font-weight: 400;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-tab-close {
+  position: absolute;
+  top: 0.375rem;
+  right: 0.375rem;
+  display: grid;
+  place-items: center;
+  width: 1rem;
+  height: 1rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: color-mix(in oklab, var(--text-dim) 60%, transparent);
+  font-size: 0.75rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.doc-tab:hover .doc-tab-close,
+.doc-tab-close:focus-visible {
+  opacity: 1;
+}
+.doc-tab-close:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+/* — Statusleiste: fixe 24px — */
+.statusbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 0.75rem;
+  height: 1.5rem;
+  padding: 0 0.75rem;
+  overflow: hidden;
+  border-top: 1px solid var(--border-70);
+  background: var(--bg-panel);
+  font-size: 0.6875rem;
+  color: var(--text-dim);
+}
+.statusbar-strong {
+  flex: none;
+  font-weight: 500;
+  color: color-mix(in oklab, var(--text) 80%, transparent);
+}
+.statusbar-right {
+  margin-left: auto;
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+/* ---------------------------------------------------------------------------
+ * Bausteine für alle Panes — Dichte und Flächen wie in der alten App:
+ * Toolbar als graue Pille, 28px-Kontrollen, Auswahl als primary/10-Tönung.
+ * ------------------------------------------------------------------------- */
 .pane {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: var(--bg-panel);
+  gap: 0.5rem;
+  background: transparent;
   overflow: hidden;
 }
 .pane-toolbar {
   display: flex;
-  gap: 6px;
+  gap: 0.5rem;
   align-items: center;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
+  flex: none;
+  padding: 0.375rem 0.5rem;
+  border-radius: var(--radius-lg);
+  background: var(--muted-40);
 }
 .pane-body {
   flex: 1;
@@ -73,20 +805,31 @@ body {
 }
 
 .btn {
-  padding: 3px 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  min-height: 1.75rem;
+  padding: 0.125rem 0.625rem;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--bg-panel);
   color: var(--text);
   cursor: pointer;
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
 }
 .btn:hover {
   background: var(--bg-hover);
 }
 .btn[data-active="true"] {
-  background: var(--bg-active);
-  border-color: var(--accent);
+  background: var(--accent-10);
+  border-color: color-mix(in oklab, var(--accent) 55%, transparent);
+  color: var(--accent);
 }
 .btn:disabled {
   opacity: 0.5;
@@ -95,46 +838,62 @@ body {
 
 .input,
 select.input {
-  padding: 3px 6px;
+  min-height: 1.75rem;
+  padding: 0.125rem 0.5rem;
   border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-panel);
+  border-radius: var(--radius-md);
+  background: transparent;
   color: var(--text);
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
+  transition: border-color 120ms ease;
+}
+.input::placeholder {
+  color: var(--text-dim);
+}
+select.input {
+  background: var(--bg-panel);
 }
 
 .row-item {
   display: block;
   width: 100%;
+  min-height: 1.5rem;
   text-align: left;
-  padding: 2px 8px;
+  padding: 0.125rem 0.375rem;
   border: none;
+  border-radius: var(--radius-sm);
   background: none;
   color: var(--text);
   cursor: pointer;
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  transition: background-color 120ms ease;
 }
 .row-item:hover {
-  background: var(--bg-hover);
+  background: var(--muted-50);
 }
 .row-item[data-selected="true"] {
-  background: var(--bg-active);
+  background: var(--accent-10);
 }
 
 .kv-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
 }
 .kv-table td,
 .kv-table th {
-  padding: 2px 8px;
-  border-bottom: 1px solid var(--border);
+  height: 1.75rem;
+  padding: 0.125rem 0.5rem;
+  border-bottom: 1px solid var(--border-60);
   text-align: left;
-  vertical-align: top;
+  vertical-align: middle;
+}
+.kv-table th {
+  background: var(--muted-40);
+  font-weight: 500;
 }
 .kv-table td.dim {
   color: var(--text-dim);
@@ -145,394 +904,420 @@ select.input {
   color: var(--text-dim);
 }
 
-/* — Ribbon (Office-artige Kopfzeile, Design nach ifc-lite-Viewer) —
-   Alle Maße in rem, damit der UI-Zoom (html-font-size) mitskaliert. */
-.ribbon {
-  position: relative;
-  z-index: 20;
-  background: var(--bg-panel);
-  border-bottom: 1px solid var(--border);
+/* — Segmented Control (Ansichts-Umschalter, Muster der alten App) — */
+.seg {
+  display: inline-flex;
   flex: none;
-}
-
-.ribbon-tabs {
-  display: flex;
-  align-items: flex-end;
-  gap: 0.125rem;
-  height: 2.25rem;
-  padding: 0 0.5rem;
-  border-bottom: 1px solid var(--border);
-}
-.ribbon-brand {
-  align-self: center;
-  margin-right: 0.75rem;
-  font-size: 0.8125rem;
-  white-space: nowrap;
-}
-.ribbon-tablist {
-  display: flex;
-  align-items: flex-end;
-  gap: 0.125rem;
-  height: 100%;
-}
-.ribbon-tabs-spacer {
-  flex: 1;
-}
-.ribbon-tab {
-  position: relative;
-  height: 1.75rem;
-  padding: 0 0.75rem;
-  border: none;
-  border-radius: 0.375rem 0.375rem 0 0;
-  background: transparent;
-  color: var(--text-dim);
-  font-size: 0.75rem;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  cursor: pointer;
-  user-select: none;
-}
-.ribbon-tab:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-.ribbon-tab[data-active="true"] {
-  color: var(--text);
-}
-.ribbon-tab-underline {
-  position: absolute;
-  left: 0.5rem;
-  right: 0.5rem;
-  bottom: 0;
-  height: 0.125rem;
-  border-radius: 1rem;
-  background: var(--accent);
-}
-.ribbon-collapse {
-  display: flex;
   align-items: center;
-  justify-content: center;
-  align-self: center;
-  width: 1.5rem;
-  height: 1.5rem;
-  padding: 0;
-  border: none;
-  border-radius: 0.25rem;
-  background: transparent;
-  color: var(--text-dim);
-  cursor: pointer;
-}
-.ribbon-collapse:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-
-.ribbon-band {
-  display: flex;
-  align-items: stretch;
-  height: 5.5rem;
-  padding: 0 0.25rem;
-  overflow-x: auto;
-  overflow-y: hidden;
-}
-
-.ribbon-group {
-  display: flex;
-  flex-direction: column;
-  flex: none;
-  padding: 0 0.375rem;
-}
-.ribbon-group-items {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-  align-items: stretch;
-  justify-content: center;
-  gap: 0.125rem;
-  padding-top: 0.25rem;
-}
-.ribbon-group-label {
-  padding: 0.125rem 0 0.25rem;
-  text-align: center;
-  font-size: 0.5625rem;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  color: var(--text-dim);
-}
-.ribbon-divider {
-  flex: none;
-  width: 1px;
-  margin: 0.5rem 0;
-  align-self: stretch;
-  background: var(--border);
-}
-
-.ribbon-btn {
-  position: relative;
-  display: flex;
-  flex: none;
-  border: 1px solid transparent;
-  border-radius: 0.375rem;
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
-  user-select: none;
-}
-.ribbon-btn:hover:not(:disabled) {
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius-lg);
   background: var(--bg-hover);
 }
-.ribbon-btn:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-.ribbon-btn[data-active="true"] {
-  background: var(--bg-active);
-  border-color: var(--accent);
-}
-.ribbon-btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-}
-
-.ribbon-btn-large {
-  width: 4.25rem;
-  height: 100%;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 0.25rem;
-  padding: 0.25rem 0.125rem;
-  font-size: 0.625rem;
-  line-height: 1.15;
-}
-.ribbon-btn-large .ribbon-btn-label {
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  gap: 0.125rem;
-  width: 100%;
-  height: 2.3em;
-}
-.ribbon-btn-large .ribbon-btn-text {
-  text-align: center;
-  overflow-wrap: break-word;
-  hyphens: auto;
-}
-
-.ribbon-btn-small {
-  width: 100%;
-  align-items: center;
-  gap: 0.375rem;
-  padding: 0 0.375rem;
+.seg-btn {
   height: 1.375rem;
+  padding: 0 0.5rem;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-dim);
   font-size: 0.6875rem;
-  text-align: left;
-}
-.ribbon-btn-small .ribbon-btn-text {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font-weight: 500;
   white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+.seg-btn:hover {
+  color: var(--text);
+}
+.seg-btn[data-active="true"] {
+  background: var(--bg-panel);
+  color: var(--text);
+  box-shadow: var(--shadow-panel);
 }
 
-.ribbon-stack {
+/* — Gruppen-Ansicht im Struktur-Pane — */
+.grp-cat {
+  padding: 0.5rem 0.375rem 0.25rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+}
+.grp-row {
   display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-height: 1.75rem;
+  padding-right: 0.25rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+.grp-row:hover {
+  background: var(--muted-50);
+}
+.grp-row[data-selected="true"] {
+  background: var(--accent-10);
+}
+.grp-chevron {
+  display: inline-flex;
   flex: none;
-  flex-direction: column;
-  justify-content: center;
-  gap: 0.0625rem;
-  width: max-content;
-  min-width: 6.5rem;
-  height: 100%;
-}
-
-.ribbon-icon-lg {
-  width: 1.75rem;
-  height: 1.75rem;
-  flex: none;
-}
-.ribbon-icon-sm {
-  width: 0.875rem;
-  height: 0.875rem;
-  flex: none;
-}
-.ribbon-icon-xs {
-  width: 0.625rem;
-  height: 0.625rem;
-  flex: none;
-  opacity: 0.6;
-}
-
-.ribbon-badge {
-  position: absolute;
-  top: 0.125rem;
-  right: 0.125rem;
-  min-width: 1rem;
-  padding: 0 0.25rem;
-  border-radius: 1rem;
-  background: var(--accent);
-  color: #fff;
-  font-size: 0.5625rem;
-  line-height: 1rem;
-  text-align: center;
-}
-
-/* Splitbutton: großer Standardbefehl + Pfeil für die Formatliste */
-.ribbon-split {
-  position: relative;
-  display: flex;
-  align-items: stretch;
-}
-.ribbon-split-arrow {
-  display: flex;
   align-items: center;
   justify-content: center;
   width: 1rem;
-  border: 1px solid transparent;
-  border-radius: 0.375rem;
+  height: 1rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-dim);
-  cursor: pointer;
-}
-.ribbon-split-arrow:hover:not(:disabled) {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-.ribbon-split-arrow:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-.ribbon-menu {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  z-index: 30;
-  min-width: 13rem;
-  padding: 0.25rem 0;
-  border: 1px solid var(--border);
-  border-radius: 0.25rem;
-  background: var(--bg-panel);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
-}
-.ribbon-menu-item {
-  display: block;
-  width: 100%;
-  padding: 0.3125rem 0.625rem;
-  border: none;
-  background: transparent;
-  color: var(--text);
-  font-size: 0.75rem;
-  text-align: left;
-  cursor: pointer;
-}
-.ribbon-menu-item:hover {
-  background: var(--bg-hover);
-}
-
-/* Galerie der Arbeitsbereiche mit Layout-Miniaturen */
-.ribbon-gallery {
-  display: flex;
-  align-items: stretch;
-  gap: 0.25rem;
-  max-width: 30rem;
-  padding: 0 0.125rem;
-  overflow-x: auto;
-}
-.ribbon-gallery-item {
-  display: flex;
-  flex: none;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.1875rem;
-  width: 3.5rem;
-  padding: 0.25rem 0.125rem;
-  border: 1px solid var(--border);
-  border-radius: 0.375rem;
-  background: var(--bg-panel);
-  color: var(--text);
   font-size: 0.625rem;
   cursor: pointer;
 }
-.ribbon-gallery-item:hover {
-  background: var(--bg-hover);
+.grp-chevron:hover {
+  color: var(--text);
 }
-.ribbon-gallery-item[data-active="true"] {
-  background: var(--bg-active);
-  border-color: var(--accent);
-}
-.ribbon-gallery-preview {
-  display: flex;
-  width: 100%;
-  height: 1.75rem;
-}
-.ribbon-gallery-split {
-  display: flex;
-  flex: 1;
-  gap: 1px;
+.grp-label {
   min-width: 0;
-  min-height: 0;
-}
-.ribbon-gallery-cell {
   flex: 1;
-  min-width: 0;
-  min-height: 0;
-  border: 1px solid var(--border);
-  border-radius: 1px;
-  background: var(--bg-hover);
-}
-.ribbon-gallery-name {
-  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
-/* Regler im Band (UI-Zoom) */
-.ribbon-field {
-  display: flex;
-  flex-direction: column;
+.grp-type {
+  flex: none;
+  color: var(--text-dim);
+  font-size: 0.625rem;
+}
+.grp-actions {
+  display: none;
+  flex: none;
+  gap: 2px;
+}
+.grp-row:hover .grp-actions,
+.grp-row:focus-within .grp-actions {
+  display: inline-flex;
+}
+.grp-action {
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
-  gap: 0.125rem;
-  padding: 0 0.375rem;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
   font-size: 0.6875rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.grp-action:hover:not(:disabled) {
+  background: var(--bg-hover);
   color: var(--text);
 }
-.ribbon-field-label {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  color: var(--text-dim);
+.grp-action:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
-.ribbon-field input[type="range"] {
-  width: 7rem;
-  accent-color: var(--accent);
-}
-.ribbon-field-value {
+.grp-empty {
+  padding: 12px;
+  border: 1px dashed var(--border-70);
+  border-radius: var(--radius-lg);
+  background: var(--muted-30);
   color: var(--text-dim);
-  font-variant-numeric: tabular-nums;
+  font-size: 0.75rem;
+  line-height: 1.45;
 }
 
-/* Mosaic-Anpassung an die Token */
-.mosaic {
-  background: var(--bg);
+/* ---------------------------------------------------------------------------
+ * Schwebende Viewer-Leisten (M10, Blender-Stil nach der ersten React-App):
+ * Glas-Optik über dem WebGPU-Canvas.
+ * ------------------------------------------------------------------------- */
+.viewer-fab {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: color-mix(in oklab, var(--bg-popover) 88%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 10px 28px oklch(0.145 0 0 / 18%);
 }
-.mosaic-window {
-  border-radius: 6px;
+
+.fab-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
 }
-.mosaic-window .mosaic-window-toolbar {
+.fab-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.fab-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.fab-btn[data-active="true"] {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+.fab-icon {
+  width: 16px;
+  height: 16px;
+}
+.fab-auto {
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+.fab-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 14px;
+  padding: 2px 3px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: 0.58rem;
+  font-weight: 700;
+  line-height: 1;
+  text-align: center;
+}
+.fab-divider {
+  height: 1px;
+  margin: 3px 6px;
+  background: var(--border);
+}
+
+.viewer-presets {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 5;
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: color-mix(in oklab, var(--bg-popover) 88%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 10px 28px oklch(0.145 0 0 / 18%);
+}
+.preset-btn {
+  height: 24px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+.preset-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.preset-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.viewer-slicebar {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: color-mix(in oklab, var(--bg-popover) 88%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 10px 28px oklch(0.145 0 0 / 18%);
+}
+.viewer-slicebar input[type="range"] {
+  width: 10rem;
+  accent-color: var(--accent);
+}
+
+/* ---------------------------------------------------------------------------
+ * Mosaic-Fensterchrome — portiert aus der ersten React-App: Karten mit
+ * Abstand, runden Ecken und dezentem Schatten in der getönten Fläche.
+ * ------------------------------------------------------------------------- */
+.editor-mosaic {
+  background: transparent;
+}
+
+.editor-mosaic .mosaic-root {
+  inset: 0;
+}
+
+.editor-mosaic .mosaic-tile {
+  margin: 3px;
+}
+
+.editor-mosaic .mosaic-window {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+  overflow: hidden;
+}
+
+.editor-mosaic .mosaic-window-toolbar {
+  height: 1.875rem;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
   box-shadow: none;
+  padding-left: 8px;
 }
-.mosaic-window .mosaic-window-title {
+
+.editor-mosaic .mosaic-window-toolbar.draggable {
+  cursor: grab;
+}
+
+.editor-mosaic .mosaic-window-toolbar.draggable:active {
+  cursor: grabbing;
+}
+
+.editor-mosaic .mosaic-window-title {
+  color: var(--text-dim);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+/* Fenster-Buttons (Maximieren/Schließen) — Optik der ersten React-App.
+   react-mosaic zeichnet ohne Blueprint-Theme keine Icons; Quadrat und
+   Schließen-Kreuz kommen deshalb aus ::before/::after. */
+.editor-mosaic .mosaic-window-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 4px;
+}
+
+.editor-mosaic .mosaic-default-control {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 0;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+.editor-mosaic .mosaic-default-control:hover {
+  background: var(--bg-hover);
   color: var(--text);
-  font-size: 0.8125rem;
 }
-.mosaic-window .mosaic-window-body {
+
+.editor-mosaic .mosaic-default-control.expand-button::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border: 1.4px solid currentColor;
+  border-radius: 2px;
+}
+
+.editor-mosaic .mosaic-default-control.close-button:hover {
+  background: color-mix(in oklab, var(--error) 12%, transparent);
+  color: var(--error);
+}
+.editor-mosaic .mosaic-default-control.close-button::before,
+.editor-mosaic .mosaic-default-control.close-button::after {
+  content: "";
+  position: absolute;
+  width: 11px;
+  height: 1.4px;
+  border-radius: 1px;
+  background: currentColor;
+}
+.editor-mosaic .mosaic-default-control.close-button::before {
+  transform: rotate(45deg);
+}
+.editor-mosaic .mosaic-default-control.close-button::after {
+  transform: rotate(-45deg);
+}
+
+.editor-mosaic .mosaic-window-body {
+  display: flex;
+  min-height: 0;
+  padding: 8px;
+  overflow: hidden;
   background: var(--bg-panel);
+  color: var(--text);
+  /* KEIN z-index-Override: Das Library-z-index:1 hält die versteckte
+     .mosaic-preview-Titelkarte UNTER dem Fensterinhalt. Der „alles
+     grau"-Dialog-Bug ist stattdessen über Portale gelöst (GroupManager-,
+     ConfirmDelete-Dialog und ContextMenu hängen am <body>). */
 }
-.mosaic-split:hover {
-  background: var(--accent);
+
+.editor-mosaic .mosaic-window-body > * {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.editor-mosaic .mosaic-split {
+  background: transparent;
+}
+
+.editor-mosaic .mosaic-split .mosaic-split-line {
+  border-radius: 999px;
+  transition: background-color 120ms ease;
+}
+
+.editor-mosaic .mosaic-split:hover .mosaic-split-line {
+  background: color-mix(in oklab, var(--accent) 55%, transparent);
+}
+
+/* Drop-Ziel-Hinweis beim Verschieben von Fenstern */
+.editor-mosaic .drop-target-container .drop-target {
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
+  border: 2px solid color-mix(in oklab, var(--accent) 45%, transparent);
 }
