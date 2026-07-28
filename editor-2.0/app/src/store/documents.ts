@@ -7,6 +7,7 @@ import { create } from "zustand";
 import { ModelSession } from "../core/session";
 import { useCommands } from "../commands/pipeline";
 import { useSelection } from "./selection";
+import { resolveIfcSource } from "../domain/export/archive";
 
 export interface DocumentEntry {
   id: string;
@@ -58,14 +59,22 @@ export const useDocuments = create<DocumentsState>((set, get) => ({
     }
     set({ progress: "Parse …" });
     try {
-      const session = await ModelSession.open(fileName, buffer, (percent, phase) =>
-        set({ progress: `${phase} ${percent.toFixed(0)} %` }),
+      // M7: ifcZIP/ZIP vor dem Parsen auspacken. Erkannt wird über die
+      // Endung ODER die PK-Signatur (siehe domain/export/archive.ts), damit
+      // auch falsch benannte Archive aufgehen; der Eintragsname wird zum
+      // Sitzungsnamen. Ohne brauchbaren Puffer bleibt der alte Weg — der
+      // Parser wirft dann wie bisher (Befund 9).
+      const source = buffer ? resolveIfcSource(fileName, new Uint8Array(buffer)) : null;
+      const session = await ModelSession.open(
+        source?.fileName ?? fileName,
+        source?.fromArchive ? source.bytes.slice().buffer : buffer,
+        (percent, phase) => set({ progress: `${phase} ${percent.toFixed(0)} %` }),
       );
       const id = `doc-${nextId++}`;
       const entry: DocumentEntry = {
         id,
         session,
-        bytes: new Uint8Array(buffer),
+        bytes: source?.bytes ?? new Uint8Array(buffer),
         changeCount: 0,
       };
       set((state) => ({

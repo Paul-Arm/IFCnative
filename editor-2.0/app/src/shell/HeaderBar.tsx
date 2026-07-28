@@ -1,8 +1,16 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useDocuments } from "../store/documents";
 import { useUi } from "../store/ui";
 import { BUILTIN_WORKSPACE_NAMES } from "../panes/workspaces";
-import { saveViaDialog } from "../core/tauri";
+import {
+  CSV_MODE_LABELS,
+  FORMAT_LABELS,
+  deliverArtifact,
+  runExport,
+  type CsvMode,
+  type ExportRequest,
+} from "../domain/export";
+import type { ModelSession } from "../core/session";
 import {
   useCommands,
   usePendingChangeCount,
@@ -31,6 +39,136 @@ function UndoRedoButtons({ docId }: { docId: string | null }) {
         ↷
       </button>
     </>
+  );
+}
+
+const CSV_MODES: readonly CsvMode[] = [
+  "entities",
+  "properties",
+  "quantities",
+  "spatial",
+];
+
+/** Menüeinträge neben dem Standardklick (IFC); CSV mit seinen vier Modi. */
+const MENU_ITEMS: ReadonlyArray<{ label: string; request: ExportRequest }> = [
+  { label: FORMAT_LABELS.ifczip, request: { format: "ifczip" } },
+  { label: FORMAT_LABELS.glb, request: { format: "glb" } },
+  { label: FORMAT_LABELS.jsonld, request: { format: "jsonld" } },
+  { label: FORMAT_LABELS.bos, request: { format: "bos" } },
+  ...CSV_MODES.map((mode) => ({
+    label: `${FORMAT_LABELS.csv}: ${CSV_MODE_LABELS[mode]}`,
+    request: { format: "csv", mode } as ExportRequest,
+  })),
+];
+
+const MENU_ITEM_STYLE = {
+  display: "block",
+  width: "100%",
+  textAlign: "left",
+  border: "none",
+  background: "transparent",
+  padding: "5px 10px",
+  cursor: "pointer",
+} as const;
+
+/**
+ * Exportieren als Split-Button: der linke Teil exportiert wie bisher IFC
+ * (inkl. Speichern-Dialog bzw. Download), der rechte öffnet das Menü der
+ * übrigen Formate. Die Badge-Logik (offene Änderungen) bleibt unverändert.
+ */
+function ExportButton({
+  session,
+  pending,
+}: {
+  session: ModelSession | null;
+  pending: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const box = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!box.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [open]);
+
+  const run = useCallback(
+    async (request: ExportRequest, label: string) => {
+      if (!session) return;
+      setOpen(false);
+      setBusy(label);
+      try {
+        await deliverArtifact(await runExport(session, request));
+      } catch (error) {
+        // Die Exportfunktionen werfen bereits deutsche Meldungen.
+        alert(error instanceof Error ? error.message : String(error));
+      } finally {
+        setBusy(null);
+      }
+    },
+    [session],
+  );
+
+  const disabled = !session || busy !== null;
+  return (
+    <div ref={box} style={{ position: "relative", display: "flex" }}>
+      <button
+        className="btn"
+        disabled={disabled}
+        title={
+          pending > 0
+            ? `${pending} ${pending === 1 ? "Änderung" : "Änderungen"} noch nicht exportiert`
+            : "Modell als IFC exportieren"
+        }
+        onClick={() => void run({ format: "ifc" }, FORMAT_LABELS.ifc)}
+      >
+        {busy ? `${busy} …` : "Exportieren"}
+        {!busy && pending > 0 ? ` (${pending})` : ""}
+      </button>
+      <button
+        className="btn"
+        disabled={disabled}
+        title="Weitere Exportformate"
+        aria-label="Weitere Exportformate"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        ▾
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          style={{
+            position: "absolute",
+            top: "100%",
+            left: 0,
+            marginTop: 4,
+            minWidth: 210,
+            padding: "4px 0",
+            background: "var(--bg-panel)",
+            border: "1px solid var(--border)",
+            borderRadius: 4,
+            boxShadow: "0 6px 18px rgba(0,0,0,.28)",
+            zIndex: 30,
+          }}
+        >
+          {MENU_ITEMS.map((item) => (
+            <button
+              key={item.label}
+              className="btn"
+              style={MENU_ITEM_STYLE}
+              onClick={() => void run(item.request, item.label)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -74,21 +212,6 @@ export function HeaderBar() {
     [openDocument, addRecent],
   );
 
-  const exportIfc = useCallback(async () => {
-    if (!active) return;
-    const bytes = active.session.exportStep();
-    const name = active.session.fileName.replace(/\.ifc$/i, "") + ".bearbeitet.ifc";
-    if (await saveViaDialog(name, bytes)) return;
-    const url = URL.createObjectURL(
-      new Blob([bytes as BlobPart], { type: "application/x-step" }),
-    );
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = name;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [active]);
-
   return (
     <header
       style={{
@@ -108,7 +231,7 @@ export function HeaderBar() {
       <input
         ref={fileInput}
         type="file"
-        accept=".ifc,.ifczip,.ifcx"
+        accept=".ifc,.ifczip,.zip,.ifcx"
         multiple
         style={{ display: "none" }}
         onChange={(e) => {
@@ -116,19 +239,7 @@ export function HeaderBar() {
           e.target.value = "";
         }}
       />
-      <button
-        className="btn"
-        disabled={!active}
-        title={
-          pending > 0
-            ? `${pending} ${pending === 1 ? "Änderung" : "Änderungen"} noch nicht exportiert`
-            : "Modell als IFC exportieren"
-        }
-        onClick={() => void exportIfc()}
-      >
-        Exportieren
-        {pending > 0 ? ` (${pending})` : ""}
-      </button>
+      <ExportButton session={active?.session ?? null} pending={pending} />
       <UndoRedoButtons docId={active?.id ?? null} />
 
       <span style={{ width: 12 }} />
