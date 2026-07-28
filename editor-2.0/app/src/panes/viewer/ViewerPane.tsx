@@ -2,17 +2,12 @@
  * Viewer-Pane: WebGPU-3D-Ansicht des aktiven Dokuments.
  *
  * Geometrie wird streamend geladen (core/viewer.ts), Auswahl läuft beidseitig
- * über den Selection-Store, Farb-Overrides über den Overrides-Store der Lens.
- *
- * Geometrie-Stand: Die Szene stammt aus EINEM Byte-Stand und kennt danach keine
- * Sitzungsänderungen. Stand und Neuberechnung liegen in `useGeometryRebuild`;
- * dieses Pane startet den Viewer bei jedem neuen Stand neu (alte Instanz wird
- * disposed).
+ * über den Selection-Store, Farb-Overrides über die Lens. Die Szene stammt aus
+ * EINEM Byte-Stand (useGeometryRebuild); neuer Stand ⇒ Viewer-Neustart.
  *
  * Werkzeuge (M9, `useViewerTools`): „Verschieben" (Taste W, Achsen-Gizmo) und
- * „Koordinaten picken" (raycastScene → pickStore + Zwischenablage). Die
- * Overlays (MoveGizmo, PickMarker) liegen als SVG ÜBER dem Canvas, weil der
- * Renderer keine Gizmo-/Marker-API besitzt.
+ * „Koordinaten picken" (raycastScene → pickStore + Zwischenablage); deren
+ * Overlays liegen als SVG ÜBER dem Canvas (Renderer hat keine Gizmo-API).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -133,19 +128,11 @@ export default function ViewerPane() {
   }, [hidden, lensHidden]);
 
   // — Werkzeuge (M9): Verschieben-Gizmo + Koordinaten-Pick —
-  const tools = useViewerTools(
-    access,
-    doc,
-    docId,
-    selection,
-    hiddenIds,
-    isolated,
-    setNote,
-  );
+  // prettier-ignore
+  const tools = useViewerTools(access, doc, docId, selection, hiddenIds, isolated, setNote);
 
   // — Picking: Treffer wählen, Leerklick löscht die Auswahl —
-  // (destrukturiert, damit der Handler nicht am instabilen tools-Objekt hängt)
-  const { tool, performPick } = tools;
+  const { tool, performPick } = tools; // stabil, anders als das tools-Objekt
   const pickHandler = useCallback(
     (x: number, y: number, additive: boolean): void => {
       if (tool === "pick") {
@@ -201,11 +188,9 @@ export default function ViewerPane() {
   }, [handle, focusNonce, docId, select]);
 
   const onGizmoDone = useCallback((text: string) => setNote(text), []);
-  const onGizmoBoundsMissing = useCallback(
-    () =>
-      setNote("Kein Geometrie-Umriss für dieses Objekt — nicht verschiebbar."),
-    [],
-  );
+  const onGizmoBoundsMissing = useCallback(() => {
+    setNote("Kein Geometrie-Umriss für dieses Objekt — nicht verschiebbar.");
+  }, []);
 
   function showAll(): void {
     setHidden(NO_IDS);
@@ -226,10 +211,6 @@ export default function ViewerPane() {
       for (const id of selection) next.add(id);
       return next;
     });
-  }
-
-  function preset(view: PresetView): void {
-    handle?.presetView(view);
   }
 
   const pickPoint = tools.pickPoint;
@@ -254,7 +235,7 @@ export default function ViewerPane() {
         onShowAll={showAll}
         onToggleXray={() => setXray((value) => !value)}
         onSection={(patch) => setSection((current) => ({ ...current, ...patch }))}
-        onPreset={preset}
+        onPreset={(view: PresetView) => handle?.presetView(view)}
       />
 
       <div
@@ -304,17 +285,12 @@ export default function ViewerPane() {
   );
 }
 
+// prettier-ignore
+const OVERLAY_STYLE = { position: "absolute", inset: 0, background: "var(--bg-panel)", margin: 0 } as const;
+
 function Overlay({ text }: { text: string }) {
   return (
-    <p
-      className="pane-empty"
-      style={{
-        position: "absolute",
-        inset: 0,
-        background: "var(--bg-panel)",
-        margin: 0,
-      }}
-    >
+    <p className="pane-empty" style={OVERLAY_STYLE}>
       {text}
     </p>
   );
