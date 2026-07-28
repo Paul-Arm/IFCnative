@@ -72,6 +72,12 @@ export const BUILTIN_WORKSPACES: Record<string, MosaicNode<PaneId>> = {
     ],
     splitPercentages: [40, 60],
   },
+  IDS: {
+    type: "split",
+    direction: "row",
+    children: ["ids-validation", "viewer"],
+    splitPercentages: [55, 45],
+  },
   Hub: {
     type: "split",
     direction: "row",

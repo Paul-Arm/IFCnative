@@ -1,0 +1,75 @@
+/*
+ * Nur das, was sich mit den Klassen aus global.css nicht ausdrücken lässt:
+ * der Grün-Token für „bestanden" (global.css kennt nur --warn und --error)
+ * und der Fortschrittsbalken je Spezifikation. Alles Übrige — Abstände,
+ * Rahmen, Schriftgrößen — kommt weiterhin aus den Design-Token.
+ */
+:root {
+  --ids-pass: #15803d;
+}
+
+:root[data-theme="dark"] {
+  --ids-pass: #4ade80;
+}
+
+/* Aufklappbare Zeile: Kopf sieht aus wie .row-item, trägt aber Zähler. */
+.ids-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 8px;
+  border: none;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.8125rem;
+  text-align: left;
+}
+.ids-head:hover {
+  background: var(--bg-hover);
+}
+
+.ids-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+/* Bestanden/fehlgeschlagen als Balken — Breite kommt inline aus der Passrate. */
+.ids-bar {
+  flex: 0 0 72px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--error);
+  overflow: hidden;
+}
+.ids-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--ids-pass);
+}
+
+.ids-entity {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  width: 100%;
+  padding: 2px 8px 2px 26px;
+  border: none;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.8125rem;
+  text-align: left;
+}
+.ids-entity:hover {
+  background: var(--bg-hover);
+}
+
+.ids-detail {
+  padding: 0 8px 4px 40px;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}

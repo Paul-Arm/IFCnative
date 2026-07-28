@@ -25,6 +25,9 @@ const ChecksPane = lazy(() => import("./checks/ChecksPane"));
 const BuilderPane = lazy(() => import("./builder/BuilderPane"));
 const HubPane = lazy(() => import("./hub/HubPane"));
 const DrawingPane = lazy(() => import("./drawing/DrawingPane"));
+const IdsValidationPane = lazy(
+  () => import("./ids-validation/IdsValidationPane"),
+);
 
 const COMPONENTS: Record<PaneId, ComponentType> = {
   structure: StructurePane,
@@ -41,6 +44,7 @@ const COMPONENTS: Record<PaneId, ComponentType> = {
   builder: BuilderPane,
   hub: HubPane,
   drawing: DrawingPane,
+  "ids-validation": IdsValidationPane,
 };
 
 /** Platzhalter für Ids, die es in dieser Version nicht (mehr) gibt. */
