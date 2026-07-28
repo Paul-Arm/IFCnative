@@ -4,6 +4,8 @@
 //  - Dateien aus Explorer-Doppelklick / "Öffnen mit" / Zweitinstanz an das
 //    Frontend durchreichen (Single-Instance, Event `ifc://open-path`)
 //  - Datei-IO (Modell lesen, Export über nativen Speichern-Dialog)
+//  - Erststart-Hinweis (E11): `open_default_apps_settings` öffnet die
+//    Windows-Seite „Standard-Apps" — Hinweis statt Zwang (UserChoice-Schutz)
 //  - Nativer ifc-lite-Fast-Path: `get_geometry` / `get_geometry_from_path`
 //    über ifc-lite-processing (Rayon, kein WASM-Limit) im Format, das die
 //    NativeBridge von @ifc-lite/geometry erwartet (camelCase).
@@ -84,6 +86,38 @@ async fn save_model_file(
             Ok(true)
         }
         None => Ok(false), // Nutzer hat abgebrochen
+    }
+}
+
+/// Öffnet die Windows-Seite „Standard-Apps" (E11).
+///
+/// Bewusst nur der Dialog, keine Registry-Schreiberei: Windows schützt die
+/// Dateizuordnung über den UserChoice-Hash — wer sie am Einstellungen-Dialog
+/// vorbei setzt, wird vom System zurückgesetzt. Der Installer registriert die
+/// App unter „Standard-Apps"; die Auswahl trifft der Nutzer.
+///
+/// Rückgabe: `true` = Dialog angestoßen, `false` = anderes Betriebssystem
+/// (No-op, kein Fehler). Ohne Zusatz-Plugin gelöst über `cmd /C start`.
+#[tauri::command]
+fn open_default_apps_settings() -> Result<bool, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        use std::process::Command;
+        /// CREATE_NO_WINDOW — sonst blitzt kurz ein Konsolenfenster auf.
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        // Das leere Argument nach `start` ist der Fenstertitel; ohne es würde
+        // die URI als Titel verstanden und nichts geöffnet.
+        Command::new("cmd")
+            .args(["/C", "start", "", "ms-settings:defaultapps"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .map_err(|e| format!("Einstellungen ließen sich nicht öffnen: {e}"))?;
+        Ok(true)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(false)
     }
 }
 
@@ -192,6 +226,7 @@ pub fn run() {
             frontend_ready,
             read_model_file,
             save_model_file,
+            open_default_apps_settings,
             get_geometry,
             get_geometry_from_path
         ])

@@ -74,5 +74,18 @@
         "displayLanguageSelector": false
       }
     }
+  },
+  "plugins": {
+    "updater-deaktiviert": {
+      "aktiv": false,
+      "hinweis": "Vorlage für das Auto-Update (E12), bewusst INAKTIV. JSON kennt keine Kommentare, deshalb steht die Konfiguration unter einem Schlüssel, den kein Plugin liest. Aktivieren: Schlüssel in \"updater\" umbenennen, \"aktiv\"/\"hinweis\" entfernen, echten pubkey und Endpoint eintragen, tauri-plugin-updater in Cargo.toml und lib.rs freischalten. Schritte im README der App.",
+      "endpoints": [
+        "https://github.com/ORG/REPO/releases/latest/download/latest.json"
+      ],
+      "pubkey": "PLATZHALTER-PUBKEY — aus `npm run tauri signer generate`; Signierung/Zertifikat sind mit E12 zurückgestellt, ohne echten Schlüssel darf der Updater nicht laufen",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

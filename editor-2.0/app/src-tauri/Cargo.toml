@@ -16,6 +16,12 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-dialog = "2"
+# Auto-Update (E12) — vorbereitet, aber ABSICHTLICH NICHT eingebunden: der
+# Updater braucht ein signiertes Release (minisign-Schlüsselpaar + Zertifikat),
+# und die Signierung ist zurückgestellt. Aktivieren = diese Zeile einkommentieren,
+# `.plugin(tauri_plugin_updater::Builder::new().build())` in lib.rs ergänzen und
+# den Block "updater-deaktiviert" in tauri.conf.json in "updater" umbenennen.
+# tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Nativer ifc-lite-Fast-Path: gleiche Pipeline wie Server/FFI, mit Rayon-Parallelität

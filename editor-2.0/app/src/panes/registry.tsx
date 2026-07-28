@@ -24,6 +24,7 @@ const ListsPane = lazy(() => import("./lists/ListsPane"));
 const ChecksPane = lazy(() => import("./checks/ChecksPane"));
 const BuilderPane = lazy(() => import("./builder/BuilderPane"));
 const HubPane = lazy(() => import("./hub/HubPane"));
+const DrawingPane = lazy(() => import("./drawing/DrawingPane"));
 
 const COMPONENTS: Record<PaneId, ComponentType> = {
   structure: StructurePane,
@@ -39,6 +40,7 @@ const COMPONENTS: Record<PaneId, ComponentType> = {
   checks: ChecksPane,
   builder: BuilderPane,
   hub: HubPane,
+  drawing: DrawingPane,
 };
 
 /** Platzhalter für Ids, die es in dieser Version nicht (mehr) gibt. */

@@ -3,6 +3,7 @@ import { Mosaic, MosaicWindow } from "react-mosaic-component";
 import { useCommands } from "../commands/pipeline";
 import { HeaderBar } from "./HeaderBar";
 import { DocumentTabs } from "./DocumentTabs";
+import { FirstRunHint } from "./FirstRunHint";
 import { StatusBar } from "./StatusBar";
 import { renderPane } from "../panes/registry";
 import { PANE_TITLES, type PaneId } from "../panes/ids";
@@ -55,6 +56,7 @@ export function AppShell() {
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <HeaderBar />
+      <FirstRunHint />
       <DocumentTabs />
       <div style={{ flex: 1, minHeight: 0 }}>
         <Mosaic<PaneId>

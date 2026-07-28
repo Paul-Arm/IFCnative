@@ -4,12 +4,36 @@ on:
   workflow_dispatch:
   push:
     branches: ["master"]
-    paths: ["editor-2.0/app/**"]
+    paths: ["editor-2.0/app/**", "editor-2.0/hub/**"]
   pull_request:
-    paths: ["editor-2.0/app/**"]
+    paths: ["editor-2.0/app/**", "editor-2.0/hub/**"]
 
 jobs:
+  # Schnelle Rückmeldung: der Hub-Dienst hat keine nativen Abhängigkeiten und
+  # läuft deshalb auf Linux — er muss nicht auf den Windows-Runner warten.
+  hub-tests:
+    name: Hub-Tests (Linux)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: editor-2.0/hub
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: editor-2.0/hub/package-lock.json
+
+      - name: Abhängigkeiten installieren
+        run: npm ci
+
+      - name: Tests
+        run: npm test
+
   build:
+    name: App-Tests + NSIS-Installer (Windows)
     runs-on: windows-latest
     defaults:
       run:
@@ -37,6 +61,26 @@ jobs:
 
       - name: Tauri-Build (NSIS-Installer, unsigniert — E12)
         run: npm run tauri build
+
+      - name: Installer-Größe ins Job-Summary schreiben
+        if: always()
+        shell: pwsh
+        run: |
+          $dir = "src-tauri/target/release/bundle/nsis"
+          "## Installer-Artefakte" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          $files = @(Get-ChildItem -Path $dir -Filter *.exe -ErrorAction SilentlyContinue)
+          if ($files.Count -eq 0) {
+            "Kein Installer gefunden (Build fehlgeschlagen oder abgebrochen)." |
+              Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          } else {
+            "| Datei | Größe |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            "| --- | ---: |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            foreach ($file in $files) {
+              $mb = [math]::Round($file.Length / 1MB, 2)
+              "| $($file.Name) | $mb MB |" |
+                Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            }
+          }
 
       - name: Installer als Artefakt sichern
         uses: actions/upload-artifact@v4
