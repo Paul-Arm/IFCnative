@@ -3,6 +3,32 @@ import { useDocuments } from "../store/documents";
 import { useUi } from "../store/ui";
 import { BUILTIN_WORKSPACE_NAMES } from "../panes/workspaces";
 import { saveViaDialog } from "../core/tauri";
+import { useCommands, useUndoRedoLabels } from "../commands/pipeline";
+
+function UndoRedoButtons({ docId }: { docId: string | null }) {
+  const { undoLabel, redoLabel } = useUndoRedoLabels(docId);
+  const { undo, redo } = useCommands();
+  return (
+    <>
+      <button
+        className="btn"
+        disabled={!docId || !undoLabel}
+        title={undoLabel ? `Rückgängig: ${undoLabel}` : "Rückgängig (Strg+Z)"}
+        onClick={() => docId && undo(docId)}
+      >
+        ↶
+      </button>
+      <button
+        className="btn"
+        disabled={!docId || !redoLabel}
+        title={redoLabel ? `Wiederholen: ${redoLabel}` : "Wiederholen (Strg+Y)"}
+        onClick={() => docId && redo(docId)}
+      >
+        ↷
+      </button>
+    </>
+  );
+}
 
 export function HeaderBar() {
   const fileInput = useRef<HTMLInputElement>(null);
@@ -91,6 +117,7 @@ export function HeaderBar() {
         Exportieren
         {active && active.changeCount > 0 ? ` (${active.changeCount})` : ""}
       </button>
+      <UndoRedoButtons docId={active?.id ?? null} />
 
       <span style={{ width: 12 }} />
       <label className="text-dim">Workspace</label>

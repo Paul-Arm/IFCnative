@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { Mosaic, MosaicWindow } from "react-mosaic-component";
+import { useCommands } from "../commands/pipeline";
 import { HeaderBar } from "./HeaderBar";
 import { DocumentTabs } from "./DocumentTabs";
 import { StatusBar } from "./StatusBar";
@@ -12,6 +13,27 @@ import { onFileOpened } from "../core/tauri";
 export function AppShell() {
   const { layout, setLayout } = useUi();
   const openDocument = useDocuments((s) => s.openDocument);
+
+  // Tastatur: Ctrl/Cmd+Z Undo, Ctrl+Shift+Z / Ctrl+Y Redo (nicht in Eingabefeldern)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const target = e.target as HTMLElement;
+      if (/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      const docId = useDocuments.getState().activeId;
+      if (!docId) return;
+      const key = e.key.toLowerCase();
+      if (key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        useCommands.getState().undo(docId);
+      } else if ((key === "z" && e.shiftKey) || key === "y") {
+        e.preventDefault();
+        useCommands.getState().redo(docId);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // Dateien aus der Tauri-Shell (Doppelklick, Zweitinstanz)
   useEffect(() => {
