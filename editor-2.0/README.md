@@ -6,16 +6,19 @@ Der bestehende React-Viewer bleibt unangetastet; dieser Ordner ist die Planungs-
 
 ## Leitplanken
 
-1. **Funktionsreferenz ist der React-Viewer** (`/src`) — nicht die Avalonia-App und nicht die aspirationalen Scope-Dokumente. Was der React-Viewer heute kann, muss 2.0 können (Paritätsmatrix in [`02-funktionsparitaet.md`](./02-funktionsparitaet.md)).
-2. **Schwerpunkt-Features** (explizit gefordert):
+1. **ifc-lite zuerst.** Für jede Funktion wird zuerst geprüft, ob eines der 38 ifc-lite-Pakete sie abdeckt — dann wird das Paket verwendet. Eigene Lösungen nur dort, wo unsere **deutlich besser** oder fachspezifisch ohne ifc-lite-Pendant ist (Entscheidung je Paket im Paketkatalog in [`03-kernfeatures.md`](./03-kernfeatures.md), je Funktion in [`02-funktionsparitaet.md`](./02-funktionsparitaet.md)).
+2. **Funktionsreferenz ist der React-Viewer** (`/src`) — nicht die Avalonia-App und nicht die aspirationalen Scope-Dokumente. Was der React-Viewer heute kann, muss 2.0 können.
+3. **Schwerpunkt-Features** (explizit gefordert):
    - Batch-Bearbeitung von Property Sets (Psets)
    - Geometrie erstellen **und** bearbeiten
    - Einbindung des Objektkatalogs (openSIM BWD/MON, xlsx)
    - IFC-Prüfung (Modell-Diagnostik, Objektkatalog-Prüfung, Objektinfo-IDs, **IDS**)
-   - **alle Features von ifc-lite** verfügbar machen (Übernahmetabelle in [`03-kernfeatures.md`](./03-kernfeatures.md))
-3. **Zielplattform Windows via Tauri v2.** Der ifc-lite-Rust-Kern läuft dabei **nativ** (nicht als WASM) über das dokumentierte Platform-Bridge-Muster: Rayon-Parallelität, kein 4-GB-WASM-Limit, direkter Dateizugriff — ausgelegt auf 500-MB+-Modelle.
-4. **Lokal zuerst.** Die App funktioniert vollständig offline; der ifc-lite-Server und der bestehende Versionierungs-Server (`/server`) sind optionale Team-/Cloud-Bausteine.
-5. **Deutschsprachige UI**, gleiche Bedienphilosophie wie 1.x (Mosaic-Panes, Workspaces, Undo/Redo mit benannten Operationen).
+   - **alle Features von ifc-lite** verfügbar machen
+4. **Zielplattform Windows via Tauri v2.** Der ifc-lite-Rust-Kern läuft dabei **nativ** (nicht als WASM) über das dokumentierte Platform-Bridge-Muster: Rayon-Parallelität, kein 4-GB-WASM-Limit, direkter Dateizugriff — ausgelegt auf 500-MB+-Modelle.
+5. **Richtiger Windows-Installer** (kein reines Portable-Exe): Installation nach `Program Files`, Startmenü-Eintrag, sauberes Deinstallieren, Auto-Update — und **Registrierung als Standardprogramm für `.ifc`** (plus `.ifczip`, `.ifcx`, `.ids`, `.bcf`): Doppelklick im Explorer öffnet die Datei im Editor. Details in [`01-architektur.md`](./01-architektur.md#installer--dateiverknüpfung).
+6. **Lokal zuerst.** Die App funktioniert vollständig offline; der ifc-lite-Server und der bestehende Versionierungs-Server (`/server`) sind optionale Team-/Cloud-Bausteine.
+7. **Deutschsprachige UI, bewusst ohne i18n-Schicht** (keine Fremdsprachen nötig); gleiche Bedienphilosophie wie 1.x (Mosaic-Panes, Workspaces, Undo/Redo mit benannten Operationen).
+8. **Portal-Funktionen (MKP/BWD-Import) ganz ans Ende.** Sie werden erst nach allen anderen Meilensteinen migriert; bis dahin bleibt 1.x dafür in Betrieb.
 
 ## Warum ifc-lite als Basis
 
@@ -40,7 +43,7 @@ Lizenz MPL-2.0: Nutzung/Einbettung in proprietäre Produkte zulässig; nur Ände
 | --- | --- |
 | [`01-architektur.md`](./01-architektur.md) | Zielarchitektur: Tauri-Shell, Rust-Kern, React-UI, Renderer, Domänenschicht, Server-Anbindung, Projektstruktur |
 | [`02-funktionsparitaet.md`](./02-funktionsparitaet.md) | Vollständige Paritätsmatrix React-Viewer 1.x → 2.0 (inkl. Lückenanalyse ifc-lite) |
-| [`03-kernfeatures.md`](./03-kernfeatures.md) | Detailspezifikation der Schwerpunkt-Features + ifc-lite-Feature-Übernahmetabelle |
+| [`03-kernfeatures.md`](./03-kernfeatures.md) | Detailspezifikation der Schwerpunkt-Features + **vollständiger ifc-lite-Paketkatalog (38 Pakete) mit Verwendungsentscheidung** |
 | [`04-roadmap.md`](./04-roadmap.md) | Meilensteine M0–M7 mit Abnahmekriterien |
 | [`05-risiken-entscheidungen.md`](./05-risiken-entscheidungen.md) | Risiken, offene Fragen, zu verifizierende Annahmen, getroffene Entscheidungen |
 

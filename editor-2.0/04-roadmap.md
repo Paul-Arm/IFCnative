@@ -6,19 +6,20 @@ Meilensteine sind so geschnitten, dass jeder ein lauffähiges, demonstrierbares 
 
 Ziel: die drei größten technischen Annahmen beweisen, bevor Struktur entsteht.
 
-- Tauri-v2-Projekt mit React/Vite-Frontend, Windows-Build (NSIS + portable).
-- ifc-lite nativ im Tauri-Backend: `get_geometry_from_path` + Streaming-Events; ein 300–500-MB-IFC öffnet und rendert streamend.
+- Tauri-v2-Projekt (Scaffold via `create-ifc-lite`, dann angepasst) mit React/Vite-Frontend.
+- **Richtiger Installer von Anfang an:** NSIS-Installer (Program Files, Startmenü, Uninstall), `bundle.fileAssociations` für `.ifc`/`.ifczip`, Single-Instance-Plugin + CLI-Args → Explorer-Doppelklick öffnet die Datei in der laufenden Instanz; Registrierung unter „Standard-Apps" (RegisteredApplications/Capabilities).
+- ifc-lite nativ im Tauri-Backend: `get_geometry_from_path` + Streaming-Events; ein 300–500-MB-IFC öffnet und rendert streamend; zweites Öffnen über `@ifc-lite/cache` messen.
 - **WebGPU in WebView2 verifizieren** (Risiko R1); Fallback Three.js-Integration prüfen.
-- Mutations-Roundtrip: Property ändern → `exportToStep(applyMutations)` → Reparse → Wert korrekt, **unveränderte Entities byte-stabil?** (Risiko R2), Umlaute/`\X2\` korrekt (Risiko R3).
+- Mutations-Roundtrip: Property ändern → `exportToStep(applyMutations)` → Reparse → Wert korrekt, **unveränderte Entities byte-stabil?** (Risiko R2), Umlaute über `@ifc-lite/encoding` gegen unsere `\X2\`-Testfälle (Risiko R3).
 - Element-Builder-Probe: Wand + Öffnung erzeugen, Export in Fremdviewer prüfen.
 
-**Abnahme:** Demo-App öffnet Groß-IFC < 10 s bis erste Dreiecke; Editier-Roundtrip beweisbar korrekt; Go/No-Go-Notiz je Risiko in `05-risiken-entscheidungen.md` nachgetragen.
+**Abnahme:** Installer installiert; Doppelklick auf `.ifc` im Explorer öffnet die Demo-App mit Modell; Groß-IFC < 10 s bis erste Dreiecke; Editier-Roundtrip beweisbar korrekt; Go/No-Go-Notiz je Risiko in `05-risiken-entscheidungen.md` nachgetragen.
 
 ## M1 — Viewer-Parität (Lesen)
 
 - App-Shell: Mosaic-Panes, Workspaces (5 eingebaute + eigene), Multi-Dokument-Tabs, Statusleiste, Theme, UI-Skalierung, Recents, Notizen, Crash-Boundary.
 - Strukturbaum (virtualisiert, Suche, Multi-Select), Inspector lesend (Übersicht, Psets, Platzierung, Beziehungen, Ressourcen), Referenzen ein-/ausgehend.
-- Viewer: Auswahl-Sync, Zoom/Kamera, Schnittebenen, Isolation, X-Ray, benannte Ansichten.
+- Viewer: Auswahl-Sync, Zoom/Kamera, Schnittebenen, Isolation, X-Ray, benannte Ansichten; **Lens-Pane** (`@ifc-lite/lens`, regelbasiertes Färben/Filtern mit Presets).
 - Beziehungsgraph lesend: Presets, Tiefe, Filter, Layouts, Pinnen, Suche.
 
 **Abnahme:** jedes 1.x-Referenzmodell lässt sich öffnen und vollständig inspizieren; Lese-Parität laut `02-funktionsparitaet.md` abgehakt.
@@ -40,6 +41,7 @@ Ziel: die drei größten technischen Annahmen beweisen, bevor Struktur entsteht.
 - Abfrage-basierte Auswahl (`@ifc-lite/query`).
 - xlsx/CSV-Roundtrip (`CsvConnector`), Datums-/Typ-Validierung.
 - Objektkatalog-Import (beide Kinds), Katalog-Pane, Anwenden auf Auswahl, Katalogprüfung + Quick-Fixes, Katalog→IDS-Generator.
+- **Listen-Pane** (`@ifc-lite/lists`): Bauteillisten mit Spalten-Picker, Gruppierung/Aggregation, CSV-Export.
 - Portierte `tests/catalog.test.ts` grün.
 
 ## M4 — Geometrie erstellen/bearbeiten
@@ -56,17 +58,26 @@ Ziel: die drei größten technischen Annahmen beweisen, bevor Struktur entsteht.
 - Vereinheitlichte Findings-UI, 3D-Highlight/Isolation, deutscher Report, BCF-Export.
 - Quick-Fix-Framework über Command-Pipeline.
 
-## M6 — Portal + Versionierung + Team
+## M6 — Versionierung + Team
 
-- MKP-Portal: Login, Bäume, Zuordnen/Import, Mapping-Editor, Mock-Modus (Portierung; `tests/portal.test.ts` grün).
-- Versionierung: Commit/Push/Pull gegen `/server`, Historie- und Diff-UI (GlobalId + Feld-Diffs), ChangeSets.
-- Optional: ifc-lite-Server-Anbindung (Cache/Parquet) für Team-Betrieb.
+- Versionierung: Commit/Push/Pull gegen `/server`, Historie- und Diff-UI (GlobalId + Feld-Diffs), ChangeSets (`ChangeSetManager`), Herkunftsanzeige (`@ifc-lite/provenance`).
+- Lokaler Datei-Vergleich (Datei A vs. B) über `@ifc-lite/diff`.
+- Optional: ifc-lite-Server-Anbindung (`server-client`/`server-bin`: Cache/Parquet/SSE) für Team-Betrieb.
 
 ## M7 — Politur & Release
 
-- Föderations-/Koordinations-Workspace, 2D-Ableitungen, Export-Menü (glTF/CSV/JSON-LD/Parquet/IFC5), ifcZIP.
-- Performance-Pass (1-GB-Modell), Installer-Signierung, Auto-Update (Tauri Updater), Handbuch.
-- Backlog-Kandidaten ab hier: Kollaboration (CRDT), MCP/KI-Assistent, Scripting-SDK, CLI, Punktwolken, Lens/Solar.
+- Föderations-/Koordinations-Workspace (`merge`), 2D-Ableitungen (`drawing-2d`), Export-Menü (glTF/CSV/JSON-LD/Parquet/IFC5), ifcZIP.
+- Performance-Pass (1-GB-Modell), Handbuch (deutsch).
+- Installer-Finalisierung: Code-Signing, Auto-Update (Tauri Updater), MSI-Variante für Firmen-Rollout, „Als Standard festlegen"-Hinweisdialog beim ersten Start.
+
+## Nachgelagert (Backlog, in dieser Reihenfolge)
+
+1. Erweiterungssystem produktiv öffnen (`extensions`/`sandbox`): kundenspezifische Prüf-/Export-Plugins.
+2. Scripting/Makros (`sdk`), CLI-Workflows (`cli`, z. B. CI-Modellprüfung).
+3. MCP/KI-Assistent (`mcp`).
+4. Echtzeit-Kollaboration (`collab`/`collab-server`, CRDT auf IFCX).
+5. Embedding (`embed-sdk`), Punktwolken (`pointcloud`), Solar (`solar`).
+6. **Ganz am Ende: MKP-Portal-Migration** (Login, Bäume, Zuordnen/Import, Mapping-Editor, Mock-Modus; `tests/portal.test.ts` als Referenz). Bis dahin bleibt 1.x für Portal-Arbeit im Einsatz.
 
 ## TestStrategie (durchgängig)
 

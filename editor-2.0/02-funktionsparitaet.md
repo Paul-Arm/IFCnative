@@ -1,6 +1,6 @@
 # 02 — Funktionsparität: React-Viewer 1.x → Editor 2.0
 
-Quelle: vollständiges Feature-Inventar des React-Viewers (`/src`, Stand v1.4.8). Legende **Ansatz**:
+Quelle: vollständiges Feature-Inventar des React-Viewers (`/src`, Stand v1.4.8). Grundregel (Leitplanke 1): **bei jeder Zeile wird die ifc-lite-Lösung bevorzugt**; P/N nur, wo kein Paket existiert oder unsere Lösung deutlich besser ist (Begründungen in `03-kernfeatures.md` §5). Legende **Ansatz**:
 - **L** = direkt durch ifc-lite-Paket abgedeckt
 - **L+** = ifc-lite-Basis + eigene Aufsatzlogik
 - **P** = Portierung eigenen 1.x-Codes (Logik existiert, wird auf ifc-lite-Store umgezogen)
@@ -17,7 +17,7 @@ Quelle: vollständiges Feature-Inventar des React-Viewers (`/src`, Stand v1.4.8)
 | Multi-Dokument-Tabs (Schema, Entity-Zahl, Dirty-Punkt, Schließen-Bestätigung) | P | je Tab ein ifc-lite-Store + Mutations-Overlay |
 | IFC öffnen / mehrere hinzufügen / exportieren | L+T | nativer Pfad-Parse; Export `exportToStep(applyMutations)` |
 | ifcZIP öffnen/schreiben | N+T | Zip-Handling in Rust (1.x konnte es nur in der Avalonia-Variante) |
-| Undo/Redo (20 Schritte, benannte Operationen, Tooltips) | L+ | ifc-lite-Undo/Redo-Stacks + eigene Operations-Zusammenfassungen; Limit konfigurierbar |
+| Undo/Redo (20 Schritte, benannte Operationen, Tooltips) | L | Undo/Redo-Stacks von `@ifc-lite/mutations` (Ctrl+Z/Ctrl+Shift+Z); eigener Anteil nur Operationsnamen/Tooltips |
 | Audit-Log (Pseudocode-Zeile je Operation) | P | in Command-Pipeline |
 | Statusleiste (Schema, Entities, Auswahl, Gespeichert/Ungespeichert), UI-Skalierung 70–125 % | P | |
 | Theme hell/dunkel/System | P | |
@@ -98,7 +98,7 @@ Quelle: vollständiges Feature-Inventar des React-Viewers (`/src`, Stand v1.4.8)
 | Klassenliste mit Suche, Detailansicht, Import-Diagnostik | P |
 | Katalog-Prüfung je Entity mit Quick-Fixes (Pset/Klassifikation ergänzen) | P |
 | Klassenvorschlag beim Import | P |
-| MKP-Portal: Keycloak-Login, Bauwerk/Projekt-Wahl, Diagnostik-/Monitoring-Baum, Zuordnen/Kinder/Komplettimport, deterministische GUIDs, Mapping-Editor + FreeCAD-Mapping-Roundtrip, Mock-Modus | P (HTTP über Tauri, entfällt CORS-Proxy) |
+| MKP-Portal: Keycloak-Login, Bauwerk/Projekt-Wahl, Diagnostik-/Monitoring-Baum, Zuordnen/Kinder/Komplettimport, deterministische GUIDs, Mapping-Editor + FreeCAD-Mapping-Roundtrip, Mock-Modus | P — **Backlog, ganz hinten** (nach M7); bis dahin 1.x für Portal-Arbeit weiterverwenden |
 
 ## Prüfung (Schwerpunkt — Details in `03-kernfeatures.md`)
 
@@ -114,12 +114,14 @@ Quelle: vollständiges Feature-Inventar des React-Viewers (`/src`, Stand v1.4.8)
 
 | 1.x-Funktion | 2.0-Ansatz | Anmerkung |
 | --- | --- | --- |
-| IFC/STEP Import (einzeln/mehrfach, Worker) | L/T | |
+| IFC/STEP Import (einzeln/mehrfach, Worker) | L/T | zweites Öffnen beschleunigt über `@ifc-lite/cache` (`.ifc-lite`-Binärcache) |
 | Export IFC (nur bei Dirty neu serialisieren) | L+ | Ziel: unveränderte Entities byte-stabil (Overlay-Prinzip); verifizieren in M0 |
-| Portal-Mapping-JSON (FreeCAD) Export/Import | P | |
+| Portal-Mapping-JSON (FreeCAD) Export/Import | P | **Backlog** (Portal ganz hinten) |
 | Beispielprojekt IFC4X3 | L | |
 | **neu:** glTF/GLB, CSV, JSON-LD, Parquet, IFC5/IFCX-Export; 2D-Ableitungen | L | ersetzt auch `/IfcToGlb` |
-| Versionierung: GlobalId-Manifeste, Feld-Diffs, `/server`-API | P | **neu:** Commit-/Diff-UI in der App |
+| **neu:** Bauteillisten/Schedules mit Gruppierung/Aggregation + CSV | L | `@ifc-lite/lists` — deckt zugleich den in 1.x fehlenden Tabellen-Export ab |
+| **neu:** regelbasiertes Färben/Filtern (Lens) | L | `@ifc-lite/lens`, auch als Darstellungsschicht des Prüfzentrums |
+| Versionierung: GlobalId-Manifeste, Feld-Diffs, `/server`-API | P | **neu:** Commit-/Diff-UI in der App; lokaler Datei-Vergleich über `@ifc-lite/diff` |
 
 ## Bewusst nicht übernommen
 

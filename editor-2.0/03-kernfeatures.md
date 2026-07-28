@@ -60,7 +60,7 @@ Die fünf vom Auftraggeber priorisierten Bereiche, jeweils mit Zielbild, technis
 - **Katalog-Pane (Parität):** Import, Kind-Wahl, durchsuchbare Klassenliste, Detailansicht, Import-Diagnostik.
 - **Anwenden:** Katalog-Klasse auf Auswahl (Batch-Pset-Pfad, ein Pset je Merkmalsgruppe, leere Werte mit Katalog-Typen) + Klassifikationsreferenz („openSIM BIM Objektkatalog"); Klassenvorschlag je Entity (Parität).
 - **Prüfung + Quick-Fixes (Parität):** Findings `class-mismatch | missing-classification | missing-pset | missing-property | property-type-mismatch | empty-required-value`, Fixes einzeln/alle.
-- **Neu — Katalog→IDS-Generator:** aus einer Katalogklasse (optional gefiltert nach LoI-Stufe und Gewerk) wird ein IDS-1.0-Dokument generiert (Entity-/Classification-/Property-Facetten, Pflicht = required). Damit läuft die Katalogprüfung wahlweise über dieselbe IDS-Engine wie externe Prüfregeln → einheitliches Prüfzentrum, BCF-Export, 3D-Highlight inklusive. Der generierte IDS ist exportierbar (Weitergabe an Dritte).
+- **Neu — Katalog→IDS-Generator:** aus einer Katalogklasse (optional gefiltert nach LoI-Stufe und Gewerk) wird ein IDS-1.0-Dokument generiert (Entity-/Classification-/Property-Facetten, Pflicht = required). Die Katalogprüfung läuft damit **primär über die ifc-lite-IDS-Engine** (ifc-lite-zuerst-Prinzip) → einheitliches Prüfzentrum, BCF-Export, 3D-Highlight inklusive; der generierte IDS ist exportierbar (Weitergabe an Dritte). Die portierte 1.x-Prüflogik bleibt nur dort im Spiel, wo IDS nicht reicht: Ableitung der **Quick-Fixes** (fehlendes Pset/Klassifikation anlegen) und Klassenvorschlag.
 - **Portal-Kopplung (Parität):** MKP-Portal-Import nutzt die Katalog-Psets (`ePset_*`, `Pset_MarxKrontalBWD`, Verfahren-Registry, Dot-ID-Konvention) unverändert; alle 23 Portal-Tests werden als Verhaltensreferenz portiert.
 
 ### Abnahme
@@ -98,35 +98,81 @@ Die fünf vom Auftraggeber priorisierten Bereiche, jeweils mit Zielbild, technis
 
 ---
 
-## 5. Übernahme aller ifc-lite-Features
+## 5. ifc-lite-Paketkatalog — Verwendungsentscheidung je Paket
 
-Vollständige Liste der ifc-lite-Fähigkeiten und wie 2.0 sie exponiert. Priorität: ● Kernumfang · ◐ nach Parität · ○ Backlog/als API vorhanden.
+Grundsatz (Leitplanke 1): **ifc-lite-Lösung bevorzugen**; Eigenbau nur, wenn unsere Lösung deutlich besser oder fachspezifisch ohne Pendant ist. Alle 38 Pakete aus `packages/` (Stand Juli 2026), Status: ● Kernumfang · ◐ nach Parität · ○ Backlog · ✕ nicht verwendet.
 
-| ifc-lite-Feature (Paket/Guide) | 2.0-Exponierung | Prio |
-| --- | --- | --- |
-| Parser IFC2X3/IFC4/IFC4X3/IFC5-IFCX, kolumnar (`parser`, `flavors`) | Öffnen aller Schemata; IFCX-Import | ● |
-| Streaming-Geometrie + WebGPU-Renderer (`geometry`, `renderer`) | Standard-Viewer, Tessellationsqualität 5-stufig einstellbar | ● |
-| Nativer Rust-Fast-Path (Tauri, `desktop`) | Backend der Windows-App | ● |
-| Mutations + Undo/Redo (`mutations`) | gesamter Editierpfad | ● |
-| Bulk-Edits + CSV (`BulkQueryEngine`, `CsvConnector`) | Batch-Pset-Editor | ● |
-| Element-Builder / IFC von Grund auf (`create`) | Baukasten, neues Projekt | ● |
-| Exakter CSG-Kernel | Öffnungen/Voids | ● |
-| STEP-Export mit Mutations-Overlay (`export`) | IFC speichern | ● |
-| IDS-Validierung (`ids`) | Prüfzentrum | ● |
-| BCF (`bcf`) | Prüfzentrum-Export; BCF-Import/Viewer | ●/◐ |
-| Query-Engine + SQL/DuckDB (`query`, `querying`) | Abfrage-basierte Auswahl, Berichts-Pane | ◐ |
-| Model-Diff (`model-diff`) | Versions-/Vergleichs-UI (mit `/server`) | ◐ |
-| Föderation/Merge (`federation`) | Koordinations-Workspace (mehrere Modelle) | ◐ |
-| Clash Detection (`clash`) | Prüfzentrum | ◐ |
-| 2D-Ableitungen (`drawing-2d`) | Grundriss-/Schnitt-Pane | ◐ |
-| Export glTF/GLB, CSV, JSON-LD, Parquet (`exporting`) | Export-Menü (ersetzt IfcToGlb) | ◐ |
-| Schema-Konvertierung IFC4 ↔ IFC5 | Export-Menü | ◐ |
-| Server: Parquet/SSE/Cache (`server`) | optionaler Team-Modus, Thin-Client | ◐ |
-| ChangeSets teilen (`ChangeSetManager`) | benannte Änderungssätze, Übergabe zwischen Instanzen | ◐ |
-| Echtzeit-Kollaboration CRDT auf IFCX (`collab`, `collab-server`) | Backlog: gemeinsames Editieren | ○ |
-| MCP-Server für KI-Agenten (`mcp`) | Backlog: „KI-Assistent"-Pane, Automatisierung | ○ |
-| Scripting-SDK (`sdk`, `scripting-sdk`) | Backlog: Nutzer-Skripte/Makros | ○ |
-| CLI (`cli`) | Backlog: Batch-Verarbeitung außerhalb der App | ○ |
-| Lens/Solar-Analysen (`lens`, `solar`) | Backlog | ○ |
-| Punktwolken | Backlog | ○ |
-| Python-Wheel `ifclite-geom` | nicht Teil der App (Doku-Verweis) | ○ |
+### Kern: Parsen, Daten, Geometrie, Rendering
+
+| Paket | Zweck | Verwendung in 2.0 | Status |
+| --- | --- | --- | --- |
+| `@ifc-lite/parser` | STEP-Parsing IFC2X3/IFC4/IFC4X3, Entity-Extraktion, Schema-Registry | einziger Lesepfad (ersetzt web-ifc **und** eigenen Parser) | ● |
+| `@ifc-lite/data` | kolumnare Datenstrukturen | Modell-Datenhaltung aller Panes | ● |
+| `@ifc-lite/wasm` | WASM-Bindings des Rust-Kerns (`IfcAPI`) | Browser-/Dev-Fallback; im Tauri-Backend läuft derselbe Kern nativ | ● |
+| `@ifc-lite/geometry` | Tessellierung, exakter CSG-Kernel, `GeometryProcessor` mit Platform-Bridge | Geometrie-Pipeline (nativ via Tauri-Bridge) | ● |
+| `@ifc-lite/renderer` | WebGPU-Renderer, Streaming, Batching, Picking, Sectioning, X-Ray, Heatmaps | der 3D-Viewer | ● |
+| `@ifc-lite/spatial` | räumlicher Index, Culling | Picking/Kamera/Nachbarschaftssuchen, Clash-Vorfilter | ● |
+| `@ifc-lite/cache` | binäres Cache-Format `.ifc-lite` | lokaler Modell-Cache: zweites Öffnen großer Dateien nahezu sofort | ● |
+| `@ifc-lite/encoding` | STEP-String-Kodierung | ersetzt unser `stepEncoding.ts`; Umlaut-Tests (R3) laufen dagegen | ● |
+| `@ifc-lite/ifcx` | IFC5/IFCX (JSON) lesen/schreiben | IFCX-Import/-Export | ◐ |
+| `@ifc-lite/pointcloud` | Punktwolken | Backlog | ○ |
+
+### Editieren & Erzeugen
+
+| Paket | Zweck | Verwendung in 2.0 | Status |
+| --- | --- | --- | --- |
+| `@ifc-lite/mutations` | Overlay-Editing (Psets, Mengen, Attribute, positionale Argumente, `addEntity`/`removeEntity`), Undo/Redo, `BulkQueryEngine`, `CsvConnector`, `ChangeSetManager` | gesamter Schreibpfad inkl. Batch; **auch Undo/Redo kommt von hier** (eigener Anteil nur Audit-Zeilen + Operationsnamen) | ● |
+| `@ifc-lite/create` | IFC von Grund auf, Element-Builder (`addWallToStore` …) | Baukasten, neues Projekt, Portal-Import-Unterbau (später) | ● |
+| `@ifc-lite/export` | STEP (mit Mutations-Overlay), glTF/GLB, CSV, JSON-LD, Parquet, IFC4↔IFC5 | Speichern + Export-Menü (ersetzt auch `/IfcToGlb`) | ● |
+| `@ifc-lite/merge` | Modelle zusammenführen/föderieren | Koordinations-Workspace, Modell-Merge | ◐ |
+
+### Abfragen, Auswertungen, Sichten
+
+| Paket | Zweck | Verwendung in 2.0 | Status |
+| --- | --- | --- | --- |
+| `@ifc-lite/query` | Fluent-Query + SQL (DuckDB-WASM) | abfragebasierte Auswahl (Batch), Berichts-Pane | ● |
+| `@ifc-lite/lists` | Bauteillisten/Schedules: konfigurierbare Spalten (Attribute/Properties/Mengen/Material/Klassifikation), Gruppierung/Aggregation, CSV-Export mit Formel-Injection-Schutz, Presets, föderationsfähig | **neues „Listen"-Pane**; ersetzt zugleich den fehlenden 1.x-xlsx-Export; Spalten-Discovery füttert den Spalten-Picker | ● |
+| `@ifc-lite/lens` | regelbasiertes Einfärben/Filtern/Verstecken je Klasse/Property/Material/…, Presets, „first match wins", Ghosting | **„Lens"-Pane** statt Eigenbau-Färbelogik; Prüfzentrum nutzt Lens für rot/grün-Darstellung | ● |
+| `@ifc-lite/diff` | zwei Modellstände vergleichen | lokaler Modellvergleich (Datei A vs. B) im Vergleichs-Pane | ◐ |
+| `@ifc-lite/drawing-2d` | 2D-Ableitungen (Grundrisse/Schnitte) | 2D-Pane | ◐ |
+
+### Prüfung & Koordination
+
+| Paket | Zweck | Verwendung in 2.0 | Status |
+| --- | --- | --- | --- |
+| `@ifc-lite/ids` | IDS 1.0 komplett (6 Facetten, Regex/Bounds/Enum), Worker-Ausführung, Reports (de) | Prüfzentrum-Kern; Katalog-Prüfung läuft primär als generiertes IDS hierüber | ● |
+| `@ifc-lite/bcf` | BCF lesen/schreiben | BCF-Export der Prüfergebnisse; BCF-Import/Themenliste | ●/◐ |
+| `@ifc-lite/clash` | Kollisionsprüfung | Prüfzentrum/Koordination | ◐ |
+
+### Plattform, Automatisierung, Erweiterbarkeit
+
+| Paket | Zweck | Verwendung in 2.0 | Status |
+| --- | --- | --- | --- |
+| `@ifc-lite/sdk` | Scripting-API (`bim.*`) | Grundlage für Makros/Automatisierung im Editor | ◐ |
+| `@ifc-lite/extensions` | Erweiterungssystem (`.iflx`: Commands, Panels, Lenses, Exporter, Kontextmenüs; Capability-Gating) | Plugin-Mechanismus der App für Zusatzmodule; Kandidat für kundenspezifische Prüf-/Exportbausteine | ◐ |
+| `@ifc-lite/sandbox` | QuickJS-WASM-Sandbox (Ressourcenlimits) für Extensions/Skripte | Ausführungsumgebung für Extensions und Nutzer-Skripte | ◐ |
+| `@ifc-lite/provenance` | Nachverfolgung der Änderungsherkunft | Herkunfts-Spalte im Audit-/History-Log | ◐ |
+| `@ifc-lite/mcp` | MCP-Server für KI-Agenten | Backlog: „KI-Assistent" (Modell abfragen/ändern per Agent) | ○ |
+| `@ifc-lite/cli` | Terminal-Toolkit (inspect/query/validate/export/clash/merge/convert) | Backlog: Batch-Verarbeitung außerhalb der App; CI-Prüfungen | ○ |
+| `@ifc-lite/codegen` | Schema-Codegenerierung (intern) | nur Build-Zeit-Abhängigkeit, keine App-Funktion | ✕ |
+| `create-ifc-lite` | Projekt-Scaffolding (`npx create-ifc-lite`) | einmalig beim Aufsetzen in M0 | ✕ |
+
+### Viewer-Apps, Embedding, Server, Kollaboration
+
+| Paket | Zweck | Verwendung in 2.0 | Status |
+| --- | --- | --- | --- |
+| `@ifc-lite/viewer` / `apps/viewer` | fertige Viewer-App | **Referenzimplementierung** (Undo/Redo-Verkabelung, Renderer-Nutzung, IDS-UI); unsere Mosaic-Shell bleibt eigen, weil Workspaces/Panes/Graph deutlich über den Viewer hinausgehen | Referenz |
+| `@ifc-lite/embed-sdk` / `embed-protocol` | Viewer per iframe einbetten/steuern | Backlog: Modell-Weitergabe an Dritte (z. B. Portal-Webansicht) | ○ |
+| `@ifc-lite/server-client` | SDK zum ifc-lite-Server (Hash/Cache/Parquet/SSE) | optionaler Team-Modus, Thin-Client | ◐ |
+| `@ifc-lite/server-bin` | Server-Binary-Wrapper | Deployment des Team-Servers (Docker/Binary) | ◐ |
+| `@ifc-lite/collab` / `collab-server` | Echtzeit-Kollaboration (CRDT auf IFCX) | Backlog: gemeinsames Editieren | ○ |
+| `@ifc-lite/solar` | Solar-/Verschattungsanalyse | Backlog | ○ |
+
+### Eigenbau nur noch hier (Begründung „deutlich besser / kein Pendant")
+
+1. **Beziehungsgraph-Editor** (React Flow, Presets, Legalitätsregeln, Kante-ziehen-erzeugt-Entity) — kein ifc-lite-Pendant.
+2. **Objektkatalog-Import + Quick-Fixes** (openSIM-xlsx-Formate) — fachspezifisch; Prüfung läuft aber über deren IDS-Engine (Katalog→IDS-Generator).
+3. **Objektinfo-Prüfung** (`ePset_Objektinformation`-Querverweis-Register: Duplikate, tote/mehrdeutige Referenzen) — Querverweis-Semantik ist mit IDS-Facetten nicht abbildbar.
+4. **Team-Versionierung** (GlobalId-Manifeste + `/server` mit Projekten/Branches/Commits/Entity-Dedup) — deutlich über `@ifc-lite/diff` (lokaler Zweiervergleich) hinaus; `diff` wird trotzdem für den lokalen Vergleich verwendet.
+5. **Welt-Frame-/Georeferenz-Mathematik, Löschkaskaden-Plan, Baum-Kindklassen-Regeln, Transform-Gizmo** — Editor-Spezifika ohne Paket-Pendant, implementiert **auf** parser/mutations/renderer.
+6. **MKP-Portal-Integration** — fachspezifisch, ganz ans Ende verschoben (Backlog, siehe Roadmap).

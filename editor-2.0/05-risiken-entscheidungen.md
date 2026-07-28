@@ -12,7 +12,7 @@ Der ifc-lite-Renderer ist WebGPU-basiert; Tauri nutzt auf Windows WebView2 (Chro
 
 ### R3 — Umlaute/`\X2\`-Kodierung
 Deutsche Fachinhalte (Katalog, Portal, BWD) verlangen korrekte STEP-Escapes. 1.x hat dafür `stepEncoding.ts` mit Tests.
-**Mitigation:** Kodierungs-Testsuite in M0 gegen ifc-lite-Export laufen lassen; bei Lücken Patch/Upstream.
+**Mitigation:** ifc-lite bringt dafür ein eigenes Paket (`@ifc-lite/encoding`), das gemäß E8 verwendet wird; unsere `stepEncoding`-Testfälle laufen in M0 als Abnahme dagegen; bei Lücken Patch/Upstream.
 
 ### R4 — ifc-lite-Reifegrad und API-Drift
 Junges, sehr aktives Projekt (36+ Pakete). API-Brüche und Lücken (z. B. Composite-Property-Typen LIST/ENUM/BOUNDED/TABLE, MaterialLayer-Usages, Approvals) sind zu erwarten.
@@ -32,12 +32,9 @@ ifc-lite-Server (Geometrie/Cache) und `/server` (Versionierung) sind getrennte D
 
 ## Offene Fragen (Entscheidung beim Auftraggeber)
 
-1. **Sprache:** UI weiterhin rein deutsch, oder i18n-Schicht von Anfang an (ifc-lite-Reports können de/en/fr)?
-2. **Paritätsumfang Portal:** MKP-Portal-Integration in 2.0 von Beginn an (M6) — oder zunächst 1.x parallel weiterbetreiben und Portal später migrieren?
-3. **Versionierungs-UI:** reicht Commit/Diff gegen `/server` (M6), oder sind Branches/Merge (Server-„Later phases") für 2.0 gewünscht?
-4. **Verteilung:** portable .exe wie bisher, zusätzlich NSIS-Installer, Auto-Update ja/nein, Code-Signing-Zertifikat vorhanden?
-5. **Backlog-Prioritäten:** Kollaboration (CRDT), MCP/KI-Assistent, Scripting — Reihenfolge nach M7?
-6. **Alte Scope-Idee „Draft-first/Review vor Apply"** (aus `IFC_EDITOR_SCOPE.md`, in 1.x zugunsten Direkt-Commit + Undo aufgegeben): soll 2.0 beim 1.x-Modell bleiben (Empfehlung: ja — plus Batch-Vorschau und ChangeSets als Mittelweg), oder Draft-Gate zurückholen?
+1. **Versionierungs-UI:** reicht Commit/Diff gegen `/server` (M6), oder sind Branches/Merge (Server-„Later phases") für 2.0 gewünscht?
+2. **Code-Signing:** Authenticode-Zertifikat vorhanden/beschaffbar (EV-Zertifikat für sofortige SmartScreen-Reputation)? Ohne Signatur warnt SmartScreen beim Installer-Download.
+3. **MSI-Variante:** wird ein Firmen-Rollout per Gruppenrichtlinie gebraucht (dann MSI/WiX zusätzlich zu NSIS in M7), oder reicht NSIS + Auto-Update?
 
 ## Getroffene Entscheidungen
 
@@ -48,8 +45,12 @@ ifc-lite-Server (Geometrie/Cache) und `/server` (Versionierung) sind getrennte D
 | E3 | Funktionsreferenz = React-Viewer, nicht Avalonia-App | Vorgabe des Auftraggebers; Avalonia-Inventar dient nur als Checkliste |
 | E4 | Direkt-Commit + Undo/Redo + Batch-Vorschau (kein Draft-Gate) | bewährtes 1.x-Verhalten; Draft-Gate war schon in 1.x verworfen; Vorschau deckt den Review-Bedarf bei Massenedits |
 | E5 | Domänenschicht in TypeScript, nicht Rust | Portierbarkeit der getesteten 1.x-Logik (Katalog/Portal/Prüfung); Rust nur für Parse/Geometrie/IO |
-| E6 | `/server` bleibt Versionierungs-Backend | GlobalId-Diff-Kern ist produktionsreif und geteilt (`src/ifc/versioning`); ifc-lite-Diff ergänzt lokal |
+| E6 | `/server` bleibt Versionierungs-Backend | GlobalId-Diff-Kern ist produktionsreif und geteilt (`src/ifc/versioning`); `@ifc-lite/diff` ergänzt den lokalen Zweiervergleich |
 | E7 | 1.x-Testsuiten als Verhaltensspezifikation | ~100 Tests definieren Editier-/Katalog-/Portal-Semantik unabhängig von der alten Implementierung |
+| E8 | **ifc-lite-zuerst** (Vorgabe Auftraggeber, 2026-07-28) | jede Funktion nutzt das passende der 38 Pakete; Eigenbau nur bei „deutlich besser/kein Pendant" — Paketkatalog mit Entscheidung je Paket in `03-kernfeatures.md` §5. Konsequenzen: Undo/Redo aus `mutations`, `encoding` statt `stepEncoding.ts`, `lists` statt eigenem Tabellen-Export, `lens` statt eigener Färbelogik, Katalogprüfung primär über `ids` |
+| E9 | **Kein i18n, UI nur deutsch** (Vorgabe Auftraggeber, 2026-07-28) | keine Fremdsprachen nötig; ifc-lite-Reports auf `de` konfiguriert; spart Abstraktionsschicht |
+| E10 | **Portal ganz ans Ende** (Vorgabe Auftraggeber, 2026-07-28) | MKP-Portal-Migration als letzter Backlog-Punkt nach M7; 1.x bleibt bis dahin für Portal-Arbeit im Einsatz |
+| E11 | **Richtiger Installer + `.ifc`-Standardprogramm** (Vorgabe Auftraggeber, 2026-07-28) | NSIS-Installer ab M0 mit fileAssociations (`.ifc`, `.ifczip`, `.ifcx`, `.ids`, `.bcf`), RegisteredApplications/Capabilities für „Standard-Apps", Single-Instance-Doppelklick-Öffnen; Windows-`UserChoice`-Schutz beachtet (App bietet „Als Standard festlegen"-Hinweis, erzwingt nichts) |
 
 ## Referenzen
 
