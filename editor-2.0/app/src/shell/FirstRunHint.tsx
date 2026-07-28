@@ -25,6 +25,10 @@ const HINT =
   "IFCnative als Standardprogramm für .ifc festlegen: " +
   "Windows-Einstellungen → Standard-Apps";
 
+const SETTINGS_TITLE =
+  "Öffnet die Windows-Seite „Standard-Apps“ — die Zuordnung selbst bleibt " +
+  "deine Entscheidung";
+
 /**
  * Minimaler Invoke-Pfad auf das globale __TAURI__-Objekt — dieselbe Brücke,
  * die `core/tauri.ts` nutzt (withGlobalTauri, keine npm-Abhängigkeit).
@@ -72,7 +76,7 @@ export function FirstRunHint() {
       </span>
       <button
         className="btn"
-        title="Öffnet die Windows-Seite „Standard-Apps"; die Zuordnung selbst bleibt deine Entscheidung"
+        title={SETTINGS_TITLE}
         onClick={invokeSettings}
       >
         Einstellungen öffnen

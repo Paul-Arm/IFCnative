@@ -72,7 +72,7 @@ sondern eine Fehlermeldung in der Statusleiste.
 | Element | Bedeutung |
 | --- | --- |
 | **IFC öffnen** | Dateidialog |
-| **Exportieren** | Bearbeitungsstand als IFC-Datei schreiben; die Zahl in Klammern nennt die noch nicht exportierten Änderungen |
+| **Exportieren** | Bearbeitungsstand als IFC-Datei schreiben; die Zahl in Klammern nennt die offenen Änderungen. Der Pfeil ▾ daneben öffnet weitere Exportformate (siehe 5) |
 | **↶ / ↷** | Rückgängig / Wiederholen; der Tooltip nennt die betroffene Operation |
 | **Workspace** | Auswahlliste der Fenster-Layouts |
 | **Layout sichern** | aktuelles Layout unter eigenem Namen ablegen |
@@ -495,6 +495,12 @@ Textbearbeitung des Feldes.
 Windows-Speichern-Dialog, im Browser-Betrieb läuft es als Download.
 Vorgeschlagen wird der Name der Ausgangsdatei mit dem Zusatz `.bearbeitet.ifc`.
 
+Der Pfeil **▾** neben der Schaltfläche öffnet die weiteren Formate: ifcZIP
+(gepackt), glTF / GLB, JSON-LD, Parquet / BOS sowie CSV in vier Zuschnitten
+(Entitäten, Eigenschaften, Mengen, Struktur). Diese Formate gehören zu M7 und
+sind noch in Arbeit — Fehler melden sie als Meldungsfenster mit deutschem
+Text.
+
 - Exportiert wird immer das aktive Dokument.
 - Das IFC-Schema der Ausgangsdatei bleibt erhalten.
 - Unveränderte Entities werden byte-stabil durchgereicht; Umlaute und
@@ -542,6 +548,6 @@ Weitere Ausgabewege an anderer Stelle:
   der Mapping-Editor kommen erst später; bis dahin bleibt die 1.x-Anwendung für
   Portal-Arbeit im Einsatz.
 - Dieses Handbuch beschreibt den Stand **M0–M6**. Die M7-Themen — weitere
-  Exportformate (glTF, JSON-LD, Parquet, IFC5), ifcZIP, 2D-Ableitungen und der
-  Föderations-Workspace — entstehen gerade und sind hier noch nicht
-  beschrieben; was davon in der Oberfläche auftaucht, kann sich noch ändern.
+  Exportformate, 2D-Ableitungen (Pane „2D-Ansicht") und der
+  Föderations-Workspace — entstehen gerade; was davon schon in der Oberfläche
+  auftaucht, ist hier nicht beschrieben und kann sich noch ändern.
