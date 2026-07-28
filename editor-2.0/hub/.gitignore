@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Lokales Datenverzeichnis, falls jemand HUB_DATA_DIR hierher legt
+data/
+.hub-data/

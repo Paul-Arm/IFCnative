@@ -1,5 +1,19 @@
 # 05 — Risiken, offene Fragen, Entscheidungen
 
+## M0-Befunde (2026-07-28, `editor-2.0/app`, Tests: `tests/m0-durchstich.test.ts`)
+
+| Risiko | Befund | Status |
+| --- | --- | --- |
+| R1 (WebGPU in WebView2) | im Linux-Container nicht prüfbar; App fällt sauber auf Statusmeldung zurück, Editor bleibt ohne 3D voll funktionsfähig. **Prüfung auf Windows-Zielhardware offen** (Installer aus CI-Action) | ⚠ offen |
+| R2 (Export-Stabilität) | mutationsfreier Re-Export: **100 % der DATA-Zeilen byte-identisch**, alle GlobalIds unverändert (Testmodell aus `IfcCreator`; Gegenprobe mit Fremd-Tool-IFC in M1 nachziehen) | ✅ positiv |
+| R3 (Umlaute/`\X2\`) | `@ifc-lite/encoding` verlustfrei für äöüÄÖÜß/µ/–/„"; Nicht-ASCII wird korrekt escaped; Umlaut-Property übersteht den vollen Mutations-Roundtrip | ✅ bestanden |
+| Mutations-Roundtrip | parse → `setProperty` → `StepExporter(applyMutations)` → Reparse liefert den neuen Wert | ✅ bestanden |
+| Element-Builder | `IfcCreator`: Wand + Tür erzeugt echte `IFCOPENINGELEMENT`/`IFCRELVOIDSELEMENT`/`IFCRELFILLSELEMENT`-Kette | ✅ bestanden |
+| Nativer Fast-Path | `ifc-lite-processing 4.1.4` (crates.io) nativ ausgeführt: Wand/Öffnung/Tür → 3 Meshes in ~1,6 ms; camelCase-Kontrakt der `NativeBridge` verifiziert | ✅ bestanden |
+| Tauri-Build unter Linux | Container hat kein webkit2gtk/gtk3 → Desktop-Build nur auf Windows/CI (`.github/workflows/editor2-windows.yml`) | ℹ Hinweis |
+| M2-Befund B5 (Export-Reproduzierbarkeit) | aus dem Overlay neu erzeugte Records (IfcPropertySet, IfcRelDefinesByProperties) bekommen bei **jedem** Export frische GlobalIds → zwei Exporte desselben Editierstands sind nicht byte-gleich (mutationsfreie Exporte schon). Relevant für Hub-Versionierung/Diff in M6: entweder GUIDs im Overlay fixieren (Upstream/Wrapper) oder Diff GUID-tolerant machen | ⚠ für M6 |
+| M2-Befund B4 (Änderungszähler) | `getMutations().length` schrumpft bei Undo nicht (append-only) — als „ungespeicherte Änderungen"-Anzeige nur näherungsweise brauchbar; verlässlich ist der Export-Vergleich | ℹ Hinweis |
+
 ## Risiken (in M0 zu verifizieren)
 
 ### R1 — WebGPU in WebView2 (Windows)
@@ -51,6 +65,7 @@ ifc-lite hat dokumentiert **keine Versionshistorie und keine Projektverwaltung**
 | E11 | **Richtiger Installer + `.ifc`-Standardprogramm** (Vorgabe Auftraggeber, 2026-07-28) | NSIS-Installer ab M0 mit fileAssociations (`.ifc`, `.ifczip`, `.ifcx`, `.ids`, `.bcf`), RegisteredApplications/Capabilities für „Standard-Apps", Single-Instance-Doppelklick-Öffnen; Windows-`UserChoice`-Schutz beachtet (App bietet „Als Standard festlegen"-Hinweis, erzwingt nichts) |
 | E12 | **Code-Signing zurückgestellt** (Auftraggeber, 2026-07-28) | Authenticode-Zertifikat ist vorhanden, wird aber vorerst nicht eingebunden; Aktivierung jederzeit möglich (Signier-Schritt im Build vorbereiten, aber deaktiviert lassen). Bis dahin SmartScreen-Warnung beim Installer-Download akzeptiert |
 | E13 | **MSI später** (Auftraggeber, 2026-07-28) | nur NSIS + Auto-Update im Planungsumfang; MSI/WiX für Firmen-Rollout wandert in den Backlog |
+| E15 | **React bleibt, kein Vue-Umstieg** (Auftraggeber, 2026-07-28) | kein fachlicher Gewinn; tragende Bibliotheken (react-mosaic, React Flow) sind React-nativ; 1.x-Referenz ist React; M1 wäre wegzuwerfen. Kern (Session/Modell/Viewer-Fassade/Tauri-Brücke) bleibt framework-freies TS, ein späterer Wechsel bliebe UI-Neuaufbau statt Kern-Neuaufbau |
 | E14 | **IFC-Hub statt `/server`** (Vorgabe Auftraggeber, 2026-07-28) | Projekt-/Versionsverwaltung der IFCs als Dienst auf ifc-lite-Bausteinen (`collab-server` via `startCollabServer()`, `diff`, `cache`, `server-bin`/`-client`) + dünner Eigenschicht für Katalog/Historie (ifc-lite hat beides nicht). **Eine Codebasis, zwei Betriebsarten:** eingebettet als Tauri-Sidecar (Standalone-Verwaltung auf dem PC) und zentral deployt (Docker) fürs Team. Spezifikation in `03-kernfeatures.md` §6, Umsetzung M6 |
 
 ## Referenzen

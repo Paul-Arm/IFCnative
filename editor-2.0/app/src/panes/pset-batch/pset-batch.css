@@ -1,0 +1,120 @@
+/*
+ * Nur das, was sich mit den Klassen aus global.css nicht ausdrücken lässt:
+ * die scrollende Matrix mit klebenden Köpfen und der Vorschau-Dialog.
+ * Farben und Abstände kommen weiterhin ausschließlich aus den Design-Token.
+ */
+
+/* Bezugsrahmen für den absolut positionierten Vorschau-Dialog. */
+.batch-pane {
+  position: relative;
+}
+
+.batch-divider {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border);
+}
+
+/* Waagerecht scrollende Matrix; Kopfzeile und Property-Spalte bleiben stehen. */
+.batch-scroll {
+  overflow: auto;
+  max-height: 60vh;
+}
+.batch-scroll table.kv-table {
+  width: max-content;
+  min-width: 100%;
+}
+.batch-scroll th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-panel);
+  white-space: nowrap;
+}
+.batch-scroll th.batch-sticky,
+.batch-scroll td.batch-sticky {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+}
+.batch-scroll th.batch-sticky {
+  z-index: 3;
+}
+.batch-scroll td.batch-cell {
+  min-width: 130px;
+  padding: 1px 4px;
+}
+.batch-scroll tr[data-divergent="true"] td.batch-cell {
+  background: color-mix(in srgb, var(--warn) 18%, transparent);
+}
+
+.batch-badge {
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+.batch-badge[data-warn="true"] {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.batch-block-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 8px 4px;
+}
+.batch-block-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 10px;
+}
+
+/* Vorschau-Dialog — bewusst dieselbe Optik wie der Kaskaden-Dialog des Graphen. */
+.batch-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--bg) 60%, transparent);
+}
+.batch-modal {
+  width: min(620px, 92%);
+  max-height: 82%;
+  overflow: auto;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  color: var(--text);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 35%);
+}
+.batch-modal-title {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+}
+.batch-modal-text {
+  margin: 0 0 10px;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+.batch-modal-plan {
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.batch-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}

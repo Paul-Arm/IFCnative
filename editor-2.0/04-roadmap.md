@@ -4,6 +4,8 @@ Meilensteine sind so geschnitten, dass jeder ein lauffähiges, demonstrierbares 
 
 ## M0 — Technischer Durchstich (Spike, ~1–2 Wochen)
 
+> **Stand 2026-07-28:** umgesetzt in `editor-2.0/app` (Frontend + Tests + Tauri-Backend + CI-Workflow für den Windows-Installer). Befunde in `05-risiken-entscheidungen.md` → „M0-Befunde"; offen sind die Windows-Punkte (WebGPU-Check R1, Installer-/Doppelklick-Abnahme), die den ersten CI-Build auf `windows-latest` brauchen.
+
 Ziel: die drei größten technischen Annahmen beweisen, bevor Struktur entsteht.
 
 - Tauri-v2-Projekt (Scaffold via `create-ifc-lite`, dann angepasst) mit React/Vite-Frontend.
@@ -18,6 +20,8 @@ Ziel: die drei größten technischen Annahmen beweisen, bevor Struktur entsteht.
 
 ## M1 — Viewer-Parität (Lesen)
 
+> **Stand 2026-07-28:** Kernumfang umgesetzt in `editor-2.0/app` — Mosaic-Shell mit 5 Workspaces + eigenen Layouts, Multi-Dokument-Tabs, Statusleiste, Theme/UI-Zoom, Notizen/Recents, Crash-Boundary; virtualisierter Strukturbaum mit Suche und Mehrfachauswahl; Inspector (Übersicht/Eigenschaften mit Edit/Mengen/Beziehungen); React-Flow-Beziehungsgraph (Presets, Tiefe 1–5, Filter, Pinnen, Suche); Viewer mit Picking/Auswahl-Sync, Orbit/Pan/Zoom, benannten Ansichten, Isolation/Ausblenden, X-Ray (Ghost), Schnittebenen; Lens-Pane mit 5 Presets und Farb-/Hidden-Brücke zum Viewer. Größte Datei < 300 Zeilen. Offen: Abnahme auf Windows-Hardware (WebGPU, R1) und Gegenprobe mit großen Fremd-Tool-IFCs.
+
 - App-Shell: Mosaic-Panes, Workspaces (5 eingebaute + eigene), Multi-Dokument-Tabs, Statusleiste, Theme, UI-Skalierung, Recents, Notizen, Crash-Boundary.
 - Strukturbaum (virtualisiert, Suche, Multi-Select), Inspector lesend (Übersicht, Psets, Platzierung, Beziehungen, Ressourcen), Referenzen ein-/ausgehend.
 - Viewer: Auswahl-Sync, Zoom/Kamera, Schnittebenen, Isolation, X-Ray, benannte Ansichten; **Lens-Pane** (`@ifc-lite/lens`, regelbasiertes Färben/Filtern mit Presets).
@@ -26,6 +30,8 @@ Ziel: die drei größten technischen Annahmen beweisen, bevor Struktur entsteht.
 **Abnahme:** jedes 1.x-Referenzmodell lässt sich öffnen und vollständig inspizieren; Lese-Parität laut `02-funktionsparitaet.md` abgehakt.
 
 ## M2 — Editierkern
+
+> **Stand 2026-07-28:** Kernumfang umgesetzt. Command-Pipeline (run/undo, Stapel je Dokument, Audit-Log, Strg+Z/Y, Header-Buttons mit Operations-Tooltip); Inspector schreibend (Pset anlegen/umbenennen/duplizieren/löschen, typisierte Property-Werte mit Validierung, Identität, Mengen); Beziehungs-Editing mit Sitzungs-Overlay über dem statischen CSR-Graphen, Endpunkt-Legalitätsregeln, Beziehung anlegen per Knoten-Verbinden im Graph, Beziehung/Objekt löschen mit Kaskadenplan-Dialog, Reklassifizierung; 23 Verhaltenstests mit Byte-Vergleich (30 gesamt). Zwei durch Tests gefundene Kern-Defekte behoben (B1 Extractor-Verdrahtung — verhinderte Property-Verlust beim Export; B3 Attribut-Undo). Offen aus dem M2-Plan: Domänen-Writer für Material/Klassifikation/Gruppen (→ mit M3 zusammengelegt), Raw-STEP-Editor („Erweitert").
 
 - Command-Pipeline: Mutations, Undo/Redo, Audit-Log, Dirty-Flag, Export-Guard.
 - Inspector schreibend: Identität, typisierte Pset-/Qto-Werte, Pset umbenennen/duplizieren/löschen, Beziehungen anlegen/ändern/löschen (endpoint-legal), Typzuweisung.
@@ -38,6 +44,8 @@ Ziel: die drei größten technischen Annahmen beweisen, bevor Struktur entsteht.
 
 ## M3 — Batch-Psets + Objektkatalog
 
+> **Stand 2026-07-28: umgesetzt.** Batch-Pset-Matrix mit Abdeckungs-Badge, Divergenz-Hervorhebung, Vorschau-Dialog vor jeder Massenaktion (alt→neu je Objekt), abfragebasierter Auswahl (Klasse + Property-Filter über BulkQueryEngine inkl. Overlay-Sicht) und CSV-Roundtrip (Semikolon+BOM, GlobalId-Matching, nur echte Diffs, ein Undo-Schritt). Objektkatalog: openSIM-Import (Diagnostik+Monitoring) in der domain-Schicht, Prüfung mit 6 Befundarten + Quick-Fixes, „Pset(s) auf Auswahl anwenden", **Katalog→IDS-Generator** mit LoI-Filter. Listen-Pane über @ifc-lite/lists (Presets, Spalten-Discovery, mehrstufige Gruppierung mit Summen, CSV). 39 Tests grün. Hinweis: @ifc-lite/query.whereProperty ist wegen der leeren PropertyTable des kolumnaren Parses nicht nutzbar (dokumentiert) — Abfragen laufen über BulkQueryEngine/entityIndex.
+
 - Batch-Pset-Matrix (Parität) + Vorschau über `BulkQueryEngine.preview()`.
 - Abfrage-basierte Auswahl (`@ifc-lite/query`).
 - xlsx/CSV-Roundtrip (`CsvConnector`), Datums-/Typ-Validierung.
@@ -47,6 +55,8 @@ Ziel: die drei größten technischen Annahmen beweisen, bevor Struktur entsteht.
 
 ## M4 — Geometrie erstellen/bearbeiten
 
+> **Stand 2026-07-28: Kernumfang umgesetzt** (nach Fable-Review-Runde mit 15 behobenen Befunden, siehe 05). Baukasten-Pane + Workspace „Bauen": Elemente mit Extrusionskörper (Wand/Decke/Stütze/Träger über die **In-Store-Builder von @ifc-lite/create** — empirisch verifiziert, inkl. upstream gelöster Einheitenfrage; Proxy + Kreisprofil als Eigenbau), Maßänderung bestehender UND frisch erzeugter Extrusionen (Exporter-Falle bei Overlay-Records gelöst), Element verschieben, **Öffnungen** (IfcOpeningElement + RelVoids, legalitätsgeprüft) — alles undo-/redo-fest mit byte-identischen Roundtrip-Tests (64 gesamt). Viewer: „Modell neu berechnen" mit Änderungs-Badge (Szene aus Sitzungs-Export, optional automatisch); Inspector-Modus „Platzierung" (Kette, Modelleinheit+Meter, positionale Adressen als Andockpunkte). Offen aus dem M4-Plan: Transform-Gizmo im Viewer (Verschieben per Maus statt numerisch), Koordinaten-Picking, Welt-Frame-Rotationen — nächste Ausbaustufe.
+
 - Baukasten mit Profilbibliothek (inkl. Positionsmarker), Platzierung Parent/Welt, Koordinaten-Pick.
 - Transform-Gizmo (W/R) mit Mutation-Commit; numerischer Placement-Editor; Welt-Frame-Mathematik.
 - Maßänderung bestehender Extrusionen; Körper zuweisen/entfernen.
@@ -55,11 +65,15 @@ Ziel: die drei größten technischen Annahmen beweisen, bevor Struktur entsteht.
 
 ## M5 — Prüfzentrum
 
+> **Stand 2026-07-28: umgesetzt.** Prüfzentrum-Pane mit Quellen-Registry (fehlertolerante Anmeldung je Quelle): Modell-Diagnostik (Projekt/Einheiten/doppelte GlobalIds/Placement/Repräsentation/Containment), Objektinfo-Portierung aus 1.x (alle 8 Befundarten inkl. Semikolon-Referenzlisten), **IDS-Prüfung** (Dateien laden + Katalog-IDS übernehmen; Bridge-Accessor um Sitzungs-Overlay/Tombstones/Retype erweitert — geprüft wird der Bearbeitungsstand), **Kollisionsprüfung** (@ifc-lite/clash über Export→Geometrie→Engine, gleiche expressIds). Vereinheitlichte Findings-UI (Severity-Zähler, Filter, klickbare Objekt-Chips, 3D-Markierung rot/orange über die Lens-Brücke, Veraltungs-Hinweis über Doc-Revision), **BCF-Export** (.bcfzip, ein Topic je Befund mit Komponenten-Auswahl). 75 Tests grün. Offen: Quick-Fix-Framework je Befundart (Katalog-Fixes existieren bereits in M3) — Backlog-Kandidat.
+
 - Modell-Diagnostik, Objektinfo-Prüfung (Portierung), IDS-Runner (Worker), Clash Detection.
 - Vereinheitlichte Findings-UI, 3D-Highlight/Isolation, deutscher Report, BCF-Export.
 - Quick-Fix-Framework über Command-Pipeline.
 
 ## M6 — IFC-Hub: Projekt- & Versionsverwaltung (Standalone + Team)
+
+> **Stand 2026-07-28: Kernumfang umgesetzt.** Hub-Dienst (`editor-2.0/hub`, Fastify, keine nativen Abhängigkeiten): Projekte→Modelle→Versionen, content-addressed Blob-Store (sha256, Dedup, atomares catalog.json), REST-API mit Bearer-Token-Option, Dockerfile; Versions-Diff über @ifc-lite/diff mit eigenem Fingerprint-Adapter — **objekt- und komponentengenau (pset:/attr:/qset:), aber nicht feldgenau** (`fieldDetail:false` in der Antwort; entityFieldDiff-Port bleibt als Option, Andockpunkt src/ifc/diff.ts). Leere/kaputte IFCs → 422. Hub-Pane in der App: Verbindung/Token, Projekt-Browser, Stand sichern/öffnen, Diff-Ansicht mit GlobalId-Sprung zur Auswahl. 22 Hub- + 75 App-Tests grün. Offen: Tauri-Sidecar-Verdrahtung (Doku liegt bei), Push/Pull lokal↔zentral, Rollen/Collab-Räume, Postgres/S3-Adapter — Backlog/nächste Stufe.
 
 - Hub-Dienst (eine Codebasis): Katalogschicht Projekte → Modelle → Versionsstände auf `collab-server`-Bausteinen (Auth/Rollen/Blob-Store via `startCollabServer()`), content-addressed IFC-Ablage.
 - **Standalone:** Hub als Tauri-Sidecar (`localhost`, SQLite + App-Datenverzeichnis), null Konfiguration; Projekt-Browser-Pane, „Stand sichern", Historie, Stand zurückholen.
@@ -71,6 +85,8 @@ Ziel: die drei größten technischen Annahmen beweisen, bevor Struktur entsteht.
 **Abnahme:** siehe `03-kernfeatures.md` §6 (Standalone-Commit/Historie ohne Konfiguration; Team-Betrieb mit Rollen und Push/Pull; leerer Diff bei unverändertem Re-Export).
 
 ## M7 — Politur & Release
+
+> **Stand 2026-07-28: Kernumfang umgesetzt.** Export-Menü (IFC, **ifcZIP** lesen+schreiben, glTF/GLB, CSV in 4 Modi, JSON-LD, Parquet/BOS — alle aus dem Sitzungs-Export, alle real verifiziert); **2D-Ansicht** (@ifc-lite/drawing-2d: Grundrisse + X/Z-Schnitte, eigene SVG-Zeichnung mit Auswahl-Sync über entityIds, Export als Plan-SVG A3 mit Maßstab/Schriftfeld; Messbefunde: Mesh-Positionen bauteillokal → origin addieren, Geschossbezug geometrieabgeleitet statt IFC-Elevation); Erststart-Hinweis „Standardprogramm" (E11, UserChoice respektiert); Auto-Update als inaktive Vorlage mit Aktivierungsanleitung (E12); CI mit eigenem Hub-Test-Job + Installer-Größe im Summary; **deutsches Handbuch** (docs/handbuch.md). 86 App- + 22 Hub-Tests grün. Offen/Backlog: Föderations-Workspace, Performance-Pass 1-GB-Modell auf echter Hardware, Hub-Sidecar-Verdrahtung, Handbuch-Abschnitt 2D-Ansicht nachziehen.
 
 - Föderations-/Koordinations-Workspace (`merge`), 2D-Ableitungen (`drawing-2d`), Export-Menü (glTF/CSV/JSON-LD/Parquet/IFC5), ifcZIP.
 - Performance-Pass (1-GB-Modell), Handbuch (deutsch).
