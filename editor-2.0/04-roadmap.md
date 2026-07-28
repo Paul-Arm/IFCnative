@@ -73,6 +73,8 @@ Ziel: die drei größten technischen Annahmen beweisen, bevor Struktur entsteht.
 
 ## M6 — IFC-Hub: Projekt- & Versionsverwaltung (Standalone + Team)
 
+> **Stand 2026-07-28: Kernumfang umgesetzt.** Hub-Dienst (`editor-2.0/hub`, Fastify, keine nativen Abhängigkeiten): Projekte→Modelle→Versionen, content-addressed Blob-Store (sha256, Dedup, atomares catalog.json), REST-API mit Bearer-Token-Option, Dockerfile; Versions-Diff über @ifc-lite/diff mit eigenem Fingerprint-Adapter — **objekt- und komponentengenau (pset:/attr:/qset:), aber nicht feldgenau** (`fieldDetail:false` in der Antwort; entityFieldDiff-Port bleibt als Option, Andockpunkt src/ifc/diff.ts). Leere/kaputte IFCs → 422. Hub-Pane in der App: Verbindung/Token, Projekt-Browser, Stand sichern/öffnen, Diff-Ansicht mit GlobalId-Sprung zur Auswahl. 22 Hub- + 75 App-Tests grün. Offen: Tauri-Sidecar-Verdrahtung (Doku liegt bei), Push/Pull lokal↔zentral, Rollen/Collab-Räume, Postgres/S3-Adapter — Backlog/nächste Stufe.
+
 - Hub-Dienst (eine Codebasis): Katalogschicht Projekte → Modelle → Versionsstände auf `collab-server`-Bausteinen (Auth/Rollen/Blob-Store via `startCollabServer()`), content-addressed IFC-Ablage.
 - **Standalone:** Hub als Tauri-Sidecar (`localhost`, SQLite + App-Datenverzeichnis), null Konfiguration; Projekt-Browser-Pane, „Stand sichern", Historie, Stand zurückholen.
 - **Team:** dasselbe Artefakt als Docker-Deployment (Postgres + S3/Filesystem, JWT-Rollen); Push/Pull lokaler ↔ zentraler Hub (nur fehlende Blobs).
