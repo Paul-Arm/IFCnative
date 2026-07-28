@@ -12,6 +12,7 @@ Ziel: die drei größten technischen Annahmen beweisen, bevor Struktur entsteht.
 - **WebGPU in WebView2 verifizieren** (Risiko R1); Fallback Three.js-Integration prüfen.
 - Mutations-Roundtrip: Property ändern → `exportToStep(applyMutations)` → Reparse → Wert korrekt, **unveränderte Entities byte-stabil?** (Risiko R2), Umlaute über `@ifc-lite/encoding` gegen unsere `\X2\`-Testfälle (Risiko R3).
 - Element-Builder-Probe: Wand + Öffnung erzeugen, Export in Fremdviewer prüfen.
+- `@ifc-lite/diff`-Detailtiefe prüfen: liefert es Feld-genaue Änderungen je Entity (für die Hub-Diff-UI in M6), oder braucht es den `entityFieldDiff`-Port aus `src/ifc/versioning`?
 
 **Abnahme:** Installer installiert; Doppelklick auf `.ifc` im Explorer öffnet die Demo-App mit Modell; Groß-IFC < 10 s bis erste Dreiecke; Editier-Roundtrip beweisbar korrekt; Go/No-Go-Notiz je Risiko in `05-risiken-entscheidungen.md` nachgetragen.
 
@@ -58,11 +59,16 @@ Ziel: die drei größten technischen Annahmen beweisen, bevor Struktur entsteht.
 - Vereinheitlichte Findings-UI, 3D-Highlight/Isolation, deutscher Report, BCF-Export.
 - Quick-Fix-Framework über Command-Pipeline.
 
-## M6 — Versionierung + Team
+## M6 — IFC-Hub: Projekt- & Versionsverwaltung (Standalone + Team)
 
-- Versionierung: Commit/Push/Pull gegen `/server`, Historie- und Diff-UI (GlobalId + Feld-Diffs), ChangeSets (`ChangeSetManager`), Herkunftsanzeige (`@ifc-lite/provenance`).
+- Hub-Dienst (eine Codebasis): Katalogschicht Projekte → Modelle → Versionsstände auf `collab-server`-Bausteinen (Auth/Rollen/Blob-Store via `startCollabServer()`), content-addressed IFC-Ablage.
+- **Standalone:** Hub als Tauri-Sidecar (`localhost`, SQLite + App-Datenverzeichnis), null Konfiguration; Projekt-Browser-Pane, „Stand sichern", Historie, Stand zurückholen.
+- **Team:** dasselbe Artefakt als Docker-Deployment (Postgres + S3/Filesystem, JWT-Rollen); Push/Pull lokaler ↔ zentraler Hub (nur fehlende Blobs).
+- Versions-Diff über `@ifc-lite/diff` mit 3D-Highlight; Feld-Diff-Fallback aus `src/ifc/versioning` falls nötig (M0-Prüfpunkt); ChangeSets (`ChangeSetManager`), Herkunftsanzeige (`@ifc-lite/provenance`).
 - Lokaler Datei-Vergleich (Datei A vs. B) über `@ifc-lite/diff`.
-- Optional: ifc-lite-Server-Anbindung (`server-client`/`server-bin`: Cache/Parquet/SSE) für Team-Betrieb.
+- Optional: Parse-/Geometrie-Offload über `server-client`/`server-bin` für Thin Clients.
+
+**Abnahme:** siehe `03-kernfeatures.md` §6 (Standalone-Commit/Historie ohne Konfiguration; Team-Betrieb mit Rollen und Push/Pull; leerer Diff bei unverändertem Re-Export).
 
 ## M7 — Politur & Release
 
@@ -77,7 +83,7 @@ Ziel: die drei größten technischen Annahmen beweisen, bevor Struktur entsteht.
 3. MCP/KI-Assistent (`mcp`).
 4. Echtzeit-Kollaboration (`collab`/`collab-server`, CRDT auf IFCX).
 5. Embedding (`embed-sdk`), Punktwolken (`pointcloud`), Solar (`solar`).
-6. IFC-Modell-Branches + Entity-Merge auf `/server` (Drei-Wege-Vergleich, Konfliktdialog je Entity) — Empfehlung aus `05-risiken-entscheidungen.md` Frage 1.
+6. IFC-Modell-Branches + Entity-Merge im IFC-Hub (Drei-Wege-Vergleich, Konfliktdialog je Entity) — Empfehlung aus `05-risiken-entscheidungen.md` Frage 1; Echtzeit-Räume des Collab-Servers (gemeinsames Editieren) gehören zu Backlog-Punkt 4.
 7. MSI/WiX-Installer für Firmen-Rollout (E13); Code-Signing aktivieren, sobald gewünscht (E12).
 8. **Ganz am Ende: MKP-Portal-Migration** (Login, Bäume, Zuordnen/Import, Mapping-Editor, Mock-Modus; `tests/portal.test.ts` als Referenz). Bis dahin bleibt 1.x für Portal-Arbeit im Einsatz.
 

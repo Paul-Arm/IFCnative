@@ -17,14 +17,14 @@
 │  │  Domänenschicht (TypeScript) │   │  Streaming-Events             │  │
 │  │   Objektkatalog, Portal,     │   └───────────────────────────────┘  │
 │  │   Objektinfo-Prüfung,        │                                      │
-│  │   Beziehungsregeln,          │   optional (Team/Cloud):             │
+│  │   Beziehungsregeln,          │   IFC-Hub (eine Codebasis):          │
 │  │   Änderungs-Historie         │   ┌───────────────────────────────┐  │
-│  │                              │   │ ifc-lite-Server (Rust/Axum)   │  │
-│  │  ifc-lite-Pakete (TS/WASM)   │──►│  Parse/Parquet/SSE/Cache      │  │
-│  │   parser, query, mutations,  │   ├───────────────────────────────┤  │
-│  │   create, export, ids, bcf,  │   │ /server (Fastify, bestehend)  │  │
-│  │   clash, diff, drawing-2d,   │   │  Projekte/Branches/Commits,   │  │
-│  │   renderer (WebGPU)          │   │  semantischer GlobalId-Diff   │  │
+│  │                              │   │ Projekte/Modelle/Versionen,   │  │
+│  │  ifc-lite-Pakete (TS/WASM)   │──►│ Diff, Blob-Store, Collab      │  │
+│  │   parser, query, mutations,  │   │                               │  │
+│  │   create, export, ids, bcf,  │   │ a) eingebettet in der App     │  │
+│  │   clash, diff, drawing-2d,   │   │    (Standalone, localhost)    │  │
+│  │   renderer (WebGPU)          │   │ b) zentral deployt (Team)     │  │
 │  └──────────────────────────────┘   └───────────────────────────────┘  │
 └────────────────────────────────────────────────────────────────────────┘
 ```
@@ -67,17 +67,21 @@ ifc-lite ist generisch; **eigener Code entsteht nur noch, wo kein Paket existier
 | `objectInfoValidation.ts`, `diagnosticsAssistant.ts` | Objektinfo-ID-Prüfung (`ePset_Objektinformation`), BWD-Assistent |
 | `portal/*` (Client, Mapping, Import, Psets) | MKP-Portal-Integration — **ganz ans Ende verschoben (Backlog nach M7)**; fachlich unverändert, HTTP dann über Tauri (kein CORS-Proxy nötig); bis dahin 1.x für Portal-Arbeit weiterverwenden |
 | `relationshipRules.ts`, `nativeGraph.ts`, `graphLayout.ts` | Beziehungslegalität, Graph-Nachbarschaft, Layouts (columns/tension) — arbeiten künftig auf dem ifc-lite-Store statt auf `NativeIfcDocument` |
-| `versioning/*` | bleibt gemeinsame Basis mit `/server` (GlobalId-Manifeste, Feld-Diffs) — deutlich mehr als `@ifc-lite/diff` (das zusätzlich für den lokalen Zweiervergleich genutzt wird) |
+| `versioning/*` | Diff läuft primär über `@ifc-lite/diff`; die React-eigenen GlobalId-Manifeste/Feld-Diffs werden nur portiert, falls ifc-lite die Detailtiefe (Feld-genau je Entity) nicht liefert — Prüfpunkt in M0 |
 | `stepEncoding.ts` | **entfällt** zugunsten `@ifc-lite/encoding`; unsere Umlaut-Tests (`\X2\`) laufen als Abnahme dagegen |
 | `bodyProfiles.ts` (Positionsmarker), `coordinateMapping.ts`-Semantik | Profilbibliothek + Welt-/Lokalkoordinaten-Logik über der Placement-API |
 
 Der 1.x-eigene STEP-Parser (`nativeDocument.ts`) wird **nicht** portiert — er wird durch parser+mutations ersetzt. Wo ifc-lite-High-Level-APIs fehlen (z. B. beliebige `IFCREL*` anlegen, MaterialLayerSet-Usages, Approvals/Objectives), schreibt die Domänenschicht über `StoreEditor.addEntity()` rohe STEP-Records — dieselbe Rolle, die bisher die ~55 Writer-Funktionen hatten, aber auf schmaler, zentraler Basis.
 
-### 5. Server (optional, Team-Betrieb)
+### 5. IFC-Hub — Projekt- & Versionsdienst (eine Codebasis, zwei Betriebsarten)
 
-- **ifc-lite-Server** (Docker `ghcr.io/louistrue/ifc-lite-server`): Parse-/Geometrie-Offload für Thin Clients und den Portal-/Web-Kontext; Content-Addressable Cache (Hash lokal rechnen → Upload sparen), Parquet + SSE-Streaming; Bearer-Token-Auth, Prometheus.
-- **Bestehender `/server`** (Fastify): Projekte/Modelle/Branches/Commits mit semantischem GlobalId-Diff. 2.0 bekommt dafür erstmals UI: Commit-Historie, Diff-Ansicht (added/removed/modified nach GlobalId + Feld-Diffs), Push/Pull aus der App.
-- Beide Dienste sind **abschaltbar**; Desktop-Betrieb ist vollständig offline möglich (nativer Rust-Pfad).
+Der Hub verwaltet und versioniert IFCs/Projekte. Der frühere Plan, den Fastify-`/server` weiterzuverwenden, ist gestrichen (außerhalb des React-Scopes); der Hub wird nach dem ifc-lite-zuerst-Prinzip aus ifc-lite-Bausteinen zusammengesetzt und nur um das ergänzt, was ifc-lite **dokumentiert nicht hat** (Versionshistorie und Projektverwaltung — der Collab-Server macht ausschließlich Echtzeit-Sitzungen):
+
+- **ifc-lite-Bausteine:** `@ifc-lite/collab-server` programmatisch eingebettet via `startCollabServer()` (Echtzeit-Räume, Rollen Viewer/Commenter/Editor/Admin, JWT-Auth, content-addressed Blob-Store), `@ifc-lite/diff` (Versionsvergleich), `@ifc-lite/cache` (Binärformat), `server-bin`/`server-client` (Parse-/Geometrie-Offload für Thin Clients).
+- **Eigene dünne Schicht:** Katalog aus Projekten → Modellen → Versionsständen (Commits mit Autor/Nachricht/Zeitstempel), content-addressed IFC-Blob-Ablage, Versions-API. Feld-genaue Diffs übernimmt `@ifc-lite/diff`; reicht dessen Detailtiefe nicht, wird `entityFieldDiff` aus dem React-Projekt (`src/ifc/versioning`) portiert — das ist zulässiger Scope.
+- **Betriebsart a — eingebettet (Standalone):** der Hub startet als lokaler Dienst innerhalb der Tauri-App (Sidecar auf `localhost`), Ablage in SQLite + Dateisystem im App-Datenverzeichnis. Damit hat jeder PC seine eigene IFC-/Projektverwaltung mit Historie — ohne jede Infrastruktur.
+- **Betriebsart b — zentral (Team):** derselbe Hub als Docker-Deployment (Postgres + S3/Filesystem-Blob-Store, JWT-Auth). Die App verbindet sich per URL + Token; Push/Pull zwischen lokalem und zentralem Hub überträgt Versionsstände (content-addressed → nur fehlende Blobs wandern).
+- Der Hub ist **abschaltbar**; die App bleibt ohne ihn voll funktionsfähig (Dateien direkt öffnen/speichern).
 
 ## Datenfluss (Kernszenarien)
 
@@ -85,7 +89,7 @@ Der 1.x-eigene STEP-Parser (`nativeDocument.ts`) wird **nicht** portiert — er 
 2. **Editieren:** UI-Aktion → Command-Pipeline → ifc-lite-`Mutation` (Overlay) → Undo-Eintrag + Audit-Zeile → Renderer-Mirror (Farbe/Transform/Mesh-Patch) ohne Voll-Reparse.
 3. **Export:** `exportToStep(applyMutations: true)` → Verifikations-Reparse (Guard wie 1.x) → Datei speichern über Tauri.
 4. **Prüfen:** IDS-Dokument(e) + generierte Katalog-IDS → `validateIDS()` im Worker → Prüfzentrum-UI (Filter, 3D-Highlight rot/grün) → optional BCF-Export.
-5. **Versionieren:** Export-Snapshot → `buildVersionManifest` → Commit an `/server` → Diff-UI über `diffManifests`/`entityFieldDiff`.
+5. **Versionieren:** Export-Snapshot → Commit an den IFC-Hub (lokal eingebettet oder zentral) → Historie-/Diff-UI über `@ifc-lite/diff`; Push/Pull synchronisiert lokale und zentrale Hub-Stände.
 
 ## Installer & Dateiverknüpfung
 

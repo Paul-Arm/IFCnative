@@ -13,10 +13,11 @@ Der bestehende React-Viewer bleibt unangetastet; dieser Ordner ist die Planungs-
    - Geometrie erstellen **und** bearbeiten
    - Einbindung des Objektkatalogs (openSIM BWD/MON, xlsx)
    - IFC-Prüfung (Modell-Diagnostik, Objektkatalog-Prüfung, Objektinfo-IDs, **IDS**)
+   - **IFC-Hub**: Projekt- und Versionsverwaltung der IFCs — standalone in der App und zentral fürs Team
    - **alle Features von ifc-lite** verfügbar machen
 4. **Zielplattform Windows via Tauri v2.** Der ifc-lite-Rust-Kern läuft dabei **nativ** (nicht als WASM) über das dokumentierte Platform-Bridge-Muster: Rayon-Parallelität, kein 4-GB-WASM-Limit, direkter Dateizugriff — ausgelegt auf 500-MB+-Modelle.
 5. **Richtiger Windows-Installer** (kein reines Portable-Exe): Installation nach `Program Files`, Startmenü-Eintrag, sauberes Deinstallieren, Auto-Update — und **Registrierung als Standardprogramm für `.ifc`** (plus `.ifczip`, `.ifcx`, `.ids`, `.bcf`): Doppelklick im Explorer öffnet die Datei im Editor. Details in [`01-architektur.md`](./01-architektur.md#installer--dateiverknüpfung).
-6. **Lokal zuerst.** Die App funktioniert vollständig offline; der ifc-lite-Server und der bestehende Versionierungs-Server (`/server`) sind optionale Team-/Cloud-Bausteine.
+6. **Lokal zuerst — mit eingebautem IFC-Hub.** Die App funktioniert vollständig offline. Ein **IFC-Hub** (Projekt- und Versionsverwaltung für IFCs, auf ifc-lite-Server-Bausteinen) läuft in zwei Betriebsarten aus einer Codebasis: **eingebettet in der App** (Standalone-Verwaltung auf dem eigenen PC) und **zentral deployt** (Team-Betrieb). Details in [`03-kernfeatures.md`](./03-kernfeatures.md) §6.
 7. **Deutschsprachige UI, bewusst ohne i18n-Schicht** (keine Fremdsprachen nötig); gleiche Bedienphilosophie wie 1.x (Mosaic-Panes, Workspaces, Undo/Redo mit benannten Operationen).
 8. **Portal-Funktionen (MKP/BWD-Import) ganz ans Ende.** Sie werden erst nach allen anderen Meilensteinen migriert; bis dahin bleibt 1.x dafür in Betrieb.
 
@@ -52,4 +53,4 @@ Lizenz MPL-2.0: Nutzung/Einbettung in proprietäre Produkte zulässig; nur Ände
 - `/src` (React/Vite + web-ifc/ThatOpen, Electron-Shell): **Funktionsreferenz**, bleibt bestehen.
 - `/NativeWindows` (C#/Avalonia): eingestellter Native-Ansatz; dessen Inventar (`NATIVE_WINDOWS_VISIBLE_FUNCTIONS_PLAN.md`) dient nur als Checkliste.
 - `/IfcToGlb` (C#): durch ifc-lite-Export (glTF/GLB) ersetzt.
-- `/server` (Fastify-Versionierungsserver): wird als **Kollaborations-Backend** weiterverwendet (semantische GlobalId-Diffs); der ifc-lite-Server kommt zusätzlich als **Geometrie-/Parse-Dienst** hinzu.
+- `/server` (Fastify-Versionierungsserver): **wird nicht weiterverwendet** — er liegt außerhalb des maßgeblichen React-Scopes. Projekt-/Versionsverwaltung übernimmt der neue IFC-Hub auf ifc-lite-Basis; einzig das GlobalId-Diff-Konzept lebt weiter, weil dessen Kern (`src/ifc/versioning`) Teil des React-Projekts ist.

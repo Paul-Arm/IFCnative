@@ -121,7 +121,7 @@ Quelle: vollständiges Feature-Inventar des React-Viewers (`/src`, Stand v1.4.8)
 | **neu:** glTF/GLB, CSV, JSON-LD, Parquet, IFC5/IFCX-Export; 2D-Ableitungen | L | ersetzt auch `/IfcToGlb` |
 | **neu:** Bauteillisten/Schedules mit Gruppierung/Aggregation + CSV | L | `@ifc-lite/lists` — deckt zugleich den in 1.x fehlenden Tabellen-Export ab |
 | **neu:** regelbasiertes Färben/Filtern (Lens) | L | `@ifc-lite/lens`, auch als Darstellungsschicht des Prüfzentrums |
-| Versionierung: GlobalId-Manifeste, Feld-Diffs, `/server`-API | P | **neu:** Commit-/Diff-UI in der App; lokaler Datei-Vergleich über `@ifc-lite/diff` |
+| Versionierung (1.x nur als Kern in `src/ifc/versioning`, ohne UI) | L+ | **neu: IFC-Hub** (Projekte/Modelle/Versionsstände, standalone + zentral, `03-kernfeatures.md` §6); Diff über `@ifc-lite/diff`, Feld-Diff-Fallback aus `src/ifc/versioning` |
 
 ## Bewusst nicht übernommen
 

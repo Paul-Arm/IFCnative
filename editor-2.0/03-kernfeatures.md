@@ -133,7 +133,7 @@ Grundsatz (Leitplanke 1): **ifc-lite-Lösung bevorzugen**; Eigenbau nur, wenn un
 | `@ifc-lite/query` | Fluent-Query + SQL (DuckDB-WASM) | abfragebasierte Auswahl (Batch), Berichts-Pane | ● |
 | `@ifc-lite/lists` | Bauteillisten/Schedules: konfigurierbare Spalten (Attribute/Properties/Mengen/Material/Klassifikation), Gruppierung/Aggregation, CSV-Export mit Formel-Injection-Schutz, Presets, föderationsfähig | **neues „Listen"-Pane**; ersetzt zugleich den fehlenden 1.x-xlsx-Export; Spalten-Discovery füttert den Spalten-Picker | ● |
 | `@ifc-lite/lens` | regelbasiertes Einfärben/Filtern/Verstecken je Klasse/Property/Material/…, Presets, „first match wins", Ghosting | **„Lens"-Pane** statt Eigenbau-Färbelogik; Prüfzentrum nutzt Lens für rot/grün-Darstellung | ● |
-| `@ifc-lite/diff` | zwei Modellstände vergleichen | lokaler Modellvergleich (Datei A vs. B) im Vergleichs-Pane | ◐ |
+| `@ifc-lite/diff` | zwei Modellstände vergleichen | Vergleichs-Pane (Datei A vs. B) **und** Versions-Diff im IFC-Hub (§6) | ◐ |
 | `@ifc-lite/drawing-2d` | 2D-Ableitungen (Grundrisse/Schnitte) | 2D-Pane | ◐ |
 
 ### Prüfung & Koordination
@@ -163,16 +163,47 @@ Grundsatz (Leitplanke 1): **ifc-lite-Lösung bevorzugen**; Eigenbau nur, wenn un
 | --- | --- | --- | --- |
 | `@ifc-lite/viewer` / `apps/viewer` | fertige Viewer-App | **Referenzimplementierung** (Undo/Redo-Verkabelung, Renderer-Nutzung, IDS-UI); unsere Mosaic-Shell bleibt eigen, weil Workspaces/Panes/Graph deutlich über den Viewer hinausgehen | Referenz |
 | `@ifc-lite/embed-sdk` / `embed-protocol` | Viewer per iframe einbetten/steuern | Backlog: Modell-Weitergabe an Dritte (z. B. Portal-Webansicht) | ○ |
-| `@ifc-lite/server-client` | SDK zum ifc-lite-Server (Hash/Cache/Parquet/SSE) | optionaler Team-Modus, Thin-Client | ◐ |
-| `@ifc-lite/server-bin` | Server-Binary-Wrapper | Deployment des Team-Servers (Docker/Binary) | ◐ |
-| `@ifc-lite/collab` / `collab-server` | Echtzeit-Kollaboration (CRDT auf IFCX) | Backlog: gemeinsames Editieren | ○ |
+| `@ifc-lite/server-client` | SDK zum ifc-lite-Server (Hash/Cache/Parquet/SSE) | Parse-/Geometrie-Offload im Team-Betrieb des IFC-Hubs (§6) | ◐ |
+| `@ifc-lite/server-bin` | Server-Binary-Wrapper | Deployment-Baustein des zentralen IFC-Hubs (Docker/Binary) | ◐ |
+| `@ifc-lite/collab-server` | Collab-Backend: Räume, Rollen (Viewer/Commenter/Editor/Admin), JWT-Auth, content-addressed Blob-Store; programmatisch einbettbar (`startCollabServer()`) | **Baustein des IFC-Hubs** (§6) — Auth/Rollen/Blob-Store sofort, Echtzeit-Räume später | ◐ |
+| `@ifc-lite/collab` | Client-CRDT (Echtzeit-Editing auf IFCX, Live-Cursor) | Backlog: gemeinsames Editieren in Echtzeit | ○ |
 | `@ifc-lite/solar` | Solar-/Verschattungsanalyse | Backlog | ○ |
 
-### Eigenbau nur noch hier (Begründung „deutlich besser / kein Pendant")
+## 6. IFC-Hub — Projekt- & Versionsverwaltung (Standalone + Team)
+
+**Zielbild:** Ein Dienst, der IFCs und Projekte verwaltet und versioniert — **eine Codebasis, zwei Betriebsarten**: eingebettet in der App (jeder PC verwaltet seine IFCs standalone) und zentral deployt (das ganze Team arbeitet gegen denselben Hub).
+
+### Was ifc-lite liefert und was fehlt
+
+Der ifc-lite-Collab-Server bietet Echtzeit-Räume (CRDT), Rollenmodell (Viewer/Commenter/Editor/Admin), JWT-Auth, content-addressed Blob-Storage und ist **programmatisch einbettbar** (`startCollabServer()`, eigene Auth-/Storage-Hooks). Er hat aber laut Doku **keine Versionshistorie und keine Projektverwaltung** — genau diese dünne Schicht bauen wir selbst (ifc-lite-zuerst: alles andere kommt aus den Paketen).
+
+### Funktionsumfang
+
+- **Projektstruktur:** Projekte → Modelle → Versionsstände. Ein Versionsstand = IFC-Blob (content-addressed, dedupliziert) + Metadaten (Autor, Nachricht, Zeitstempel, Schema, Entity-Zahl).
+- **Versionieren aus der App:** „Stand sichern" committet den aktuellen Export in den Hub; Historie-Ansicht je Modell; Stand öffnen/zurückholen; zwei Stände vergleichen (`@ifc-lite/diff`, Ergebnis im Vergleichs-Pane mit 3D-Highlight added/removed/modified).
+- **Projekt-Browser-Pane** in der App: Projekte/Modelle/Stände durchsuchen, öffnen, committen — gegen den lokalen **oder** einen zentralen Hub (umschaltbar, beide gleichzeitig verbindbar).
+- **Push/Pull:** Versionsstände zwischen lokalem und zentralem Hub übertragen; content-addressed → nur fehlende Blobs wandern (Dedup wie beim ifc-lite-Server-Cache).
+- **Team-Betrieb:** Rollen/Auth vom Collab-Server (JWT, Rollen je Projekt), Blob-Store auf S3/Filesystem, Postgres für den Katalog; Docker-Deployment.
+- **Standalone-Betrieb:** Sidecar in der Tauri-App auf `localhost`, SQLite + App-Datenverzeichnis; null Konfiguration, läuft immer.
+- **Später (Backlog):** Echtzeit-Räume des Collab-Servers aktivieren (gemeinsames Editieren, Live-Cursor), IFC-Modell-Branches + Entity-Merge (Drei-Wege), Web-Zugriff auf den zentralen Hub über `embed-sdk`.
+
+### Technik
+
+- Hub-Prozess: Node/TypeScript (weil `startCollabServer()` eine Node-API ist), gebündelt als Tauri-**Sidecar-Binary**; identisches Artefakt läuft im Docker-Container. Persistenzadapter: SQLite/Dateisystem (standalone) ↔ Postgres/S3 (zentral).
+- Erfordert persistenten Prozess (Collab-Räume halten Zustand im Speicher) — kein Serverless; für den zentralen Betrieb ein kleiner Dauerdienst.
+- Diff-Detailtiefe: primär `@ifc-lite/diff`; falls Feld-genaue Diffs je Entity fehlen (M0-Prüfpunkt), wird `entityFieldDiff`/`buildVersionManifest` aus `src/ifc/versioning` (React-Projekt) portiert.
+
+### Abnahme
+
+- Standalone: App ohne jede Konfiguration → IFC öffnen → „Stand sichern" → Historie zeigt Commit; alter Stand lässt sich öffnen und mit dem aktuellen vergleichen.
+- Team: zentraler Hub per Docker; zwei Clients committen abwechselnd; Push/Pull synchronisiert; Rollen greifen (Viewer kann nicht committen).
+- Re-Export ohne inhaltliche Änderung erzeugt einen als „identisch/leer" erkennbaren Diff.
+
+## 7. Eigenbau nur noch hier (Begründung „deutlich besser / kein Pendant")
 
 1. **Beziehungsgraph-Editor** (React Flow, Presets, Legalitätsregeln, Kante-ziehen-erzeugt-Entity) — kein ifc-lite-Pendant.
 2. **Objektkatalog-Import + Quick-Fixes** (openSIM-xlsx-Formate) — fachspezifisch; Prüfung läuft aber über deren IDS-Engine (Katalog→IDS-Generator).
 3. **Objektinfo-Prüfung** (`ePset_Objektinformation`-Querverweis-Register: Duplikate, tote/mehrdeutige Referenzen) — Querverweis-Semantik ist mit IDS-Facetten nicht abbildbar.
-4. **Team-Versionierung** (GlobalId-Manifeste + `/server` mit Projekten/Branches/Commits/Entity-Dedup) — deutlich über `@ifc-lite/diff` (lokaler Zweiervergleich) hinaus; `diff` wird trotzdem für den lokalen Vergleich verwendet.
+4. **IFC-Hub-Katalogschicht** (Projekte → Modelle → Versionshistorie, §6) — ifc-lite hat dokumentiert **keine** Versionshistorie und **keine** Projektverwaltung (der Collab-Server macht nur Echtzeit-Sitzungen); die dünne Eigenschicht sitzt auf `collab-server`/`diff`/`cache`. Feld-genauer Diff-Fallback ggf. aus `src/ifc/versioning` (React-Projekt).
 5. **Welt-Frame-/Georeferenz-Mathematik, Löschkaskaden-Plan, Baum-Kindklassen-Regeln, Transform-Gizmo** — Editor-Spezifika ohne Paket-Pendant, implementiert **auf** parser/mutations/renderer.
 6. **MKP-Portal-Integration** — fachspezifisch, ganz ans Ende verschoben (Backlog, siehe Roadmap).

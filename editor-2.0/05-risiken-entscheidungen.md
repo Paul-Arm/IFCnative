@@ -26,13 +26,13 @@ Beziehungsgraph-Editing, Spatial-Reparenting, Welt-Frame-Mathematik auf georefer
 Live-Mirror (Mesh-Patch nach Edit) ist im ifc-lite-Renderer nicht als fertiges Feature dokumentiert; 1.x hat dafür viel Logik (Ghost-Mesh-Vermeidung, Operations-Queue).
 **Mitigation:** M4-Aufgabe mit Fallback „Modell neu berechnen" (Voll-Retessellierung des betroffenen Elements über den nativen Pfad ist dank Rust-Geschwindigkeit akzeptabel).
 
-### R7 — Zwei Server-Komponenten
-ifc-lite-Server (Geometrie/Cache) und `/server` (Versionierung) sind getrennte Dienste mit getrennter Auth.
-**Mitigation:** Desktop-Betrieb braucht keinen von beiden; Team-Setup dokumentieren; mittelfristig prüfen, ob der Versionierungsdienst ifc-lite-Parsing serverseitig mitnutzen kann.
+### R7 — IFC-Hub: Eigenanteil und Sidecar-Betrieb
+ifc-lite hat dokumentiert **keine Versionshistorie und keine Projektverwaltung** (der Collab-Server macht nur Echtzeit-Sitzungen) — die Hub-Katalogschicht ist Eigenbau. Zudem: der Hub läuft als Node-Sidecar in der Tauri-App (Bundle-Größe, Prozess-Lebenszyklus), und der Collab-Server verlangt einen persistenten Prozess (kein Serverless).
+**Mitigation:** Eigenschicht bewusst dünn halten (nur Katalog + Versions-API; Auth/Rollen/Blob-Store/Diff aus ifc-lite-Paketen); Persistenzadapter SQLite↔Postgres von Anfang an trennen; Sidecar-Start/-Stop über Tauri verwalten; Upstream beobachten — liefert ifc-lite später Projekt-/Versionsverwaltung nach, wird die Eigenschicht ersetzt (ifc-lite-zuerst).
 
 ## Offene Fragen (Entscheidung beim Auftraggeber)
 
-1. **Versionierungs-UI — IFC-Modell-Branches (nicht git):** Der `/server` versioniert IFC-Stände pro Modell (Commits = GlobalId-gehashte Entity-Manifeste, Diff = semantisch je Bauteil). „Branches/Merge" hieße: parallele Bearbeitungsstände desselben Modells (z. B. Hauptstand vs. Planungsvariante) mit Drei-Wege-Zusammenführung und Konflikterkennung **pro Entity** — im Server-README als „later phases" markiert, UI und Merge-Logik existieren noch nicht. **Empfehlung:** 2.0 startet mit linearer Commit-Historie + Diff (M6); Branch-UI + Entity-Merge als Backlog-Punkt dahinter.
+1. **Versionierungs-UI — IFC-Modell-Branches (nicht git):** Der IFC-Hub versioniert IFC-Stände pro Modell (Commits mit semantischem Diff je Bauteil). „Branches/Merge" hieße: parallele Bearbeitungsstände desselben Modells (z. B. Hauptstand vs. Planungsvariante) mit Drei-Wege-Zusammenführung und Konflikterkennung **pro Entity**. **Empfehlung:** 2.0 startet mit linearer Commit-Historie + Diff (M6); Branch-UI + Entity-Merge als Backlog-Punkt dahinter.
 
 ## Getroffene Entscheidungen
 
@@ -43,7 +43,7 @@ ifc-lite-Server (Geometrie/Cache) und `/server` (Versionierung) sind getrennte D
 | E3 | Funktionsreferenz = React-Viewer, nicht Avalonia-App | Vorgabe des Auftraggebers; Avalonia-Inventar dient nur als Checkliste |
 | E4 | Direkt-Commit + Undo/Redo + Batch-Vorschau (kein Draft-Gate) | bewährtes 1.x-Verhalten; Draft-Gate war schon in 1.x verworfen; Vorschau deckt den Review-Bedarf bei Massenedits |
 | E5 | Domänenschicht in TypeScript, nicht Rust | Portierbarkeit der getesteten 1.x-Logik (Katalog/Portal/Prüfung); Rust nur für Parse/Geometrie/IO |
-| E6 | `/server` bleibt Versionierungs-Backend | GlobalId-Diff-Kern ist produktionsreif und geteilt (`src/ifc/versioning`); `@ifc-lite/diff` ergänzt den lokalen Zweiervergleich |
+| E6 | ~~`/server` bleibt Versionierungs-Backend~~ **revidiert durch E14** | ursprüngliche Entscheidung verletzte den Scope „nur React-Projekt"; `/server` wird nicht weiterverwendet |
 | E7 | 1.x-Testsuiten als Verhaltensspezifikation | ~100 Tests definieren Editier-/Katalog-/Portal-Semantik unabhängig von der alten Implementierung |
 | E8 | **ifc-lite-zuerst** (Vorgabe Auftraggeber, 2026-07-28) | jede Funktion nutzt das passende der 38 Pakete; Eigenbau nur bei „deutlich besser/kein Pendant" — Paketkatalog mit Entscheidung je Paket in `03-kernfeatures.md` §5. Konsequenzen: Undo/Redo aus `mutations`, `encoding` statt `stepEncoding.ts`, `lists` statt eigenem Tabellen-Export, `lens` statt eigener Färbelogik, Katalogprüfung primär über `ids` |
 | E9 | **Kein i18n, UI nur deutsch** (Vorgabe Auftraggeber, 2026-07-28) | keine Fremdsprachen nötig; ifc-lite-Reports auf `de` konfiguriert; spart Abstraktionsschicht |
@@ -51,10 +51,11 @@ ifc-lite-Server (Geometrie/Cache) und `/server` (Versionierung) sind getrennte D
 | E11 | **Richtiger Installer + `.ifc`-Standardprogramm** (Vorgabe Auftraggeber, 2026-07-28) | NSIS-Installer ab M0 mit fileAssociations (`.ifc`, `.ifczip`, `.ifcx`, `.ids`, `.bcf`), RegisteredApplications/Capabilities für „Standard-Apps", Single-Instance-Doppelklick-Öffnen; Windows-`UserChoice`-Schutz beachtet (App bietet „Als Standard festlegen"-Hinweis, erzwingt nichts) |
 | E12 | **Code-Signing zurückgestellt** (Auftraggeber, 2026-07-28) | Authenticode-Zertifikat ist vorhanden, wird aber vorerst nicht eingebunden; Aktivierung jederzeit möglich (Signier-Schritt im Build vorbereiten, aber deaktiviert lassen). Bis dahin SmartScreen-Warnung beim Installer-Download akzeptiert |
 | E13 | **MSI später** (Auftraggeber, 2026-07-28) | nur NSIS + Auto-Update im Planungsumfang; MSI/WiX für Firmen-Rollout wandert in den Backlog |
+| E14 | **IFC-Hub statt `/server`** (Vorgabe Auftraggeber, 2026-07-28) | Projekt-/Versionsverwaltung der IFCs als Dienst auf ifc-lite-Bausteinen (`collab-server` via `startCollabServer()`, `diff`, `cache`, `server-bin`/`-client`) + dünner Eigenschicht für Katalog/Historie (ifc-lite hat beides nicht). **Eine Codebasis, zwei Betriebsarten:** eingebettet als Tauri-Sidecar (Standalone-Verwaltung auf dem PC) und zentral deployt (Docker) fürs Team. Spezifikation in `03-kernfeatures.md` §6, Umsetzung M6 |
 
 ## Referenzen
 
 - ifc-lite: <https://github.com/LTplus-AG/ifc-lite> (Guides: `docs/guide/` — u. a. `mutations.md`, `desktop.md`, `server.md`, `ids.md`, `geometry.md`, `viewer-api.md`, `federation.md`, `collab.md`, `mcp.md`)
 - 1.x-Funktionsreferenz: `/src` (v1.4.8), Tests unter `/tests`
 - Historische Scope-Dokumente: `IFC_EDITOR_SCOPE.md`, `OPENCLAW_V2_PLAN.md`, `WINDOWS_NATIVE_REWRITE.md`, `NATIVE_WINDOWS_VISIBLE_FUNCTIONS_PLAN.md`
-- Versionierungs-Server: `/server/README.md`
+- Historisch (nicht weiterverwendet, siehe E14): `/server/README.md`
