@@ -76,10 +76,10 @@ export default function DrawingPane() {
   const selectedIds = useSelectionOf(docId);
   const select = useSelection((s) => s.select);
 
+  // `revision` steht bewusst in den Abhängigkeiten: der Strukturbaum ist
+  // gecacht, strukturelle Edits sollen die Geschossliste trotzdem erneuern.
   const storeys = useMemo(
     () => collectStoreys(session?.spatialTree() ?? null),
-    // Die Revision hält die Liste bei strukturellen Edits aktuell.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [session, revision],
   );
   const selection = useMemo(() => new Set(selectedIds), [selectedIds]);
@@ -209,6 +209,11 @@ export default function DrawingPane() {
           <p className="pane-empty">
             Noch keine Zeichnung. „Berechnen" leitet Schnittkanten aus der
             Geometrie ab (bei großen Modellen dauert das einige Sekunden).
+          </p>
+        ) : result.paths.length === 0 ? (
+          <p className="pane-empty">
+            Die Schnittebene bei {formatElevation(result.cutAt)} trifft keine
+            Geometrie — Schnitthöhe oder Geschoss anpassen.
           </p>
         ) : (
           <DrawingView

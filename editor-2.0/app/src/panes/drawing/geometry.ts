@@ -8,14 +8,19 @@
  * tesselliert daraus. Der Pass ist teuer, deshalb läuft er nur auf Klick und
  * das Ergebnis wird im Pane je Dokument-Revision gehalten.
  *
- * Koordinaten: die Meshes liegen in der Y-up-Welt des Renderers in Metern und
- * sind ggf. RTC-verschoben (große Landeskoordinaten). Deshalb wird die
- * Schnitthöhe NICHT direkt aus dem IFC-Attribut `Elevation` gebildet, sondern
- * aus der Geometrie der Geschosselemente: `storeyLevel()` nimmt das
- * 25-%-Quantil der Mesh-Unterkanten des Geschosses. Das ist einheiten- und
- * RTC-fest; einzelne tiefer liegende Bauteile (Fundamente, Unterzüge) ziehen
- * den Bezug nicht nach unten. Erst wenn ein Geschoss gar keine Geometrie hat,
- * greift `Elevation` als Rückfallwert.
+ * Koordinaten (nachgemessen, nicht vermutet): `MeshData.positions` liegen im
+ * LOKALEN Rahmen des Bauteils; die Weltlage entsteht erst über
+ * `MeshData.origin` (Y-up, Meter) — genau so hebt auch der `SectionCutter` von
+ * drawing-2d jeden Vertex an. Ohne diese Verschiebung säßen alle Bauteile
+ * übereinander im Ursprung. Alle Auswertungen hier rechnen deshalb mit
+ * `origin + position`.
+ *
+ * Die Schnitthöhe entsteht NICHT aus dem IFC-Attribut `Elevation`, sondern aus
+ * der Geometrie der Geschosselemente: `storeyLevel()` nimmt das 25-%-Quantil
+ * der Bauteil-Unterkanten des Geschosses. Das ist einheiten- und RTC-fest
+ * (große Landeskoordinaten werden vom Prozessor verschoben), und einzelne
+ * tiefer liegende Bauteile (Fundamente, Unterzüge) ziehen den Bezug nicht nach
+ * unten. Erst wenn ein Geschoss gar keine Geometrie hat, greift `Elevation`.
  */
 import { GeometryProcessor, type MeshData } from "@ifc-lite/geometry";
 import type { ModelSession } from "../../core/session";
@@ -36,6 +41,9 @@ export interface MeshSource {
   revision: number;
 }
 
+/** Rückfall, wenn ein Mesh keinen eigenen Weltrahmen trägt. */
+const ORIGIN: readonly [number, number, number] = [0, 0, 0];
+
 const EMPTY_BOUNDS: MeshBounds = {
   minX: 0,
   maxX: 0,
@@ -55,13 +63,17 @@ export function meshBounds(meshes: readonly MeshData[]): MeshBounds {
   let maxZ = -Infinity;
   for (const mesh of meshes) {
     const p = mesh.positions;
+    const [ox, oy, oz] = mesh.origin ?? ORIGIN;
     for (let i = 0; i + 2 < p.length; i += 3) {
-      if (p[i] < minX) minX = p[i];
-      if (p[i] > maxX) maxX = p[i];
-      if (p[i + 1] < minY) minY = p[i + 1];
-      if (p[i + 1] > maxY) maxY = p[i + 1];
-      if (p[i + 2] < minZ) minZ = p[i + 2];
-      if (p[i + 2] > maxZ) maxZ = p[i + 2];
+      const x = p[i] + ox;
+      const y = p[i + 1] + oy;
+      const z = p[i + 2] + oz;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+      if (z < minZ) minZ = z;
+      if (z > maxZ) maxZ = z;
     }
   }
   return Number.isFinite(minX)
@@ -104,9 +116,10 @@ export function storeyLevel(
   for (const mesh of meshes) {
     if (!wanted.has(mesh.expressId)) continue;
     const p = mesh.positions;
+    const offset = (mesh.origin ?? ORIGIN)[1];
     let low = Infinity;
     for (let i = 1; i < p.length; i += 3) if (p[i] < low) low = p[i];
-    if (Number.isFinite(low)) lows.push(low);
+    if (Number.isFinite(low)) lows.push(low + offset);
   }
   if (lows.length === 0) return fallback;
   lows.sort((a, b) => a - b);
