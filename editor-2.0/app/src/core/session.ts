@@ -5,13 +5,20 @@
 import {
   IfcParser,
   extractPropertiesOnDemand,
+  normalizeIfcTypeName,
   type IfcDataStore,
 } from "@ifc-lite/parser";
-import { MutablePropertyView } from "@ifc-lite/mutations";
+import {
+  MutablePropertyView,
+  StoreEditor,
+  setEntityTypeNormalizer,
+  type MutationStoreShape,
+} from "@ifc-lite/mutations";
 import { StepExporter } from "@ifc-lite/export";
 import { PropertyValueType } from "@ifc-lite/data";
 import { buildSpatialTree, type SpatialTreeNode } from "./model/spatial";
 import { relationsOf, type RelationRow } from "./model/relations";
+import { RelationOverlay } from "./model/relationOverlay";
 import {
   entityLabel,
   identityOf,
@@ -39,7 +46,14 @@ export interface EntityRow {
   name: string;
 }
 
+// Der StoreEditor validiert neue Entity-Klassen gegen die Schema-Registry,
+// sobald ihm der Normalizer des Parsers bekannt ist (einmal pro Prozess).
+setEntityTypeNormalizer(normalizeIfcTypeName);
+
 export class ModelSession {
+  /** Sitzungs-Overlay für Beziehungen (der CSR des Parsers ist statisch). */
+  readonly relationOverlay = new RelationOverlay();
+
   private constructor(
     readonly fileName: string,
     readonly store: IfcDataStore,
@@ -140,11 +154,40 @@ export class ModelSession {
   }
 
   relationsOf(expressId: number): RelationRow[] {
-    return relationsOf(this.store, expressId);
+    return relationsOf(this.store, expressId, this.relationOverlay);
   }
 
   labelOf(expressId: number): string {
     return entityLabel(this.store, expressId);
+  }
+
+  // — Schreib-APIs (M2) —
+
+  private editorCache: StoreEditor | null = null;
+
+  /**
+   * Gecachter StoreEditor für strukturelle Änderungen (neue Entities,
+   * Beziehungen, Löschungen). Der Konstruktor setzt die expressId-Wasserlinie
+   * im Overlay — deshalb genau eine Instanz pro Sitzung.
+   */
+  editor(): StoreEditor {
+    if (!this.editorCache) {
+      this.editorCache = new StoreEditor(
+        this.store as unknown as MutationStoreShape,
+        this.view,
+      );
+    }
+    return this.editorCache;
+  }
+
+  /** Sichtbar gelöscht (Tombstone im Mutations-Overlay)? */
+  isDeleted(expressId: number): boolean {
+    return this.view.isDeleted(expressId);
+  }
+
+  /** Zähler für Cache-Invalidierung in den Panes. */
+  get relationRevision(): number {
+    return this.relationOverlay.revision;
   }
 
   exportStep(): Uint8Array {

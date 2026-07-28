@@ -31,19 +31,28 @@ export function toFlowNodes(
   }));
 }
 
-export function toFlowEdges(edges: readonly GraphEdgeInfo[]): Edge[] {
+export function toFlowEdges(
+  edges: readonly GraphEdgeInfo[],
+  selectedId?: string | null,
+): Edge[] {
   return edges.map((edge) => {
     const color = relationColor(edge.relType);
+    const selected = edge.id === selectedId;
     return {
       id: edge.id,
       source: String(edge.source),
       target: String(edge.target),
       type: "smoothstep",
-      label: edge.label,
+      label: edge.origin === "overlay" ? `${edge.label} ＋` : edge.label,
       labelShowBg: true,
       labelBgPadding: [2, 1],
       labelBgBorderRadius: 3,
-      style: { stroke: color, strokeWidth: 1.2 },
+      selected,
+      style: {
+        stroke: color,
+        strokeWidth: selected ? 3 : 1.2,
+        strokeDasharray: edge.origin === "overlay" ? "6 3" : undefined,
+      },
       markerEnd: {
         type: MarkerType.ArrowClosed,
         width: 14,

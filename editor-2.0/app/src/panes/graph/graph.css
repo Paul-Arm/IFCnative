@@ -137,3 +137,77 @@
   border-top: 1px solid var(--border);
   margin-top: 4px;
 }
+
+/* Dialoge des Graph-Panes (Beziehung anlegen, Löschen bestätigen) */
+.graph-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--bg) 60%, transparent);
+}
+.graph-modal {
+  width: min(440px, 90%);
+  max-height: 80%;
+  overflow: auto;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  color: var(--text);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 35%);
+}
+.graph-modal-title {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+}
+.graph-modal-subtitle {
+  margin: 10px 0 4px;
+  font-size: 0.8125rem;
+}
+.graph-modal-text {
+  margin: 0 0 10px;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+.graph-modal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.8125rem;
+}
+.graph-modal-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  line-height: 1.35;
+  cursor: pointer;
+}
+.graph-modal-item:hover {
+  background: var(--bg-hover);
+}
+.graph-modal-plan {
+  max-height: 160px;
+  overflow: auto;
+  gap: 2px;
+}
+.graph-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+/* Fokusrahmen der Zeichenfläche, damit Entf zuverlässig ankommt */
+.graph-flow:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}

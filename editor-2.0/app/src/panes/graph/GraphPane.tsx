@@ -1,9 +1,14 @@
 /**
- * Beziehungsgraph-Pane (lesend, M1).
+ * Beziehungsgraph-Pane (M1 lesend, M2 bearbeitend).
  *
  * Anker ist das zuletzt ausgewählte Objekt; von dort wird die Nachbarschaft
  * per Breitensuche über den RelationshipGraph aufgebaut, nach Beziehungsart
  * gefiltert und in einem Ebenen-Layout dargestellt.
+ *
+ * Bearbeiten (M2): zwei Knoten verbinden legt nach Auswahl der Beziehungsart
+ * eine neue IfcRel*-Instanz an, ausgewählte Kanten und Objekte lassen sich
+ * mit Entf löschen. Jede Änderung läuft durch die Command-Pipeline; der
+ * Graph wird danach über die Revision der Historie neu aufgebaut.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -14,6 +19,7 @@ import {
   ReactFlowProvider,
   useNodesState,
   useReactFlow,
+  type EdgeMouseHandler,
   type NodeMouseHandler,
   type NodeTypes,
   type OnNodeDrag,
@@ -23,8 +29,12 @@ import "./graph.css";
 import { useActiveDocument } from "../../store/documents";
 import { useSelection, useSelectionOf } from "../../store/selection";
 import { useUi } from "../../store/ui";
+import { useCommands } from "../../commands/pipeline";
 import GraphNode, { type IfcFlowNode } from "./GraphNode";
 import GraphToolbar from "./GraphToolbar";
+import CascadeDialog from "./CascadeDialog";
+import RelationDialog from "./RelationDialog";
+import { useGraphEditing } from "./useGraphEditing";
 import { matchingNodes, toFlowEdges, toFlowNodes } from "./elements";
 import {
   clearPinned,
@@ -61,7 +71,15 @@ function GraphPaneInner() {
   const [search, setSearch] = useState("");
   const [anchorId, setAnchorId] = useState<number | null>(null);
   const [layoutVersion, setLayoutVersion] = useState(0);
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const fromGraph = useRef(false);
+
+  // Jede ausgeführte, rückgängig gemachte oder wiederholte Operation erhöht
+  // die Revision — Store und Overlay ändern sich außerhalb von React.
+  const revision = useCommands(
+    (s) => s.byDocument[docId ?? ""]?.audit.length ?? 0,
+  );
+  const editing = useGraphEditing(docId, doc?.session ?? null);
 
   const filter = useTypeFilter(doc?.session.store ?? null);
   const lastSelected =
@@ -88,6 +106,7 @@ function GraphPaneInner() {
     anchorId,
     depth,
     filter.activeTypes,
+    revision,
   );
 
   const key = docId && anchorId !== null ? pinKey(docId, anchorId) : "";
@@ -119,9 +138,19 @@ function GraphPaneInner() {
     [neighborhood, positions, pickedSet, matchSet],
   );
   const flowEdges = useMemo(
-    () => (neighborhood ? toFlowEdges(neighborhood.edges) : []),
-    [neighborhood],
+    () => (neighborhood ? toFlowEdges(neighborhood.edges, selectedEdgeId) : []),
+    [neighborhood, selectedEdgeId],
   );
+
+  const selectedEdge = useMemo(
+    () => neighborhood?.edges.find((edge) => edge.id === selectedEdgeId) ?? null,
+    [neighborhood, selectedEdgeId],
+  );
+
+  // Kantenauswahl gilt nur für die aktuell dargestellte Nachbarschaft.
+  useEffect(() => {
+    setSelectedEdgeId(null);
+  }, [neighborhood]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<IfcFlowNode>([]);
   useEffect(() => {
@@ -187,6 +216,38 @@ function GraphPaneInner() {
     setLayoutVersion((version) => version + 1);
   }, [key]);
 
+  const onEdgeClick = useCallback<EdgeMouseHandler>((_event, edge) => {
+    setSelectedEdgeId((current) => (current === edge.id ? null : edge.id));
+  }, []);
+
+  const onDeleteRelation = useCallback(() => {
+    if (!selectedEdge?.relId) return;
+    editing.deleteRelation(
+      selectedEdge.relId,
+      `${selectedEdge.label} #${selectedEdge.source} → #${selectedEdge.target}`,
+    );
+    setSelectedEdgeId(null);
+  }, [selectedEdge, editing]);
+
+  const onDeleteSelection = useCallback(() => {
+    if (lastSelected === null) return;
+    editing.requestRemoval(lastSelected);
+  }, [lastSelected, editing]);
+
+  const onKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (event.key !== "Delete" && event.key !== "Backspace") return;
+      if (selectedEdge) {
+        event.preventDefault();
+        onDeleteRelation();
+      } else if (lastSelected !== null) {
+        event.preventDefault();
+        onDeleteSelection();
+      }
+    },
+    [selectedEdge, lastSelected, onDeleteRelation, onDeleteSelection],
+  );
+
   if (!doc) {
     return <p className="pane-empty">Kein Dokument geöffnet.</p>;
   }
@@ -215,6 +276,10 @@ function GraphPaneInner() {
         canAnchor={lastSelected !== null && lastSelected !== anchorId}
         onResetLayout={onResetLayout}
         canResetLayout={key !== "" && hasPinned(key)}
+        onDeleteRelation={onDeleteRelation}
+        canDeleteRelation={Boolean(selectedEdge?.relId)}
+        onDeleteEntity={onDeleteSelection}
+        canDeleteEntity={lastSelected !== null}
         status={status}
       />
       {!neighborhood ? (
@@ -223,7 +288,7 @@ function GraphPaneInner() {
           gewählten Objekts.
         </p>
       ) : (
-        <div className="graph-flow">
+        <div className="graph-flow" tabIndex={0} onKeyDown={onKeyDown}>
           <ReactFlow<IfcFlowNode>
             nodes={nodes}
             edges={flowEdges}
@@ -232,9 +297,13 @@ function GraphPaneInner() {
             onNodeClick={onNodeClick}
             onNodeDoubleClick={onNodeDoubleClick}
             onNodeDragStop={onNodeDragStop}
+            onEdgeClick={onEdgeClick}
+            onConnect={editing.onConnect}
             colorMode={theme === "dark" ? "dark" : "light"}
-            nodesConnectable={false}
+            nodesConnectable
             edgesReconnectable={false}
+            elementsSelectable
+            deleteKeyCode={null}
             minZoom={0.05}
             maxZoom={2.5}
             proOptions={{ hideAttribution: true }}
@@ -245,6 +314,21 @@ function GraphPaneInner() {
             <MiniMap pannable zoomable />
           </ReactFlow>
         </div>
+      )}
+
+      {editing.connect && (
+        <RelationDialog
+          pending={editing.connect}
+          onConfirm={editing.confirmConnect}
+          onCancel={editing.cancelConnect}
+        />
+      )}
+      {editing.removal && (
+        <CascadeDialog
+          pending={editing.removal}
+          onConfirm={editing.confirmRemoval}
+          onCancel={editing.cancelRemoval}
+        />
       )}
     </div>
   );

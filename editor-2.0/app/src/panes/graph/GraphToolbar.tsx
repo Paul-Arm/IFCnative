@@ -28,6 +28,12 @@ export interface GraphToolbarProps {
   canAnchor: boolean;
   onResetLayout(): void;
   canResetLayout: boolean;
+  /** Ausgewählte Kante löschen (M2) */
+  onDeleteRelation(): void;
+  canDeleteRelation: boolean;
+  /** Ausgewähltes Objekt mit Kaskadenplan löschen (M2) */
+  onDeleteEntity(): void;
+  canDeleteEntity: boolean;
   status: string;
 }
 
@@ -143,6 +149,24 @@ export default function GraphToolbar(props: GraphToolbarProps) {
         title="Manuell verschobene Knoten zurücksetzen"
       >
         Layout zurücksetzen
+      </button>
+
+      <button
+        className="btn"
+        onClick={props.onDeleteRelation}
+        disabled={!props.canDeleteRelation}
+        title="Ausgewählte Beziehung entfernen (Entf)"
+      >
+        Beziehung löschen
+      </button>
+
+      <button
+        className="btn"
+        onClick={props.onDeleteEntity}
+        disabled={!props.canDeleteEntity}
+        title="Ausgewähltes Objekt mit Kaskadenplan löschen (Entf)"
+      >
+        Objekt löschen …
       </button>
 
       <span className="text-dim" style={{ marginLeft: "auto" }}>

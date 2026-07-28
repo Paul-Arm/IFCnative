@@ -30,6 +30,10 @@ export interface GraphEdgeInfo {
   target: number;
   relType: RelationshipType;
   label: string;
+  /** expressId der IfcRel*-Instanz — Angriffspunkt zum Löschen */
+  relId: number;
+  /** Herkunft: geparst oder in dieser Sitzung angelegt */
+  origin: "parsed" | "overlay";
 }
 
 export interface Neighborhood {
@@ -74,6 +78,7 @@ export function buildNeighborhood(
   types?: ReadonlySet<RelationshipType>,
 ): Neighborhood {
   const store = session.store;
+  const overlay = session.relationOverlay;
   const nodes = new Map<number, GraphNodeInfo>();
   const edges = new Map<string, GraphEdgeInfo>();
   let capped = false;
@@ -88,8 +93,10 @@ export function buildNeighborhood(
   for (let depth = 0; depth < maxDepth && frontier.length > 0; depth++) {
     const next: number[] = [];
     for (const current of frontier) {
-      for (const row of neighborsOf(store, current, types)) {
+      for (const row of neighborsOf(store, current, types, overlay)) {
         if (row.otherId === current) continue;
+        // Gelöschte Objekte verschwinden aus dem Graphen.
+        if (session.isDeleted(row.otherId)) continue;
         if (!nodes.has(row.otherId)) {
           if (nodes.size >= NODE_CAP) {
             capped = true;
@@ -109,7 +116,7 @@ export function buildNeighborhood(
         }
         const source = row.direction === "forward" ? current : row.otherId;
         const target = row.direction === "forward" ? row.otherId : current;
-        const id = `${source}-${target}-${row.relType}`;
+        const id = `${source}-${target}-${row.relType}-${row.relId}`;
         if (!edges.has(id)) {
           edges.set(id, {
             id,
@@ -117,6 +124,8 @@ export function buildNeighborhood(
             target,
             relType: row.relType,
             label: row.label,
+            relId: row.relId,
+            origin: row.origin,
           });
         }
       }
@@ -134,15 +143,22 @@ export function buildNeighborhood(
   };
 }
 
-/** Memoisierte Variante für das Pane. */
+/**
+ * Memoisierte Variante für das Pane. `revision` erzwingt den Neuaufbau nach
+ * jeder Modelländerung (Command-Historie und Beziehungs-Overlay).
+ */
 export function useNeighborhood(
   session: ModelSession | null,
   anchorId: number | null,
   maxDepth: number,
   types: ReadonlySet<RelationshipType> | undefined,
+  revision = 0,
 ): Neighborhood | null {
   return useMemo(() => {
     if (!session || anchorId === null) return null;
+    if (session.isDeleted(anchorId)) return null;
     return buildNeighborhood(session, anchorId, maxDepth, types);
-  }, [session, anchorId, maxDepth, types]);
+    // revision ist bewusst Teil der Abhängigkeiten: der Graph liest aus
+    // Store und Overlay, deren Änderungen React nicht sieht.
+  }, [session, anchorId, maxDepth, types, revision]);
 }
