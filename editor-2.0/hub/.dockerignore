@@ -1,0 +1,10 @@
+node_modules
+tests
+vitest.config.ts
+README.md
+Dockerfile
+.dockerignore
+.gitignore
+data
+.hub-data
+*.tsbuildinfo
