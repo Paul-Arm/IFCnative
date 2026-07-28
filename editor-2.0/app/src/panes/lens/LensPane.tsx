@@ -10,6 +10,7 @@ import {
   evaluateAutoColorLens,
   evaluateLens,
   type Lens,
+  type LensEvaluationResult,
 } from "@ifc-lite/lens";
 import { useActiveDocument } from "../../store/documents";
 import { useViewerOverrides } from "../viewer/overrides";
@@ -48,6 +49,9 @@ interface LensResult {
 export default function LensPane() {
   const doc = useActiveDocument();
   const docId = doc?.id ?? null;
+  // Session statt Dokument als Abhängigkeit: `touch()` (Property-Edit) darf
+  // keine komplette Neuauswertung auslösen.
+  const session = doc?.session ?? null;
   const applyOverrides = useViewerOverrides((s) => s.setColorOverrides);
   const clearOverrides = useViewerOverrides((s) => s.clear);
   const activeSource = useViewerOverrides((s) =>
@@ -71,30 +75,33 @@ export default function LensPane() {
   );
 
   useEffect(() => {
-    if (!doc || !docId || !lens) return;
+    if (!session || !docId || !lens) return;
     setBusy(true);
     setError(null);
     // Erst rendern lassen („Werte aus …"), dann die O(n)-Auswertung fahren.
     const timer = window.setTimeout(() => {
       try {
-        const provider = createLensProvider(docId, doc.session);
-        const evaluation = lens.autoColor
-          ? evaluateAutoColorLens(lens.autoColor, provider)
-          : evaluateLens(lens, provider);
-        const rows: LensRow[] =
-          "legend" in evaluation
-            ? evaluation.legend.map((entry) => ({
-                id: entry.id,
-                name: entry.name,
-                color: entry.color,
-                count: entry.count,
-              }))
-            : lens.rules.map((rule) => ({
-                id: rule.id,
-                name: rule.name,
-                color: rule.color,
-                count: evaluation.ruleCounts.get(rule.id) ?? 0,
-              }));
+        const provider = createLensProvider(docId, session);
+        let evaluation: LensEvaluationResult;
+        let rows: LensRow[];
+        if (lens.autoColor) {
+          const auto = evaluateAutoColorLens(lens.autoColor, provider);
+          evaluation = auto;
+          rows = auto.legend.map((entry) => ({
+            id: entry.id,
+            name: entry.name,
+            color: entry.color,
+            count: entry.count,
+          }));
+        } else {
+          evaluation = evaluateLens(lens, provider);
+          rows = lens.rules.map((rule) => ({
+            id: rule.id,
+            name: rule.name,
+            color: rule.color,
+            count: evaluation.ruleCounts.get(rule.id) ?? 0,
+          }));
+        }
         setResult({
           rows,
           coloredCount: evaluation.colorMap.size,
@@ -115,7 +122,7 @@ export default function LensPane() {
       }
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [doc, docId, lens, applyOverrides]);
+  }, [session, docId, lens, applyOverrides]);
 
   function reset(): void {
     setLensId("");

@@ -20,6 +20,8 @@ Ziel: die drei größten technischen Annahmen beweisen, bevor Struktur entsteht.
 
 ## M1 — Viewer-Parität (Lesen)
 
+> **Stand 2026-07-28:** Kernumfang umgesetzt in `editor-2.0/app` — Mosaic-Shell mit 5 Workspaces + eigenen Layouts, Multi-Dokument-Tabs, Statusleiste, Theme/UI-Zoom, Notizen/Recents, Crash-Boundary; virtualisierter Strukturbaum mit Suche und Mehrfachauswahl; Inspector (Übersicht/Eigenschaften mit Edit/Mengen/Beziehungen); React-Flow-Beziehungsgraph (Presets, Tiefe 1–5, Filter, Pinnen, Suche); Viewer mit Picking/Auswahl-Sync, Orbit/Pan/Zoom, benannten Ansichten, Isolation/Ausblenden, X-Ray (Ghost), Schnittebenen; Lens-Pane mit 5 Presets und Farb-/Hidden-Brücke zum Viewer. Größte Datei < 300 Zeilen. Offen: Abnahme auf Windows-Hardware (WebGPU, R1) und Gegenprobe mit großen Fremd-Tool-IFCs.
+
 - App-Shell: Mosaic-Panes, Workspaces (5 eingebaute + eigene), Multi-Dokument-Tabs, Statusleiste, Theme, UI-Skalierung, Recents, Notizen, Crash-Boundary.
 - Strukturbaum (virtualisiert, Suche, Multi-Select), Inspector lesend (Übersicht, Psets, Platzierung, Beziehungen, Ressourcen), Referenzen ein-/ausgehend.
 - Viewer: Auswahl-Sync, Zoom/Kamera, Schnittebenen, Isolation, X-Ray, benannte Ansichten; **Lens-Pane** (`@ifc-lite/lens`, regelbasiertes Färben/Filtern mit Presets).

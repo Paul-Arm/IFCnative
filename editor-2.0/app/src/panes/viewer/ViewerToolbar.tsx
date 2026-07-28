@@ -85,7 +85,7 @@ export default function ViewerToolbar(props: ViewerToolbarProps) {
         min={0}
         max={100}
         step={1}
-        disabled={disabled || !section.enabled}
+        disabled={disabled}
         value={section.position}
         aria-label="Position der Schnittebene"
         onChange={(event) =>

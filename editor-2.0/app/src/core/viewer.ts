@@ -157,9 +157,6 @@ function createSession(
     renderer.requestRender();
   };
 
-  const bounds = (): { min: Vec3Like; max: Vec3Like } | null =>
-    renderer.getModelBounds();
-
   void (async () => {
     let meshCount = 0;
     try {
@@ -168,15 +165,20 @@ function createSession(
         if (disposed) return;
         if (event.type !== "batch") continue;
         meshCount += event.meshes.length;
-        renderer.loadGeometry(event.meshes);
+        // isStreaming = true: nur Fragment-Batches statt O(N²)-Rebatching.
+        renderer.addMeshes(event.meshes, true);
         if (meshCount > 0 && !cameraTouched) renderer.fitToView();
         renderer.requestRender();
         onStatus({ kind: "loading", meshCount });
       }
       if (disposed) return;
       streaming = false;
-      const box = bounds();
-      if (box) camera.setSceneBounds(box);
+      // Fragmente zu kompakten Batches verschmelzen (Pflicht nach Streaming).
+      const device = renderer.getGPUDevice();
+      const pipeline = renderer.getPipeline();
+      if (device && pipeline)
+        await renderer.getScene().finalizeStreamingAsync(device, pipeline);
+      if (disposed) return;
       if (!cameraTouched) renderer.fitToView();
       refresh();
       onStatus({ kind: "ready", meshCount });
@@ -226,7 +228,7 @@ function createSession(
     },
 
     zoomToModel() {
-      const box = bounds();
+      const box = renderer.getModelBounds();
       cameraTouched = true;
       if (box) void camera.zoomExtent(box.min, box.max, 300);
       else renderer.fitToView();
@@ -251,7 +253,7 @@ function createSession(
     },
 
     presetView(preset) {
-      const box = bounds();
+      const box = renderer.getModelBounds();
       cameraTouched = true;
       if (preset === "iso") {
         if (box) camera.fitToBounds(box.min, box.max);
@@ -286,10 +288,4 @@ function createSession(
       renderer.requestRender();
     },
   };
-}
-
-interface Vec3Like {
-  x: number;
-  y: number;
-  z: number;
 }
