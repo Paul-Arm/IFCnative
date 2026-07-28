@@ -63,6 +63,15 @@ export const BUILTIN_WORKSPACES: Record<string, MosaicNode<PaneId>> = {
     ],
     splitPercentages: [20, 80],
   },
+  Prüfung: {
+    type: "split",
+    direction: "row",
+    children: [
+      "checks",
+      { type: "split", direction: "column", children: ["viewer", "inspector"], splitPercentages: [60, 40] },
+    ],
+    splitPercentages: [40, 60],
+  },
   Start: {
     type: "split",
     direction: "row",

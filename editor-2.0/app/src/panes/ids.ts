@@ -11,6 +11,7 @@ export const PANE_IDS = [
   "catalog",
   "lists",
   "builder",
+  "checks",
 ] as const;
 
 export type PaneId = (typeof PANE_IDS)[number];
@@ -27,4 +28,5 @@ export const PANE_TITLES: Record<PaneId, string> = {
   catalog: "Objektkatalog",
   lists: "Listen",
   builder: "Baukasten",
+  checks: "Prüfzentrum",
 };

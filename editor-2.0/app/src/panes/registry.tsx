@@ -21,6 +21,7 @@ const RecentsPane = lazy(() => import("./recents/RecentsPane"));
 const PsetBatchPane = lazy(() => import("./pset-batch/PsetBatchPane"));
 const CatalogPane = lazy(() => import("./catalog/CatalogPane"));
 const ListsPane = lazy(() => import("./lists/ListsPane"));
+const ChecksPane = lazy(() => import("./checks/ChecksPane"));
 const BuilderPane = lazy(() => import("./builder/BuilderPane"));
 
 const COMPONENTS: Record<PaneId, ComponentType> = {
@@ -34,6 +35,7 @@ const COMPONENTS: Record<PaneId, ComponentType> = {
   "pset-batch": PsetBatchPane,
   catalog: CatalogPane,
   lists: ListsPane,
+  checks: ChecksPane,
   builder: BuilderPane,
 };
 
