@@ -86,6 +86,8 @@ Ziel: die drei größten technischen Annahmen beweisen, bevor Struktur entsteht.
 
 ## M7 — Politur & Release
 
+> **Stand 2026-07-28: Kernumfang umgesetzt.** Export-Menü (IFC, **ifcZIP** lesen+schreiben, glTF/GLB, CSV in 4 Modi, JSON-LD, Parquet/BOS — alle aus dem Sitzungs-Export, alle real verifiziert); **2D-Ansicht** (@ifc-lite/drawing-2d: Grundrisse + X/Z-Schnitte, eigene SVG-Zeichnung mit Auswahl-Sync über entityIds, Export als Plan-SVG A3 mit Maßstab/Schriftfeld; Messbefunde: Mesh-Positionen bauteillokal → origin addieren, Geschossbezug geometrieabgeleitet statt IFC-Elevation); Erststart-Hinweis „Standardprogramm" (E11, UserChoice respektiert); Auto-Update als inaktive Vorlage mit Aktivierungsanleitung (E12); CI mit eigenem Hub-Test-Job + Installer-Größe im Summary; **deutsches Handbuch** (docs/handbuch.md). 86 App- + 22 Hub-Tests grün. Offen/Backlog: Föderations-Workspace, Performance-Pass 1-GB-Modell auf echter Hardware, Hub-Sidecar-Verdrahtung, Handbuch-Abschnitt 2D-Ansicht nachziehen.
+
 - Föderations-/Koordinations-Workspace (`merge`), 2D-Ableitungen (`drawing-2d`), Export-Menü (glTF/CSV/JSON-LD/Parquet/IFC5), ifcZIP.
 - Performance-Pass (1-GB-Modell), Handbuch (deutsch).
 - Installer-Finalisierung: Auto-Update (Tauri Updater), „Als Standard festlegen"-Hinweisdialog beim ersten Start. Code-Signing-Schritt im Build vorbereitet, aber deaktiviert (Zertifikat vorhanden, Einsatz zurückgestellt — E12); MSI-Variante im Backlog (E13).
