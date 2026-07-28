@@ -3,7 +3,7 @@
  * Objekte samt Kaskade löschen. Der Hook hält nur den Dialogzustand — jede
  * Modelländerung läuft über `execute` durch die Command-Pipeline.
  */
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { Connection } from "@xyflow/react";
 import { useCommands } from "../../commands/pipeline";
 import {
@@ -120,15 +120,29 @@ export function useGraphEditing(
     [docId, session, execute],
   );
 
-  return {
-    connect,
-    removal,
-    onConnect,
-    confirmConnect,
-    cancelConnect,
-    requestRemoval,
-    confirmRemoval,
-    cancelRemoval,
-    deleteRelation,
-  };
+  // Stabile Identität, damit abhängige Hooks nicht bei jedem Render neu bauen.
+  return useMemo(
+    () => ({
+      connect,
+      removal,
+      onConnect,
+      confirmConnect,
+      cancelConnect,
+      requestRemoval,
+      confirmRemoval,
+      cancelRemoval,
+      deleteRelation,
+    }),
+    [
+      connect,
+      removal,
+      onConnect,
+      confirmConnect,
+      cancelConnect,
+      requestRemoval,
+      confirmRemoval,
+      cancelRemoval,
+      deleteRelation,
+    ],
+  );
 }

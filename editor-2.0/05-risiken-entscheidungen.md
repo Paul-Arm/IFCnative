@@ -11,6 +11,8 @@
 | Element-Builder | `IfcCreator`: Wand + Tür erzeugt echte `IFCOPENINGELEMENT`/`IFCRELVOIDSELEMENT`/`IFCRELFILLSELEMENT`-Kette | ✅ bestanden |
 | Nativer Fast-Path | `ifc-lite-processing 4.1.4` (crates.io) nativ ausgeführt: Wand/Öffnung/Tür → 3 Meshes in ~1,6 ms; camelCase-Kontrakt der `NativeBridge` verifiziert | ✅ bestanden |
 | Tauri-Build unter Linux | Container hat kein webkit2gtk/gtk3 → Desktop-Build nur auf Windows/CI (`.github/workflows/editor2-windows.yml`) | ℹ Hinweis |
+| M2-Befund B5 (Export-Reproduzierbarkeit) | aus dem Overlay neu erzeugte Records (IfcPropertySet, IfcRelDefinesByProperties) bekommen bei **jedem** Export frische GlobalIds → zwei Exporte desselben Editierstands sind nicht byte-gleich (mutationsfreie Exporte schon). Relevant für Hub-Versionierung/Diff in M6: entweder GUIDs im Overlay fixieren (Upstream/Wrapper) oder Diff GUID-tolerant machen | ⚠ für M6 |
+| M2-Befund B4 (Änderungszähler) | `getMutations().length` schrumpft bei Undo nicht (append-only) — als „ungespeicherte Änderungen"-Anzeige nur näherungsweise brauchbar; verlässlich ist der Export-Vergleich | ℹ Hinweis |
 
 ## Risiken (in M0 zu verifizieren)
 

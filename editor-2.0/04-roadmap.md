@@ -31,6 +31,8 @@ Ziel: die drei größten technischen Annahmen beweisen, bevor Struktur entsteht.
 
 ## M2 — Editierkern
 
+> **Stand 2026-07-28:** Kernumfang umgesetzt. Command-Pipeline (run/undo, Stapel je Dokument, Audit-Log, Strg+Z/Y, Header-Buttons mit Operations-Tooltip); Inspector schreibend (Pset anlegen/umbenennen/duplizieren/löschen, typisierte Property-Werte mit Validierung, Identität, Mengen); Beziehungs-Editing mit Sitzungs-Overlay über dem statischen CSR-Graphen, Endpunkt-Legalitätsregeln, Beziehung anlegen per Knoten-Verbinden im Graph, Beziehung/Objekt löschen mit Kaskadenplan-Dialog, Reklassifizierung; 23 Verhaltenstests mit Byte-Vergleich (30 gesamt). Zwei durch Tests gefundene Kern-Defekte behoben (B1 Extractor-Verdrahtung — verhinderte Property-Verlust beim Export; B3 Attribut-Undo). Offen aus dem M2-Plan: Domänen-Writer für Material/Klassifikation/Gruppen (→ mit M3 zusammengelegt), Raw-STEP-Editor („Erweitert").
+
 - Command-Pipeline: Mutations, Undo/Redo, Audit-Log, Dirty-Flag, Export-Guard.
 - Inspector schreibend: Identität, typisierte Pset-/Qto-Werte, Pset umbenennen/duplizieren/löschen, Beziehungen anlegen/ändern/löschen (endpoint-legal), Typzuweisung.
 - Domänenschicht-Writer über `addEntity`: Materialien (einfach/Schichten/Profile/Bestandteile), Klassifikation/Dokument/Bibliothek, Gruppen/Zonen/Systeme, Freigaben/Constraints, Einheiten.

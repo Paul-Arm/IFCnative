@@ -5,6 +5,7 @@
 import {
   IfcParser,
   extractPropertiesOnDemand,
+  extractQuantitiesOnDemand,
   normalizeIfcTypeName,
   type IfcDataStore,
 } from "@ifc-lite/parser";
@@ -71,6 +72,17 @@ export class ModelSession {
         onProgress?.(percent, phase),
     });
     const view = new MutablePropertyView(store.properties, fileName);
+    // Befund B1 (tests/m2-editierkern.test.ts): parseColumnar füllt die
+    // Property-/Quantity-Tabellen absichtlich NICHT — ohne diese Verdrahtung
+    // liefert getPropertyValue() für geparste Werte null, Undo löscht statt
+    // wiederherzustellen, und der Export verliert beim Ändern einer Property
+    // die übrigen Properties desselben Psets.
+    view.setOnDemandExtractor((entityId: number) =>
+      extractPropertiesOnDemand(store, entityId),
+    );
+    view.setQuantityExtractor((entityId: number) =>
+      extractQuantitiesOnDemand(store, entityId),
+    );
     return new ModelSession(fileName, store, view);
   }
 

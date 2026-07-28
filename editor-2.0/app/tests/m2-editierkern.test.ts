@@ -258,22 +258,20 @@ describe("M2: cmdSetProperty auf bestehende Property", () => {
     return openSession(exportText(seed), "m2-mit-pset.ifc");
   }
 
-  it("BEFUND B1: ohne On-Demand-Extractor kennt das Overlay den geparsten Altwert nicht", async () => {
+  it("B1 GEFIXT: ModelSession verdrahtet den On-Demand-Extractor — Overlay kennt den geparsten Altwert", async () => {
+    // Historie: parseColumnar füllt store.properties absichtlich nicht; ohne
+    // setOnDemandExtractor lieferte getPropertyValue() null und das Undo
+    // LÖSCHTE bestehende Properties. Seit dem Fix in ModelSession.open ist
+    // der Extractor immer verdrahtet.
     const session = await sessionWithExistingProperty();
     const [wall] = wallIds(session);
 
-    // Die Property IST im Modell vorhanden …
     expect(readProperty(session, wall, "Pset_WallCommon", "FireRating")).toBe(
       "REI 30",
     );
-    // … aber MutablePropertyView liest sie nicht, weil ModelSession nur
-    // `store.properties` als Basistabelle übergibt und `setOnDemandExtractor`
-    // nie aufruft. parseColumnar füllt diese Tabelle nicht.
     expect(session.view.getPropertyValue(wall, "Pset_WallCommon", "FireRating"))
-      .toBeNull();
+      .toBe("REI 30");
 
-    // Folge: cmdSetProperty merkt sich oldValue === null; das Undo LÖSCHT die
-    // Property, statt den Altwert wiederherzustellen.
     const command = cmdSetProperty(
       session,
       wall,
@@ -287,7 +285,7 @@ describe("M2: cmdSetProperty auf bestehende Property", () => {
     const reparsed = await openSession(exportText(session));
     const [wall2] = wallIds(reparsed);
     expect(readProperty(reparsed, wall2, "Pset_WallCommon", "FireRating"))
-      .toBeUndefined();
+      .toBe("REI 30");
   });
 
   it("mit verdrahtetem On-Demand-Extractor stellt undo den alten WERT wieder her", async () => {
@@ -367,7 +365,11 @@ describe("M2: cmdSetAttribute (Name einer Wand)", () => {
     expect(exportText(session)).toContain("Wand A (geändert)");
   });
 
-  it("BEFUND B3: undo räumt das Overlay, der Export behält aber den neuen Namen", async () => {
+  it("B3 GEFIXT: cmdSetAttribute-Undo stellt den Export byte-identisch her", async () => {
+    // Historie: der StepExporter liest UPDATE_ATTRIBUTE aus der append-only
+    // Mutationshistorie; der frühere Undo-Pfad (removeAttributeMutation)
+    // räumte nur die Overlay-Map und ließ den neuen Namen im Export stehen.
+    // Seit dem Fix ist das Undo ein history-anhängendes Gegen-setAttribute.
     const session = await openSession(createSampleIfc());
     const [wall] = wallIds(session);
     const oldName = session.store.entities.getName(wall);
@@ -381,19 +383,11 @@ describe("M2: cmdSetAttribute (Name einer Wand)", () => {
       oldName,
     );
     command.run();
+    expect(exportText(session)).toContain("Wand A (geändert)");
     command.undo();
 
-    // Das Overlay-Map ist korrekt geleert …
-    expect(session.view.getAttributeMutationsForEntity(wall)).toEqual([]);
-    // … aber der StepExporter liest UPDATE_ATTRIBUTE aus der APPEND-ONLY
-    // Mutationshistorie (`getMutations()`), nicht aus dem Overlay-Map.
-    // `removeAttributeMutation()` — der Undo-Pfad von cmdSetAttribute —
-    // entfernt nichts aus dieser Historie, also bleibt der neue Name im Export.
-    expect(
-      session.view.getMutations().filter((m) => m.type === "UPDATE_ATTRIBUTE"),
-    ).toHaveLength(1);
-    expect(exportText(session)).toContain("Wand A (geändert)");
-    expect(exportData(session)).not.toBe(before);
+    expect(exportText(session)).not.toContain("Wand A (geändert)");
+    expect(exportData(session)).toBe(before);
   });
 
   it("ein History-anhängendes Gegen-setAttribute stellt den Export byte-identisch her", async () => {

@@ -12,16 +12,10 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Background,
-  Controls,
-  MiniMap,
-  ReactFlow,
   ReactFlowProvider,
   useNodesState,
   useReactFlow,
-  type EdgeMouseHandler,
   type NodeMouseHandler,
-  type NodeTypes,
   type OnNodeDrag,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -30,11 +24,13 @@ import { useActiveDocument } from "../../store/documents";
 import { useSelection, useSelectionOf } from "../../store/selection";
 import { useUi } from "../../store/ui";
 import { useCommands } from "../../commands/pipeline";
-import GraphNode, { type IfcFlowNode } from "./GraphNode";
+import type { IfcFlowNode } from "./GraphNode";
+import GraphCanvas from "./GraphCanvas";
 import GraphToolbar from "./GraphToolbar";
 import CascadeDialog from "./CascadeDialog";
 import RelationDialog from "./RelationDialog";
 import { useGraphEditing } from "./useGraphEditing";
+import { useEdgeSelection } from "./useEdgeSelection";
 import { matchingNodes, toFlowEdges, toFlowNodes } from "./elements";
 import {
   clearPinned,
@@ -47,7 +43,6 @@ import {
 import { useTypeFilter } from "./useTypeFilter";
 import { NODE_CAP, useNeighborhood } from "./useNeighborhood";
 
-const NODE_TYPES: NodeTypes = { ifc: GraphNode };
 const EMPTY_POSITIONS: ReadonlyMap<number, NodePosition> = new Map();
 
 export default function GraphPane() {
@@ -71,7 +66,6 @@ function GraphPaneInner() {
   const [search, setSearch] = useState("");
   const [anchorId, setAnchorId] = useState<number | null>(null);
   const [layoutVersion, setLayoutVersion] = useState(0);
-  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const fromGraph = useRef(false);
 
   // Jede ausgeführte, rückgängig gemachte oder wiederholte Operation erhöht
@@ -137,20 +131,14 @@ function GraphPaneInner() {
         : [],
     [neighborhood, positions, pickedSet, matchSet],
   );
+  const edgeSelection = useEdgeSelection(neighborhood, editing, lastSelected);
   const flowEdges = useMemo(
-    () => (neighborhood ? toFlowEdges(neighborhood.edges, selectedEdgeId) : []),
-    [neighborhood, selectedEdgeId],
+    () =>
+      neighborhood
+        ? toFlowEdges(neighborhood.edges, edgeSelection.selectedEdgeId)
+        : [],
+    [neighborhood, edgeSelection.selectedEdgeId],
   );
-
-  const selectedEdge = useMemo(
-    () => neighborhood?.edges.find((edge) => edge.id === selectedEdgeId) ?? null,
-    [neighborhood, selectedEdgeId],
-  );
-
-  // Kantenauswahl gilt nur für die aktuell dargestellte Nachbarschaft.
-  useEffect(() => {
-    setSelectedEdgeId(null);
-  }, [neighborhood]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<IfcFlowNode>([]);
   useEffect(() => {
@@ -216,38 +204,6 @@ function GraphPaneInner() {
     setLayoutVersion((version) => version + 1);
   }, [key]);
 
-  const onEdgeClick = useCallback<EdgeMouseHandler>((_event, edge) => {
-    setSelectedEdgeId((current) => (current === edge.id ? null : edge.id));
-  }, []);
-
-  const onDeleteRelation = useCallback(() => {
-    if (!selectedEdge?.relId) return;
-    editing.deleteRelation(
-      selectedEdge.relId,
-      `${selectedEdge.label} #${selectedEdge.source} → #${selectedEdge.target}`,
-    );
-    setSelectedEdgeId(null);
-  }, [selectedEdge, editing]);
-
-  const onDeleteSelection = useCallback(() => {
-    if (lastSelected === null) return;
-    editing.requestRemoval(lastSelected);
-  }, [lastSelected, editing]);
-
-  const onKeyDown = useCallback(
-    (event: React.KeyboardEvent<HTMLDivElement>) => {
-      if (event.key !== "Delete" && event.key !== "Backspace") return;
-      if (selectedEdge) {
-        event.preventDefault();
-        onDeleteRelation();
-      } else if (lastSelected !== null) {
-        event.preventDefault();
-        onDeleteSelection();
-      }
-    },
-    [selectedEdge, lastSelected, onDeleteRelation, onDeleteSelection],
-  );
-
   if (!doc) {
     return <p className="pane-empty">Kein Dokument geöffnet.</p>;
   }
@@ -276,9 +232,9 @@ function GraphPaneInner() {
         canAnchor={lastSelected !== null && lastSelected !== anchorId}
         onResetLayout={onResetLayout}
         canResetLayout={key !== "" && hasPinned(key)}
-        onDeleteRelation={onDeleteRelation}
-        canDeleteRelation={Boolean(selectedEdge?.relId)}
-        onDeleteEntity={onDeleteSelection}
+        onDeleteRelation={edgeSelection.onDeleteRelation}
+        canDeleteRelation={Boolean(edgeSelection.selectedEdge?.relId)}
+        onDeleteEntity={edgeSelection.onDeleteEntity}
         canDeleteEntity={lastSelected !== null}
         status={status}
       />
@@ -288,32 +244,18 @@ function GraphPaneInner() {
           gewählten Objekts.
         </p>
       ) : (
-        <div className="graph-flow" tabIndex={0} onKeyDown={onKeyDown}>
-          <ReactFlow<IfcFlowNode>
-            nodes={nodes}
-            edges={flowEdges}
-            onNodesChange={onNodesChange}
-            nodeTypes={NODE_TYPES}
-            onNodeClick={onNodeClick}
-            onNodeDoubleClick={onNodeDoubleClick}
-            onNodeDragStop={onNodeDragStop}
-            onEdgeClick={onEdgeClick}
-            onConnect={editing.onConnect}
-            colorMode={theme === "dark" ? "dark" : "light"}
-            nodesConnectable
-            edgesReconnectable={false}
-            elementsSelectable
-            deleteKeyCode={null}
-            minZoom={0.05}
-            maxZoom={2.5}
-            proOptions={{ hideAttribution: true }}
-            fitView
-          >
-            <Background gap={20} />
-            <Controls showInteractive={false} />
-            <MiniMap pannable zoomable />
-          </ReactFlow>
-        </div>
+        <GraphCanvas
+          nodes={nodes}
+          edges={flowEdges}
+          dark={theme === "dark"}
+          onNodesChange={onNodesChange}
+          onNodeClick={onNodeClick}
+          onNodeDoubleClick={onNodeDoubleClick}
+          onNodeDragStop={onNodeDragStop}
+          onEdgeClick={edgeSelection.onEdgeClick}
+          onConnect={editing.onConnect}
+          onKeyDown={edgeSelection.onKeyDown}
+        />
       )}
 
       {editing.connect && (
