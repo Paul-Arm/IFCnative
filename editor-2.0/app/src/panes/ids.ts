@@ -12,6 +12,7 @@ export const PANE_IDS = [
   "lists",
   "builder",
   "checks",
+  "hub",
 ] as const;
 
 export type PaneId = (typeof PANE_IDS)[number];
@@ -29,4 +30,5 @@ export const PANE_TITLES: Record<PaneId, string> = {
   lists: "Listen",
   builder: "Baukasten",
   checks: "Prüfzentrum",
+  hub: "IFC-Hub",
 };

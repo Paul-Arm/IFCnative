@@ -72,6 +72,12 @@ export const BUILTIN_WORKSPACES: Record<string, MosaicNode<PaneId>> = {
     ],
     splitPercentages: [40, 60],
   },
+  Hub: {
+    type: "split",
+    direction: "row",
+    children: ["hub", "viewer"],
+    splitPercentages: [55, 45],
+  },
   Start: {
     type: "split",
     direction: "row",
