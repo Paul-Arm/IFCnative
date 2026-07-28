@@ -65,6 +65,8 @@ Ziel: die drei größten technischen Annahmen beweisen, bevor Struktur entsteht.
 
 ## M5 — Prüfzentrum
 
+> **Stand 2026-07-28: umgesetzt.** Prüfzentrum-Pane mit Quellen-Registry (fehlertolerante Anmeldung je Quelle): Modell-Diagnostik (Projekt/Einheiten/doppelte GlobalIds/Placement/Repräsentation/Containment), Objektinfo-Portierung aus 1.x (alle 8 Befundarten inkl. Semikolon-Referenzlisten), **IDS-Prüfung** (Dateien laden + Katalog-IDS übernehmen; Bridge-Accessor um Sitzungs-Overlay/Tombstones/Retype erweitert — geprüft wird der Bearbeitungsstand), **Kollisionsprüfung** (@ifc-lite/clash über Export→Geometrie→Engine, gleiche expressIds). Vereinheitlichte Findings-UI (Severity-Zähler, Filter, klickbare Objekt-Chips, 3D-Markierung rot/orange über die Lens-Brücke, Veraltungs-Hinweis über Doc-Revision), **BCF-Export** (.bcfzip, ein Topic je Befund mit Komponenten-Auswahl). 75 Tests grün. Offen: Quick-Fix-Framework je Befundart (Katalog-Fixes existieren bereits in M3) — Backlog-Kandidat.
+
 - Modell-Diagnostik, Objektinfo-Prüfung (Portierung), IDS-Runner (Worker), Clash Detection.
 - Vereinheitlichte Findings-UI, 3D-Highlight/Isolation, deutscher Report, BCF-Export.
 - Quick-Fix-Framework über Command-Pipeline.

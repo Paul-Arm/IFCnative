@@ -83,6 +83,8 @@ export default function ChecksPane() {
     [findings, filter],
   );
   const counts = useMemo(() => severityCounts(findings), [findings]);
+  /** Gefilterte Fehlschläge — Grundlage für Auswahl und 3D-Markierung. */
+  const visibleFailures = useMemo(() => failuresOf(visible), [visible]);
   const checked = sumChecked(state);
   const failedCount = affectedEntityIds(failuresOf(findings)).length;
   const stale = state.ranAtRevision !== null && revision > state.ranAtRevision;
@@ -127,10 +129,8 @@ export default function ChecksPane() {
         </button>
         <button
           className="btn"
-          disabled={visible.length === 0}
-          onClick={() =>
-            setSelection(docId, affectedEntityIds(failuresOf(visible)))
-          }
+          disabled={visibleFailures.length === 0}
+          onClick={() => setSelection(docId, affectedEntityIds(visibleFailures))}
           title={ISOLATE_TITLE}
           type="button"
         >
@@ -139,12 +139,12 @@ export default function ChecksPane() {
         <button
           className="btn"
           data-active={marked}
-          disabled={visible.length === 0}
+          disabled={visibleFailures.length === 0}
           onClick={() =>
             applyOverrides(
               docId,
               HIGHLIGHT_SOURCE,
-              findingColors(failuresOf(visible)),
+              findingColors(visibleFailures),
               NO_HIDDEN,
             )
           }
