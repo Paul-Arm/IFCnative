@@ -16,7 +16,6 @@ import {
   type MutationStoreShape,
 } from "@ifc-lite/mutations";
 import { StepExporter } from "@ifc-lite/export";
-import { PropertyValueType } from "@ifc-lite/data";
 import { buildSpatialTree, type SpatialTreeNode } from "./model/spatial";
 import { relationsOf, type RelationRow } from "./model/relations";
 import { RelationOverlay } from "./model/relationOverlay";
@@ -133,14 +132,9 @@ export class ModelSession {
     return value === null || value === undefined ? "" : String(value);
   }
 
-  setProperty(
-    expressId: number,
-    pset: string,
-    prop: string,
-    value: string,
-  ): void {
-    this.view.setProperty(expressId, pset, prop, value, PropertyValueType.Label);
-  }
+  // Review-Befund 13: `setProperty` ist ersatzlos entfallen — es umging die
+  // Command-Pipeline (kein Undo, kein Audit-Eintrag) und hatte keinen
+  // Aufrufer mehr. Der einzige Schreibweg ist `cmdSetProperty`.
 
   get changeCount(): number {
     return this.view.getMutations().length;
@@ -149,12 +143,32 @@ export class ModelSession {
   // — Lese-APIs für Panes (M1). Teure Ergebnisse werden pro Sitzung gecacht. —
 
   private spatialTreeCache: SpatialTreeNode | null | undefined;
+  private spatialTreeKey = "";
+  /** Wird von strukturellen Commands hochgezählt (siehe invalidateSpatialTree). */
+  private structureRev = 0;
 
+  /**
+   * Räumlicher Baum inklusive Overlay-Beziehungen und Tombstones
+   * (Review-Befund 2). Der Cache hängt an einem Schlüssel aus
+   * Beziehungs-Revision, Tombstone-Zahl und dem expliziten Struktur-Zähler —
+   * ohne den zeigte der Strukturbaum strukturelle Edits nie.
+   */
   spatialTree(): SpatialTreeNode | null {
-    if (this.spatialTreeCache === undefined) {
-      this.spatialTreeCache = buildSpatialTree(this.store);
+    const key = `${this.relationOverlay.revision}:${this.view.getTombstones().size}:${this.structureRev}`;
+    if (this.spatialTreeCache === undefined || this.spatialTreeKey !== key) {
+      this.spatialTreeCache = buildSpatialTree(this.store, {
+        overlay: this.relationOverlay,
+        isDeleted: (id) => this.view.isDeleted(id),
+      });
+      this.spatialTreeKey = key;
     }
     return this.spatialTreeCache;
+  }
+
+  /** Cache des Strukturbaums verwerfen (Commands rufen das in run/undo/redo). */
+  invalidateSpatialTree(): void {
+    this.structureRev++;
+    this.spatialTreeCache = undefined;
   }
 
   identityOf(expressId: number): EntityIdentity {
@@ -166,7 +180,10 @@ export class ModelSession {
   }
 
   relationsOf(expressId: number): RelationRow[] {
-    return relationsOf(this.store, expressId, this.relationOverlay);
+    // Befund 4b: Zeilen zu tombstoneten Gegenstellen fallen zentral hier heraus.
+    return relationsOf(this.store, expressId, this.relationOverlay, (id) =>
+      this.view.isDeleted(id),
+    );
   }
 
   labelOf(expressId: number): string {

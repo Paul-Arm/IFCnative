@@ -81,16 +81,29 @@ function nameOf(store: IfcDataStore, expressId: number): string {
   }
 }
 
+/**
+ * Beziehungszeilen eines Objekts.
+ *
+ * `isDeleted` (Review-Befund 4b) blendet Zeilen aus, deren Gegenseite im
+ * Mutations-Overlay tombstoned ist — ohne diesen Filter zeigen Inspector und
+ * Graph Kanten zu Objekten, die es nach dem Export nicht mehr gibt.
+ */
 export function relationsOf(
   store: IfcDataStore,
   expressId: number,
   overlay?: RelationOverlay,
+  isDeleted?: (expressId: number) => boolean,
 ): RelationRow[] {
   const rows: RelationRow[] = [];
   for (const direction of ["forward", "inverse"] as const) {
     for (const edge of edgesOf(store, expressId, direction)) {
       const relId = edge.relationshipId ?? 0;
       if (overlay?.isSuppressed(relId)) continue;
+      // Befund 1: Bei Multi-Target-Beziehungen kann ein einzelnes Mitglied
+      // entfernt sein — in beiden Kantenrichtungen.
+      if (overlay?.isMemberSuppressed(relId, edge.target)) continue;
+      if (overlay?.isMemberSuppressed(relId, expressId)) continue;
+      if (isDeleted?.(edge.target)) continue;
       rows.push({
         otherId: edge.target,
         otherType: typeNameOf(store, edge.target),
@@ -104,6 +117,7 @@ export function relationsOf(
     }
   }
   for (const row of overlay?.relationsFor(expressId) ?? []) {
+    if (isDeleted?.(row.otherId)) continue;
     rows.push({
       otherId: row.otherId,
       otherType: typeNameOf(store, row.otherId),
@@ -124,7 +138,8 @@ export function neighborsOf(
   expressId: number,
   types?: ReadonlySet<RelationshipType>,
   overlay?: RelationOverlay,
+  isDeleted?: (expressId: number) => boolean,
 ): RelationRow[] {
-  const rows = relationsOf(store, expressId, overlay);
+  const rows = relationsOf(store, expressId, overlay, isDeleted);
   return types ? rows.filter((r) => types.has(r.relType)) : rows;
 }

@@ -37,6 +37,14 @@ export interface OverlayRelationRow {
 export class RelationOverlay {
   private readonly added = new Map<number, OverlayRelation>();
   private readonly suppressed = new Set<number>();
+  /**
+   * Review-Befund 1: Bei Multi-Target-Beziehungen (ein
+   * IfcRelContainedInSpatialStructure für alle Wände eines Geschosses) darf
+   * das Löschen EINES Mitglieds die Beziehung nicht global unterdrücken.
+   * Diese Map merkt sich je Beziehung die entfernten Mitglieder;
+   * `relationsOf` blendet nur deren Kanten aus.
+   */
+  private readonly suppressedMembers = new Map<number, Set<number>>();
   private rev = 0;
 
   /** Zählt jede Änderung — Panes hängen ihre Caches daran auf. */
@@ -92,15 +100,51 @@ export class RelationOverlay {
     return this.suppressed.has(relId);
   }
 
+  /** Einzelnes Mitglied einer Multi-Target-Beziehung ausblenden. */
+  suppressMember(relId: number, expressId: number): void {
+    let members = this.suppressedMembers.get(relId);
+    if (!members) {
+      members = new Set<number>();
+      this.suppressedMembers.set(relId, members);
+    }
+    members.add(expressId);
+    this.rev++;
+  }
+
+  /** Undo von `suppressMember`. */
+  unsuppressMember(relId: number, expressId: number): void {
+    const members = this.suppressedMembers.get(relId);
+    if (!members) return;
+    members.delete(expressId);
+    if (members.size === 0) this.suppressedMembers.delete(relId);
+    this.rev++;
+  }
+
+  isMemberSuppressed(relId: number, expressId: number): boolean {
+    return this.suppressedMembers.get(relId)?.has(expressId) ?? false;
+  }
+
   getRelation(relId: number): OverlayRelation | null {
     return this.added.get(relId) ?? null;
   }
 
-  /** Alle aktiven Overlay-Beziehungen in Einfügereihenfolge. */
+  /**
+   * Alle aktiven Overlay-Beziehungen in Einfügereihenfolge — ohne
+   * unterdrückte Beziehungen und ohne einzeln entfernte Mitglieder.
+   */
   all(): OverlayRelation[] {
-    return [...this.added.values()].filter(
-      (relation) => !this.suppressed.has(relation.relExpressId),
-    );
+    const rows: OverlayRelation[] = [];
+    for (const relation of this.added.values()) {
+      if (this.suppressed.has(relation.relExpressId)) continue;
+      const targetIds = relation.targetIds.filter(
+        (id) => !this.isMemberSuppressed(relation.relExpressId, id),
+      );
+      if (targetIds.length === 0) continue;
+      rows.push(targetIds.length === relation.targetIds.length
+        ? relation
+        : { ...relation, targetIds });
+    }
+    return rows;
   }
 
   /** Zeilen für ein Objekt, in beiden Richtungen. */
@@ -115,9 +159,11 @@ export class RelationOverlay {
       };
       if (relation.sourceId === expressId) {
         for (const targetId of relation.targetIds) {
+          if (this.isMemberSuppressed(relation.relExpressId, targetId)) continue;
           rows.push({ ...base, otherId: targetId, direction: "forward" });
         }
       }
+      if (this.isMemberSuppressed(relation.relExpressId, expressId)) continue;
       if (relation.targetIds.includes(expressId)) {
         rows.push({
           ...base,
