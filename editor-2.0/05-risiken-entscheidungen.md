@@ -1,5 +1,17 @@
 # 05 — Risiken, offene Fragen, Entscheidungen
 
+## M0-Befunde (2026-07-28, `editor-2.0/app`, Tests: `tests/m0-durchstich.test.ts`)
+
+| Risiko | Befund | Status |
+| --- | --- | --- |
+| R1 (WebGPU in WebView2) | im Linux-Container nicht prüfbar; App fällt sauber auf Statusmeldung zurück, Editor bleibt ohne 3D voll funktionsfähig. **Prüfung auf Windows-Zielhardware offen** (Installer aus CI-Action) | ⚠ offen |
+| R2 (Export-Stabilität) | mutationsfreier Re-Export: **100 % der DATA-Zeilen byte-identisch**, alle GlobalIds unverändert (Testmodell aus `IfcCreator`; Gegenprobe mit Fremd-Tool-IFC in M1 nachziehen) | ✅ positiv |
+| R3 (Umlaute/`\X2\`) | `@ifc-lite/encoding` verlustfrei für äöüÄÖÜß/µ/–/„"; Nicht-ASCII wird korrekt escaped; Umlaut-Property übersteht den vollen Mutations-Roundtrip | ✅ bestanden |
+| Mutations-Roundtrip | parse → `setProperty` → `StepExporter(applyMutations)` → Reparse liefert den neuen Wert | ✅ bestanden |
+| Element-Builder | `IfcCreator`: Wand + Tür erzeugt echte `IFCOPENINGELEMENT`/`IFCRELVOIDSELEMENT`/`IFCRELFILLSELEMENT`-Kette | ✅ bestanden |
+| Nativer Fast-Path | `ifc-lite-processing 4.1.4` (crates.io) nativ ausgeführt: Wand/Öffnung/Tür → 3 Meshes in ~1,6 ms; camelCase-Kontrakt der `NativeBridge` verifiziert | ✅ bestanden |
+| Tauri-Build unter Linux | Container hat kein webkit2gtk/gtk3 → Desktop-Build nur auf Windows/CI (`.github/workflows/editor2-windows.yml`) | ℹ Hinweis |
+
 ## Risiken (in M0 zu verifizieren)
 
 ### R1 — WebGPU in WebView2 (Windows)

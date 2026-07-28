@@ -1,0 +1,26 @@
+[package]
+name = "ifcnative-editor"
+version = "2.0.0"
+description = "IFC native Editor 2.0 - Tauri-Shell mit nativem ifc-lite-Kern"
+edition = "2021"
+license = "MPL-2.0"
+
+[lib]
+name = "ifcnative_editor_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Nativer ifc-lite-Fast-Path: gleiche Pipeline wie Server/FFI, mit Rayon-Parallelität
+ifc-lite-processing = "4.1.4"
+
+[profile.release]
+lto = true
+codegen-units = 1

@@ -1,0 +1,40 @@
+{
+  "name": "ifcnative-editor-2",
+  "version": "2.0.0-m0",
+  "private": true,
+  "type": "module",
+  "description": "IFC native Editor 2.0 - M0 Durchstich (Tauri + ifc-lite)",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5273",
+    "build": "tsc --noEmit && vite build",
+    "test": "vitest run",
+    "lint": "eslint src",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@ifc-lite/create": "1.16.4",
+    "@ifc-lite/data": "2.8.0",
+    "@ifc-lite/encoding": "1.14.11",
+    "@ifc-lite/export": "2.6.0",
+    "@ifc-lite/geometry": "3.4.0",
+    "@ifc-lite/mutations": "1.21.0",
+    "@ifc-lite/parser": "3.10.1",
+    "@ifc-lite/query": "1.14.13",
+    "@ifc-lite/renderer": "1.39.0",
+    "@ifc-lite/wasm": "4.1.4",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.4",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.5",
+    "vitest": "^4.1.10"
+  }
+}

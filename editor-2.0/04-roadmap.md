@@ -4,6 +4,8 @@ Meilensteine sind so geschnitten, dass jeder ein lauffähiges, demonstrierbares 
 
 ## M0 — Technischer Durchstich (Spike, ~1–2 Wochen)
 
+> **Stand 2026-07-28:** umgesetzt in `editor-2.0/app` (Frontend + Tests + Tauri-Backend + CI-Workflow für den Windows-Installer). Befunde in `05-risiken-entscheidungen.md` → „M0-Befunde"; offen sind die Windows-Punkte (WebGPU-Check R1, Installer-/Doppelklick-Abnahme), die den ersten CI-Build auf `windows-latest` brauchen.
+
 Ziel: die drei größten technischen Annahmen beweisen, bevor Struktur entsteht.
 
 - Tauri-v2-Projekt (Scaffold via `create-ifc-lite`, dann angepasst) mit React/Vite-Frontend.
