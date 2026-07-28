@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { Mosaic, MosaicWindow } from "react-mosaic-component";
 import { useCommands } from "../commands/pipeline";
-import { HeaderBar } from "./HeaderBar";
+import { Ribbon } from "./ribbon/Ribbon";
 import { DocumentTabs } from "./DocumentTabs";
 import { FirstRunHint } from "./FirstRunHint";
 import { StatusBar } from "./StatusBar";
@@ -55,7 +55,7 @@ export function AppShell() {
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      <HeaderBar />
+      <Ribbon />
       <FirstRunHint />
       <DocumentTabs />
       <div style={{ flex: 1, minHeight: 0 }}>
