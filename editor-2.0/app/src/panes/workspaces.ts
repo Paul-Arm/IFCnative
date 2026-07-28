@@ -39,6 +39,21 @@ export const BUILTIN_WORKSPACES: Record<string, MosaicNode<PaneId>> = {
     ],
     splitPercentages: [75, 25],
   },
+  Daten: {
+    type: "split",
+    direction: "row",
+    children: [
+      "structure",
+      { type: "split", direction: "column", children: ["pset-batch", "catalog"], splitPercentages: [60, 40] },
+    ],
+    splitPercentages: [22, 78],
+  },
+  Auswertung: {
+    type: "split",
+    direction: "row",
+    children: ["lists", "viewer"],
+    splitPercentages: [55, 45],
+  },
   Start: {
     type: "split",
     direction: "row",

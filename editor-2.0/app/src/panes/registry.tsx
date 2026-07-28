@@ -13,6 +13,9 @@ const GraphPane = lazy(() => import("./graph/GraphPane"));
 const LensPane = lazy(() => import("./lens/LensPane"));
 const NotesPane = lazy(() => import("./notes/NotesPane"));
 const RecentsPane = lazy(() => import("./recents/RecentsPane"));
+const PsetBatchPane = lazy(() => import("./pset-batch/PsetBatchPane"));
+const CatalogPane = lazy(() => import("./catalog/CatalogPane"));
+const ListsPane = lazy(() => import("./lists/ListsPane"));
 
 const COMPONENTS: Record<PaneId, ComponentType> = {
   structure: StructurePane,
@@ -22,6 +25,9 @@ const COMPONENTS: Record<PaneId, ComponentType> = {
   lens: LensPane,
   notes: NotesPane,
   recents: RecentsPane,
+  "pset-batch": PsetBatchPane,
+  catalog: CatalogPane,
+  lists: ListsPane,
 };
 
 export function renderPane(id: PaneId) {

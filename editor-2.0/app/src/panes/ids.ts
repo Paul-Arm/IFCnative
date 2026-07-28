@@ -7,6 +7,9 @@ export const PANE_IDS = [
   "lens",
   "notes",
   "recents",
+  "pset-batch",
+  "catalog",
+  "lists",
 ] as const;
 
 export type PaneId = (typeof PANE_IDS)[number];
@@ -19,4 +22,7 @@ export const PANE_TITLES: Record<PaneId, string> = {
   lens: "Lens",
   notes: "Notizen",
   recents: "Kürzlich verwendet",
+  "pset-batch": "Pset Batch",
+  catalog: "Objektkatalog",
+  lists: "Listen",
 };
