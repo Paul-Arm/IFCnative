@@ -32,9 +32,11 @@ export default function IdsSection() {
   }
 
   return (
-    <section style={{ borderBottom: "1px solid var(--border)", padding: "6px 8px" }}>
-      <div className="pane-toolbar" style={{ border: 0, padding: 0 }}>
-        <strong style={{ fontWeight: 600 }}>IDS</strong>
+    <section
+      style={{ borderBottom: "1px solid var(--border-60)", padding: "0 0 6px" }}
+    >
+      <div className="pane-toolbar">
+        <strong className="card-title">IDS</strong>
         <input
           ref={fileInput}
           type="file"
@@ -84,32 +86,43 @@ export default function IdsSection() {
       </div>
 
       {error && (
-        <p style={{ color: "var(--error)", margin: "6px 0 0" }}>{error}</p>
+        <p className="msg msg-error" style={{ margin: "6px 0 0" }}>
+          {error}
+        </p>
       )}
 
       {entries.length === 0 ? (
-        <p className="text-dim" style={{ margin: "6px 0 0" }}>
+        <p className="list-note" style={{ marginTop: 4 }}>
           Kein IDS geladen — die IDS-Quelle liefert dann keine Befunde.
         </p>
       ) : (
-        <ul style={{ listStyle: "none", margin: "6px 0 0", padding: 0 }}>
+        <ul style={{ listStyle: "none", margin: "4px 0 0", padding: 0 }}>
           {entries.map((entry) => (
-            <li
-              key={entry.id}
-              style={{ alignItems: "baseline", display: "flex", gap: 6 }}
-            >
-              <span style={{ flex: 1 }}>{entry.name}</span>
-              <span className="text-dim">
+            <li key={entry.id} className="list-row">
+              <span
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {entry.name}
+              </span>
+              <span className="badge">
                 {entry.specCount} Spezifikation(en)
               </span>
-              <button
-                className="btn"
-                onClick={() => remove(entry.id)}
-                title="Dieses IDS-Dokument entfernen"
-                type="button"
-              >
-                Entfernen
-              </button>
+              <span className="row-actions">
+                <button
+                  className="btn btn-sm"
+                  onClick={() => remove(entry.id)}
+                  title="Dieses IDS-Dokument entfernen"
+                  type="button"
+                >
+                  Entfernen
+                </button>
+              </span>
             </li>
           ))}
         </ul>

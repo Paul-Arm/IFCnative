@@ -21,11 +21,14 @@ import {
   ruleForClass,
 } from "../core/model/relationshipRules";
 import {
+  AXIS_REFDIRECTION_INDEX,
   buildElement,
   buildOpening,
   builderClass,
   planDimensionEdits,
   planMove,
+  planRotation,
+  planScale,
   restorePositional,
   writePositional,
   type BuildContext,
@@ -222,6 +225,105 @@ export function cmdUpdateDimensions(
       edits = [];
     },
     /** Befund 12: Redo schreibt mit skipHistory, damit die Historie nicht wächst. */
+    redo() {
+      apply(true);
+    },
+  };
+}
+
+/**
+ * Bauteil drehen (Yaw um die IFC-Z-Achse): legt eine neue IfcDirection an
+ * und setzt sie als RefDirection des IfcAxis2Placement3D der Platzierung.
+ * Delta in Radiant, relativ zum aktuellen Winkel.
+ */
+export function cmdRotateElement(
+  session: ModelSession,
+  elementId: number,
+  deltaRad: number,
+): EditorCommand {
+  let edit: PositionalEdit | null = null;
+  /** Für das Redo gesicherter IfcDirection-Record (stabile expressId). */
+  let dirSnapshot: NewEntity | null = null;
+
+  const degrees = Math.round((deltaRad * 180) / Math.PI * 10) / 10;
+  const round9 = (value: number): number => Math.round(value * 1e9) / 1e9;
+
+  return {
+    label: `${session.labelOf(elementId)} gedreht (${fmt(degrees)}°)`,
+    run() {
+      const plan = planRotation(contextOf(session), elementId);
+      const angle = plan.currentRad + deltaRad;
+      const ref = session.editor().addEntity("IfcDirection", [
+        [round9(Math.cos(angle)), round9(Math.sin(angle)), 0],
+      ]);
+      const created = session.view.getNewEntity(ref.expressId);
+      dirSnapshot = created
+        ? { ...created, attributes: [...created.attributes] }
+        : null;
+      edit = writePositional(
+        session.view,
+        plan.axis,
+        AXIS_REFDIRECTION_INDEX,
+        `#${ref.expressId}`,
+        false,
+      );
+    },
+    undo() {
+      if (edit) restorePositional(session.view, edit);
+      if (dirSnapshot) session.editor().removeEntity(dirSnapshot.expressId);
+      edit = null;
+    },
+    /** Befund 12: Redo stellt den gesicherten Record wieder her. */
+    redo() {
+      if (!dirSnapshot) {
+        this.run();
+        return;
+      }
+      session.view.restoreNewEntity(dirSnapshot);
+      const plan = planRotation(contextOf(session), elementId);
+      edit = writePositional(
+        session.view,
+        plan.axis,
+        AXIS_REFDIRECTION_INDEX,
+        `#${dirSnapshot.expressId}`,
+        true,
+      );
+    },
+  };
+}
+
+/**
+ * Bauteil skalieren: Faktoren wirken als Maßänderung an der parametrischen
+ * Extrusion (XDim/YDim bzw. Radius, Depth) — nur für Bauteile mit
+ * Rechteck-/Kreisprofil möglich.
+ */
+export function cmdScaleElement(
+  session: ModelSession,
+  elementId: number,
+  factors: { x: number; y: number; z: number },
+): EditorCommand {
+  let edits: PositionalEdit[] = [];
+
+  const apply = (skipHistory: boolean): void => {
+    const planned = planScale(contextOf(session), elementId, factors);
+    edits = planned.map((planEntry) => write(session, planEntry, skipHistory));
+  };
+
+  const factorText = [factors.x, factors.y, factors.z]
+    .map((value) => `×${fmt(Math.round(value * 100) / 100)}`)
+    .join(" / ");
+
+  return {
+    label: `${session.labelOf(elementId)} skaliert (${factorText})`,
+    run() {
+      apply(false);
+    },
+    undo() {
+      for (const edit of [...edits].reverse()) {
+        restorePositional(session.view, edit);
+      }
+      edits = [];
+    },
     redo() {
       apply(true);
     },

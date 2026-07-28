@@ -1,100 +1,113 @@
-/** Eingebaute Workspace-Layouts (Mosaic-v6-Bäume). Nutzerdefinierte kommen aus dem UI-Slice. */
+/**
+ * Eingebaute Arbeitsbereiche. Ein Workspace besteht seit dem Sidebar-Umbau
+ * aus zwei Teilen: dem Mosaic-Layout der HAUPTFENSTER (nur MainPaneId) und
+ * optional dem Werkzeug, das dazu in der rechten Sidebar aufgeht.
+ * Nutzerdefinierte Workspaces kommen aus dem UI-Slice.
+ */
 import type { MosaicNode } from "react-mosaic-component";
-import type { PaneId } from "./ids";
+import type { MainPaneId, ToolPaneId } from "./ids";
 
-export const BUILTIN_WORKSPACES: Record<string, MosaicNode<PaneId>> = {
+export interface WorkspaceDef {
+  layout: MosaicNode<MainPaneId>;
+  /** Sidebar-Werkzeug, das dieser Arbeitsbereich öffnet (undefined = zu). */
+  tool?: ToolPaneId;
+}
+
+export const BUILTIN_WORKSPACES: Record<string, WorkspaceDef> = {
   Editor: {
-    type: "split",
-    direction: "row",
-    children: [
-      "structure",
-      { type: "split", direction: "row", children: ["viewer", "inspector"], splitPercentages: [55, 45] },
-    ],
-    splitPercentages: [22, 78],
+    layout: {
+      type: "split",
+      direction: "row",
+      children: [
+        "structure",
+        { type: "split", direction: "row", children: ["viewer", "inspector"], splitPercentages: [55, 45] },
+      ],
+      splitPercentages: [22, 78],
+    },
   },
   Review: {
-    type: "split",
-    direction: "row",
-    children: [
-      { type: "split", direction: "column", children: ["viewer", "notes"], splitPercentages: [70, 30] },
-      "inspector",
-    ],
-    splitPercentages: [65, 35],
+    layout: {
+      type: "split",
+      direction: "row",
+      children: ["viewer", "inspector"],
+      splitPercentages: [65, 35],
+    },
+    tool: "notes",
   },
   Graph: {
-    type: "split",
-    direction: "row",
-    children: [
-      "structure",
-      { type: "split", direction: "row", children: ["graph", "inspector"], splitPercentages: [60, 40] },
-    ],
-    splitPercentages: [20, 80],
+    layout: {
+      type: "split",
+      direction: "row",
+      children: [
+        "structure",
+        { type: "split", direction: "row", children: ["graph", "inspector"], splitPercentages: [60, 40] },
+      ],
+      splitPercentages: [20, 80],
+    },
   },
   Koordination: {
-    type: "split",
-    direction: "row",
-    children: [
-      { type: "split", direction: "column", children: ["viewer", "lens"], splitPercentages: [65, 35] },
-      "structure",
-    ],
-    splitPercentages: [75, 25],
+    layout: {
+      type: "split",
+      direction: "row",
+      children: ["viewer", "structure"],
+      splitPercentages: [75, 25],
+    },
+    tool: "lens",
   },
   Daten: {
-    type: "split",
-    direction: "row",
-    children: [
-      "structure",
-      { type: "split", direction: "column", children: ["pset-batch", "catalog"], splitPercentages: [60, 40] },
-    ],
-    splitPercentages: [22, 78],
+    layout: {
+      type: "split",
+      direction: "row",
+      children: ["structure", "pset-batch"],
+      splitPercentages: [25, 75],
+    },
+    tool: "catalog",
   },
   Auswertung: {
-    type: "split",
-    direction: "row",
-    children: ["lists", "viewer"],
-    splitPercentages: [55, 45],
+    layout: {
+      type: "split",
+      direction: "row",
+      children: ["lists", "viewer"],
+      splitPercentages: [55, 45],
+    },
   },
   Bauen: {
-    type: "split",
-    direction: "row",
-    children: [
-      "structure",
-      { type: "split", direction: "row", children: ["viewer", "builder"], splitPercentages: [58, 42] },
-    ],
-    splitPercentages: [20, 80],
+    layout: {
+      type: "split",
+      direction: "row",
+      children: ["structure", "viewer"],
+      splitPercentages: [25, 75],
+    },
+    tool: "builder",
   },
   Prüfung: {
-    type: "split",
-    direction: "row",
-    children: [
-      "checks",
-      { type: "split", direction: "column", children: ["viewer", "inspector"], splitPercentages: [60, 40] },
-    ],
-    splitPercentages: [40, 60],
+    layout: {
+      type: "split",
+      direction: "row",
+      children: ["viewer", "inspector"],
+      splitPercentages: [60, 40],
+    },
+    tool: "checks",
   },
   IDS: {
-    type: "split",
-    direction: "row",
-    children: ["ids-validation", "viewer"],
-    splitPercentages: [55, 45],
+    layout: "viewer",
+    tool: "ids-validation",
   },
   Hub: {
-    type: "split",
-    direction: "row",
-    children: ["hub", "viewer"],
-    splitPercentages: [55, 45],
+    layout: "viewer",
+    tool: "hub",
   },
   Pläne: {
-    type: "split",
-    direction: "row",
-    children: ["drawing", "structure"],
-    splitPercentages: [72, 28],
+    layout: {
+      type: "split",
+      direction: "row",
+      children: ["drawing", "structure"],
+      splitPercentages: [72, 28],
+    },
   },
   Start: {
-    type: "split",
-    direction: "row",
-    children: ["recents", "notes"],
-    splitPercentages: [55, 45],
+    layout: "viewer",
+    tool: "recents",
   },
 };
 

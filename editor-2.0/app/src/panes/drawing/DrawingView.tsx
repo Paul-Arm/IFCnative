@@ -18,10 +18,14 @@ interface DrawingViewProps {
   onPick(entityId: number, additive: boolean): void;
 }
 
-/** Auswahlfarbe (Akzent des Editors, im hellen Planbild kräftig genug). */
-const SELECTED = "#c62828";
-const FILL = "#dcdcdc";
-const FILL_SELECTED = "#f3c9c9";
+/**
+ * Auswahl- und Füllfarben kommen als CSS-Custom-Properties von `.drawing-svg`
+ * (panels.css) — dort zentral je Theme pflegbar. SVG-Attribute können kein
+ * var(), deshalb laufen sie über das style-Property.
+ */
+const SELECTED = "var(--draw-selected)";
+const FILL = "var(--draw-fill)";
+const FILL_SELECTED = "var(--draw-fill-selected)";
 /** Ab dieser Mausbewegung gilt eine Geste als Verschieben, nicht als Klick. */
 const DRAG_THRESHOLD_PX = 3;
 
@@ -116,27 +120,23 @@ export default function DrawingView({
   return (
     <svg
       ref={svgRef}
+      className="drawing-svg"
+      data-panning={panning || undefined}
       viewBox={`${box.x} ${box.y} ${box.width} ${box.height}`}
       preserveAspectRatio="xMidYMid meet"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
-      style={{
-        display: "block",
-        width: "100%",
-        height: "100%",
-        background: "#ffffff",
-        cursor: panning ? "grabbing" : "grab",
-        touchAction: "none",
-      }}
     >
       {result.fills.map((fill) => (
         <path
           key={`f-${fill.key}`}
           d={fill.d}
           fillRule="evenodd"
-          fill={selected.has(fill.entityId) ? FILL_SELECTED : FILL}
+          style={{
+            fill: selected.has(fill.entityId) ? FILL_SELECTED : FILL,
+          }}
           onClick={(event) => pick(fill.entityId, event)}
         >
           <title>{`${fill.ifcType} #${fill.entityId}`}</title>
@@ -149,7 +149,7 @@ export default function DrawingView({
             key={path.key}
             d={path.d}
             fill="none"
-            stroke={isSelected ? SELECTED : path.color}
+            style={{ stroke: isSelected ? SELECTED : path.color }}
             strokeWidth={isSelected ? path.width * 2 : path.width}
             strokeDasharray={path.dash}
             strokeLinecap="round"

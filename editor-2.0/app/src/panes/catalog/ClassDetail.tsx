@@ -45,20 +45,20 @@ export default function ClassDetail({
 
   return (
     <section style={{ padding: "8px 10px" }}>
-      <h3 style={{ margin: "0 0 4px" }}>
+      <h3 className="detail-title">
         {objectType.name}
         {objectType.code ? (
           <span className="text-dim"> · {objectType.code}</span>
         ) : null}
       </h3>
-      <p className="text-dim" style={{ margin: "0 0 8px" }}>
+      <p className="text-dim" style={{ margin: "0 0 8px", fontSize: "0.75rem" }}>
         IFC-Klasse {objectType.ifcClass} · {objectType.propertyRules.length}{" "}
         Merkmale in {groups.length} Merkmalsgruppen
         {objectType.version ? ` · Version ${objectType.version}` : ""} · Quelle „
         {objectType.sheetName}"
       </p>
 
-      <div className="pane-toolbar" style={{ border: 0, padding: 0 }}>
+      <div className="pane-toolbar">
         <label className="text-dim" htmlFor="catalog-loi">
           LoI-Filter
         </label>
@@ -90,7 +90,7 @@ export default function ClassDetail({
 
       {groups.map(([psetName, rules]) => (
         <div key={psetName} style={{ marginTop: 12 }}>
-          <strong>{psetName}</strong>
+          <div className="subhead">{psetName}</div>
           <table className="kv-table">
             <thead>
               <tr>

@@ -3,21 +3,33 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 /**
- * Ribbon-Kopfzeile. Aufbau und Bedienlogik folgen dem Ribbon des ifc-lite-
- * Viewers (LTplus-AG/ifc-lite, `apps/viewer/src/components/viewer/ribbon/
- * RibbonToolbar.tsx`, MPL-2.0), nachgebaut ohne dessen Abhängigkeiten:
+ * Ribbon-Kopfzeile, zweite Generation: die Register (Start/Ansicht/Modell/
+ * Prüfen) bleiben, das Band darunter ist aber eine einzeilige, kompakte
+ * Befehlsleiste im Design der ersten React-App statt des hohen Office-Bands.
  *
- *  - schmale Registerleiste, aktives Register mit Unterstrich statt Pille,
- *  - darunter das Band mit beschrifteten Befehlsgruppen,
- *  - Office-Konventionen: Doppelklick auf das aktive Register (oder der
- *    Pfeil rechts) klappt das Band ein, der Zustand bleibt gespeichert;
- *    ein Klick auf irgendein Register klappt es wieder auf,
+ *  - Registerzeile: Marke, Register mit Teal-Unterstrich, rechts die
+ *    ständigen Aktionen (Rückgängig/Wiederholen, Theme) und der
+ *    Einklapp-Pfeil,
+ *  - Office-Konventionen bleiben: Doppelklick auf das aktive Register (oder
+ *    der Pfeil) klappt das Band ein, der Zustand bleibt gespeichert,
+ *  - darunter die Dokument-Tabs (Browser-Tab-Optik),
  *  - das versteckte Datei-Input bleibt außerhalb der Register montiert,
  *    damit „IFC öffnen" auch im eingeklappten Zustand weiterläuft.
  */
 import { useState } from "react";
+import { useCommands, useUndoRedoLabels } from "../../commands/pipeline";
 import { loadJson, saveJson } from "../../core/storage";
-import { IconChevronDown, IconChevronUp } from "./icons";
+import { useDocuments } from "../../store/documents";
+import { useUi } from "../../store/ui";
+import { DocumentTabs } from "../DocumentTabs";
+import {
+  IconChevronDown,
+  IconChevronUp,
+  IconMoon,
+  IconRedo,
+  IconSun,
+  IconUndo,
+} from "./icons";
 import { AnsichtTab } from "./tabs/AnsichtTab";
 import { ModellTab } from "./tabs/ModellTab";
 import { PruefenTab } from "./tabs/PruefenTab";
@@ -36,13 +48,14 @@ const RIBBON_TABS: ReadonlyArray<{ id: RibbonTabId; label: string }> = [
 const COLLAPSED_KEY = "ribbonCollapsed";
 
 export function Ribbon() {
-  // Das aktive Register ist bewusst flüchtig (wie im Original), der
-  // Einklapp-Zustand dagegen eine Nutzerentscheidung und persistent.
+  // Das aktive Register ist bewusst flüchtig, der Einklapp-Zustand dagegen
+  // eine Nutzerentscheidung und persistent.
   const [activeTab, setActiveTab] = useState<RibbonTabId>("start");
   const [collapsed, setCollapsedState] = useState(() =>
     loadJson<boolean>(COLLAPSED_KEY, false),
   );
   const fileCommands = useFileOpen();
+  const hasDocuments = useDocuments((s) => s.documents.length > 0);
 
   const setCollapsed = (value: boolean) => {
     saveJson(COLLAPSED_KEY, value);
@@ -63,7 +76,7 @@ export function Ribbon() {
       {fileCommands.fileInput}
 
       <div className="ribbon-tabs">
-        <strong className="ribbon-brand">IFCnative 2.0</strong>
+        <span className="ribbon-brand">IFCnative 2.0</span>
         <div role="tablist" aria-label="Register" className="ribbon-tablist">
           {RIBBON_TABS.map((tab) => {
             const isActive = tab.id === activeTab;
@@ -79,7 +92,7 @@ export function Ribbon() {
                 data-active={isActive ? "true" : undefined}
                 title={
                   isActive
-                    ? "Doppelklick klappt das Menüband ein bzw. aus"
+                    ? "Doppelklick klappt die Befehlsleiste ein bzw. aus"
                     : tab.label
                 }
                 onClick={() => onTabClick(tab.id)}
@@ -88,30 +101,31 @@ export function Ribbon() {
                 }}
               >
                 {tab.label}
-                {isActive ? (
-                  <span aria-hidden="true" className="ribbon-tab-underline" />
-                ) : null}
               </button>
             );
           })}
         </div>
 
-        <span className="ribbon-tabs-spacer" />
+        <span className="ribbon-spacer" />
+
+        <QuickActions />
 
         <button
           type="button"
-          className="ribbon-collapse"
+          className="tb-btn tb-btn-ghost tb-btn-icon"
           aria-label={
-            collapsed ? "Menüband ausklappen" : "Menüband einklappen"
+            collapsed ? "Befehlsleiste ausklappen" : "Befehlsleiste einklappen"
           }
           aria-expanded={!collapsed}
-          title={collapsed ? "Menüband ausklappen" : "Menüband einklappen"}
+          title={
+            collapsed ? "Befehlsleiste ausklappen" : "Befehlsleiste einklappen"
+          }
           onClick={() => setCollapsed(!collapsed)}
         >
           {collapsed ? (
-            <IconChevronDown className="ribbon-icon-sm" />
+            <IconChevronDown className="tb-icon" />
           ) : (
-            <IconChevronUp className="ribbon-icon-sm" />
+            <IconChevronUp className="tb-icon" />
           )}
         </button>
       </div>
@@ -132,6 +146,70 @@ export function Ribbon() {
           {activeTab === "pruefen" ? <PruefenTab /> : null}
         </div>
       )}
+
+      {hasDocuments ? (
+        <div className="ribbon-doctabs">
+          <DocumentTabs />
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+/**
+ * Ständige Aktionen rechts in der Registerzeile: Rückgängig/Wiederholen und
+ * der Theme-Wechsel — erreichbar unabhängig vom aktiven Register.
+ */
+function QuickActions() {
+  const docId = useDocuments((s) => s.activeId);
+  const { undoLabel, redoLabel } = useUndoRedoLabels(docId);
+  const undo = useCommands((s) => s.undo);
+  const redo = useCommands((s) => s.redo);
+  const theme = useUi((s) => s.theme);
+  const setTheme = useUi((s) => s.setTheme);
+
+  return (
+    <>
+      <button
+        type="button"
+        className="tb-btn tb-btn-ghost tb-btn-icon"
+        title={
+          undoLabel ? `Rückgängig: ${undoLabel} (Strg+Z)` : "Rückgängig (Strg+Z)"
+        }
+        aria-label="Rückgängig"
+        disabled={!docId || !undoLabel}
+        onClick={() => docId && undo(docId)}
+      >
+        <IconUndo className="tb-icon" />
+      </button>
+      <button
+        type="button"
+        className="tb-btn tb-btn-ghost tb-btn-icon"
+        title={
+          redoLabel
+            ? `Wiederholen: ${redoLabel} (Strg+Y)`
+            : "Wiederholen (Strg+Y)"
+        }
+        aria-label="Wiederholen"
+        disabled={!docId || !redoLabel}
+        onClick={() => docId && redo(docId)}
+      >
+        <IconRedo className="tb-icon" />
+      </button>
+      <span className="tb-divider" aria-hidden="true" />
+      <button
+        type="button"
+        className="tb-btn tb-btn-ghost tb-btn-icon"
+        title={theme === "light" ? "Dunkles Theme" : "Helles Theme"}
+        aria-label="Theme umschalten"
+        onClick={() => setTheme(theme === "light" ? "dark" : "light")}
+      >
+        {theme === "light" ? (
+          <IconMoon className="tb-icon" />
+        ) : (
+          <IconSun className="tb-icon" />
+        )}
+      </button>
+    </>
   );
 }

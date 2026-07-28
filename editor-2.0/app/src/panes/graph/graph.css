@@ -4,7 +4,7 @@
   --xy-node-background-color: var(--bg-panel);
   --xy-node-color: var(--text);
   --xy-node-border: 1px solid var(--border);
-  --xy-node-border-radius: 6px;
+  --xy-node-border-radius: var(--radius-md);
   --xy-node-boxshadow-hover: 0 0 0 1px var(--accent);
   --xy-node-boxshadow-selected: 0 0 0 1px var(--accent);
   --xy-edge-stroke: var(--text-dim);
@@ -46,7 +46,7 @@
   max-width: 200px;
   padding: 4px 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--bg-panel);
   color: var(--text);
   font-size: 0.75rem;
@@ -106,20 +106,20 @@
   max-height: 280px;
   overflow: auto;
   padding: 6px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-panel);
-  box-shadow: 0 6px 16px rgb(0 0 0 / 25%);
+  border-radius: var(--radius-lg);
+  background: var(--bg-popover);
+  box-shadow: var(--shadow-popover);
 }
 .graph-filter-item {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 2px 4px;
-  border-radius: 4px;
-  font-size: 0.8125rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
   cursor: pointer;
   white-space: nowrap;
+  transition: background-color 120ms ease;
 }
 .graph-filter-item:hover {
   background: var(--bg-hover);
@@ -134,7 +134,7 @@
   display: flex;
   gap: 6px;
   padding: 4px 4px 2px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--border-60);
   margin-top: 4px;
 }
 
@@ -146,22 +146,21 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: color-mix(in srgb, var(--bg) 60%, transparent);
+  background: color-mix(in oklab, var(--bg) 60%, transparent);
 }
 .graph-modal {
   width: min(440px, 90%);
   max-height: 80%;
   overflow: auto;
   padding: 14px 16px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-panel);
+  border-radius: var(--radius-lg);
+  background: var(--bg-popover);
   color: var(--text);
-  box-shadow: 0 10px 30px rgb(0 0 0 / 35%);
+  box-shadow: var(--shadow-popover);
 }
 .graph-modal-title {
   margin: 0 0 8px;
-  font-size: 0.95rem;
+  font-size: 0.875rem;
 }
 .graph-modal-subtitle {
   margin: 10px 0 4px;
@@ -186,10 +185,13 @@
   align-items: flex-start;
   gap: 8px;
   padding: 6px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  border: 1px solid var(--border-60);
+  border-radius: var(--radius-md);
   line-height: 1.35;
   cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
 }
 .graph-modal-item:hover {
   background: var(--bg-hover);

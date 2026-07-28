@@ -1,13 +1,23 @@
 /**
- * Strukturbaum: räumliche Hierarchie (Projekt → Standort → Gebäude →
- * Geschoss) samt enthaltener Elemente, mit Suche, Mehrfachauswahl und
- * Fenster-Virtualisierung für sehr große Modelle.
+ * Struktur-Pane mit drei Ansichten (portiert aus der ersten React-App,
+ * Branch `old-react-tauri-improvements`): Baum (räumliche Hierarchie),
+ * Graph (Beziehungsgraph der Auswahl) und Gruppen (IfcGroup/System/Zone).
  *
- * M9: Rechtsklick öffnet ein eigenes Kontextmenü (Kamera zentrieren,
- * Kind anlegen, Löschen mit Kaskadenplan) — jede Modelländerung läuft als
- * Command durch die Pipeline.
+ * Baum: Projekt → Standort → Gebäude → Geschoss samt enthaltener Elemente,
+ * mit Suche, Mehrfachauswahl und Fenster-Virtualisierung für sehr große
+ * Modelle. M9: Rechtsklick öffnet ein eigenes Kontextmenü (Kamera
+ * zentrieren, Kind anlegen, Gruppen verwalten, Löschen mit Kaskadenplan) —
+ * jede Modelländerung läuft als Command durch die Pipeline.
  */
-import { useCallback, useMemo, useRef, useState, type MouseEvent } from "react";
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent,
+} from "react";
 import { useCommands } from "../../commands/pipeline";
 import {
   cmdDeleteEntityCascade,
@@ -23,13 +33,28 @@ import ConfirmDeleteDialog, {
 } from "./ConfirmDeleteDialog";
 import ContextMenu, { type MenuTarget } from "./ContextMenu";
 import type { ChildOption } from "./contextModel";
+import GroupManagerDialog from "./GroupManagerDialog";
+import GroupsView from "./GroupsView";
 import TreeRow from "./TreeRow";
 import VirtualList from "./VirtualList";
 import { ROW_HEIGHT } from "./treeModel";
 import { useTreeRows } from "./useTreeRows";
 
+// Lazy wie in der Registry: React Flow soll nur laden, wenn der Graph-Modus
+// wirklich geöffnet wird.
+const GraphPane = lazy(() => import("../graph/GraphPane"));
+
+type StructureMode = "tree" | "graph" | "groups";
+
+const MODES: ReadonlyArray<{ id: StructureMode; label: string }> = [
+  { id: "tree", label: "Baum" },
+  { id: "graph", label: "Graph" },
+  { id: "groups", label: "Gruppen" },
+];
+
 export default function StructurePane() {
   const document = useActiveDocument();
+  const [mode, setMode] = useState<StructureMode>("tree");
   const [query, setQuery] = useState("");
   const tree = useTreeRows(document, query);
 
@@ -45,10 +70,11 @@ export default function StructurePane() {
 
   const { items, rows } = tree;
 
-  // — Kontextmenü + Lösch-Dialog (M9) —
+  // — Kontextmenü + Dialoge (M9 / Gruppen) —
   const execute = useCommands((s) => s.execute);
   const [menu, setMenu] = useState<MenuTarget | null>(null);
   const [removal, setRemoval] = useState<PendingTreeRemoval | null>(null);
+  const [groupManagerId, setGroupManagerId] = useState<number | null>(null);
   const session = document?.session ?? null;
 
   const onContext = useCallback(
@@ -168,9 +194,41 @@ export default function StructurePane() {
 
   const empty = items.length === 0;
 
+  const modeSwitcher = (
+    <div className="seg" role="tablist" aria-label="Struktur-Ansicht">
+      {MODES.map((entry) => (
+        <button
+          key={entry.id}
+          type="button"
+          role="tab"
+          aria-selected={mode === entry.id}
+          className="seg-btn"
+          data-active={mode === entry.id ? "true" : undefined}
+          onClick={() => setMode(entry.id)}
+        >
+          {entry.label}
+        </button>
+      ))}
+    </div>
+  );
+
+  // Graph-Modus: der Beziehungsgraph bringt seine eigene Toolbar mit —
+  // nur der Ansichts-Umschalter bleibt darüber stehen.
+  if (mode === "graph") {
+    return (
+      <div className="pane">
+        <div className="pane-toolbar">{modeSwitcher}</div>
+        <Suspense fallback={<div className="pane-loading">Lade Graph …</div>}>
+          <GraphPane />
+        </Suspense>
+      </div>
+    );
+  }
+
   return (
     <div className="pane">
       <div className="pane-toolbar">
+        {modeSwitcher}
         <input
           className="input"
           type="search"
@@ -179,20 +237,30 @@ export default function StructurePane() {
           onChange={(event) => setQuery(event.target.value)}
           style={{ flex: "1 1 140px", minWidth: 120 }}
         />
-        <button className="btn" onClick={tree.expandAll} disabled={empty}>
-          Alles aufklappen
-        </button>
-        <button className="btn" onClick={tree.collapseAll} disabled={empty}>
-          Alles zuklappen
-        </button>
-        <span className="text-dim">
-          {tree.searching
-            ? `${tree.matchCount.toLocaleString("de-DE")} Treffer`
-            : `${rows.length.toLocaleString("de-DE")} Zeilen`}
-        </span>
+        {mode === "tree" && (
+          <>
+            <button className="btn" onClick={tree.expandAll} disabled={empty}>
+              Alles aufklappen
+            </button>
+            <button className="btn" onClick={tree.collapseAll} disabled={empty}>
+              Alles zuklappen
+            </button>
+            <span className="text-dim">
+              {tree.searching
+                ? `${tree.matchCount.toLocaleString("de-DE")} Treffer`
+                : `${rows.length.toLocaleString("de-DE")} Zeilen`}
+            </span>
+          </>
+        )}
       </div>
 
-      {empty ? (
+      {mode === "groups" ? (
+        <GroupsView
+          document={document}
+          query={query}
+          onManageGroups={setGroupManagerId}
+        />
+      ) : empty ? (
         <p className="pane-empty">Keine räumliche Struktur im Modell.</p>
       ) : rows.length === 0 ? (
         <p className="pane-empty">Keine Treffer für „{query}".</p>
@@ -212,6 +280,7 @@ export default function StructurePane() {
           onFocus={onFocus}
           onDelete={onDeleteRequest}
           onCreateChild={onCreateChild}
+          onManageGroups={(id) => setGroupManagerId(id)}
           onClose={() => setMenu(null)}
         />
       )}
@@ -220,6 +289,13 @@ export default function StructurePane() {
           pending={removal}
           onConfirm={onConfirmDelete}
           onCancel={() => setRemoval(null)}
+        />
+      )}
+      {groupManagerId !== null && (
+        <GroupManagerDialog
+          document={document}
+          entityId={groupManagerId}
+          onClose={() => setGroupManagerId(null)}
         />
       )}
     </div>

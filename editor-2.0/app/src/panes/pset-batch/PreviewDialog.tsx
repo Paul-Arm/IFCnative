@@ -99,8 +99,7 @@ export default function PreviewDialog({
             Abbrechen
           </button>
           <button
-            className="btn"
-            data-active
+            className="btn btn-primary"
             disabled={rows.length === 0}
             onClick={onConfirm}
           >

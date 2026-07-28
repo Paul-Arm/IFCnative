@@ -1,15 +1,31 @@
 /*
- * Nur das, was sich mit den Klassen aus global.css nicht ausdrücken lässt:
- * der Grün-Token für „bestanden" (global.css kennt nur --warn und --error)
- * und der Fortschrittsbalken je Spezifikation. Alles Übrige — Abstände,
- * Rahmen, Schriftgrößen — kommt weiterhin aus den Design-Token.
+ * Nur das, was sich mit den Klassen aus global.css/panels.css nicht
+ * ausdrücken lässt: der Grün-Ton für „bestanden" (aus --ok in panels.css),
+ * der Fortschrittsbalken je Spezifikation und die Baumzeilen des Berichts.
+ * Alles Übrige — Abstände, Rahmen, Schriftgrößen — kommt aus den Design-Token.
  */
 :root {
-  --ids-pass: #15803d;
+  --ids-pass: var(--ok);
 }
 
-:root[data-theme="dark"] {
-  --ids-pass: #4ade80;
+/* Dokument-Kopfzeile des Ergebnisbaums. */
+.ids-doc-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--muted-40);
+  border-bottom: 1px solid var(--border-60);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+.ids-doc-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.75rem;
+  font-weight: 600;
 }
 
 /* Aufklappbare Zeile: Kopf sieht aus wie .row-item, trägt aber Zähler. */
@@ -18,36 +34,40 @@
   align-items: center;
   gap: 6px;
   width: 100%;
+  min-height: 1.75rem;
   padding: 3px 8px;
   border: none;
+  border-radius: var(--radius-sm);
   background: none;
   color: var(--text);
   cursor: pointer;
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
   text-align: left;
+  transition: background-color 120ms ease;
 }
 .ids-head:hover {
-  background: var(--bg-hover);
+  background: var(--muted-50);
 }
 
 .ids-dot {
   flex: 0 0 auto;
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: 999px;
 }
 
 /* Bestanden/fehlgeschlagen als Balken — Breite kommt inline aus der Passrate. */
 .ids-bar {
   flex: 0 0 72px;
-  height: 6px;
-  border-radius: 3px;
-  background: var(--error);
+  height: 5px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--error) 55%, transparent);
   overflow: hidden;
 }
 .ids-bar > span {
   display: block;
   height: 100%;
+  border-radius: 999px;
   background: var(--ids-pass);
 }
 
@@ -56,20 +76,24 @@
   gap: 6px;
   align-items: baseline;
   width: 100%;
+  min-height: 1.5rem;
   padding: 2px 8px 2px 26px;
   border: none;
+  border-radius: var(--radius-sm);
   background: none;
   color: var(--text);
   cursor: pointer;
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
   text-align: left;
+  transition: background-color 120ms ease;
 }
 .ids-entity:hover {
-  background: var(--bg-hover);
+  background: var(--muted-50);
 }
 
 .ids-detail {
   padding: 0 8px 4px 40px;
-  font-size: 0.75rem;
+  font-size: 0.7rem;
+  line-height: 1.45;
   color: var(--text-dim);
 }

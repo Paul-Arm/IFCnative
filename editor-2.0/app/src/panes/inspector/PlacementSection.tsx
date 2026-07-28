@@ -73,11 +73,7 @@ export default function PlacementSection({
         </tbody>
       </table>
 
-      {reading.note && (
-        <p className="text-dim" style={{ padding: "6px 8px", margin: 0 }}>
-          {reading.note}
-        </p>
-      )}
+      {reading.note && <p className="list-note">{reading.note}</p>}
 
       {reading.chain.map((link) => (
         <ChainBlock key={link.expressId} link={link} scale={scale} />
@@ -230,8 +226,8 @@ function ValueTable({ children }: { children: ReactNode }) {
       <thead>
         <tr>
           <th style={{ width: "40%" }}>Wert</th>
-          <th>Modelleinheit</th>
-          <th>Meter</th>
+          <th className="num">Modelleinheit</th>
+          <th className="num">Meter</th>
         </tr>
       </thead>
       <tbody>{children}</tbody>
@@ -291,8 +287,8 @@ function LengthRow({
   return (
     <tr title={title}>
       <td className="dim">{label}</td>
-      <td>{UNITS.format(value)}</td>
-      <td className="dim">{METERS.format(toMeters(value, scale))} m</td>
+      <td className="num">{UNITS.format(value)}</td>
+      <td className="num dim">{METERS.format(toMeters(value, scale))} m</td>
     </tr>
   );
 }

@@ -80,20 +80,16 @@ export default function QueryBar({
 
       <input
         className="input"
-        style={{
-          minWidth: 110,
-          borderColor: partial && !spec.psetName.trim() ? "var(--warn)" : undefined,
-        }}
+        style={{ minWidth: 110 }}
+        data-warn={partial && !spec.psetName.trim() ? true : undefined}
         placeholder="Pset (optional)"
         value={spec.psetName}
         onChange={(event) => patch({ psetName: event.target.value })}
       />
       <input
         className="input"
-        style={{
-          minWidth: 110,
-          borderColor: partial && !spec.propName.trim() ? "var(--warn)" : undefined,
-        }}
+        style={{ minWidth: 110 }}
+        data-warn={partial && !spec.propName.trim() ? true : undefined}
         placeholder="Property"
         value={spec.propName}
         onChange={(event) => patch({ propName: event.target.value })}
@@ -113,10 +109,8 @@ export default function QueryBar({
       </select>
       <input
         className="input"
-        style={{
-          minWidth: 100,
-          borderColor: partial && !spec.value.trim() ? "var(--warn)" : undefined,
-        }}
+        style={{ minWidth: 100 }}
+        data-warn={partial && !spec.value.trim() ? true : undefined}
         placeholder="Wert"
         value={spec.value}
         onChange={(event) => patch({ value: event.target.value })}

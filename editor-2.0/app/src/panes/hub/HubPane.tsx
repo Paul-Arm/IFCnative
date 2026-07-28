@@ -225,15 +225,7 @@ export default function HubPane() {
       </div>
 
       {message !== null && message !== "" && (
-        <p
-          style={{
-            color: isError ? "var(--error)" : "var(--text-dim)",
-            margin: 0,
-            padding: "4px 8px",
-          }}
-        >
-          {message}
-        </p>
+        <p className={isError ? "msg msg-error" : "list-note"}>{message}</p>
       )}
 
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>

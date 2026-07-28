@@ -78,17 +78,14 @@ export default function ColumnPicker({
         <span className="text-dim">{columns.length} aktiv</span>
       </div>
 
-      <div
-        className="pane-toolbar"
-        style={{ gap: 4, borderBottom: "1px solid var(--border)" }}
-      >
+      <div className="pane-toolbar" style={{ gap: 4 }}>
         {columns.length === 0 ? (
           <span className="text-dim">Keine Spalten — bitte hinzufügen.</span>
         ) : (
           columns.map((column) => (
             <button
               key={column.id}
-              className="btn"
+              className="chip"
               title={`${columnLabel(column)} entfernen`}
               onClick={() => onRemove(column.id)}
             >

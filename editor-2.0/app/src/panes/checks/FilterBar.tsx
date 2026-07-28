@@ -51,14 +51,8 @@ export default function FilterBar({
         >
           <span
             aria-hidden
-            style={{
-              background: SEVERITY_CSS[severity],
-              borderRadius: "50%",
-              display: "inline-block",
-              height: 8,
-              marginRight: 6,
-              width: 8,
-            }}
+            className="dot"
+            style={{ background: SEVERITY_CSS[severity] }}
           />
           {SEVERITY_LABELS[severity]} {counts[severity]}
         </button>

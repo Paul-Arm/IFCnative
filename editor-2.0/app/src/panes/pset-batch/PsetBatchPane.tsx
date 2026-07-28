@@ -183,9 +183,9 @@ function BatchBody({ doc }: { doc: DocumentEntry }) {
         />
       </div>
 
-      <div className="pane-body">
+      <div className="pane-body pane-stack">
         {!hasSelection && (
-          <p className="pane-empty">
+          <p className="empty-state">
             Keine Objekte ausgewählt. Wähle im Strukturbaum oder Viewer mehrere
             Objekte (Strg/Umschalt-Klick) — oder setze oben eine Auswahl über
             IFC-Klasse und optionalen Property-Filter. Danach erscheint je
@@ -195,7 +195,7 @@ function BatchBody({ doc }: { doc: DocumentEntry }) {
           </p>
         )}
         {hasSelection && matrix.blocks.length === 0 && (
-          <p className="pane-empty">
+          <p className="empty-state">
             Die Auswahl hat noch keine Eigenschaftssätze — oben einen neuen
             anlegen.
           </p>

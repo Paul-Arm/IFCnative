@@ -30,7 +30,7 @@ function EntityColumn({
   return (
     <div
       style={{
-        borderRight: "1px solid var(--border)",
+        borderRight: "1px solid var(--border-60)",
         display: "flex",
         flex: "0 0 180px",
         flexDirection: "column",
@@ -38,10 +38,10 @@ function EntityColumn({
       }}
     >
       <div className="pane-toolbar" style={{ gap: 4 }}>
-        <span className="text-dim">{title}</span>
+        <span className="card-title">{title}</span>
         <span style={{ marginLeft: "auto" }} />
         <button
-          className="btn"
+          className="btn btn-sm"
           disabled={!canCreate}
           onClick={() => {
             const name = prompt(createTitle);
@@ -56,7 +56,7 @@ function EntityColumn({
       </div>
       <div className="pane-body">
         {items.length === 0 ? (
-          <p className="pane-empty" style={{ padding: "8px" }}>
+          <p className="empty-state" style={{ margin: 4 }}>
             {emptyText}
           </p>
         ) : (

@@ -42,13 +42,13 @@ function Section({
   onSelect(element: HubDiffElement): void;
 }) {
   return (
-    <section style={{ borderTop: "1px solid var(--border)" }}>
+    <section style={{ borderTop: "1px solid var(--border-60)" }}>
       <div className="pane-toolbar" style={{ borderBottom: "none" }}>
-        <strong>{title}</strong>
-        <span className="text-dim">{elements.length}</span>
+        <strong className="card-title">{title}</strong>
+        <span className="badge">{elements.length}</span>
       </div>
       {elements.length === 0 ? (
-        <p className="pane-empty" style={{ padding: "0 16px 8px" }}>
+        <p className="list-note" style={{ paddingBottom: 8 }}>
           Keine Einträge.
         </p>
       ) : (
@@ -102,16 +102,15 @@ export default function DiffView({
   return (
     <div>
       <div className="pane-toolbar">
-        <strong>Vergleich</strong>
+        <strong className="card-title">Vergleich</strong>
         <span className="text-dim">
           {labelA} → {labelB}
         </span>
-        <span className="text-dim">
-          + {summary.added} hinzugefügt · − {summary.removed} entfernt · ±{" "}
-          {summary.modified} geändert
-        </span>
+        <span className="badge badge-ok">+ {summary.added} hinzugefügt</span>
+        <span className="badge badge-error">− {summary.removed} entfernt</span>
+        <span className="badge badge-warn">± {summary.modified} geändert</span>
         <span style={{ marginLeft: "auto" }} />
-        <button className="btn" onClick={onClose} type="button">
+        <button className="btn btn-sm" onClick={onClose} type="button">
           Schließen
         </button>
       </div>

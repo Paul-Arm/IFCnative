@@ -1,0 +1,432 @@
+/* ---------------------------------------------------------------------------
+ * Panel-Feinschliff: gemeinsame Bausteine für die Pane-Inhalte (Formulare,
+ * Karten, Tabellen, Listen) im Design der ersten React-App. Wird aus
+ * global.css importiert; Basis-Tokens und Shell-Styles liegen dort.
+ * ------------------------------------------------------------------------- */
+
+/* Grün-Token für „bestanden/ok" — global.css kennt nur --warn und --error. */
+:root {
+  --ok: #15803d;
+}
+:root[data-theme="dark"] {
+  --ok: #4ade80;
+}
+
+/* — Layout: vertikaler Karten-Stapel in einem pane-body — */
+.pane-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.pane-stack > * {
+  flex: none;
+}
+
+/* — Sektion-Karte: Rahmen + Radius auf der Panelfläche, Kopf leicht getönt — */
+.card {
+  border: 1px solid var(--border-60);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-height: 2rem;
+  padding: 0.25rem 0.625rem;
+  background: var(--muted-30);
+  border-bottom: 1px solid var(--border-60);
+}
+/* Kopf-Beschriftung mit Datencharakter (Pset-Namen …): kein uppercase. */
+.card-head-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+.card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.625rem 0.5rem;
+  border-top: 1px solid var(--border-60);
+}
+/* Tabellen in Karten: letzte Zeile ohne Trennlinie, Karte schließt bündig. */
+.card .kv-table tr:last-child td {
+  border-bottom: none;
+}
+
+/* — Mikro-Titel: 10.4px, uppercase, gedimmt (Muster der alten App) — */
+.card-title,
+.section-title {
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+}
+.section-title {
+  padding: 0.625rem 0.5rem 0.25rem;
+}
+.section-title:first-child {
+  padding-top: 0.25rem;
+}
+
+/* Zwischenüberschrift mit Datencharakter (Pset-Gruppen …). */
+.subhead {
+  margin: 0.75rem 0 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.detail-title {
+  margin: 0 0 0.125rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+/* — Auswahlkopf des Inspectors — */
+.sel-head {
+  flex: none;
+  padding: 0.125rem 0.5rem 0.5rem;
+  border-bottom: 1px solid var(--border-60);
+}
+.sel-head-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sel-head-count {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+}
+
+/* — Feldzeilen: Label links (8.5rem) vom Feld, Formulardichte 28px — */
+.field-row {
+  display: grid;
+  grid-template-columns: 8.5rem 1fr;
+  align-items: center;
+  gap: 0.375rem;
+  margin-bottom: 0.25rem;
+}
+.field-label {
+  font-size: 0.71875rem;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Einzeilige Anlege-/Filterzeile (Label + Felder + Button). */
+.form-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+/* — Zuklappbares Anlegen-Formular (Ressourcen-Modus u. Ä.) — */
+.form-details {
+  margin: 0;
+}
+.form-details > summary {
+  padding: 0.125rem 0;
+  font-size: 0.71875rem;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+  transition: color 120ms ease;
+}
+.form-details > summary:hover {
+  color: var(--text);
+}
+.form-card {
+  margin-top: 0.375rem;
+  padding: 0.625rem;
+  border: 1px solid var(--border-60);
+  border-radius: var(--radius-md);
+  background: var(--muted-30);
+}
+.form-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+.form-status {
+  font-size: 0.71875rem;
+  color: var(--text-dim);
+}
+.form-status[data-error="true"] {
+  color: var(--error);
+}
+.form-hint {
+  margin: 0.25rem 0 0.125rem;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+}
+
+/* — Eingabefelder: Fehler-/Warnzustand über data-Attribut statt Inline-Farbe — */
+.input[data-invalid="true"] {
+  border-color: color-mix(in oklab, var(--error) 55%, transparent);
+  color: var(--error);
+}
+.input[data-warn="true"] {
+  border-color: color-mix(in oklab, var(--warn-solid) 55%, transparent);
+}
+
+/* — Sekundäre Kontrollen: 24px-Button und quadratischer Icon-Knopf — */
+.btn-sm {
+  min-height: 1.5rem;
+  padding: 0.0625rem 0.5rem;
+  font-size: 0.6875rem;
+}
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+}
+.btn-primary:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--accent) 80%, var(--bg-panel));
+}
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  flex: none;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+.icon-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.icon-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* — Listenzeile mit Hover-Enthüllung der Zeilen-Aktionen — */
+.list-row {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-height: 1.75rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  transition: background-color 120ms ease;
+}
+.list-row:hover {
+  background: var(--muted-50);
+}
+.list-row[data-selected="true"] {
+  background: var(--accent-10);
+}
+.row-actions {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.list-row:hover .row-actions,
+.list-row:focus-within .row-actions,
+.card-head:hover .row-actions,
+.card-head:focus-within .row-actions,
+tr:hover .row-actions,
+tr:focus-within .row-actions {
+  opacity: 1;
+}
+
+/* Tabellen mit Zeilen-Hover (Opt-in, z. B. Ständeliste). */
+.kv-table.table-hover tbody tr:hover > td {
+  background: var(--muted-50);
+}
+/* Numerische Zellen: rechtsbündig, Mono, tabular-nums. */
+.kv-table th.num,
+.kv-table td.num {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 0.71875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* — Status-Punkt und Badges (Trias: Fläche 10 % + Border 30 % + Vollton) — */
+.dot {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  padding: 0 0.375rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--muted-40);
+  color: var(--text-dim);
+  font-size: 0.65rem;
+  font-weight: 600;
+  line-height: 1.1rem;
+  white-space: nowrap;
+}
+.badge-accent {
+  background: var(--accent-10);
+  border-color: color-mix(in oklab, var(--accent) 30%, transparent);
+  color: var(--accent);
+}
+.badge-ok {
+  background: color-mix(in oklab, var(--ok) 10%, transparent);
+  border-color: color-mix(in oklab, var(--ok) 30%, transparent);
+  color: var(--ok);
+}
+.badge-warn {
+  background: color-mix(in oklab, var(--warn) 10%, transparent);
+  border-color: color-mix(in oklab, var(--warn) 30%, transparent);
+  color: var(--warn);
+}
+.badge-error {
+  background: color-mix(in oklab, var(--error) 10%, transparent);
+  border-color: color-mix(in oklab, var(--error) 30%, transparent);
+  color: var(--error);
+}
+
+/* — Objekt-Chips (Befundlisten): kompakte Referenz, Hover teal — */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  max-width: 16rem;
+  height: 1.25rem;
+  padding: 0 0.375rem;
+  border: 1px solid var(--border-60);
+  border-radius: 999px;
+  background: var(--muted-30);
+  color: var(--text);
+  font-size: 0.65rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+.chip:hover:not(:disabled) {
+  background: var(--accent-10);
+  border-color: color-mix(in oklab, var(--accent) 35%, transparent);
+  color: var(--accent);
+}
+.chip[data-active="true"] {
+  background: var(--accent-10);
+  border-color: color-mix(in oklab, var(--accent) 55%, transparent);
+  color: var(--accent);
+}
+
+/* — Meldungen (Trias) und dezente Hinweiszeilen — */
+.msg {
+  margin: 0;
+  padding: 0.375rem 0.625rem;
+  border: 1px solid var(--border-60);
+  border-radius: var(--radius-md);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+.msg-error {
+  background: color-mix(in oklab, var(--error) 10%, transparent);
+  border-color: color-mix(in oklab, var(--error) 30%, transparent);
+  color: var(--error);
+}
+.msg-warn {
+  background: color-mix(in oklab, var(--warn) 10%, transparent);
+  border-color: color-mix(in oklab, var(--warn) 30%, transparent);
+  color: var(--warn);
+}
+.list-note {
+  margin: 0;
+  padding: 0.25rem 0.5rem;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+
+/* — Leerer Zustand: gestrichelte Karte — */
+.empty-state {
+  margin: 0;
+  padding: 0.875rem 0.75rem;
+  border: 1px dashed var(--border-70);
+  border-radius: var(--radius-lg);
+  background: var(--muted-30);
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+/* — Mono für Ids, GlobalIds, Messwerte — */
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Checkboxen in Pane-Inhalten in Akzentfarbe. */
+.pane input[type="checkbox"],
+.card input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+
+/* — Notizen: randloser Editor auf Panelfläche — */
+.notes-editor {
+  border: none;
+  border-radius: var(--radius-md);
+  resize: none;
+  padding: 0.625rem;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  outline: none;
+}
+.notes-editor::placeholder {
+  color: var(--text-dim);
+}
+
+/* — Zeichnungs-Pane: Planbild bleibt bewusst Papier-weiß (die Linienfarben
+ *   kommen aus dem Zeichnungspaket und rechnen mit hellem Grund); Auswahl-
+ *   und Füllfarben liegen hier als Token statt hart im TSX. — */
+.drawing-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #ffffff;
+  cursor: grab;
+  touch-action: none;
+  --draw-fill: #dcdcdc;
+  --draw-fill-selected: #f3c9c9;
+  --draw-selected: #c62828;
+}
+.drawing-svg[data-panning="true"] {
+  cursor: grabbing;
+}

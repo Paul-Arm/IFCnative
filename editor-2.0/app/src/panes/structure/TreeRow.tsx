@@ -100,8 +100,8 @@ function TreeRow({
         {item.detail ? `${item.type} · ${item.detail}` : item.type}
       </span>
       <span
-        className="text-dim"
-        style={{ marginLeft: "auto", fontSize: "0.75rem", flex: "0 0 auto" }}
+        className="text-dim mono"
+        style={{ marginLeft: "auto", fontSize: "0.7rem", flex: "0 0 auto" }}
       >
         #{item.expressId}
       </span>

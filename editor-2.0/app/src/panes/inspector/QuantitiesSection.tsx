@@ -17,7 +17,7 @@ import {
 } from "../../commands/quantityCommands";
 import type { ModelSession } from "../../core/session";
 import ValueEditor from "./ValueEditor";
-import { DimValue, SectionHeading } from "./parts";
+import { DimValue } from "./parts";
 import { readQuantitySets } from "./overlay";
 import { QUANTITY_TYPES, parseNumber } from "./values";
 
@@ -45,7 +45,7 @@ export default function QuantitiesSection({
   }
 
   return (
-    <div>
+    <div className="pane-stack">
       <NewQuantitySetForm
         existing={sets.map((s) => s.name)}
         onCreate={(qsetName, quantity) =>
@@ -54,14 +54,16 @@ export default function QuantitiesSection({
       />
 
       {sets.length === 0 && (
-        <p className="pane-empty">
+        <p className="empty-state">
           Keine Mengen für dieses Objekt — oben einen Mengensatz anlegen.
         </p>
       )}
 
       {sets.map((set) => (
-        <div key={set.name}>
-          <SectionHeading>{set.name}</SectionHeading>
+        <div key={set.name} className="card">
+          <div className="card-head">
+            <span className="card-head-label">{set.name}</span>
+          </div>
           <table className="kv-table">
             <thead>
               <tr>
@@ -146,26 +148,12 @@ function NewQuantitySetForm({ existing, onCreate }: NewQuantitySetFormProps) {
   }
 
   return (
-    <div
-      style={{
-        display: "flex",
-        gap: 6,
-        alignItems: "center",
-        padding: 8,
-        borderBottom: "1px solid var(--border)",
-        flexWrap: "wrap",
-      }}
-    >
-      <span className="text-dim" style={{ fontSize: "0.75rem" }}>
-        Neuer Mengensatz
-      </span>
+    <div className="form-row">
+      <span className="field-label">Neuer Mengensatz</span>
       <input
         className="input"
-        style={{
-          flex: "1 1 130px",
-          minWidth: 100,
-          borderColor: duplicate ? "var(--error)" : undefined,
-        }}
+        style={{ flex: "1 1 130px", minWidth: 100 }}
+        data-invalid={duplicate ? true : undefined}
         placeholder="z. B. Qto_WallBaseQuantities"
         value={qsetName}
         title={duplicate ? "Dieser Name ist bereits vergeben" : undefined}
@@ -191,10 +179,8 @@ function NewQuantitySetForm({ existing, onCreate }: NewQuantitySetFormProps) {
       </select>
       <input
         className="input"
-        style={{
-          width: 90,
-          borderColor: draft && value === null ? "var(--error)" : undefined,
-        }}
+        style={{ width: 90 }}
+        data-invalid={draft && value === null ? true : undefined}
         placeholder="Wert"
         inputMode="decimal"
         value={draft}

@@ -155,13 +155,13 @@ export function MaterialLayersForm({
       <SelectRow label="Richtung" value={direction} onChange={setDirection} options={DIRECTIONS} />
       <SelectRow label="Richtungssinn" value={sense} onChange={setSense} options={SENSES} />
       <NumberRow label="Offset" value={offset} onChange={setOffset} />
-      <div className="text-dim" style={{ fontSize: "0.7rem", margin: "4px 0 2px" }}>
+      <div className="form-hint">
         Schichten: Material;Dicke;Name;Kategorie — eine je Zeile
       </div>
       <textarea
-        className="input"
+        className="input mono"
         rows={3}
-        style={{ width: "100%", resize: "vertical", fontFamily: "ui-monospace, monospace" }}
+        style={{ width: "100%", resize: "vertical" }}
         value={rowsText}
         onChange={(event) => setRowsText(event.target.value)}
       />

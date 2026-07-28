@@ -167,9 +167,7 @@ export default function ChecksPane() {
             : `Stand: Revision ${state.ranAtRevision}`}
         </span>
         {stale && (
-          <span style={{ color: "var(--warn)" }}>
-            Modell geändert — neu prüfen
-          </span>
+          <span className="badge badge-warn">Modell geändert — neu prüfen</span>
         )}
       </div>
 
@@ -183,7 +181,11 @@ export default function ChecksPane() {
       />
 
       <div className="pane-body">
-        {error && <p style={{ color: "var(--error)", padding: "6px 8px" }}>{error}</p>}
+        {error && (
+          <p className="msg msg-error" style={{ margin: "0 0 8px" }}>
+            {error}
+          </p>
+        )}
         {state.ranAtRevision === null ? (
           <p className="pane-empty">
             Quellen wählen und „Prüfen" — die Befunde erscheinen hier.

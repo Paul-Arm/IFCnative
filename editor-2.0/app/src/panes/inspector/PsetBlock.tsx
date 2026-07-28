@@ -49,42 +49,37 @@ export default function PsetBlock({
     !takenNames.includes(draftName);
 
   return (
-    <div style={{ borderBottom: "1px solid var(--border)" }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          padding: "8px 8px 4px",
-        }}
-      >
+    <div className="card">
+      <div className="card-head">
         {renaming === null ? (
           <>
-            <span style={{ fontWeight: 600, fontSize: "0.8125rem", flex: 1 }}>
-              {pset.name}
+            <span className="card-head-label">{pset.name}</span>
+            <span className="row-actions">
+              <button
+                className="btn btn-sm"
+                onClick={() => setRenaming(pset.name)}
+              >
+                Umbenennen
+              </button>
+              <button className="btn btn-sm" onClick={onDuplicate}>
+                Duplizieren
+              </button>
+              <button className="btn btn-sm" onClick={onDelete}>
+                Löschen
+              </button>
             </span>
-            <button className="btn" onClick={() => setRenaming(pset.name)}>
-              Umbenennen
-            </button>
-            <button className="btn" onClick={onDuplicate}>
-              Duplizieren
-            </button>
-            <button className="btn" onClick={onDelete}>
-              Löschen
-            </button>
           </>
         ) : (
           <>
             <input
               className="input"
               autoFocus
-              style={{
-                flex: 1,
-                borderColor:
-                  draftName && !renameOk && draftName !== pset.name
-                    ? "var(--error)"
-                    : undefined,
-              }}
+              style={{ flex: 1 }}
+              data-invalid={
+                Boolean(draftName) && !renameOk && draftName !== pset.name
+                  ? true
+                  : undefined
+              }
               value={renaming}
               title={
                 takenNames.includes(draftName)
@@ -101,7 +96,7 @@ export default function PsetBlock({
               }}
             />
             <button
-              className="btn"
+              className="btn btn-sm"
               disabled={!renameOk}
               onClick={() => {
                 onRename(draftName);
@@ -110,7 +105,7 @@ export default function PsetBlock({
             >
               Übernehmen
             </button>
-            <button className="btn" onClick={() => setRenaming(null)}>
+            <button className="btn btn-sm" onClick={() => setRenaming(null)}>
               Abbrechen
             </button>
           </>
@@ -160,13 +155,17 @@ export default function PsetBlock({
                   />
                 </td>
                 <td>
-                  <button
-                    className="btn"
-                    title={`Property „${property.name}" löschen`}
-                    onClick={() => onDeleteProperty(property.name, property.type)}
-                  >
-                    ×
-                  </button>
+                  <span className="row-actions">
+                    <button
+                      className="icon-btn"
+                      title={`Property „${property.name}" löschen`}
+                      onClick={() =>
+                        onDeleteProperty(property.name, property.type)
+                      }
+                    >
+                      ×
+                    </button>
+                  </span>
                 </td>
               </tr>
             );
@@ -203,18 +202,8 @@ function NewPropertyForm({ onAdd }: NewPropertyFormProps) {
   }
 
   return (
-    <div
-      style={{
-        display: "flex",
-        gap: 6,
-        padding: "6px 8px 10px",
-        alignItems: "center",
-        flexWrap: "wrap",
-      }}
-    >
-      <span className="text-dim" style={{ fontSize: "0.75rem" }}>
-        Neue Property
-      </span>
+    <div className="card-foot">
+      <span className="field-label">Neue Property</span>
       <input
         className="input"
         style={{ flex: "1 1 110px", minWidth: 90 }}
@@ -245,11 +234,8 @@ function NewPropertyForm({ onAdd }: NewPropertyFormProps) {
       ) : (
         <input
           className="input"
-          style={{
-            flex: "1 1 110px",
-            minWidth: 90,
-            borderColor: isValidDraft(valueDraft, kind) ? undefined : "var(--error)",
-          }}
+          style={{ flex: "1 1 110px", minWidth: 90 }}
+          data-invalid={isValidDraft(valueDraft, kind) ? undefined : true}
           placeholder="Wert"
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
@@ -261,7 +247,7 @@ function NewPropertyForm({ onAdd }: NewPropertyFormProps) {
           }}
         />
       )}
-      <button className="btn" disabled={!ready} onClick={add}>
+      <button className="btn btn-sm" disabled={!ready} onClick={add}>
         Hinzufügen
       </button>
     </div>

@@ -18,7 +18,7 @@ import type {
   StoreEditor,
 } from "@ifc-lite/mutations";
 import type { MutablePropertyView } from "@ifc-lite/mutations";
-import type { ProfileKind } from "./types";
+import type { PolygonPoints, ProfileKind } from "./types";
 
 export interface BuildContext {
   store: IfcDataStore;
@@ -108,14 +108,31 @@ export interface ProfileSpec {
   tiefe: number;
   /** Kreis: Radius (Meter) */
   radius: number;
+  /** Polygon: Eckpunkte (Meter, Profil-Koordinaten) */
+  punkte?: PolygonPoints;
 }
 
-/** Am Ursprung zentriertes Rechteck- oder Kreisprofil. */
+/** Am Ursprung zentriertes Rechteck-/Kreisprofil oder freies Polygon. */
 export function emitProfile(
   add: Add,
   anchor: SpatialAnchor,
   spec: ProfileSpec,
 ): number {
+  if (spec.profil === "polygon") {
+    const points = spec.punkte ?? [];
+    if (points.length < 3) {
+      throw new Error("Polygon-Profil braucht mindestens 3 Punkte.");
+    }
+    // Geschlossener Linienzug wie in `addArbitraryProfile` aus
+    // @ifc-lite/create: erster Punkt wird am Ende wiederholt.
+    const pointIds = points.map(([x, y]) =>
+      add("IfcCartesianPoint", [[native(anchor, x), native(anchor, y)]]),
+    );
+    const polyline = add("IfcPolyline", [
+      [...pointIds, pointIds[0]].map((id) => `#${id}`),
+    ]);
+    return add("IfcArbitraryClosedProfileDef", [".AREA.", null, `#${polyline}`]);
+  }
   const origin = add("IfcCartesianPoint", [[0, 0]]);
   const position = add("IfcAxis2Placement2D", [`#${origin}`, null]);
   if (spec.profil === "kreis") {

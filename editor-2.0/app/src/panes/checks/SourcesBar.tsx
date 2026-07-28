@@ -83,7 +83,7 @@ function SourceStatus({
   const result = state.results[source];
   if (status === "running") return <span>{STATUS_TEXT.running}</span>;
   if (status === "error")
-    return <span style={{ color: "var(--error)" }}>{STATUS_TEXT.error}</span>;
+    return <span className="badge badge-error">{STATUS_TEXT.error}</span>;
   if (!result) return null;
-  return <span>({result.findings.length})</span>;
+  return <span className="mono">({result.findings.length})</span>;
 }

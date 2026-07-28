@@ -55,6 +55,7 @@ export default function ListTable({
           {columns.map((column) => (
             <th
               key={column.id}
+              className={numericIds.has(column.id) ? "num" : undefined}
               style={{ cursor: "pointer", whiteSpace: "nowrap" }}
               title="Sortieren (auf/ab)"
               onClick={() => onSort(column.id)}
@@ -70,7 +71,15 @@ export default function ListTable({
           line.kind === "group" ? (
             <tr key={`g-${line.group.key}-${index}`}>
               {columns.map((column, columnIndex) => (
-                <td key={column.id} style={{ fontWeight: 600 }}>
+                <td
+                  key={column.id}
+                  className={
+                    columnIndex > 0 && numericIds.has(column.id)
+                      ? "num"
+                      : undefined
+                  }
+                  style={{ fontWeight: 600, background: "var(--muted-30)" }}
+                >
                   {columnIndex === 0 ? (
                     <span
                       style={{ paddingLeft: (line.group.level ?? 0) * 12 }}
@@ -93,7 +102,12 @@ export default function ListTable({
               onDoubleClick={() => onPick(line.row.entityId, true)}
             >
               {columns.map((column, columnIndex) => (
-                <td key={column.id}>{formatCell(line.row.values[columnIndex])}</td>
+                <td
+                  key={column.id}
+                  className={numericIds.has(column.id) ? "num" : undefined}
+                >
+                  {formatCell(line.row.values[columnIndex])}
+                </td>
               ))}
             </tr>
           ),
@@ -101,7 +115,15 @@ export default function ListTable({
         {summary && (
           <tr>
             {columns.map((column, columnIndex) => (
-              <td key={column.id} style={{ fontWeight: 600 }}>
+              <td
+                key={column.id}
+                className={
+                  columnIndex > 0 && numericIds.has(column.id)
+                    ? "num"
+                    : undefined
+                }
+                style={{ fontWeight: 600, background: "var(--muted-40)" }}
+              >
                 {columnIndex === 0
                   ? `Gesamt (${summary.count})`
                   : aggregateCell(column, numericIds, summary.sums)}

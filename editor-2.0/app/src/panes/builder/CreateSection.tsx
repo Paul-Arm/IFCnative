@@ -17,6 +17,7 @@ import {
   type CreateElementParams,
   type ProfileKind,
 } from "../../domain/geometry";
+import { useDrawStore } from "../viewer/drawStore";
 import { usePickStore } from "../viewer/pickStore";
 import { formatPointStatus, roundMm } from "../viewer/worldCoords";
 import { defaultParent, spatialOptions } from "./spatialOptions";
@@ -62,6 +63,27 @@ export default function CreateSection({
   // Letzter 3D-Pick aus dem Viewer (M9) — nur Punkte DIESES Dokuments.
   const lastPick = usePickStore((s) => s.last);
   const pick = lastPick && lastPick.docId === docId ? lastPick : null;
+  // Zuletzt gezeichnetes Polygon (M10) — Werkzeug „Polygon zeichnen" im Viewer.
+  const drawnPolygon = useDrawStore((s) => s.polygon);
+  const polygon =
+    drawnPolygon && drawnPolygon.docId === docId ? drawnPolygon : null;
+
+  /** Polygon übernehmen: Schwerpunkt wird Position, Punkte werden relativ. */
+  function adoptPolygon(): void {
+    if (!polygon) return;
+    const n = polygon.points.length;
+    const cx = polygon.points.reduce((sum, p) => sum + p[0], 0) / n;
+    const cy = polygon.points.reduce((sum, p) => sum + p[1], 0) / n;
+    patch({
+      profil: "polygon",
+      punkte: polygon.points.map(
+        ([x, y]) => [roundMm(x - cx), roundMm(y - cy)] as const,
+      ),
+      x: roundMm(cx),
+      y: roundMm(cy),
+      z: roundMm(polygon.z),
+    });
+  }
 
   const parentId =
     selectedSpatialId ?? parentChoice ?? defaultParent(options);
@@ -138,12 +160,32 @@ export default function CreateSection({
             onChange={(value) => patch({ tiefe: value })}
           />
         </>
-      ) : (
+      ) : params.profil === "kreis" ? (
         <NumberField
           label="Radius"
           value={params.radius}
           onChange={(value) => patch({ radius: value })}
         />
+      ) : (
+        <>
+          <p className="text-dim" style={{ fontSize: "0.75rem", margin: "2px 0 6px" }}>
+            {params.punkte?.length
+              ? `${params.punkte.length} Punkte übernommen.`
+              : "Noch kein Polygon — im 3D-Viewer mit dem Werkzeug „Polygon zeichnen“ (Taste P) einen Umriss klicken."}
+          </p>
+          <button
+            className="btn"
+            disabled={!polygon}
+            title={
+              polygon
+                ? `${polygon.points.length} Punkte auf Höhe ${roundMm(polygon.z)} m übernehmen`
+                : "Erst im Viewer ein Polygon zeichnen (Doppelklick oder Enter schließt den Umriss)."
+            }
+            onClick={adoptPolygon}
+          >
+            Gezeichnetes Polygon übernehmen
+          </button>
+        </>
       )}
       <NumberField
         label="Höhe / Länge"

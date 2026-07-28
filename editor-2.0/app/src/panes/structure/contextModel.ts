@@ -40,6 +40,11 @@ const ELEMENT_OPTIONS: ChildOption[] = [
   { label: "Decke / Platte", kind: "element", ifcClass: "IFCSLAB", builderId: "slab" },
   { label: "Stütze", kind: "element", ifcClass: "IFCCOLUMN", builderId: "column" },
   { label: "Träger", kind: "element", ifcClass: "IFCBEAM", builderId: "beam" },
+  { label: "Platte (Plate)", kind: "element", ifcClass: "IFCPLATE", builderId: "plate" },
+  { label: "Stab (Member)", kind: "element", ifcClass: "IFCMEMBER", builderId: "member" },
+  { label: "Fundament", kind: "element", ifcClass: "IFCFOOTING", builderId: "footing" },
+  { label: "Geländer", kind: "element", ifcClass: "IFCRAILING", builderId: "railing" },
+  { label: "Bekleidung (Covering)", kind: "element", ifcClass: "IFCCOVERING", builderId: "covering" },
   {
     label: "Element-Proxy",
     kind: "element",

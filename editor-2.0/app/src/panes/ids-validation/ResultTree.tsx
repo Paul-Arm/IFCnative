@@ -88,26 +88,19 @@ export default function ResultTree({ docId, documents, filter }: ResultTreeProps
     <div>
       {documents.map((doc) => (
         <section key={doc.key}>
-          <header
-            style={{
-              alignItems: "baseline",
-              background: "var(--bg-hover)",
-              borderBottom: "1px solid var(--border)",
-              display: "flex",
-              gap: 6,
-              padding: "3px 8px",
-            }}
-          >
-            <strong style={{ flex: 1, fontWeight: 600, minWidth: 0 }}>
-              {doc.name}
-            </strong>
-            <span className="text-dim">
-              {doc.totals.specs} Spezifikation(en) · {doc.totals.failedSpecs}{" "}
-              fehlgeschlagen
-            </span>
+          <header className="ids-doc-head">
+            <strong className="ids-doc-name">{doc.name}</strong>
+            <span className="badge">{doc.totals.specs} Spezifikation(en)</span>
+            {doc.totals.failedSpecs > 0 ? (
+              <span className="badge badge-error">
+                {doc.totals.failedSpecs} fehlgeschlagen
+              </span>
+            ) : (
+              <span className="badge badge-ok">alle bestanden</span>
+            )}
           </header>
           {doc.specs.length === 0 ? (
-            <p className="text-dim" style={{ margin: 0, padding: "4px 8px" }}>
+            <p className="list-note">
               Dieses IDS enthält keine Spezifikationen.
             </p>
           ) : (

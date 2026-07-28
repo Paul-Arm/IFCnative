@@ -11,7 +11,17 @@
  * Klasse in Klartext fest.
  */
 
-export type BuilderClassId = "wall" | "slab" | "column" | "beam" | "proxy";
+export type BuilderClassId =
+  | "wall"
+  | "slab"
+  | "column"
+  | "beam"
+  | "plate"
+  | "member"
+  | "footing"
+  | "railing"
+  | "covering"
+  | "proxy";
 
 export interface BuilderClassDef {
   id: BuilderClassId;
@@ -67,6 +77,51 @@ export const BUILDER_CLASSES: readonly BuilderClassDef[] = [
     hasInStoreBuilder: true,
   },
   {
+    id: "plate",
+    label: "Platte (Plate)",
+    entityName: "IfcPlate",
+    ifcClass: "IFCPLATE",
+    predefinedType: "NOTDEFINED",
+    hint: "Breite × Tiefe = Grundriss, Höhe = Plattendicke (+Z)",
+    hasInStoreBuilder: false,
+  },
+  {
+    id: "member",
+    label: "Stab (Member)",
+    entityName: "IfcMember",
+    ifcClass: "IFCMEMBER",
+    predefinedType: "NOTDEFINED",
+    hint: "Breite × Tiefe = Querschnitt, Höhe = Stablänge (+Z)",
+    hasInStoreBuilder: false,
+  },
+  {
+    id: "footing",
+    label: "Fundament",
+    entityName: "IfcFooting",
+    ifcClass: "IFCFOOTING",
+    predefinedType: "PAD_FOOTING",
+    hint: "Breite × Tiefe = Grundriss, Höhe = Fundamenthöhe (+Z)",
+    hasInStoreBuilder: false,
+  },
+  {
+    id: "railing",
+    label: "Geländer",
+    entityName: "IfcRailing",
+    ifcClass: "IFCRAILING",
+    predefinedType: "NOTDEFINED",
+    hint: "Breite × Tiefe = Grundriss, Höhe = Geländerhöhe (+Z)",
+    hasInStoreBuilder: false,
+  },
+  {
+    id: "covering",
+    label: "Bekleidung (Covering)",
+    entityName: "IfcCovering",
+    ifcClass: "IFCCOVERING",
+    predefinedType: "NOTDEFINED",
+    hint: "Breite × Tiefe = Fläche, Höhe = Aufbaudicke (+Z)",
+    hasInStoreBuilder: false,
+  },
+  {
     id: "proxy",
     label: "Allgemeines Bauteil (Proxy)",
     entityName: "IfcBuildingElementProxy",
@@ -83,12 +138,16 @@ export function builderClass(id: BuilderClassId): BuilderClassDef {
   return found;
 }
 
-export type ProfileKind = "rechteck" | "kreis";
+export type ProfileKind = "rechteck" | "kreis" | "polygon";
 
 export const PROFILE_LABELS: Readonly<Record<ProfileKind, string>> = {
   rechteck: "Rechteck (Breite × Tiefe)",
   kreis: "Kreis (Radius)",
+  polygon: "Polygon (gezeichnet)",
 };
+
+/** Geschlossener 2D-Linienzug in Profil-Koordinaten (Meter). */
+export type PolygonPoints = ReadonlyArray<readonly [number, number]>;
 
 /** Eingabewerte des Baukasten-Formulars — alle Längen in Metern. */
 export interface CreateElementParams {
@@ -100,6 +159,8 @@ export interface CreateElementParams {
   tiefe: number;
   /** Kreis: Radius */
   radius: number;
+  /** Polygon: Eckpunkte (mind. 3), relativ zur Element-Position */
+  punkte?: PolygonPoints;
   /** Extrusionslänge (Bedeutung je Klasse, siehe `hint`) */
   hoehe: number;
   /** Position relativ zum räumlichen Elternknoten */

@@ -61,9 +61,13 @@ export default function CheckSection({
 
   if (!doc || !session) {
     return (
-      <section style={{ borderTop: "1px solid var(--border)", padding: "8px 10px" }}>
-        <h4 style={{ margin: "0 0 4px" }}>Prüfung</h4>
-        <p className="text-dim" style={{ margin: 0 }}>
+      <section
+        style={{ borderTop: "1px solid var(--border-60)", padding: "8px 10px" }}
+      >
+        <h4 className="card-title" style={{ margin: "0 0 4px" }}>
+          Prüfung
+        </h4>
+        <p className="list-note" style={{ padding: 0 }}>
           Kein Modell geöffnet.
         </p>
       </section>
@@ -73,10 +77,14 @@ export default function CheckSection({
   const fixable = findings.filter((entry) => entry.quickFix);
 
   return (
-    <section style={{ borderTop: "1px solid var(--border)", padding: "8px 10px" }}>
-      <h4 style={{ margin: "0 0 6px" }}>Prüfung</h4>
+    <section
+      style={{ borderTop: "1px solid var(--border-60)", padding: "8px 10px" }}
+    >
+      <h4 className="card-title" style={{ margin: "0 0 6px" }}>
+        Prüfung
+      </h4>
 
-      <div className="pane-toolbar" style={{ border: 0, padding: 0 }}>
+      <div className="pane-toolbar">
         <span className="text-dim">
           {selection.length === 0
             ? "Keine Auswahl"
@@ -111,7 +119,7 @@ export default function CheckSection({
         <p className="text-dim" style={{ margin: "6px 0 0" }}>
           Vorschlag für #{checked[0]}:{" "}
           <button
-            className="btn"
+            className="btn btn-sm"
             onClick={() => select(suggestion.id)}
             type="button"
           >
@@ -128,40 +136,27 @@ export default function CheckSection({
 
       <ul style={{ listStyle: "none", margin: "6px 0 0", padding: 0 }}>
         {findings.map((entry) => (
-          <li
-            key={entry.id}
-            style={{
-              alignItems: "baseline",
-              borderBottom: "1px solid var(--border)",
-              display: "flex",
-              gap: 6,
-              padding: "3px 0",
-            }}
-          >
+          <li key={entry.id} className="list-row">
             <span
               aria-label={CATALOG_SEVERITY_LABEL[entry.severity]}
-              style={{
-                background: CATALOG_SEVERITY_COLOR[entry.severity],
-                borderRadius: "50%",
-                display: "inline-block",
-                flex: "0 0 auto",
-                height: 8,
-                width: 8,
-              }}
+              className="dot"
+              style={{ background: CATALOG_SEVERITY_COLOR[entry.severity] }}
               title={CATALOG_SEVERITY_LABEL[entry.severity]}
             />
-            <span style={{ flex: 1 }}>{entry.message}</span>
+            <span style={{ flex: 1, minWidth: 0 }}>{entry.message}</span>
             {entry.quickFix ? (
-              <button
-                className="btn"
-                onClick={() => {
-                  const command = cmdCatalogQuickFix(session, entry);
-                  if (command) execute(doc.id, command);
-                }}
-                type="button"
-              >
-                {entry.quickFix.label}
-              </button>
+              <span className="row-actions">
+                <button
+                  className="btn btn-sm"
+                  onClick={() => {
+                    const command = cmdCatalogQuickFix(session, entry);
+                    if (command) execute(doc.id, command);
+                  }}
+                  type="button"
+                >
+                  {entry.quickFix.label}
+                </button>
+              </span>
             ) : null}
           </li>
         ))}

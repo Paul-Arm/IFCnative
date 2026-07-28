@@ -39,7 +39,7 @@ export default function RelationsSection({
   );
 
   if (groups.length === 0) {
-    return <p className="pane-empty">Keine Beziehungen für dieses Objekt.</p>;
+    return <p className="empty-state">Keine Beziehungen für dieses Objekt.</p>;
   }
 
   return (
@@ -47,8 +47,7 @@ export default function RelationsSection({
       {groups.map((group) => (
         <div key={group.label}>
           <SectionHeading>
-            {group.label}{" "}
-            <span className="text-dim">({group.rows.length})</span>
+            {group.label} <span>({group.rows.length})</span>
           </SectionHeading>
           {group.rows.map((row) => (
             <button
@@ -70,7 +69,7 @@ export default function RelationsSection({
               </span>
               {row.otherType}
               {row.otherName ? ` ‚${row.otherName}'` : ""}
-              <span className="text-dim"> #{row.otherId}</span>
+              <span className="text-dim mono"> #{row.otherId}</span>
             </button>
           ))}
         </div>
