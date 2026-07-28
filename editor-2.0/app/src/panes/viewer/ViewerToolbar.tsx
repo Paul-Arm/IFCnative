@@ -7,12 +7,18 @@ import type { PresetView } from "../../core/viewer";
 import type { SectionState } from "./section";
 import { SECTION_AXES } from "./section";
 
+/** Exklusiver Werkzeugmodus des Viewers (M9). */
+export type ViewerTool = "none" | "move" | "pick";
+
 export interface ViewerToolbarProps {
   disabled: boolean;
   hasSelection: boolean;
   isolated: boolean;
   xray: boolean;
   section: SectionState;
+  /** Aktives Werkzeug (Verschieben / Koordinaten picken). */
+  tool: ViewerTool;
+  onSelectTool(tool: ViewerTool): void;
   /** Offene Modelländerungen seit dem letzten Geometrie-Stand (Badge-Zähler). */
   pendingRebuild: number;
   /** Export läuft gerade — Neuberechnung sperren. */
@@ -35,6 +41,13 @@ const REBUILD_TITLE =
 const AUTO_TITLE =
   "Automatisch 2 s nach der letzten Änderung neu berechnen. " +
   "Standardmäßig aus: Der Export großer Modelle ist teuer.";
+
+const MOVE_TITLE =
+  "Werkzeug „Verschieben" (Taste W): Achsenpfeile am ausgewählten Bauteil " +
+  "ziehen; beim Loslassen wird die Verschiebung als Command ausgeführt.";
+const PICK_TITLE =
+  "Werkzeug „Koordinaten picken": Klick auf Geometrie liefert den Weltpunkt " +
+  "in Metern (Statuszeile + Zwischenablage).";
 
 const PRESETS: ReadonlyArray<{ id: PresetView; label: string }> = [
   { id: "iso", label: "Iso" },
@@ -75,6 +88,29 @@ export default function ViewerToolbar(props: ViewerToolbarProps) {
         onClick={props.onToggleXray}
       >
         X-Ray
+      </button>
+
+      <button
+        className="btn"
+        data-active={props.tool === "move"}
+        disabled={disabled}
+        title={MOVE_TITLE}
+        onClick={() =>
+          props.onSelectTool(props.tool === "move" ? "none" : "move")
+        }
+      >
+        Verschieben (W)
+      </button>
+      <button
+        className="btn"
+        data-active={props.tool === "pick"}
+        disabled={disabled}
+        title={PICK_TITLE}
+        onClick={() =>
+          props.onSelectTool(props.tool === "pick" ? "none" : "pick")
+        }
+      >
+        Koordinaten picken
       </button>
 
       <span className="text-dim" style={{ marginLeft: 8 }}>

@@ -17,6 +17,8 @@ import {
   type CreateElementParams,
   type ProfileKind,
 } from "../../domain/geometry";
+import { usePickStore } from "../viewer/pickStore";
+import { formatPointStatus, roundMm } from "../viewer/worldCoords";
 import { defaultParent, spatialOptions } from "./spatialOptions";
 import {
   NumberField,
@@ -57,6 +59,9 @@ export default function CreateSection({
   const [status, setStatus] = useState<{ text: string; error?: boolean }>({
     text: "",
   });
+  // Letzter 3D-Pick aus dem Viewer (M9) — nur Punkte DIESES Dokuments.
+  const lastPick = usePickStore((s) => s.last);
+  const pick = lastPick && lastPick.docId === docId ? lastPick : null;
 
   const parentId =
     selectedSpatialId ?? parentChoice ?? defaultParent(options);
@@ -165,6 +170,22 @@ export default function CreateSection({
         step={0.1}
         onChange={(value) => patch({ z: value })}
       />
+      <button
+        className="btn"
+        disabled={!pick}
+        title={
+          pick
+            ? `Übernimmt ${formatPointStatus(pick)} (Weltkoordinaten — passt, ` +
+              "solange der Elternknoten im Ursprung liegt)."
+            : "Erst im Viewer mit „Koordinaten picken" einen Punkt wählen."
+        }
+        onClick={() =>
+          pick &&
+          patch({ x: roundMm(pick.x), y: roundMm(pick.y), z: roundMm(pick.z) })
+        }
+      >
+        Position aus Pick übernehmen
+      </button>
 
       <TextField
         label="Name"

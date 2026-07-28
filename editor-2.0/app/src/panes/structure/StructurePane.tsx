@@ -2,10 +2,27 @@
  * Strukturbaum: räumliche Hierarchie (Projekt → Standort → Gebäude →
  * Geschoss) samt enthaltener Elemente, mit Suche, Mehrfachauswahl und
  * Fenster-Virtualisierung für sehr große Modelle.
+ *
+ * M9: Rechtsklick öffnet ein eigenes Kontextmenü (Kamera zentrieren,
+ * Kind anlegen, Löschen mit Kaskadenplan) — jede Modelländerung läuft als
+ * Command durch die Pipeline.
  */
 import { useCallback, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useCommands } from "../../commands/pipeline";
+import {
+  cmdDeleteEntityCascade,
+  planEntityRemoval,
+} from "../../commands/entityCommands";
+import { cmdCreateSpatialChild } from "../../commands/resourceCommands";
+import { cmdCreateElement } from "../../commands/geometryCommands";
+import { DEFAULT_CREATE_PARAMS } from "../../domain/geometry";
 import { useActiveDocument } from "../../store/documents";
 import { useSelection, useSelectionOf } from "../../store/selection";
+import ConfirmDeleteDialog, {
+  type PendingTreeRemoval,
+} from "./ConfirmDeleteDialog";
+import ContextMenu, { type MenuTarget } from "./ContextMenu";
+import type { ChildOption } from "./contextModel";
 import TreeRow from "./TreeRow";
 import VirtualList from "./VirtualList";
 import { ROW_HEIGHT } from "./treeModel";
@@ -27,6 +44,63 @@ export default function StructurePane() {
   const anchor = useRef<number | null>(null);
 
   const { items, rows } = tree;
+
+  // — Kontextmenü + Lösch-Dialog (M9) —
+  const execute = useCommands((s) => s.execute);
+  const [menu, setMenu] = useState<MenuTarget | null>(null);
+  const [removal, setRemoval] = useState<PendingTreeRemoval | null>(null);
+  const session = document?.session ?? null;
+
+  const onContext = useCallback(
+    (event: MouseEvent, index: number) => {
+      event.preventDefault();
+      if (!docId) return;
+      const item = items[index];
+      select(docId, item.expressId);
+      setMenu({
+        x: event.clientX,
+        y: event.clientY,
+        expressId: item.expressId,
+        type: item.type,
+        label: `${item.type} ${item.name || "(ohne Namen)"} (#${item.expressId})`,
+      });
+    },
+    [docId, items, select],
+  );
+
+  const onDeleteRequest = useCallback(
+    (expressId: number) => {
+      if (!session) return;
+      setRemoval({
+        expressId,
+        label: session.labelOf(expressId),
+        plan: planEntityRemoval(session, expressId),
+      });
+    },
+    [session],
+  );
+
+  const onConfirmDelete = useCallback(() => {
+    if (!docId || !session || !removal) return;
+    execute(docId, cmdDeleteEntityCascade(session, removal.expressId, docId));
+    setRemoval(null);
+  }, [docId, session, removal, execute]);
+
+  const onCreateChild = useCallback(
+    (parentId: number, option: ChildOption) => {
+      if (!docId || !session) return;
+      const command =
+        option.kind === "spatial"
+          ? cmdCreateSpatialChild(session, parentId, option.ifcClass, "")
+          : cmdCreateElement(session, parentId, {
+              ...DEFAULT_CREATE_PARAMS,
+              klasse: option.builderId ?? "wall",
+              name: "",
+            });
+      execute(docId, command);
+    },
+    [docId, session, execute],
+  );
 
   const onActivate = useCallback(
     (event: MouseEvent, row: number, expressId: number) => {
@@ -70,6 +144,7 @@ export default function StructurePane() {
           onToggle={tree.toggle}
           onActivate={onActivate}
           onFocus={onFocus}
+          onContext={onContext}
         />
       );
     },
@@ -83,6 +158,7 @@ export default function StructurePane() {
       tree.toggle,
       onActivate,
       onFocus,
+      onContext,
     ],
   );
 

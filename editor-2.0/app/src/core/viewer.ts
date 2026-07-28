@@ -8,7 +8,7 @@
  * hält den Zustand der Pro-Frame-Render-Optionen und stellt dem Pane eine
  * schmale, typisierte Fassade (`ViewerHandle`) zur Verfügung.
  */
-import type { GeometryProcessor } from "@ifc-lite/geometry";
+import type { CoordinateInfo, GeometryProcessor } from "@ifc-lite/geometry";
 import type { RenderOptions, Renderer, SectionPlane } from "@ifc-lite/renderer";
 
 export type ViewerColor = [number, number, number, number];
@@ -23,6 +23,20 @@ export interface ViewerViewState {
   isolatedIds: ReadonlySet<number> | null;
   sectionPlane: SectionPlane | null;
   xray: boolean;
+}
+
+/**
+ * Roh-Zugriff der Overlay-Werkzeuge (M9: Verschiebe-Gizmo, Koordinaten-Pick)
+ * auf Renderer-APIs (raycastScene, Camera.projectToScreen/unprojectToRay,
+ * Scene.getEntityBoundingBox). Bewusst roh statt einzeln gespiegelt, damit
+ * diese Fassade schlank bleibt — die Overlay-Logik lebt in panes/viewer/**.
+ */
+export interface ViewerOverlayAccess {
+  renderer: Renderer;
+  /** true, solange noch Streaming-Fragmente gezeichnet werden. */
+  isStreaming(): boolean;
+  /** RTC-Ursprungsverschiebung (IFC Z-up, Meter); 0/0/0 ohne Großkoordinaten. */
+  originShift(): { x: number; y: number; z: number };
 }
 
 export interface ViewerHandle {
@@ -41,6 +55,8 @@ export interface ViewerHandle {
   pan(dx: number, dy: number): void;
   zoom(delta: number, x: number, y: number): void;
   resize(width: number, height: number): void;
+  /** Overlay-Zugriff (M9); null ohne laufenden Renderer (IDLE-Handle). */
+  overlay(): ViewerOverlayAccess | null;
 }
 
 export type ViewerStatus =
@@ -65,6 +81,9 @@ const IDLE: ViewerHandle = {
   pan() {},
   zoom() {},
   resize() {},
+  overlay() {
+    return null;
+  },
 };
 
 export async function startViewer(
@@ -133,6 +152,8 @@ function createSession(
   let options = buildOptions(view, true);
   let disposed = false;
   let streaming = true;
+  /** Koordinaten-Kontext des Geometrie-Laufs (originShift bei Großkoordinaten). */
+  let coordInfo: CoordinateInfo | null = null;
   let cameraTouched = false;
   let frame = 0;
   let last = performance.now();
@@ -163,7 +184,11 @@ function createSession(
       // Streaming-First: Batches laden, während der Rest noch tesselliert wird.
       for await (const event of geometry.processAdaptive(ifcBytes)) {
         if (disposed) return;
+        // originShift für die Pick-/Gizmo-Overlays merken (M9): Batch-Events
+        // tragen sie optional, das complete-Event verbindlich.
+        if (event.type === "complete") coordInfo = event.coordinateInfo;
         if (event.type !== "batch") continue;
+        if (event.coordinateInfo) coordInfo = event.coordinateInfo;
         meshCount += event.meshes.length;
         // isStreaming = true: nur Fragment-Batches statt O(N²)-Rebatching.
         renderer.addMeshes(event.meshes, true);
@@ -286,6 +311,14 @@ function createSession(
     resize(width, height) {
       renderer.resize(width, height);
       renderer.requestRender();
+    },
+
+    overlay() {
+      return {
+        renderer,
+        isStreaming: () => streaming,
+        originShift: () => coordInfo?.originShift ?? { x: 0, y: 0, z: 0 },
+      };
     },
   };
 }
