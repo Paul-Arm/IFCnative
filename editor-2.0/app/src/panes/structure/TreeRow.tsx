@@ -34,6 +34,8 @@ export interface TreeRowProps {
   onToggle(index: number): void;
   onActivate(event: MouseEvent, row: number, expressId: number): void;
   onFocus(expressId: number): void;
+  /** Rechtsklick → eigenes Kontextmenü (M9), kein natives Menü. */
+  onContext(event: MouseEvent, index: number): void;
 }
 
 function TreeRow({
@@ -46,6 +48,7 @@ function TreeRow({
   onToggle,
   onActivate,
   onFocus,
+  onContext,
 }: TreeRowProps) {
   const hasChildren = item.subtreeSize > 0;
   const label = item.name || "(ohne Namen)";
@@ -62,6 +65,7 @@ function TreeRow({
       }}
       onClick={(event) => onActivate(event, row, item.expressId)}
       onDoubleClick={() => onFocus(item.expressId)}
+      onContextMenu={(event) => onContext(event, index)}
     >
       <span
         style={CHEVRON_STYLE}

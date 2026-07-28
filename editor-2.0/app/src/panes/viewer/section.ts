@@ -12,6 +12,8 @@ export interface SectionState {
   /** 0–100 % der Modellausdehnung entlang der Achse. */
   position: number;
   enabled: boolean;
+  /** Schnittrichtung umkehren (Renderer-Flag `flipped`). */
+  flipped: boolean;
 }
 
 export const SECTION_AXES: ReadonlyArray<{ id: SectionAxis; label: string }> = [
@@ -24,6 +26,7 @@ export const DEFAULT_SECTION: SectionState = {
   axis: "down",
   position: 50,
   enabled: false,
+  flipped: false,
 };
 
 export function toSectionPlane(state: SectionState): SectionPlane | null {
@@ -32,5 +35,6 @@ export function toSectionPlane(state: SectionState): SectionPlane | null {
     axis: state.axis,
     position: state.position,
     enabled: true,
+    flipped: state.flipped,
   };
 }

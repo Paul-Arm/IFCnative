@@ -1,8 +1,9 @@
 /**
- * Inspector: zeigt Details des zuletzt ausgewählten Objekts in fünf Modi
- * (Übersicht, Eigenschaften, Mengen, Beziehungen, Platzierung). Attribute,
- * Eigenschaften und Mengen sind editierbar; jeder Schreibpfad läuft als Command
- * durch die Pipeline (`useCommands.execute`). „Platzierung" ist reine Anzeige.
+ * Inspector: zeigt Details des zuletzt ausgewählten Objekts in sechs Modi
+ * (Übersicht, Eigenschaften, Mengen, Beziehungen, Ressourcen, Platzierung).
+ * Attribute, Eigenschaften, Mengen und Ressourcen-Zuordnungen sind editierbar;
+ * jeder Schreibpfad läuft als Command durch die Pipeline
+ * (`useCommands.execute`). „Platzierung" ist reine Anzeige.
  *
  * Aktualität (Befund 5): Die Abschnitte hängen ihre Memos an
  * `useDocRevision(docId)` — die dokumentweite Revision aus der Pipeline, die
@@ -17,12 +18,14 @@ import PlacementSection from "./PlacementSection";
 import PropertiesSection from "./PropertiesSection";
 import QuantitiesSection from "./QuantitiesSection";
 import RelationsSection from "./RelationsSection";
+import ResourcesSection from "./ResourcesSection";
 
 type InspectorMode =
   | "overview"
   | "properties"
   | "quantities"
   | "relations"
+  | "resources"
   | "placement";
 
 const MODES: ReadonlyArray<{ id: InspectorMode; label: string }> = [
@@ -30,6 +33,7 @@ const MODES: ReadonlyArray<{ id: InspectorMode; label: string }> = [
   { id: "properties", label: "Eigenschaften" },
   { id: "quantities", label: "Mengen" },
   { id: "relations", label: "Beziehungen" },
+  { id: "resources", label: "Ressourcen" },
   { id: "placement", label: "Platzierung" },
 ];
 
@@ -67,7 +71,8 @@ export default function InspectorPane() {
       </div>
 
       <div className="pane-body">
-        {!doc || expressId === null ? (
+        {/* „Ressourcen" rendert auch ohne Auswahl — die Einheiten gelten modellweit. */}
+        {!doc || (expressId === null && mode !== "resources") ? (
           <p className="pane-empty">
             {doc
               ? "Nichts ausgewählt — Objekt in Struktur, Viewer oder Graph wählen."
@@ -75,18 +80,20 @@ export default function InspectorPane() {
           </p>
         ) : (
           <>
-            <SelectionHeader
-              count={selection.length}
-              label={doc.session.labelOf(expressId)}
-            />
-            {mode === "overview" && (
+            {expressId !== null && (
+              <SelectionHeader
+                count={selection.length}
+                label={doc.session.labelOf(expressId)}
+              />
+            )}
+            {mode === "overview" && expressId !== null && (
               <OverviewSection
                 docId={doc.id}
                 session={doc.session}
                 expressId={expressId}
               />
             )}
-            {mode === "properties" && (
+            {mode === "properties" && expressId !== null && (
               <PropertiesSection
                 docId={doc.id}
                 session={doc.session}
@@ -94,21 +101,28 @@ export default function InspectorPane() {
                 query={query}
               />
             )}
-            {mode === "quantities" && (
+            {mode === "quantities" && expressId !== null && (
               <QuantitiesSection
                 docId={doc.id}
                 session={doc.session}
                 expressId={expressId}
               />
             )}
-            {mode === "relations" && (
+            {mode === "relations" && expressId !== null && (
               <RelationsSection
                 docId={doc.id}
                 session={doc.session}
                 expressId={expressId}
               />
             )}
-            {mode === "placement" && (
+            {mode === "resources" && (
+              <ResourcesSection
+                docId={doc.id}
+                session={doc.session}
+                expressId={expressId}
+              />
+            )}
+            {mode === "placement" && expressId !== null && (
               <PlacementSection
                 docId={doc.id}
                 session={doc.session}

@@ -1,20 +1,27 @@
 /**
  * Ribbon · Ansicht — Arbeitsbereiche als Galerie, die Fenster des aktuellen
  * Layouts als Schalter, dazu Theme und UI-Zoom. Alles über `useUi`.
+ * Gruppe „Schnitt" (M9): Schnittebene und Clip-Box des 3D-Viewers über den
+ * geteilten `sectionStore` — der ViewerPane konsumiert denselben Zustand.
  */
 import type { PaneId } from "../../../panes/ids";
+import { SECTION_AXES } from "../../../panes/viewer/section";
+import { useSectionStore } from "../../../panes/viewer/sectionStore";
 import { useUi } from "../../../store/ui";
 import type { IconComponent } from "../icons";
 import {
   IconCube,
+  IconDrawing,
   IconGraph,
   IconInspector,
+  IconLayout,
   IconLens,
   IconMoon,
   IconNotes,
   IconSave,
   IconStructure,
   IconSun,
+  IconUndo,
   IconZoom,
 } from "../icons";
 import { togglePane, usePaneVisible } from "../panes";
@@ -84,6 +91,10 @@ export function AnsichtTab() {
 
       <RibbonGroupDivider />
 
+      <SchnittGroup />
+
+      <RibbonGroupDivider />
+
       <RibbonGroup label="Darstellung">
         <RibbonLargeButton
           icon={theme === "light" ? IconMoon : IconSun}
@@ -126,6 +137,64 @@ function PaneToggles({ entries }: { entries: readonly PaneEntry[] }) {
         <PaneToggle key={entry.id} {...entry} />
       ))}
     </RibbonSmallStack>
+  );
+}
+
+/**
+ * Gruppe „Schnitt": Schnittebene an/aus, Achse, Clip-Box auf Auswahl und
+ * Zurücksetzen. Wirkt über den sectionStore auf den 3D-Viewer; ohne
+ * laufenden Viewer (kein Dokument/kein WebGPU) ist die Gruppe gesperrt.
+ */
+function SchnittGroup() {
+  const section = useSectionStore((s) => s.section);
+  const viewerReady = useSectionStore((s) => s.viewerReady);
+  const boxEnabled = useSectionStore((s) => s.boxEnabled);
+  const toggleSection = useSectionStore((s) => s.toggleSection);
+  const patchSection = useSectionStore((s) => s.patchSection);
+  const requestBox = useSectionStore((s) => s.requestBoxOnSelection);
+  const reset = useSectionStore((s) => s.reset);
+
+  return (
+    <RibbonGroup label="Schnitt">
+      <RibbonLargeButton
+        icon={IconDrawing}
+        label="Schnitt"
+        tooltip="Schnittebene ein-/ausschalten (Werkzeug „Schneiden“ im Viewer: Taste X)"
+        active={section.enabled}
+        disabled={!viewerReady}
+        onClick={toggleSection}
+      />
+      <RibbonSmallStack>
+        {SECTION_AXES.map((axis) => (
+          <RibbonSmallButton
+            key={axis.id}
+            icon={IconLayout}
+            label={`Achse ${axis.label}`}
+            tooltip={`Schnittachse ${axis.label}`}
+            active={section.axis === axis.id}
+            disabled={!viewerReady}
+            onClick={() => patchSection({ axis: axis.id, enabled: true })}
+          />
+        ))}
+      </RibbonSmallStack>
+      <RibbonSmallStack>
+        <RibbonSmallButton
+          icon={IconCube}
+          label="Box auf Auswahl"
+          tooltip="Clip-Box auf die Bounding-Box der Auswahl setzen (+10 % Rand); ohne Auswahl auf das gesamte Modell"
+          active={boxEnabled}
+          disabled={!viewerReady}
+          onClick={requestBox}
+        />
+        <RibbonSmallButton
+          icon={IconUndo}
+          label="Zurücksetzen"
+          tooltip="Schnittebene und Clip-Box zurücksetzen"
+          disabled={!viewerReady}
+          onClick={reset}
+        />
+      </RibbonSmallStack>
+    </RibbonGroup>
   );
 }
 

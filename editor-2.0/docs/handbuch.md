@@ -175,6 +175,34 @@ automatische Neuberechnung bewusst abgeschaltet.
 Färbungen und Ausblendungen aus **Lens** und **Prüfzentrum** wirken auf dieselbe
 Szene.
 
+#### Schneiden & Clip-Box
+
+**Schneiden** (Werkzeug in der Viewer-Leiste, Taste **X**): Solange das
+Werkzeug aktiv ist, verschiebt Ziehen mit der linken Maustaste die
+Schnittebene direkt im Viewer (nach rechts/oben = mehr, die Position läuft
+von 0 bis 100 % der Modellausdehnung entlang der Achse). Feinjustierung über
+das Mausrad: **Umschalt+Rad** in 1-%-, **Alt+Rad** in 0,1-%-Schritten — ohne
+Modifier bleibt das Rad Zoom. Achse (X/Y/Z), Position (Schieberegler),
+**Flip** (Schnittrichtung umkehren) und **Schnitt an/aus** stehen wie gehabt
+in der Werkzeugleiste; Auswahl-Klicks und Pan (mittlere/rechte Maustaste)
+funktionieren auch im Schneiden-Modus. Der Renderer unterstützt genau **eine**
+Schnittebene — eine zweite, kombinierte Ebene gibt die Renderer-API nicht her;
+als Gegenschnitt dienen Flip oder die Clip-Box.
+
+**Clip-Box**: Der Knopf **Clip-Box** (Werkzeugleiste) bzw. **Box auf
+Auswahl** (Ribbon **Ansicht → Schnitt**) legt eine achsparallele Box um die
+Bounding-Box der Auswahl plus 10 % Rand — ohne Auswahl um das gesamte Modell.
+Geometrie außerhalb der Box wird echt weggeschnitten (kein bloßes
+Ausblenden); geschnittene Bauteile sind dort auch nicht mehr anklickbar. Die
+Boxkanten erscheinen gestrichelt im Viewer, und ein kompaktes Panel (rechts
+oben) bietet sechs Flächen-Regler — min/max je Achse in Metern
+(IFC-Koordinaten). **Zurücksetzen** stellt den vollen Modellumfang wieder
+her, **Aus** schaltet die Box ab. Schnittebene und Clip-Box sind unabhängig
+und können gleichzeitig aktiv sein.
+
+Die Ribbon-Gruppe **Ansicht → Schnitt** bündelt dieselben Schalter (Schnitt
+an/aus, Achse, Box auf Auswahl, Zurücksetzen) außerhalb des Viewer-Panes.
+
 ### 3.3 Inspector
 
 Details des zuletzt ausgewählten Objekts, umschaltbar über fünf Knöpfe:

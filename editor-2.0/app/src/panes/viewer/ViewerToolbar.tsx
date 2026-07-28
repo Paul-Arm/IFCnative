@@ -7,12 +7,18 @@ import type { PresetView } from "../../core/viewer";
 import type { SectionState } from "./section";
 import { SECTION_AXES } from "./section";
 
+/** Exklusiver Werkzeugmodus des Viewers (M9). */
+export type ViewerTool = "none" | "move" | "pick" | "slice";
+
 export interface ViewerToolbarProps {
   disabled: boolean;
   hasSelection: boolean;
   isolated: boolean;
   xray: boolean;
   section: SectionState;
+  /** Aktives Werkzeug (Verschieben / Koordinaten picken). */
+  tool: ViewerTool;
+  onSelectTool(tool: ViewerTool): void;
   /** Offene Modelländerungen seit dem letzten Geometrie-Stand (Badge-Zähler). */
   pendingRebuild: number;
   /** Export läuft gerade — Neuberechnung sperren. */
@@ -24,6 +30,10 @@ export interface ViewerToolbarProps {
   onShowAll(): void;
   onToggleXray(): void;
   onSection(patch: Partial<SectionState>): void;
+  /** Clip-Box aktiv (Panel sichtbar). */
+  clipBoxActive: boolean;
+  /** „Box auf Auswahl": Clip-Box aus Auswahl- bzw. Modell-Bounds setzen. */
+  onClipBoxOnSelection(): void;
   onPreset(view: PresetView): void;
   onRebuild(): void;
   onToggleAutoRebuild(): void;
@@ -35,6 +45,22 @@ const REBUILD_TITLE =
 const AUTO_TITLE =
   "Automatisch 2 s nach der letzten Änderung neu berechnen. " +
   "Standardmäßig aus: Der Export großer Modelle ist teuer.";
+
+const MOVE_TITLE =
+  "Werkzeug „Verschieben“ (Taste W): Achsenpfeile am ausgewählten Bauteil " +
+  "ziehen; beim Loslassen wird die Verschiebung als Command ausgeführt.";
+const PICK_TITLE =
+  "Werkzeug „Koordinaten picken“: Klick auf Geometrie liefert den Weltpunkt " +
+  "in Metern (Statuszeile + Zwischenablage).";
+const SLICE_TITLE =
+  "Werkzeug „Schneiden“ (Taste X): Ziehen auf dem Canvas verschiebt die " +
+  "Schnittebene; Umschalt+Rad = 1-%-Schritte, Alt+Rad = 0,1-%-Schritte. " +
+  "Klick-Auswahl bleibt aktiv, Pan über mittlere/rechte Maustaste.";
+const FLIP_TITLE = "Schnittrichtung umkehren (Flip).";
+const CLIPBOX_TITLE =
+  "Clip-Box auf die Bounding-Box der Auswahl setzen (+10 % Rand); ohne " +
+  "Auswahl auf das gesamte Modell. Feinjustierung über die sechs " +
+  "Flächen-Regler im Panel.";
 
 const PRESETS: ReadonlyArray<{ id: PresetView; label: string }> = [
   { id: "iso", label: "Iso" },
@@ -77,9 +103,43 @@ export default function ViewerToolbar(props: ViewerToolbarProps) {
         X-Ray
       </button>
 
+      <button
+        className="btn"
+        data-active={props.tool === "move"}
+        disabled={disabled}
+        title={MOVE_TITLE}
+        onClick={() =>
+          props.onSelectTool(props.tool === "move" ? "none" : "move")
+        }
+      >
+        Verschieben (W)
+      </button>
+      <button
+        className="btn"
+        data-active={props.tool === "pick"}
+        disabled={disabled}
+        title={PICK_TITLE}
+        onClick={() =>
+          props.onSelectTool(props.tool === "pick" ? "none" : "pick")
+        }
+      >
+        Koordinaten picken
+      </button>
+
       <span className="text-dim" style={{ marginLeft: 8 }}>
         Schnitt
       </span>
+      <button
+        className="btn"
+        data-active={props.tool === "slice"}
+        disabled={disabled}
+        title={SLICE_TITLE}
+        onClick={() =>
+          props.onSelectTool(props.tool === "slice" ? "none" : "slice")
+        }
+      >
+        Schneiden (X)
+      </button>
       <select
         className="input"
         disabled={disabled}
@@ -108,11 +168,29 @@ export default function ViewerToolbar(props: ViewerToolbarProps) {
       />
       <button
         className="btn"
+        data-active={section.flipped}
+        disabled={disabled}
+        title={FLIP_TITLE}
+        onClick={() => props.onSection({ flipped: !section.flipped })}
+      >
+        Flip
+      </button>
+      <button
+        className="btn"
         data-active={section.enabled}
         disabled={disabled}
         onClick={() => props.onSection({ enabled: !section.enabled })}
       >
         {section.enabled ? "Schnitt an" : "Schnitt aus"}
+      </button>
+      <button
+        className="btn"
+        data-active={props.clipBoxActive}
+        disabled={disabled}
+        title={CLIPBOX_TITLE}
+        onClick={props.onClipBoxOnSelection}
+      >
+        Clip-Box
       </button>
 
       <span className="text-dim" style={{ marginLeft: 8 }}>
