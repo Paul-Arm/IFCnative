@@ -1,24 +1,42 @@
 /**
- * Modus „Eigenschaften": alle Psets als Tabellen, Werte editierbar.
- * Commit erfolgt bei Blur oder Enter und nur, wenn sich der Wert geändert hat;
- * geschrieben wird über das Mutations-Overlay der Sitzung.
+ * Modus „Eigenschaften": alle Psets eines Objekts als editierbare Tabellen.
+ * Jeder Schreibpfad — Wert setzen, Property löschen/anlegen, Pset anlegen,
+ * umbenennen, duplizieren, löschen — läuft als Command durch die Pipeline und
+ * ist damit undo-fähig und im Audit-Log sichtbar.
  */
-import { useEffect, useMemo, useState } from "react";
-import type { ModelSession, PsetView } from "../../core/session";
-import { SectionHeading } from "./parts";
+import { useMemo, useState } from "react";
+import type { PropertyValueType } from "@ifc-lite/data";
+import { useCommands, type EditorCommand } from "../../commands/pipeline";
+import {
+  cmdDeleteProperty,
+  cmdSetProperty,
+} from "../../commands/propertyCommands";
+import {
+  COPY_SUFFIX,
+  cmdCreatePset,
+  cmdDeletePset,
+  cmdDuplicatePset,
+  cmdRenamePset,
+} from "../../commands/psetCommands";
+import type { ModelSession } from "../../core/session";
+import PsetBlock, { type PropertyCommit } from "./PsetBlock";
+import { readPsets, type EditablePset } from "./overlay";
+import { toDraft } from "./values";
 
 interface PropertiesSectionProps {
+  docId: string;
   session: ModelSession;
   expressId: number;
   /** Freitextfilter über Pset-Name, Property-Name und Wert. */
   query: string;
   /** Steigt bei jeder Mutation — erzwingt Neuladen der Psets. */
   revision: number;
-  /** Meldet dem Pane eine erfolgte Änderung (touch + Refresh). */
+  /** Meldet dem Pane eine erfolgte Änderung (Refresh). */
   onMutate(): void;
 }
 
 export default function PropertiesSection({
+  docId,
   session,
   expressId,
   query,
@@ -26,63 +44,145 @@ export default function PropertiesSection({
   onMutate,
 }: PropertiesSectionProps) {
   const psets = useMemo(
-    () => session.psetsOf(expressId),
-    // revision lädt die Psets nach einem Commit neu
+    // revision lädt die Psets nach jedem Command neu
+    () => readPsets(session, expressId),
     [session, expressId, revision],
   );
   const visible = useMemo(() => filterPsets(psets, query), [psets, query]);
 
-  function commit(psetName: string, propName: string, value: string): void {
-    session.setProperty(expressId, psetName, propName, value);
+  function run(command: EditorCommand): void {
+    useCommands.getState().execute(docId, command);
     onMutate();
   }
 
-  if (psets.length === 0) {
-    return <p className="pane-empty">Keine Eigenschaftssätze für dieses Objekt.</p>;
-  }
-  if (visible.length === 0) {
-    return <p className="pane-empty">Kein Treffer für „{query}".</p>;
+  function setProperty(
+    psetName: string,
+    propName: string,
+    type: PropertyValueType,
+    value: PropertyCommit,
+  ): void {
+    run(cmdSetProperty(session, expressId, psetName, propName, value, type));
   }
 
   return (
     <div>
+      <NewPsetForm
+        existing={psets.map((p) => p.name)}
+        onCreate={(name) => run(cmdCreatePset(session, expressId, name))}
+      />
+
+      {psets.length === 0 && (
+        <p className="pane-empty">
+          Keine Eigenschaftssätze für dieses Objekt — oben einen anlegen.
+        </p>
+      )}
+      {psets.length > 0 && visible.length === 0 && (
+        <p className="pane-empty">Kein Treffer für „{query}".</p>
+      )}
+
       {visible.map((pset) => (
-        <div key={pset.name}>
-          <SectionHeading>{pset.name}</SectionHeading>
-          <table className="kv-table">
-            <thead>
-              <tr>
-                <th className="text-dim" style={{ width: "45%" }}>
-                  Property
-                </th>
-                <th className="text-dim">Wert</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pset.properties.map((property) => (
-                <tr key={property.name}>
-                  <td className="dim">{property.name}</td>
-                  <td>
-                    <ValueInput
-                      key={`${expressId}|${pset.name}|${property.name}`}
-                      value={property.value}
-                      onCommit={(next) => commit(pset.name, property.name, next)}
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <PsetBlock
+          key={pset.name}
+          pset={pset}
+          takenNames={psets.map((p) => p.name)}
+          onSetProperty={(propName, type, value) =>
+            setProperty(pset.name, propName, type, value)
+          }
+          onDeleteProperty={(propName, type) =>
+            run(cmdDeleteProperty(session, expressId, pset.name, propName, type))
+          }
+          onRename={(newName) =>
+            run(cmdRenamePset(session, expressId, pset.name, newName))
+          }
+          onDuplicate={() =>
+            run(
+              cmdDuplicatePset(
+                session,
+                expressId,
+                pset.name,
+                uniqueName(
+                  `${pset.name}${COPY_SUFFIX}`,
+                  psets.map((p) => p.name),
+                ),
+              ),
+            )
+          }
+          onDelete={() => run(cmdDeletePset(session, expressId, pset.name))}
+        />
       ))}
     </div>
   );
 }
 
-function filterPsets(psets: PsetView[], query: string): PsetView[] {
+interface NewPsetFormProps {
+  existing: readonly string[];
+  onCreate(name: string): void;
+}
+
+function NewPsetForm({ existing, onCreate }: NewPsetFormProps) {
+  const [name, setName] = useState("");
+  const trimmed = name.trim();
+  const duplicate = existing.includes(trimmed);
+  const ready = trimmed.length > 0 && !duplicate;
+
+  function create(): void {
+    if (!ready) return;
+    onCreate(trimmed);
+    setName("");
+  }
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: 6,
+        alignItems: "center",
+        padding: "8px",
+        borderBottom: "1px solid var(--border)",
+      }}
+    >
+      <span className="text-dim" style={{ fontSize: "0.75rem" }}>
+        Neues Pset
+      </span>
+      <input
+        className="input"
+        style={{
+          flex: 1,
+          minWidth: 90,
+          borderColor: duplicate ? "var(--error)" : undefined,
+        }}
+        placeholder="z. B. Pset_WallCommon"
+        value={name}
+        title={duplicate ? "Dieser Name ist bereits vergeben" : undefined}
+        onChange={(event) => setName(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            create();
+          }
+        }}
+      />
+      <button className="btn" disabled={!ready} onClick={create}>
+        Anlegen
+      </button>
+    </div>
+  );
+}
+
+/** „X (Kopie)", „X (Kopie) 2", … — erster Name, der noch frei ist. */
+function uniqueName(candidate: string, taken: readonly string[]): string {
+  if (!taken.includes(candidate)) return candidate;
+  for (let index = 2; index < 1000; index += 1) {
+    const next = `${candidate} ${index}`;
+    if (!taken.includes(next)) return next;
+  }
+  return `${candidate} ${Date.now()}`;
+}
+
+function filterPsets(psets: EditablePset[], query: string): EditablePset[] {
   const needle = query.trim().toLowerCase();
   if (!needle) return psets;
-  const result: PsetView[] = [];
+  const result: EditablePset[] = [];
   for (const pset of psets) {
     if (pset.name.toLowerCase().includes(needle)) {
       result.push(pset);
@@ -91,46 +191,9 @@ function filterPsets(psets: PsetView[], query: string): PsetView[] {
     const properties = pset.properties.filter(
       (p) =>
         p.name.toLowerCase().includes(needle) ||
-        p.value.toLowerCase().includes(needle),
+        toDraft(p.value).toLowerCase().includes(needle),
     );
     if (properties.length > 0) result.push({ name: pset.name, properties });
   }
   return result;
-}
-
-interface ValueInputProps {
-  value: string;
-  onCommit(next: string): void;
-}
-
-function ValueInput({ value, onCommit }: ValueInputProps) {
-  const [draft, setDraft] = useState(value);
-
-  useEffect(() => {
-    setDraft(value);
-  }, [value]);
-
-  function commit(): void {
-    if (draft !== value) onCommit(draft);
-  }
-
-  return (
-    <input
-      className="input"
-      style={{ width: "100%" }}
-      value={draft}
-      onChange={(event) => setDraft(event.target.value)}
-      onBlur={commit}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") {
-          event.preventDefault();
-          commit();
-          event.currentTarget.blur();
-        } else if (event.key === "Escape") {
-          event.preventDefault();
-          setDraft(value);
-        }
-      }}
-    />
-  );
 }

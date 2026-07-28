@@ -66,20 +66,18 @@ export function cmdSetAttribute(
   oldValue: string,
 ): EditorCommand {
   const view = session.view;
-  const hadMutation = view
-    .getAttributeMutationsForEntity(expressId)
-    .some((m) => (m as { attrName?: string }).attrName === attrName);
   return {
     label: `${attrName} = „${value}" (#${expressId})`,
     run() {
       view.setAttribute(expressId, attrName, value, oldValue);
     },
     undo() {
-      if (hadMutation) {
-        view.setAttribute(expressId, attrName, oldValue, value, true);
-      } else {
-        view.removeAttributeMutation(expressId, attrName);
-      }
+      // Befund B3 (tests/m2-editierkern.test.ts): der StepExporter liest
+      // UPDATE_ATTRIBUTE aus der append-only Mutationshistorie, nicht aus der
+      // Overlay-Map. `removeAttributeMutation`/skipHistory lassen den neuen
+      // Wert daher im Export stehen — Undo muss ein history-anhängendes
+      // Gegen-setAttribute sein.
+      view.setAttribute(expressId, attrName, oldValue, value);
     },
   };
 }

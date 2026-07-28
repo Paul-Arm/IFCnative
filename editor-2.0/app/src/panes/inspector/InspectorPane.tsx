@@ -1,10 +1,12 @@
 /**
  * Inspector: zeigt Details des zuletzt ausgewählten Objekts in vier Modi
- * (Übersicht, Eigenschaften, Mengen, Beziehungen). Einziger Schreibpfad in M1
- * ist das Editieren von Pset-Werten im Modus „Eigenschaften".
+ * (Übersicht, Eigenschaften, Mengen, Beziehungen). Attribute, Eigenschaften
+ * und Mengen sind editierbar; jeder Schreibpfad läuft als Command durch die
+ * Pipeline (`useCommands.execute`), die selbst `documents.touch` auslöst.
+ * Der Pane zählt nur `revision` hoch, damit die Abschnitte neu lesen.
  */
 import { useState } from "react";
-import { useActiveDocument, useDocuments } from "../../store/documents";
+import { useActiveDocument } from "../../store/documents";
 import { useSelectionOf } from "../../store/selection";
 import OverviewSection from "./OverviewSection";
 import PropertiesSection from "./PropertiesSection";
@@ -22,7 +24,6 @@ const MODES: ReadonlyArray<{ id: InspectorMode; label: string }> = [
 
 export default function InspectorPane() {
   const doc = useActiveDocument();
-  const touch = useDocuments((s) => s.touch);
   const selection = useSelectionOf(doc?.id ?? null);
   const [mode, setMode] = useState<InspectorMode>("overview");
   const [query, setQuery] = useState("");
@@ -31,8 +32,8 @@ export default function InspectorPane() {
   const expressId =
     selection.length > 0 ? selection[selection.length - 1] : null;
 
+  /** Nach jedem execute: Abschnitte neu lesen lassen (touch macht die Pipeline). */
   function handleMutate(): void {
-    if (doc) touch(doc.id);
     setRevision((value) => value + 1);
   }
 
@@ -75,13 +76,16 @@ export default function InspectorPane() {
             />
             {mode === "overview" && (
               <OverviewSection
+                docId={doc.id}
                 session={doc.session}
                 expressId={expressId}
                 revision={revision}
+                onMutate={handleMutate}
               />
             )}
             {mode === "properties" && (
               <PropertiesSection
+                docId={doc.id}
                 session={doc.session}
                 expressId={expressId}
                 query={query}
@@ -90,7 +94,13 @@ export default function InspectorPane() {
               />
             )}
             {mode === "quantities" && (
-              <QuantitiesSection session={doc.session} expressId={expressId} />
+              <QuantitiesSection
+                docId={doc.id}
+                session={doc.session}
+                expressId={expressId}
+                revision={revision}
+                onMutate={handleMutate}
+              />
             )}
             {mode === "relations" && (
               <RelationsSection

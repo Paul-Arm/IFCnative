@@ -1,36 +1,68 @@
 /**
- * Modus „Übersicht": Identität des Objekts plus eine kurze Zusammenfassung,
- * wie viele Eigenschafts-, Mengen- und Beziehungsdatensätze vorhanden sind.
+ * Modus „Übersicht": Identität des Objekts plus eine kurze Zusammenfassung.
+ * Name, Beschreibung und ObjectType sind editierbar (Commit bei Blur oder
+ * Enter) und laufen über `cmdSetAttribute` durch die Pipeline. GlobalId,
+ * Klasse und expressId bleiben bewusst schreibgeschützt.
  */
 import { useMemo, useState } from "react";
+import { useCommands } from "../../commands/pipeline";
+import { cmdSetAttribute } from "../../commands/propertyCommands";
 import type { ModelSession } from "../../core/session";
+import ValueEditor from "./ValueEditor";
 import { DimValue, SectionHeading } from "./parts";
+import { readAttributes, readPsets, readQuantitySets } from "./overlay";
 
 interface OverviewSectionProps {
+  docId: string;
   session: ModelSession;
   expressId: number;
-  /** Steigt bei jeder Mutation — erzwingt Neuberechnung der Zusammenfassung. */
+  /** Steigt bei jeder Mutation — erzwingt Neuberechnung. */
   revision: number;
+  onMutate(): void;
 }
 
+const EDITABLE: ReadonlyArray<{
+  attr: "Name" | "Description" | "ObjectType";
+  label: string;
+  field: "name" | "description" | "objectType";
+}> = [
+  { attr: "Name", label: "Name", field: "name" },
+  { attr: "Description", label: "Beschreibung", field: "description" },
+  { attr: "ObjectType", label: "ObjectType", field: "objectType" },
+];
+
 export default function OverviewSection({
+  docId,
   session,
   expressId,
   revision,
+  onMutate,
 }: OverviewSectionProps) {
   const identity = useMemo(
     () => session.identityOf(expressId),
     [session, expressId],
   );
-  const summary = useMemo(
-    () => ({
-      psets: session.psetsOf(expressId).length,
-      quantities: session.quantitiesOf(expressId).length,
-      relations: session.relationsOf(expressId).length,
-    }),
-    // revision hält die Zahlen nach setProperty aktuell
+  const attributes = useMemo(
+    // revision hält die Werte nach einem Commit aktuell
+    () => readAttributes(session, expressId),
     [session, expressId, revision],
   );
+  const summary = useMemo(
+    () => ({
+      psets: readPsets(session, expressId).length,
+      quantities: readQuantitySets(session, expressId).length,
+      relations: session.relationsOf(expressId).length,
+    }),
+    [session, expressId, revision],
+  );
+
+  function commit(attr: string, value: string, oldValue: string): void {
+    if (value === oldValue) return;
+    useCommands
+      .getState()
+      .execute(docId, cmdSetAttribute(session, expressId, attr, value, oldValue));
+    onMutate();
+  }
 
   return (
     <div>
@@ -41,24 +73,22 @@ export default function OverviewSection({
             <td className="dim">Klasse</td>
             <td>{identity.type}</td>
           </tr>
-          <tr>
-            <td className="dim">Name</td>
-            <td>
-              <DimValue value={identity.name} />
-            </td>
-          </tr>
-          <tr>
-            <td className="dim">Beschreibung</td>
-            <td>
-              <DimValue value={identity.description} />
-            </td>
-          </tr>
-          <tr>
-            <td className="dim">ObjectType</td>
-            <td>
-              <DimValue value={identity.objectType} />
-            </td>
-          </tr>
+          {EDITABLE.map((entry) => (
+            <tr key={entry.attr}>
+              <td className="dim">{entry.label}</td>
+              <td>
+                <ValueEditor
+                  key={`${expressId}|${entry.attr}|${revision}`}
+                  value={attributes[entry.field]}
+                  kind="text"
+                  title={`${entry.attr} bearbeiten`}
+                  onCommit={(draft) =>
+                    commit(entry.attr, draft, attributes[entry.field])
+                  }
+                />
+              </td>
+            </tr>
+          ))}
           <tr>
             <td className="dim">GlobalId</td>
             <td>
