@@ -55,6 +55,8 @@ Ziel: die drei größten technischen Annahmen beweisen, bevor Struktur entsteht.
 
 ## M4 — Geometrie erstellen/bearbeiten
 
+> **Stand 2026-07-28: Kernumfang umgesetzt** (nach Fable-Review-Runde mit 15 behobenen Befunden, siehe 05). Baukasten-Pane + Workspace „Bauen": Elemente mit Extrusionskörper (Wand/Decke/Stütze/Träger über die **In-Store-Builder von @ifc-lite/create** — empirisch verifiziert, inkl. upstream gelöster Einheitenfrage; Proxy + Kreisprofil als Eigenbau), Maßänderung bestehender UND frisch erzeugter Extrusionen (Exporter-Falle bei Overlay-Records gelöst), Element verschieben, **Öffnungen** (IfcOpeningElement + RelVoids, legalitätsgeprüft) — alles undo-/redo-fest mit byte-identischen Roundtrip-Tests (64 gesamt). Viewer: „Modell neu berechnen" mit Änderungs-Badge (Szene aus Sitzungs-Export, optional automatisch); Inspector-Modus „Platzierung" (Kette, Modelleinheit+Meter, positionale Adressen als Andockpunkte). Offen aus dem M4-Plan: Transform-Gizmo im Viewer (Verschieben per Maus statt numerisch), Koordinaten-Picking, Welt-Frame-Rotationen — nächste Ausbaustufe.
+
 - Baukasten mit Profilbibliothek (inkl. Positionsmarker), Platzierung Parent/Welt, Koordinaten-Pick.
 - Transform-Gizmo (W/R) mit Mutation-Commit; numerischer Placement-Editor; Welt-Frame-Mathematik.
 - Maßänderung bestehender Extrusionen; Körper zuweisen/entfernen.
