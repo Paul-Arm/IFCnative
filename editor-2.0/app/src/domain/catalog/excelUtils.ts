@@ -7,7 +7,20 @@
  */
 import * as XLSX from "xlsx";
 
-import { normalizeCatalogToken } from "./model";
+import {
+  normalizeCatalogToken,
+  type CatalogObjectType,
+} from "./model";
+
+/** Gesamtzahl der Merkmalsregeln über alle Klassen (Import-Diagnostik). */
+export function countCatalogRules(
+  objectTypes: readonly CatalogObjectType[],
+): number {
+  return objectTypes.reduce(
+    (total, objectType) => total + objectType.propertyRules.length,
+    0,
+  );
+}
 
 export interface MarkerColumn {
   index: number;

@@ -28,14 +28,12 @@ import {
   MASTER_PROPERTY_SHEET,
   MASTER_TRADE_COLUMNS,
   MASTER_ELEMENT_CLASSES,
-  MONITORING_COLUMNS,
-  MONITORING_LOI_COLUMNS,
   MONITORING_PROPERTY_SHEET,
-  MONITORING_TRADE_COLUMNS,
   SHEET_LOI_COLUMNS,
   SHEET_TRADE_COLUMNS,
   catalogCodeSuffix,
   cleanCell,
+  countCatalogRules,
   hasPropertySuffix,
   looksLikePropertyRule,
   makeCatalogId,
@@ -44,6 +42,7 @@ import {
   readSheetRows,
   readableSetName,
 } from "./excelUtils";
+import { parseMonitoringCatalog } from "./excelMonitoring";
 
 export function parseCatalogWorkbook(
   arrayBuffer: ArrayBuffer,
@@ -98,7 +97,7 @@ function parseDiagnostikCatalog(
       `${objectTypes.length} Katalogklassen aus ${workbook.SheetNames.length} Sheets importiert.`,
     );
   }
-  diagnostics.push(`${countRules(objectTypes)} Merkmalsregeln indiziert.`);
+  diagnostics.push(`${countCatalogRules(objectTypes)} Merkmalsregeln indiziert.`);
   if (masterRows.length) {
     diagnostics.push(
       objectTypes.length && masterClassRows.length
@@ -289,112 +288,4 @@ function readSheetPropertyRules(
     });
   }
   return rules;
-}
-
-// — Monitoring (MON) —
-
-function parseMonitoringCatalog(
-  workbook: XLSX.WorkBook,
-  fileName: string,
-): IfcObjectCatalog {
-  const diagnostics: string[] = [];
-  const objectTypes = parseMonitoringObjectTypes(
-    readSheetRows(workbook, MONITORING_PROPERTY_SHEET),
-  );
-  diagnostics.push(
-    objectTypes.length === 0
-      ? `Keine Monitoring-Objekte gefunden. Erwartet wird eine Element-Spalte in „${MONITORING_PROPERTY_SHEET}".`
-      : `${objectTypes.length} Monitoring-Objektklassen aus „${MONITORING_PROPERTY_SHEET}" importiert.`,
-  );
-  diagnostics.push(`${countRules(objectTypes)} Merkmalsregeln indiziert.`);
-  return {
-    diagnostics,
-    fileName,
-    importedAt: new Date().toISOString(),
-    kind: "monitoring",
-    objectTypes,
-  };
-}
-
-/**
- * Gruppierung nach Merkmalsgruppe: jede Merkmalsgruppe wird eine wählbare
- * Klasse (Bauwerk, Messanlage, Sensor …), statt alles auf die zwei
- * IFC-Elemente der Element-Spalte zusammenzufalten.
- */
-function parseMonitoringObjectTypes(rows: unknown[][]): CatalogObjectType[] {
-  if (rows.length < 2) return [];
-  interface Group {
-    psetName: string;
-    ifcClass: string;
-    rules: CatalogPropertyRule[];
-  }
-  const groups = new Map<string, Group>();
-  for (let index = 1; index < rows.length; index += 1) {
-    const row = rows[index];
-    const psetName = cleanCell(row[MONITORING_COLUMNS.pset]);
-    const propertyName =
-      cleanCell(row[MONITORING_COLUMNS.propertyAttribute]) ||
-      cleanCell(row[MONITORING_COLUMNS.propertyOutput]);
-    if (!looksLikePropertyRule(psetName, propertyName)) continue;
-    const key = normalizeCatalogToken(psetName);
-    let group = groups.get(key);
-    if (!group) {
-      group = {
-        psetName,
-        ifcClass: normalizeIfcClass(
-          cleanCell(row[MONITORING_COLUMNS.ifcClass]) ||
-            "IfcBuildingElementProxy",
-        ),
-        rules: [],
-      };
-      groups.set(key, group);
-    }
-    group.rules.push({
-      format: cleanCell(row[MONITORING_COLUMNS.format]),
-      id: "",
-      loiMarkers: readMarkers(row, MONITORING_LOI_COLUMNS),
-      propertyName,
-      psetName,
-      requirement: normalizeCatalogRequirement(
-        row[MONITORING_COLUMNS.requirement],
-      ),
-      sourceRow: index + 1,
-      sourceSheet: MONITORING_PROPERTY_SHEET,
-      tradeMarkers: readMarkers(row, MONITORING_TRADE_COLUMNS),
-      unit: "",
-      valueType: normalizeIfcValueType(row[MONITORING_COLUMNS.valueType]),
-    });
-  }
-
-  return [...groups.values()].map((group) => {
-    const id = makeCatalogId(`mon ${group.psetName}`);
-    return {
-      code: `MON - ${monitoringObjectCode(group.rules[0]?.propertyName, group.psetName)}`,
-      id,
-      ifcClass: group.ifcClass,
-      name: readableSetName(group.psetName, true),
-      propertyRules: group.rules.map((rule, ruleIndex) => ({
-        ...rule,
-        id: `${id}:monitoring:${ruleIndex + 1}`,
-      })),
-      sheetName: MONITORING_PROPERTY_SHEET,
-      version: "",
-    };
-  });
-}
-
-/** Kürzel aus dem Merkmalssuffix („_Bauwerksnummer_BW" → „BW"). */
-function monitoringObjectCode(
-  propertyName: string | undefined,
-  psetName: string,
-): string {
-  const suffix = String(propertyName ?? "").match(/_([^_]+)$/)?.[1];
-  return (suffix || readableSetName(psetName, true)).toUpperCase() || "OBJ";
-}
-
-function countRules(objectTypes: readonly CatalogObjectType[]): number {
-  return objectTypes.reduce(
-    (total, objectType) => total + objectType.propertyRules.length,
-    0,
-  );
 }
