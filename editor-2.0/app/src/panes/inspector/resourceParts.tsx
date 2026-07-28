@@ -21,7 +21,7 @@ export function runResourceCommand(
   docId: string,
   build: () => EditorCommand,
   setStatus: (status: FormStatus) => void,
-  successText = "Zugewiesen — sichtbar unter „Overlay".",
+  successText = 'Zugewiesen — sichtbar als „Overlay"-Zeile.',
 ): void {
   try {
     useCommands.getState().execute(docId, build());

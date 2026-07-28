@@ -205,6 +205,23 @@ export default function StructurePane() {
           resetKey={`${document.id}|${query}`}
         />
       )}
+
+      {menu && (
+        <ContextMenu
+          target={menu}
+          onFocus={onFocus}
+          onDelete={onDeleteRequest}
+          onCreateChild={onCreateChild}
+          onClose={() => setMenu(null)}
+        />
+      )}
+      {removal && (
+        <ConfirmDeleteDialog
+          pending={removal}
+          onConfirm={onConfirmDelete}
+          onCancel={() => setRemoval(null)}
+        />
+      )}
     </div>
   );
 }

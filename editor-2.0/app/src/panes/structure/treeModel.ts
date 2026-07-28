@@ -8,6 +8,7 @@
  */
 import type { ModelSession } from "../../core/session";
 import type { SpatialTreeNode } from "../../core/model/spatial";
+import { attrText } from "../../domain/resources/emit";
 
 export const ROW_HEIGHT = 22;
 
@@ -46,6 +47,26 @@ function isStorey(type: string): boolean {
   return type.toUpperCase() === "IFCBUILDINGSTOREY";
 }
 
+/**
+ * Typ/Name für Overlay-Knoten (M9, Kontextmenü „Kind anlegen"): per Sitzung
+ * angelegte räumliche Kinder existieren nur als NewEntity im Mutations-
+ * Overlay — die Entity-Tabelle des Parsers liefert für sie leere Strings.
+ */
+function nodeIdentity(
+  session: ModelSession,
+  node: SpatialTreeNode,
+): { type: string; name: string } {
+  // Die Entity-Tabelle liefert für Overlay-Ids "UNKNOWN" bzw. leere Namen.
+  const unknownType = !node.type || node.type.toUpperCase() === "UNKNOWN";
+  if (!unknownType && node.name) return node;
+  const record = session.view.getNewEntity(node.expressId);
+  if (!record) return node;
+  return {
+    type: unknownType ? record.type : node.type,
+    name: node.name || attrText(record.attributes[2]), // IfcRoot.Name
+  };
+}
+
 function spatialDetail(node: SpatialTreeNode): string {
   const parts: string[] = [];
   if (node.longName && node.longName !== node.name) parts.push(node.longName);
@@ -66,10 +87,11 @@ function pushSpatial(
   items: TreeItem[],
 ): void {
   const index = items.length;
+  const identity = nodeIdentity(session, node);
   items.push({
     expressId: node.expressId,
-    type: node.type,
-    name: node.name,
+    type: identity.type,
+    name: identity.name,
     detail: spatialDetail(node),
     depth,
     kind: "spatial",
@@ -77,10 +99,10 @@ function pushSpatial(
     subtreeSize: 0,
     // Bis zur Geschoss-Ebene offen; große Elementlisten bleiben zu.
     defaultOpen: !belowStorey && node.elements.length <= AUTO_COLLAPSE_ELEMENTS,
-    search: `${node.type} ${node.name}`.toLowerCase(),
+    search: `${identity.type} ${identity.name}`.toLowerCase(),
   });
 
-  const childBelowStorey = belowStorey || isStorey(node.type);
+  const childBelowStorey = belowStorey || isStorey(identity.type);
   for (const child of node.children) {
     pushSpatial(session, child, depth + 1, index, childBelowStorey, items);
   }
