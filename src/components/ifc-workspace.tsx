@@ -1,373 +1,99 @@
-import { Button as IconButton } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PanelTopOpen } from "lucide-react";
 import {
-    Select,
-    SelectContent,
-    SelectGroup,
-    SelectItem,
-    SelectLabel,
-    SelectSeparator,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-    FilePlus2,
-    FolderOpen,
-    HardDriveDownload,
-    PanelTopOpen,
-    Plus,
-    Redo2,
-    Save,
-    Trash2,
-    Undo2,
-    X,
-} from "lucide-react";
-import {
-    cloneElement,
-    isValidElement,
-    startTransition,
-    useEffect,
-    useMemo,
-    useRef,
-    useState,
-    type SetStateAction,
+  cloneElement,
+  isValidElement,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
 } from "react";
 import {
-    DEFAULT_CONTROLS_WITHOUT_CREATION,
-    Mosaic,
-    MosaicWindow,
-    type MosaicNode,
-    type MosaicPath,
+  DEFAULT_CONTROLS_WITHOUT_CREATION,
+  Mosaic,
+  MosaicWindow,
+  type MosaicPath,
 } from "react-mosaic-component";
 
 import {
-    addNativeApproval,
-    addNativeBodyElement,
-    addNativeClassification,
-    addNativeConstraintObjective,
-    addNativeDocumentReference,
-    addNativeElement,
-    addNativeEmptyPropertySet,
-    addNativeGroupAssignment,
-    addNativeLibraryReference,
-    addNativeMaterial,
-    addNativeMaterialConstituentSet,
-    addNativeMaterialLayerSet,
-    addNativeMaterialLayerSetUsage,
-    addNativeMaterialProfileSet,
-    addNativeMaterialProfileSetUsage,
-    addNativeMaterialStyle,
-    addNativeMaterialWithProperties,
-    addNativePropertySetValues,
-    addNativePropertyToSet,
-    addNativeQuantitySet,
-    addNativeRelationship,
-    addNativeSiUnit,
-    addNativeTypeAssignment,
-    applyCatalogQuickFix,
-    applyDiagnosticObjectInfo,
-    applyDiagnosticProcedureFromCatalog,
-    assignNativeBodyRepresentation,
-    buildObjectInfoIndex,
-    catalogObjectLabel,
-    createNativeSampleDocument,
-    duplicateNativePropertySet,
-    findCatalogObject,
-    getNativeLengthUnitScale,
-    getNativePlacement,
-    getNativePlacementWorld,
-    getNativePlacementWorldFrame,
-    getNextNativeEntityId,
-    ifcPlacementPointToViewerWorldPoint,
-    nativeWorldDirectionInPlacementParentFrame,
-    parseNativeIfcFileInWorker,
-    planNativeEntityRemoval,
-    removeNativeBodyRepresentation,
-    removeNativePropertyFromSet,
-    removeNativePropertySet,
-    removeNativeRelationship,
-    resolveNativeMovableProductId,
-    serializeNativeIfcDocument,
-    summarizeNativeIfcGeometry,
-    setDiagnosticObjectiveReferences as setNativeDiagnosticObjectiveReferences,
-    splitTopLevel,
-    suggestCatalogObjectForEntity,
-    updateNativeEntity,
-    updateNativePlacement,
-    updateNativePlacementWorld,
-    updateNativePlacementRotation,
-    updateNativePropertySetName,
-    updateNativePropertyValue,
-    updateNativeRelationship,
-    validateEntityAgainstCatalogObject,
-    validateObjectInfoIndex,
-    viewerWorldDeltaToIfcPlacementDelta,
-    viewerWorldDirectionToIfcPlacementDirection,
-    viewerWorldPointToIfcPlacementPoint,
-    type CatalogKind,
-    type CatalogObjectType,
-    type CatalogValidationFinding,
-    type DiagnosticObjectInfoDraft,
-    type IfcObjectCatalog,
-    type NativeIfcDocument,
-    type NativeIfcEntity,
-    type NativeEntityRemovalPlan,
+  buildObjectInfoIndex,
+  catalogObjectLabel,
+  getNativePlacement,
+  resolveNativeMovableProductId,
+  validateObjectInfoIndex,
 } from "@/ifc";
 import { type NativeGraphPreset } from "@/ifc/nativeGraph";
 
-import {
-    Button,
-    MosaicWindowMenu,
-    SegmentedControl,
-    typeOption,
-} from "@/components/ifc-workspace/ui";
-import {
-    UI_SCALE_OPTIONS,
-    useUiScale,
-    type UiScale,
-} from "@/hooks/use-ui-scale";
+import { Button, SegmentedControl, typeOption } from "@/components/ifc-workspace/ui";
+import { useUiScale } from "@/hooks/use-ui-scale";
 import { ChildWindow } from "./child-window";
-import { registerEmergencySave } from "./error-boundary";
 import { BuilderPanel } from "./ifc-workspace/BuilderPanel";
 import { CatalogPanel, CatalogReviewPanel } from "./ifc-workspace/CatalogPanel";
 import {
-    BUILT_IN_WORKSPACES,
-    DEFAULT_MOSAIC_LAYOUT,
-    DEFAULT_WORKSPACE_ID,
-    ENTITY_TYPES,
-    MOSAIC_TITLES,
-    MOSAIC_VIEW_IDS,
-    RELATION_TYPES,
+  ENTITY_TYPES,
+  MOSAIC_TITLES,
+  RELATION_TYPES,
 } from "./ifc-workspace/constants";
 import { DiagnosticsAssistantPanel } from "./ifc-workspace/DiagnosticsAssistantPanel";
 import { DeleteEntityDialog } from "./ifc-workspace/DeleteEntityDialog";
 import { GraphPanel } from "./ifc-workspace/GraphPanel";
 import {
-    INSPECTOR_MODES,
-    InspectorPanel,
-    ResourceControlsPanel,
-    ResourceReferencesPanel,
+  INSPECTOR_MODES,
+  InspectorPanel,
+  ResourceControlsPanel,
+  ResourceReferencesPanel,
 } from "./ifc-workspace/InspectorPanel";
 import { ObjectInfoPanel } from "./ifc-workspace/ObjectInfoPanel";
 import { PortalPanel } from "./ifc-workspace/PortalPanel";
 import { PortalSettingsPanel } from "./ifc-workspace/PortalSettingsPanel";
 import { PsetBatchPanel } from "./ifc-workspace/PsetBatchPanel";
 import { StructurePanel } from "./ifc-workspace/StructurePanel";
-import { ThemeToggle } from "./ifc-workspace/ThemeToggle";
-import type {
-    BodyElementDraft,
-    CoordinateClipboard,
-    EntityEditDraft,
-    InspectorMode,
-    MosaicViewId,
-    ParsedCoordinates,
-    Point,
-    StructureMode,
-} from "./ifc-workspace/types";
 import { NotesPanel, RecentFilesPanel } from "./ifc-workspace/WorkspacePanels";
-import {
-    cloneMosaicNode,
-    createCustomWorkspace,
-    loadActiveWorkspaceId,
-    loadCustomWorkspaces,
-    loadNotes,
-    loadPortalSettings,
-    loadPortalTokens,
-    loadRecentIfcFiles,
-    mergeRecentIfcFile,
-    resolveWorkspace,
-    saveActiveWorkspaceId,
-    saveCustomWorkspaces,
-    saveNotes,
-    savePortalSettings,
-    savePortalTokens,
-    saveRecentIfcFiles,
-    type RecentIfcFileEntry,
-} from "./ifc-workspace/workspaceStorage";
-import type { RelationshipFlowClipboardNode } from "./relationship-flow.types";
-import ThatOpenViewer from "./that-open-viewer";
+
+import { useBatchPsetActions } from "./ifc-workspace/actions/useBatchPsetActions";
+import { useCatalogActions } from "./ifc-workspace/actions/useCatalogActions";
+import { useEntityDeletion } from "./ifc-workspace/actions/useEntityDeletion";
+import { useGeometryActions } from "./ifc-workspace/actions/useGeometryActions";
+import { usePropertyActions } from "./ifc-workspace/actions/usePropertyActions";
+import { useRelationshipActions } from "./ifc-workspace/actions/useRelationshipActions";
+import { useResourceActions } from "./ifc-workspace/actions/useResourceActions";
+import { WorkspaceHeader } from "./ifc-workspace/components/WorkspaceHeader";
+import { WorkspaceStatusBar } from "./ifc-workspace/components/WorkspaceStatusBar";
+import { useCatalog } from "./ifc-workspace/hooks/useCatalog";
+import { useDesktopIntegration } from "./ifc-workspace/hooks/useDesktopIntegration";
+import { useIfcFileActions } from "./ifc-workspace/hooks/useIfcFileActions";
+import { useWorkspaceLayout } from "./ifc-workspace/hooks/useWorkspaceLayout";
+import { useWorkspacePersistence } from "./ifc-workspace/hooks/useWorkspacePersistence";
+import { addToSet, removeFromSet } from "./ifc-workspace/lib/collections";
+import { formatCoordinate, parseCoordinateClipboardText } from "./ifc-workspace/lib/coordinates";
+import { isEditableShortcutTarget } from "./ifc-workspace/lib/dom";
+import { matchesEntitySearch } from "./ifc-workspace/lib/entities";
+import { useDocumentSessions } from "./ifc-workspace/session/useDocumentSessions";
 import type {
-    ViewerCoordinatePick,
-    ViewerMirrorOp,
-    ViewerMirrorRequest,
-    ViewerMirrorResult,
-    ViewerRotationChange,
-} from "./that-open-viewer.types";
-
-interface WorkspaceDocumentSnapshot {
-  document: NativeIfcDocument;
-  graphAnchorId: number;
-  graphCollapsed: Set<number>;
-  graphExpanded: Set<number>;
-  graphPinned: Set<number>;
-  graphPositions: Map<number, Point>;
-  selectedId: number;
-  selectedIds: Set<number>;
-}
-
-interface WorkspaceHistoryEntry {
-  snapshot: WorkspaceDocumentSnapshot;
-  summary: string;
-}
-
-interface WorkspaceDocumentSession {
-  id: string;
-  document: NativeIfcDocument;
-  documentText: string;
-  documentTextDirty: boolean;
-  graphAnchorId: number;
-  graphCollapsed: Set<number>;
-  graphExpanded: Set<number>;
-  graphPinned: Set<number>;
-  graphPositions: Map<number, Point>;
-  /**
-   * Geometrie-Änderungen, die im Dokument committed, aber noch nicht in das
-   * Fragments-Modell übernommen sind. Werden mit "Modell neu berechnen" im
-   * Viewer abgearbeitet (Revision-Bump → Re-Konvertierung). Einträge mit
-   * gleichem key (z. B. Mehrfach-Verschiebung desselben Elements) werden
-   * zusammengefasst und zählen als EINE Änderung.
-   */
-  pendingViewerChanges: { key?: string; label: string }[];
-  selectedId: number;
-  selectedIds: Set<number>;
-  sourceIfcBytes: ArrayBuffer | null;
-  sourceIfcFile: File | null;
-  redoStack: WorkspaceHistoryEntry[];
-  undoStack: WorkspaceHistoryEntry[];
-  viewerModelBytes: ArrayBuffer | null;
-  viewerModelDeferredReason: string;
-  viewerModelFile: File | null;
-  viewerModelLoadRequested: boolean;
-  viewerModelRevision: number;
-  viewerModelText: string;
-}
-
-let nextWorkspaceDocumentId = 0;
-const DOCUMENT_HISTORY_LIMIT = 20;
-
-function createWorkspaceDocumentSession(
-  document: NativeIfcDocument,
-  options?: {
-    bytes?: ArrayBuffer | null;
-    file?: File | null;
-    graphPositions?: Map<number, Point>;
-    id?: string;
-    selectedId?: number;
-    text?: string;
-    viewerModelLoadRequested?: boolean;
-    viewerModelRevision?: number;
-  },
-): WorkspaceDocumentSession {
-  const sourceBytes = options?.bytes ?? null;
-  const sourceFile = options?.file ?? null;
-  const text =
-    options?.text ?? (sourceBytes ? "" : serializeNativeIfcDocument(document));
-  const viewerModelLoadRequested = options?.viewerModelLoadRequested ?? true;
-  const viewerModelDeferredReason = "";
-  const fallbackId =
-    document.spatialRoots[0]?.id ?? document.entities[0]?.id ?? 0;
-  const selectedId = document.entityById.has(options?.selectedId ?? 0)
-    ? (options?.selectedId as number)
-    : fallbackId;
-  return {
-    document,
-    documentText: text,
-    documentTextDirty: false,
-    graphAnchorId: selectedId,
-    graphCollapsed: new Set(),
-    graphExpanded: new Set(),
-    graphPinned: new Set(),
-    graphPositions: options?.graphPositions ?? new Map(),
-    id: options?.id ?? createWorkspaceDocumentId(document.fileName),
-    pendingViewerChanges: [],
-    redoStack: [],
-    selectedId,
-    selectedIds: new Set(),
-    sourceIfcBytes: sourceBytes,
-    sourceIfcFile: sourceFile,
-    undoStack: [],
-    viewerModelBytes: sourceBytes,
-    viewerModelDeferredReason,
-    viewerModelFile: sourceFile,
-    viewerModelLoadRequested,
-    viewerModelRevision: options?.viewerModelRevision ?? 0,
-    viewerModelText: text,
-  };
-}
-
-function createWorkspaceDocumentId(fileName: string) {
-  nextWorkspaceDocumentId += 1;
-  return `${fileName || "IFC"}:${Date.now().toString(36)}:${nextWorkspaceDocumentId}`;
-}
-
-function createWorkspaceDocumentSnapshot(
-  session: WorkspaceDocumentSession,
-): WorkspaceDocumentSnapshot {
-  return {
-    document: session.document,
-    graphAnchorId: session.graphAnchorId,
-    graphCollapsed: new Set(session.graphCollapsed),
-    graphExpanded: new Set(session.graphExpanded),
-    graphPinned: new Set(session.graphPinned),
-    graphPositions: new Map(session.graphPositions),
-    selectedId: session.selectedId,
-    selectedIds: new Set(session.selectedIds),
-  };
-}
-
-function matchesEntitySearch(entity: NativeIfcEntity, query: string) {
-  const id = String(entity.id);
-  return [
-    id,
-    `#${id}`,
-    entity.type,
-    entity.name,
-    entity.globalId,
-    entity.description,
-  ].some((value) => value.toLowerCase().includes(query));
-}
-
-function createInitialWorkspaceDocument() {
-  const document = createNativeSampleDocument();
-  return createWorkspaceDocumentSession(document);
-}
-
-function applyStateAction<T>(current: T, action: SetStateAction<T>) {
-  return typeof action === "function"
-    ? (action as (value: T) => T)(current)
-    : action;
-}
+  CoordinateClipboard,
+  InspectorMode,
+  MosaicViewId,
+  StructureMode,
+} from "./ifc-workspace/types";
+import ThatOpenViewer from "./that-open-viewer";
+import type { ViewerCoordinatePick } from "./that-open-viewer.types";
 
 export default function IfcWorkspace() {
-  const [workspaceBootState] = useState(() => {
-    const customWorkspaces = loadCustomWorkspaces();
-    const workspace = resolveWorkspace(
-      loadActiveWorkspaceId(),
-      customWorkspaces,
-    );
-    return {
-      activeWorkspaceId: workspace.id,
-      customWorkspaces,
-      layout: cloneMosaicNode(workspace.layout) ?? DEFAULT_MOSAIC_LAYOUT,
-    };
+  const logAction = (code: string) => {
+    if (import.meta.env.DEV) {
+      console.debug(`${new Date().toLocaleTimeString()}  ${code}`);
+    }
+  };
+
+  const layout = useWorkspaceLayout(logAction);
+  const persistence = useWorkspacePersistence({
+    activeWorkspaceId: layout.activeWorkspaceId,
+    customWorkspaces: layout.customWorkspaces,
   });
-  const [initialDocument] = useState(createInitialWorkspaceDocument);
-  const [documentSessions, setDocumentSessions] = useState<
-    WorkspaceDocumentSession[]
-  >(() => [initialDocument]);
-  const [activeDocumentId, setActiveDocumentId] = useState(initialDocument.id);
-  const [customWorkspaces, setCustomWorkspaces] = useState(
-    workspaceBootState.customWorkspaces,
-  );
-  const [activeWorkspaceId, setActiveWorkspaceId] = useState(
-    workspaceBootState.activeWorkspaceId,
-  );
+
   const [structureMode, setStructureMode] = useState<StructureMode>("tree");
   const [treeRevealNonce, setTreeRevealNonce] = useState(0);
   const [inspectorMode, setInspectorMode] = useState<InspectorMode>("overview");
-  const [mosaicValue, setMosaicValue] =
-    useState<MosaicNode<MosaicViewId> | null>(workspaceBootState.layout);
   const [search, setSearch] = useState("");
   const [graphDepth, setGraphDepth] = useState(1);
   const [graphPreset, setGraphPreset] = useState<NativeGraphPreset>("all");
@@ -383,131 +109,99 @@ export default function IfcWorkspace() {
     entityId: number;
     nonce: number;
   } | null>(null);
-  const [viewerMirrorRequest, setViewerMirrorRequest] =
-    useState<ViewerMirrorRequest | null>(null);
-  const [loadingIfcName, setLoadingIfcName] = useState("");
-  const [catalog, setCatalog] = useState<IfcObjectCatalog | null>(null);
-  const [catalogKind, setCatalogKind] = useState<CatalogKind>("diagnostik");
-  const [catalogImporting, setCatalogImporting] = useState(false);
-  const [selectedCatalogObjectId, setSelectedCatalogObjectId] = useState("");
-  const [recentIfcFiles, setRecentIfcFiles] = useState(loadRecentIfcFiles);
-  const [notes, setNotes] = useState(loadNotes);
-  const [portalSettings, setPortalSettings] = useState(loadPortalSettings);
-  const [portalTokens, setPortalTokens] = useState(loadPortalTokens);
   const [coordinateClipboard, setCoordinateClipboard] =
     useState<CoordinateClipboard | null>(null);
-  const [deleteRequest, setDeleteRequest] = useState<{
-    documentId: string;
-    entity: NativeIfcEntity;
-    plan: NativeEntityRemovalPlan;
-    sourceDocument: NativeIfcDocument;
-    source: "tree" | "graph" | "viewer" | "keyboard";
-  } | null>(null);
-  const [detachedViews, setDetachedViews] = useState<Set<MosaicViewId>>(
-    () => new Set(),
-  );
   const { scale: uiScale, setScale: setUiScale } = useUiScale();
-  const desktopApi =
-    typeof window === "undefined" ? undefined : window.ifcNativeDesktop;
-  const allWorkspaces = useMemo(
-    () => [...BUILT_IN_WORKSPACES, ...customWorkspaces],
-    [customWorkspaces],
-  );
-  const activeWorkspace =
-    allWorkspaces.find((workspace) => workspace.id === activeWorkspaceId) ??
-    allWorkspaces[0];
 
-  const activeSession =
-    documentSessions.find((session) => session.id === activeDocumentId) ??
-    documentSessions[0];
-  const document = activeSession.document;
-  const selectedId = activeSession.selectedId;
-  const selectedIds = activeSession.selectedIds;
+  const sessions = useDocumentSessions({
+    logAction,
+    onBeforeHistoryRestore: () => cancelDeleteEntity(),
+  });
+  const {
+    activeSession,
+    batchSelectionIds,
+    commitDocument,
+    document,
+    documentSessions,
+    selectedId,
+    selectedIds,
+  } = sessions;
   const graphAnchorId = activeSession.graphAnchorId;
-  const graphPinned = activeSession.graphPinned;
-  const graphExpanded = activeSession.graphExpanded;
-  const graphCollapsed = activeSession.graphCollapsed;
   const graphPositions = activeSession.graphPositions;
-  const documentText = activeSession.documentText;
-  const documentTextDirty = activeSession.documentTextDirty;
   const undoStack = activeSession.undoStack ?? [];
   const redoStack = activeSession.redoStack ?? [];
 
-  const updateActiveSession = (
-    updater: (session: WorkspaceDocumentSession) => WorkspaceDocumentSession,
-  ) => {
-    setDocumentSessions((current) =>
-      current.map((session) =>
-        session.id === activeSession.id ? updater(session) : session,
-      ),
-    );
-  };
+  const catalogState = useCatalog({
+    document,
+    selectedId,
+    logAction,
+    onCatalogImported: () => layout.showMosaicViews(["catalog", "catalog-review"]),
+  });
+  const { activeCatalogObject, activeCatalogObjectId, catalog, catalogFindings } =
+    catalogState;
 
-  const setSelectedId = (action: SetStateAction<number>) => {
-    updateActiveSession((session) => ({
-      ...session,
-      selectedId: applyStateAction(session.selectedId, action),
-    }));
-  };
+  // Gemeinsamer Kontext aller Edit-Aktionen (siehe actions/context.ts).
+  const editContext = { commitDocument, document, logAction, selectedId };
+  const geometryActions = useGeometryActions(editContext);
+  const propertyActions = usePropertyActions(editContext);
+  const resourceActions = useResourceActions(editContext);
+  const relationshipActions = useRelationshipActions({
+    ...editContext,
+    graphPositions,
+    setGraphCollapsed: sessions.setGraphCollapsed,
+    setGraphExpanded: sessions.setGraphExpanded,
+    setGraphPinned: sessions.setGraphPinned,
+  });
+  const batchPsetActions = useBatchPsetActions({
+    ...editContext,
+    activeCatalogObject,
+    batchSelectionIds,
+  });
+  const catalogActions = useCatalogActions({
+    ...editContext,
+    setSelectedCatalogObjectId: catalogState.setSelectedCatalogObjectId,
+  });
+  const {
+    cancelDeleteEntity,
+    confirmDeleteEntity,
+    deleteRequest,
+    requestDeleteEntity,
+  } = useEntityDeletion({
+    ...editContext,
+    activeSessionId: activeSession.id,
+    graphAnchorId,
+    graphPositions,
+    setGraphAnchorId: sessions.setGraphAnchorId,
+    setGraphCollapsed: sessions.setGraphCollapsed,
+    setGraphExpanded: sessions.setGraphExpanded,
+    setGraphPinned: sessions.setGraphPinned,
+  });
 
-  const setSelectedIds = (action: SetStateAction<Set<number>>) => {
-    updateActiveSession((session) => ({
-      ...session,
-      selectedIds: applyStateAction(session.selectedIds, action),
-    }));
-  };
+  const fileActions = useIfcFileActions({
+    activeSession,
+    appendSessions: sessions.appendSessions,
+    logAction,
+    rememberRecentIfc: persistence.rememberRecentIfc,
+    replaceDocument: sessions.replaceDocument,
+  });
+  const { loadingIfcName } = fileActions;
 
-  // Objects targeted by batch operations: the explicit multi-selection from the
-  // tree, or the single active object when nothing else is selected.
-  const batchSelectionIds = useMemo(() => {
-    const ids = [...selectedIds].filter((id) => document.entityById.has(id));
-    return ids.length > 0
-      ? ids
-      : document.entityById.has(selectedId)
-        ? [selectedId]
-        : [];
-  }, [document, selectedId, selectedIds]);
+  useDesktopIntegration({
+    catalogImporting: catalogState.catalogImporting,
+    closedMosaicIds: layout.closedMosaicIds,
+    hasCatalog: Boolean(catalog),
+    loadingIfcName,
+    onAddIfc: () => void fileActions.addIfcFiles(),
+    onExportIfc: () => void fileActions.exportIfc(),
+    onImportCatalog: () => void catalogState.importCatalog(),
+    onLoadSample: fileActions.loadSample,
+    onOpenIfc: () => void fileActions.openIfc(),
+    onResetLayout: layout.resetMosaicLayout,
+    onRestoreWindow: layout.restoreMosaicView,
+  });
 
-  const setGraphAnchorId = (action: SetStateAction<number>) => {
-    updateActiveSession((session) => ({
-      ...session,
-      graphAnchorId: applyStateAction(session.graphAnchorId, action),
-    }));
-  };
-
-  const setGraphPinned = (action: SetStateAction<Set<number>>) => {
-    updateActiveSession((session) => ({
-      ...session,
-      graphPinned: applyStateAction(session.graphPinned, action),
-    }));
-  };
-
-  const setGraphExpanded = (action: SetStateAction<Set<number>>) => {
-    updateActiveSession((session) => ({
-      ...session,
-      graphExpanded: applyStateAction(session.graphExpanded, action),
-    }));
-  };
-
-  const setGraphCollapsed = (action: SetStateAction<Set<number>>) => {
-    updateActiveSession((session) => ({
-      ...session,
-      graphCollapsed: applyStateAction(session.graphCollapsed, action),
-    }));
-  };
-
-  const setGraphPositions = (action: SetStateAction<Map<number, Point>>) => {
-    updateActiveSession((session) => ({
-      ...session,
-      graphPositions: applyStateAction(session.graphPositions, action),
-    }));
-  };
-
-  const viewerDocument = document;
   const selectedEntity =
-    viewerDocument.entityById.get(selectedId) ??
-    document.entityById.get(selectedId) ??
-    document.entities[0];
+    document.entityById.get(selectedId) ?? document.entities[0];
   const viewerEditCapabilities = useMemo(() => {
     const hasPlacement = Boolean(getNativePlacement(document, selectedId));
     return {
@@ -518,38 +212,9 @@ export default function IfcWorkspace() {
         : "Auswahl hat kein editierbares IFCLOCALPLACEMENT",
     };
   }, [document, selectedId]);
-  const suggestedCatalogObject = useMemo(
-    () =>
-      catalog
-        ? suggestCatalogObjectForEntity(
-            viewerDocument,
-            selectedId,
-            catalog.objectTypes,
-          )
-        : undefined,
-    [catalog, selectedId, viewerDocument],
-  );
-  const activeCatalogObjectId =
-    selectedCatalogObjectId ||
-    suggestedCatalogObject?.id ||
-    catalog?.objectTypes[0]?.id ||
-    "";
-  const activeCatalogObject =
-    findCatalogObject(catalog, activeCatalogObjectId) ?? suggestedCatalogObject;
-  const catalogFindings = useMemo(
-    () =>
-      activeCatalogObject
-        ? validateEntityAgainstCatalogObject(
-            viewerDocument,
-            selectedId,
-            activeCatalogObject,
-          )
-        : [],
-    [activeCatalogObject, selectedId, viewerDocument],
-  );
   const objectInfoIndex = useMemo(
-    () => buildObjectInfoIndex(viewerDocument),
-    [viewerDocument],
+    () => buildObjectInfoIndex(document),
+    [document],
   );
   const objectInfoFindings = useMemo(
     () => validateObjectInfoIndex(objectInfoIndex),
@@ -577,10 +242,6 @@ export default function IfcWorkspace() {
       ),
     [documentSessions],
   );
-  const closedMosaicIds = useMemo(() => {
-    const visibleIds = new Set(getMosaicLeaves(mosaicValue));
-    return MOSAIC_VIEW_IDS.filter((id) => !visibleIds.has(id));
-  }, [mosaicValue]);
 
   const normalizedSearch = search.trim().toLowerCase();
   const searchMatchedEntities = useMemo(() => {
@@ -593,368 +254,11 @@ export default function IfcWorkspace() {
   }, [document.entities, normalizedSearch]);
 
   const filteredEntities = useMemo(() => {
-    const query = normalizedSearch;
-    if (!query) {
+    if (!normalizedSearch) {
       return document.entities.slice(0, 120);
     }
     return searchMatchedEntities.slice(0, 160);
   }, [document.entities, normalizedSearch, searchMatchedEntities]);
-
-  const logAction = (code: string) => {
-    if (import.meta.env.DEV) {
-      console.debug(`${new Date().toLocaleTimeString()}  ${code}`);
-    }
-  };
-
-  const selectWorkspace = (id: string) => {
-    const workspace =
-      allWorkspaces.find((candidate) => candidate.id === id) ??
-      allWorkspaces[0];
-    setActiveWorkspaceId(workspace.id);
-    setMosaicValue(cloneMosaicNode(workspace.layout) ?? DEFAULT_MOSAIC_LAYOUT);
-    logAction(`ui.workspace.select({ id: '${workspace.id}' });`);
-  };
-
-  const saveActiveWorkspace = () => {
-    if (activeWorkspace?.builtIn) {
-      return;
-    }
-    setCustomWorkspaces((current) =>
-      current.map((workspace) =>
-        workspace.id === activeWorkspaceId
-          ? {
-              ...workspace,
-              layout: cloneMosaicNode(mosaicValue),
-              updatedAt: new Date().toISOString(),
-            }
-          : workspace,
-      ),
-    );
-    logAction(`ui.workspace.save({ id: '${activeWorkspaceId}' });`);
-  };
-
-  const createWorkspaceFromCurrentLayout = () => {
-    const nextIndex = customWorkspaces.length + 1;
-    const name = `Eigener Workspace ${nextIndex}`;
-    const workspace = createCustomWorkspace(name, mosaicValue);
-    setCustomWorkspaces((current) => [...current, workspace]);
-    setActiveWorkspaceId(workspace.id);
-    setMosaicValue(cloneMosaicNode(workspace.layout) ?? DEFAULT_MOSAIC_LAYOUT);
-    logAction(`ui.workspace.create({ id: '${workspace.id}' });`);
-  };
-
-  const deleteActiveWorkspace = () => {
-    if (activeWorkspace?.builtIn) {
-      return;
-    }
-    const nextWorkspace = BUILT_IN_WORKSPACES[0];
-    setCustomWorkspaces((current) =>
-      current.filter((workspace) => workspace.id !== activeWorkspaceId),
-    );
-    setActiveWorkspaceId(nextWorkspace.id);
-    setMosaicValue(
-      cloneMosaicNode(nextWorkspace.layout) ?? DEFAULT_MOSAIC_LAYOUT,
-    );
-    logAction(`ui.workspace.delete({ id: '${activeWorkspaceId}' });`);
-  };
-
-  const restoreMosaicView = (id: MosaicViewId) => {
-    setMosaicValue((current) => addMosaicView(current, id));
-    logAction(`ui.restoreWindow({ view: '${id}' });`);
-  };
-
-  const resetMosaicLayout = () => {
-    setMosaicValue(
-      cloneMosaicNode(activeWorkspace?.layout) ?? DEFAULT_MOSAIC_LAYOUT,
-    );
-    logAction(`ui.resetLayout({ workspace: '${activeWorkspaceId}' });`);
-  };
-
-  const replaceDocument = (
-    next: NativeIfcDocument,
-    nextSelectedId?: number,
-    log?: string,
-    nextGraphPositions?: Map<number, Point>,
-    nextText?: string,
-    nextBytes?: ArrayBuffer | null,
-    nextFile?: File | null,
-  ) => {
-    const session = createWorkspaceDocumentSession(next, {
-      bytes: nextBytes,
-      file: nextFile,
-      graphPositions: nextGraphPositions,
-      selectedId: nextSelectedId,
-      text: nextText,
-    });
-    startTransition(() => {
-      setDocumentSessions([session]);
-      setActiveDocumentId(session.id);
-    });
-    if (log) {
-      logAction(log);
-    }
-    return session;
-  };
-
-  const rememberRecentIfc = (
-    session: WorkspaceDocumentSession,
-    source: RecentIfcFileEntry["source"],
-    file?: File | null,
-  ) => {
-    const filePath =
-      file &&
-      "path" in file &&
-      typeof (file as File & { path?: unknown }).path === "string"
-        ? (file as File & { path?: string }).path
-        : undefined;
-    const entry: RecentIfcFileEntry = {
-      documentId: session.id,
-      entityCount: session.document.entities.length,
-      id: `${filePath || session.document.fileName}:${Date.now().toString(36)}`,
-      name: session.document.fileName,
-      openedAt: new Date().toISOString(),
-      path: filePath,
-      schema: session.document.schema,
-      size: file?.size ?? session.sourceIfcBytes?.byteLength,
-      source,
-    };
-    setRecentIfcFiles((current) => mergeRecentIfcFile(current, entry));
-  };
-
-  const commitDocument = (
-    next: NativeIfcDocument,
-    nextSelectedId: number | undefined,
-    summary: string,
-    log?: string,
-    nextGraphPositions?: Map<number, Point>,
-    options?: {
-      reloadViewer?: boolean;
-      /**
-       * Fasst wiederholte Änderungen zusammen: existiert bereits ein
-       * ausstehender Eintrag mit diesem key, wird nur dessen Label ersetzt
-       * (z. B. transform:<id> bei Mehrfach-Verschiebung).
-       */
-      pendingKey?: string;
-      /**
-       * Dual-Write: die Änderung wird sofort per Fragments-Edit-API in das
-       * geladene Modell gespiegelt. Der Pending-Eintrag bleibt als Fallback
-       * bestehen und wird erst bei gemeldetem Mirror-Erfolg entfernt —
-       * schlägt der Mirror fehl, bleibt "Modell neu berechnen" verfügbar.
-       */
-      viewerMirror?: ViewerMirrorOp;
-    },
-  ) => {
-    const committedSessionId = activeSession.id;
-    const previousSnapshot = createWorkspaceDocumentSnapshot(activeSession);
-    const resolvedSelectedId = next.entityById.has(nextSelectedId ?? 0)
-      ? (nextSelectedId as number)
-      : (next.spatialRoots[0]?.id ?? next.entities[0]?.id ?? selectedId);
-    setDocumentSessions((current) =>
-      current.map((session) => {
-        if (session.id !== committedSessionId) {
-          return session;
-        }
-        return {
-          ...session,
-          document: next,
-          // Bewusst NICHT sofort serialisieren (O(Dokumentgröße) pro Edit,
-          // relevant bei großen IFC-Dateien): Export und Neuberechnung
-          // serialisieren bei documentTextDirty selbst.
-          documentTextDirty: true,
-          graphPositions: nextGraphPositions ?? session.graphPositions,
-          // Geometrie-Änderungen sammeln sich als ausstehende Änderungen;
-          // der Live-Mirror räumt sie bei Erfolg wieder ab. Ohne Mirror
-          // übernimmt "Modell neu berechnen" (Revision-Bump) sie in den
-          // Viewer. viewerModel* bleibt bis dahin unverändert (stabiler
-          // Load-Key).
-          pendingViewerChanges:
-            options?.reloadViewer
-              ? mergePendingViewerChange(session.pendingViewerChanges, {
-                  key: options.pendingKey,
-                  label: summary,
-                })
-              : session.pendingViewerChanges,
-          redoStack: next === session.document ? (session.redoStack ?? []) : [],
-          selectedId: resolvedSelectedId,
-          selectedIds: new Set(
-            [...session.selectedIds].filter((id) => next.entityById.has(id)),
-          ),
-          sourceIfcBytes: options?.reloadViewer ? null : session.sourceIfcBytes,
-          sourceIfcFile: options?.reloadViewer ? null : session.sourceIfcFile,
-          viewerModelDeferredReason: options?.reloadViewer
-            ? session.viewerModelLoadRequested
-              ? ""
-              : session.viewerModelDeferredReason ||
-                "3D-Konvertierung pausiert."
-            : session.viewerModelDeferredReason,
-          viewerModelLoadRequested: session.viewerModelLoadRequested,
-          undoStack:
-            next === session.document
-              ? (session.undoStack ?? [])
-              : [
-                  ...(session.undoStack ?? []),
-                  {
-                    snapshot: previousSnapshot,
-                    summary,
-                  },
-                ].slice(-DOCUMENT_HISTORY_LIMIT),
-        };
-      }),
-    );
-    if (
-      options?.reloadViewer &&
-      options.viewerMirror &&
-      activeSession.viewerModelLoadRequested
-    ) {
-      setViewerMirrorRequest({
-        documentId: committedSessionId,
-        label: summary,
-        nonce: Date.now() + Math.random(),
-        op: options.viewerMirror,
-        pendingKey: options.pendingKey,
-      });
-    }
-    if (log) {
-      logAction(log);
-    }
-  };
-
-  // Rückmeldung des Live-Mirrors: bei Erfolg ist die Änderung im Viewer
-  // sichtbar — der zugehörige Pending-Eintrag (Fallback-Recalc) entfällt.
-  // Bei Fehlschlag bleibt er bestehen bzw. wird wiederhergestellt.
-  const applyViewerMirrorResult = (result: ViewerMirrorResult) => {
-    setDocumentSessions((current) =>
-      current.map((session) => {
-        if (session.id !== result.documentId) {
-          return session;
-        }
-        if (!result.ok) {
-          return {
-            ...session,
-            pendingViewerChanges: mergePendingViewerChange(
-              session.pendingViewerChanges,
-              { key: result.pendingKey, label: result.label },
-            ),
-          };
-        }
-        const remaining = session.pendingViewerChanges.filter((change) =>
-          result.pendingKey
-            ? change.key !== result.pendingKey
-            : change.label !== result.label,
-        );
-        return remaining.length === session.pendingViewerChanges.length
-          ? session
-          : { ...session, pendingViewerChanges: remaining };
-      }),
-    );
-    logAction(
-      result.ok
-        ? `viewer.mirrorApplied({ label: ${JSON.stringify(result.label)} });`
-        : `viewer.mirrorFailed({ label: ${JSON.stringify(result.label)}, reason: ${JSON.stringify(result.reason ?? "unknown")} });`,
-    );
-  };
-
-  // "Modell neu berechnen": alle ausstehenden Geometrie-Änderungen in einem
-  // Rutsch übernehmen — Viewer-Quelle auf den aktuellen IFC-Text setzen und
-  // per Revision-Bump die Re-Konvertierung des aktiven Dokuments auslösen.
-  const recalculateViewerModel = () => {
-    const sessionId = activeSession.id;
-    const pendingCount = activeSession.pendingViewerChanges.length;
-    if (!pendingCount) {
-      return;
-    }
-    setDocumentSessions((current) =>
-      current.map((session) =>
-        session.id === sessionId
-          ? {
-              ...session,
-              pendingViewerChanges: [],
-              viewerModelBytes: null,
-              viewerModelFile: null,
-              viewerModelRevision: session.viewerModelRevision + 1,
-              viewerModelText: session.documentTextDirty
-                ? serializeNativeIfcDocument(session.document)
-                : session.documentText,
-            }
-          : session,
-      ),
-    );
-    logAction(
-      `viewer.recalculate({ file: '${activeSession.document.fileName}', pending: ${pendingCount} });`,
-    );
-  };
-
-  const restoreDocumentHistory = (direction: "undo" | "redo") => {
-    const sourceStack =
-      direction === "undo" ? undoStack : redoStack;
-    const entry = sourceStack.at(-1);
-    if (!entry) {
-      return;
-    }
-    const restored = entry.snapshot;
-    const restoredSelectedId = restored.document.entityById.has(
-      restored.selectedId,
-    )
-      ? restored.selectedId
-      : (restored.document.spatialRoots[0]?.id ??
-        restored.document.entities[0]?.id ??
-        0);
-    const viewerModelText = serializeNativeIfcDocument(restored.document);
-    const sessionId = activeSession.id;
-    setDeleteRequest(null);
-    setDocumentSessions((current) =>
-      current.map((session) => {
-        if (session.id !== sessionId) {
-          return session;
-        }
-        const currentEntry: WorkspaceHistoryEntry = {
-          snapshot: createWorkspaceDocumentSnapshot(session),
-          summary: entry.summary,
-        };
-        return {
-          ...session,
-          document: restored.document,
-          documentTextDirty: true,
-          graphAnchorId: restored.graphAnchorId,
-          graphCollapsed: new Set(restored.graphCollapsed),
-          graphExpanded: new Set(restored.graphExpanded),
-          graphPinned: new Set(restored.graphPinned),
-          graphPositions: new Map(restored.graphPositions),
-          pendingViewerChanges: [],
-          redoStack:
-            direction === "undo"
-              ? [...(session.redoStack ?? []), currentEntry].slice(
-                  -DOCUMENT_HISTORY_LIMIT,
-                )
-              : (session.redoStack ?? []).slice(0, -1),
-          selectedId: restoredSelectedId,
-          selectedIds: new Set(
-            [...restored.selectedIds].filter((id) =>
-              restored.document.entityById.has(id),
-            ),
-          ),
-          sourceIfcBytes: null,
-          sourceIfcFile: null,
-          undoStack:
-            direction === "undo"
-              ? (session.undoStack ?? []).slice(0, -1)
-              : [...(session.undoStack ?? []), currentEntry].slice(
-                  -DOCUMENT_HISTORY_LIMIT,
-                ),
-          viewerModelBytes: null,
-          viewerModelFile: null,
-          viewerModelRevision: session.viewerModelRevision + 1,
-          viewerModelText,
-        };
-      }),
-    );
-    logAction(
-      `history.${direction}({ summary: ${JSON.stringify(entry.summary)} });`,
-    );
-  };
-
-  const undoDocument = () => restoreDocumentHistory("undo");
-  const redoDocument = () => restoreDocumentHistory("redo");
 
   const selectEntity = (
     id: number,
@@ -991,7 +295,7 @@ export default function IfcWorkspace() {
       setTreeRevealNonce((current) => current + 1);
     }
     if (documentId !== activeSession.id) {
-      setDocumentSessions((current) =>
+      sessions.setDocumentSessions((current) =>
         current.map((session) =>
           session.id === documentId
             ? {
@@ -1002,13 +306,13 @@ export default function IfcWorkspace() {
             : session,
         ),
       );
-      setActiveDocumentId(documentId);
+      sessions.setActiveDocumentId(documentId);
     } else {
-      setSelectedId(resolvedId);
-      setSelectedIds(new Set([resolvedId]));
+      sessions.setSelectedId(resolvedId);
+      sessions.setSelectedIds(new Set([resolvedId]));
     }
     if (source === "graph") {
-      setGraphAnchorId(resolvedId);
+      sessions.setGraphAnchorId(resolvedId);
       setGraphFocusRequest(null);
     }
     const entity = selectionDocument.entityById.get(resolvedId);
@@ -1020,14 +324,14 @@ export default function IfcWorkspace() {
   // Multi-selection from the tree (Ctrl/Shift-click). Keeps the active object
   // when it is still part of the selection so the inspector does not jump.
   const selectEntities = (ids: number[]) => {
-    const valid = ids.filter((id) => activeSession.document.entityById.has(id));
+    const valid = ids.filter((id) => document.entityById.has(id));
     if (valid.length === 0) {
       return;
     }
     const nextPrimary = valid.includes(selectedId)
       ? selectedId
       : valid[valid.length - 1];
-    updateActiveSession((session) => ({
+    sessions.updateActiveSession((session) => ({
       ...session,
       selectedId: nextPrimary,
       selectedIds: new Set(valid),
@@ -1038,14 +342,14 @@ export default function IfcWorkspace() {
   };
 
   const revealGraphWarningEntity = (id: number) => {
-    const entity = activeSession.document.entityById.get(id);
+    const entity = document.entityById.get(id);
     if (!entity) {
       return;
     }
-    setSelectedId(id);
-    setGraphAnchorId(id);
-    setGraphCollapsed((current) => removeFromSet(current, id));
-    setGraphExpanded((current) => addToSet(current, id));
+    sessions.setSelectedId(id);
+    sessions.setGraphAnchorId(id);
+    sessions.setGraphCollapsed((current) => removeFromSet(current, id));
+    sessions.setGraphExpanded((current) => addToSet(current, id));
     setGraphFocusRequest({
       entityId: id,
       nonce: Date.now(),
@@ -1054,13 +358,13 @@ export default function IfcWorkspace() {
   };
 
   const centerViewerCamera = (id = selectedId, source = "ui") => {
-    const entity = activeSession.document.entityById.get(id);
+    const entity = document.entityById.get(id);
     if (!entity) {
       return;
     }
-    setSelectedId(id);
+    sessions.setSelectedId(id);
     if (!activeSession.viewerModelLoadRequested) {
-      requestActiveViewerLoad();
+      sessions.requestActiveViewerLoad();
     }
     setViewerFocusRequest({
       documentId: activeSession.id,
@@ -1072,6 +376,7 @@ export default function IfcWorkspace() {
     );
   };
 
+  // Punkt-Taste: Kamera auf die aktuelle Auswahl zentrieren.
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (
@@ -1093,1625 +398,7 @@ export default function IfcWorkspace() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [activeSession, selectedId, structureMode]);
 
-  const openIfc = async () => {
-    try {
-      const asset = await pickIfcFile();
-      if (!asset) {
-        return;
-      }
-      setLoadingIfcName(asset.name);
-      logAction(
-        `ui.openIfc.start({ file: '${asset.name}', parser: 'worker' });`,
-      );
-      const parsed = await parseNativeIfcFileInWorker(asset.file, asset.name);
-      const session = replaceDocument(
-        parsed.document,
-        undefined,
-        `ui.openIfc({ file: '${asset.name}', parser: 'worker', ms: ${Math.round(parsed.elapsedMs)} });`,
-        undefined,
-        undefined,
-        parsed.bytes,
-        asset.file,
-      );
-      rememberRecentIfc(session, "opened", asset.file);
-    } catch (error) {
-      logAction(`ui.error(${JSON.stringify(String(error))});`);
-    } finally {
-      setLoadingIfcName("");
-    }
-  };
-
-  const addIfcFiles = async () => {
-    try {
-      const assets = await pickIfcFiles(true);
-      if (!assets.length) {
-        return;
-      }
-      setLoadingIfcName(
-        assets.length === 1
-          ? assets[0].name
-          : `${assets.length.toLocaleString()} IFC files`,
-      );
-      logAction(`ui.addIfc.start({ files: ${assets.length} });`);
-      const nextSessions: WorkspaceDocumentSession[] = [];
-      for (const asset of assets) {
-        const parsed = await parseNativeIfcFileInWorker(asset.file, asset.name);
-        const session = createWorkspaceDocumentSession(parsed.document, {
-          bytes: parsed.bytes,
-          file: asset.file,
-        });
-        nextSessions.push(session);
-        rememberRecentIfc(session, "added", asset.file);
-        logAction(
-          `ui.addIfc.file({ file: '${asset.name}', parser: 'worker', ms: ${Math.round(parsed.elapsedMs)} });`,
-        );
-      }
-      startTransition(() => {
-        setDocumentSessions((current) => [...current, ...nextSessions]);
-        setActiveDocumentId(nextSessions[0].id);
-      });
-      logAction(`ui.addIfc({ files: ${nextSessions.length} });`);
-    } catch (error) {
-      logAction(`ui.error(${JSON.stringify(String(error))});`);
-    } finally {
-      setLoadingIfcName("");
-    }
-  };
-
-  const importCatalog = async () => {
-    try {
-      const asset = await pickCatalogFile();
-      if (!asset) {
-        return;
-      }
-      setCatalogImporting(true);
-      logAction(
-        `ui.importCatalog.start({ file: '${asset.name}', kind: '${catalogKind}' });`,
-      );
-      const { parseCatalogWorkbook } = await import("@/ifc/catalogExcel");
-      const parsed = parseCatalogWorkbook(
-        await asset.file.arrayBuffer(),
-        asset.name,
-        catalogKind,
-      );
-      setCatalogKind(parsed.kind);
-      const suggested = suggestCatalogObjectForEntity(
-        viewerDocument,
-        selectedId,
-        parsed.objectTypes,
-      );
-      setCatalog(parsed);
-      setSelectedCatalogObjectId(
-        suggested?.id ?? parsed.objectTypes[0]?.id ?? "",
-      );
-      setMosaicValue((current) =>
-        addMosaicView(addMosaicView(current, "catalog"), "catalog-review"),
-      );
-      logAction(
-        `ui.importCatalog({ file: '${asset.name}', kind: '${parsed.kind}', classes: ${parsed.objectTypes.length} });`,
-      );
-    } catch (error) {
-      logAction(`ui.error(${JSON.stringify(String(error))});`);
-    } finally {
-      setCatalogImporting(false);
-    }
-  };
-
-  const applyCatalogFinding = (finding: CatalogValidationFinding) => {
-    const sourceDocument = document;
-    const next = applyCatalogQuickFix(sourceDocument, selectedId, finding);
-    if (next === sourceDocument) {
-      return;
-    }
-    commitDocument(
-      next,
-      selectedId,
-      `Catalog quick fix: ${finding.quickFix?.label ?? finding.kind}`,
-      `catalog.quickFix({ id: ${selectedId}, kind: '${finding.kind}' });`,
-    );
-  };
-
-  const applyCatalogFindings = (findings: CatalogValidationFinding[]) => {
-    const fixes = findings.filter((finding) => finding.quickFix);
-    if (!fixes.length) {
-      return;
-    }
-    const sourceDocument = document;
-    const next = fixes.reduce(
-      (currentDocument, finding) =>
-        applyCatalogQuickFix(currentDocument, selectedId, finding),
-      sourceDocument,
-    );
-    if (next === sourceDocument) {
-      return;
-    }
-    commitDocument(
-      next,
-      selectedId,
-      `Apply ${fixes.length.toLocaleString()} catalog quick fixes to #${selectedId}`,
-      `catalog.quickFixAll({ id: ${selectedId}, fixes: ${fixes.length} });`,
-    );
-  };
-
-  const applyDiagnosticObjectInfoDraft = (draft: DiagnosticObjectInfoDraft) => {
-    const next = applyDiagnosticObjectInfo(document, selectedId, draft);
-    if (next === document) {
-      return;
-    }
-    commitDocument(
-      next,
-      selectedId,
-      `Apply diagnostics object information to #${selectedId}`,
-      `diagnostics.objectInfo({ id: ${selectedId}, role: '${draft.role}' });`,
-    );
-  };
-
-  const applyDiagnosticProcedure = (objectType: CatalogObjectType) => {
-    const next = applyDiagnosticProcedureFromCatalog(
-      document,
-      selectedId,
-      objectType,
-    );
-    if (next === document) {
-      return;
-    }
-    setSelectedCatalogObjectId(objectType.id);
-    commitDocument(
-      next,
-      selectedId,
-      `Apply diagnostics procedure ${objectType.code || objectType.name} to #${selectedId}`,
-      `diagnostics.procedure({ id: ${selectedId}, catalogObject: '${objectType.id}' });`,
-    );
-  };
-
-  const setDiagnosticObjectiveReferences = (
-    setId: number,
-    objectiveIds: string[],
-  ) => {
-    const next = setNativeDiagnosticObjectiveReferences(
-      document,
-      selectedId,
-      setId,
-      objectiveIds,
-    );
-    if (next === document) {
-      return;
-    }
-    commitDocument(
-      next,
-      selectedId,
-      `Set investigation objectives on #${setId}`,
-      `diagnostics.objectives({ setId: ${setId}, values: ${JSON.stringify(objectiveIds)} });`,
-    );
-  };
-
-  const loadSample = () => {
-    const session = replaceDocument(
-      createNativeSampleDocument(),
-      undefined,
-      "ui.loadSample('IFCnative Builder Sample.ifc');",
-    );
-    rememberRecentIfc(session, "sample");
-  };
-
-  const exportIfc = async () => {
-    const contents: BlobPart = documentTextDirty
-      ? serializeNativeIfcDocument(document)
-      : documentText ||
-        activeSession.sourceIfcBytes ||
-        serializeNativeIfcDocument(document);
-    const fileName = document.fileName.replace(/\.ifc$/i, "") || "IFCnative";
-    const blob = new Blob([contents], { type: "application/x-step" });
-    const geometry = summarizeNativeIfcGeometry(document);
-    const url = URL.createObjectURL(blob);
-    const anchor = globalThis.document.createElement("a");
-    anchor.href = url;
-    anchor.download = `${fileName}.ifc`;
-    anchor.hidden = true;
-    globalThis.document.body.append(anchor);
-    try {
-      anchor.click();
-    } finally {
-      anchor.remove();
-      // Keep the object URL alive until the browser has consumed the click.
-      globalThis.setTimeout(() => URL.revokeObjectURL(url), 1_000);
-    }
-    logAction(
-      `ui.exportIfc({ file: '${fileName}.ifc', bytes: ${blob.size}, representedProducts: ${geometry.representedProductCount}, shapeRepresentations: ${geometry.shapeRepresentationCount}, geometryItems: ${geometry.geometryItemCount} });`,
-    );
-  };
-
-  useEffect(() => {
-    saveCustomWorkspaces(customWorkspaces);
-  }, [customWorkspaces]);
-
-  useEffect(() => {
-    saveActiveWorkspaceId(activeWorkspaceId || DEFAULT_WORKSPACE_ID);
-  }, [activeWorkspaceId]);
-
-  useEffect(() => {
-    saveRecentIfcFiles(recentIfcFiles);
-  }, [recentIfcFiles]);
-
-  useEffect(() => {
-    saveNotes(notes);
-  }, [notes]);
-
-  useEffect(() => {
-    savePortalSettings(portalSettings);
-  }, [portalSettings]);
-
-  useEffect(() => {
-    savePortalTokens(portalTokens);
-  }, [portalTokens]);
-
-  // Portal-Importe laufen asynchron (Netz-Roundtrip) und übernehmen ihr
-  // Ergebnis gegen den zum Anwendungszeitpunkt aktuellen Stand statt gegen
-  // den Klick-Zeitpunkt — sonst gingen zwischenzeitliche Änderungen verloren.
-  const portalApplyTargetRef = useRef({ document, selectedId });
-  portalApplyTargetRef.current = { document, selectedId };
-
-  const emergencyStateRef = useRef({
-    activeWorkspaceId,
-    customWorkspaces,
-    notes,
-    recentIfcFiles,
-  });
-  emergencyStateRef.current = {
-    activeWorkspaceId,
-    customWorkspaces,
-    notes,
-    recentIfcFiles,
-  };
-  useEffect(
-    () =>
-      registerEmergencySave(() => {
-        const snapshot = emergencyStateRef.current;
-        saveNotes(snapshot.notes);
-        saveRecentIfcFiles(snapshot.recentIfcFiles);
-        saveCustomWorkspaces(snapshot.customWorkspaces);
-        saveActiveWorkspaceId(
-          snapshot.activeWorkspaceId || DEFAULT_WORKSPACE_ID,
-        );
-      }),
-    [],
-  );
-
-  useEffect(() => {
-    if (!desktopApi) {
-      return;
-    }
-
-    return desktopApi.onCommand((command) => {
-      switch (command.type) {
-        case "add-ifc":
-          if (!loadingIfcName) {
-            void addIfcFiles();
-          }
-          break;
-        case "open-ifc":
-          if (!loadingIfcName) {
-            void openIfc();
-          }
-          break;
-        case "load-sample":
-          loadSample();
-          break;
-        case "import-catalog":
-          if (!catalogImporting) {
-            void importCatalog();
-          }
-          break;
-        case "export-ifc":
-          if (!loadingIfcName) {
-            void exportIfc();
-          }
-          break;
-        case "reset-layout":
-          resetMosaicLayout();
-          break;
-        case "restore-window":
-          if (MOSAIC_VIEW_IDS.includes(command.viewId)) {
-            restoreMosaicView(command.viewId);
-          }
-          break;
-      }
-    });
-  });
-
-  useEffect(() => {
-    if (!desktopApi) {
-      return;
-    }
-
-    desktopApi.setMenuState({
-      catalogImporting,
-      closedWindowIds: closedMosaicIds,
-      hasCatalog: Boolean(catalog),
-      loadingIfcName,
-    });
-  }, [catalog, catalogImporting, closedMosaicIds, desktopApi, loadingIfcName]);
-
-  const saveSelectedEdit = (draft: EntityEditDraft) => {
-    const next = updateNativeEntity(document, selectedId, {
-      args: splitTopLevel(draft.rawArgs),
-      description: draft.description,
-      name: draft.name,
-      type: draft.type,
-    });
-    commitDocument(
-      next,
-      selectedId,
-      `Edit #${selectedId} ${draft.type}`,
-      `saveEdit({ id: ${selectedId}, class: '${draft.type}' });`,
-      undefined,
-      { reloadViewer: true },
-    );
-  };
-
-  const addChildElement = (parentId: number, type: string, name: string) => {
-    if (!document.entityById.has(parentId)) {
-      return;
-    }
-    const addedId = getNextNativeEntityId(document);
-    const next = addNativeElement(document, parentId, type, name);
-    commitDocument(
-      next,
-      addedId,
-      `Create ${type} '${name}' under #${parentId}`,
-      `tree.addChildElement({ parentId: ${parentId}, class: '${type}', name: ${JSON.stringify(name)}, id: ${addedId} });`,
-      undefined,
-      { reloadViewer: true },
-    );
-  };
-
-  // Geerbte Rotation der Platzierungskette (georeferenzierte/rotierte Sites)
-  // als Basis der Spiegel-Geometrie in Viewer-Weltrichtungen: Geometrie-X =
-  // IFC-X, Geometrie-Y (hoch) = IFC-Z, Geometrie-Z = -IFC-Y.
-  const nativePlacementViewerAxes = (
-    doc: NativeIfcDocument,
-    entityId: number,
-  ) => {
-    const frame = getNativePlacementWorldFrame(doc, entityId);
-    if (!frame) {
-      return undefined;
-    }
-    const yIfc = ifcPlacementPointToViewerWorldPoint(frame.yAxis, 1);
-    return {
-      x: ifcPlacementPointToViewerWorldPoint(frame.xAxis, 1),
-      y: ifcPlacementPointToViewerWorldPoint(frame.zAxis, 1),
-      z: { x: -yIfc.x, y: -yIfc.y, z: -yIfc.z },
-    };
-  };
-
-  // Der Viewer stellt die Szene in echten IFC-Weltkoordinaten dar (Meter,
-  // Y-up; die Koordinationsmatrix der Fragments-Konvertierung wird beim Laden
-  // wieder angewendet). Ein Weltmodus-Punkt ist damit direkt eine
-  // IFC-Weltkoordinate: nur Achsen tauschen und in Modell-Einheiten skalieren.
-  // Die Projektion in die (georeferenzierte) Platzierungskette des Parents —
-  // kleine lokale Koordinaten statt riesiger Absolutwerte — übernimmt
-  // addNativeBodyElement.
-  const addBodyElement = (options: BodyElementDraft) => {
-    const parentId = options.parentId ?? selectedId;
-    const addedId = getNextNativeEntityId(document);
-    const scale = getNativeLengthUnitScale(document);
-    const ifcPoint = viewerWorldPointToIfcPlacementPoint(
-      {
-        x: readBodyCoordinate(options.x),
-        y: readBodyCoordinate(options.y),
-        z: readBodyCoordinate(options.z),
-      },
-      scale,
-    );
-    const next = addNativeBodyElement(document, {
-      ...options,
-      parentId,
-      positionInModelUnits: true,
-      x: formatCoordinate(ifcPoint.x),
-      y: formatCoordinate(ifcPoint.y),
-      z: formatCoordinate(ifcPoint.z),
-    });
-    const createdWorld = getNativePlacementWorld(next, addedId);
-    const createdViewerPoint = createdWorld
-      ? ifcPlacementPointToViewerWorldPoint(
-          {
-            x: createdWorld.worldX,
-            y: createdWorld.worldY,
-            z: createdWorld.worldZ,
-          },
-          scale,
-        )
-      : null;
-    if (!createdViewerPoint) {
-      // Ohne Weltposition kein Live-Mirror — die Änderung bleibt als
-      // ausstehend markiert ("Modell neu berechnen").
-      logAction(
-        `builder.createBodyMirrorSkipped({ id: ${addedId}, reason: 'no-world-placement' });`,
-      );
-    }
-    commitDocument(
-      next,
-      addedId,
-      `Create ${options.type} '${options.name}' under #${parentId}`,
-      `builder.createBodyElement({ class: '${options.type}', name: ${JSON.stringify(options.name)}, parentId: ${parentId}, id: ${addedId}, profile: '${options.profile ?? "rectangle"}', width: ${options.width}, depth: ${options.depth}, height: ${options.height} });`,
-      undefined,
-      {
-        pendingKey: `body:${addedId}`,
-        reloadViewer: true,
-        viewerMirror: createdViewerPoint
-          ? {
-              axes: nativePlacementViewerAxes(next, addedId),
-              category: options.type,
-              depth: options.depth,
-              entityId: addedId,
-              globalId: next.entityById.get(addedId)?.globalId,
-              height: options.height,
-              kind: "create-body",
-              name: options.name,
-              position: createdViewerPoint,
-              profile: options.profile,
-              tag: options.tag,
-              width: options.width,
-            }
-          : undefined,
-      },
-    );
-    logAction(
-      `builder.bodyDiagnostics({ id: ${addedId}, mode: '${options.placementMode ?? "parent"}', unitScale: ${scale}, inputViewer: { x: ${options.x}, y: ${options.y}, z: ${options.z} }, ifcInput: { x: ${formatCoordinate(ifcPoint.x)}, y: ${formatCoordinate(ifcPoint.y)}, z: ${formatCoordinate(ifcPoint.z)} }, ifcWorld: { x: ${createdWorld?.worldX ?? "?"}, y: ${createdWorld?.worldY ?? "?"}, z: ${createdWorld?.worldZ ?? "?"} } });`,
-    );
-  };
-
-  const removeBodyFromSelected = () => {
-    const next = removeNativeBodyRepresentation(document, selectedId);
-    if (next === document) {
-      logAction(
-        `builder.removeBodyRepresentation.skip({ id: ${selectedId}, reason: 'no-representation' });`,
-      );
-      return;
-    }
-    commitDocument(
-      next,
-      selectedId,
-      `Remove geometry of #${selectedId}`,
-      `builder.removeBodyRepresentation({ id: ${selectedId} });`,
-      undefined,
-      {
-        pendingKey: `hide:${selectedId}`,
-        reloadViewer: true,
-        viewerMirror: { entityId: selectedId, kind: "remove" },
-      },
-    );
-  };
-
-  // Dual-Write statt Fragments-first: die Geometrie wird im nativen Dokument
-  // (Source of Truth) zugewiesen und nur zur Anzeige in das Fragments-Modell
-  // gespiegelt. Vorher lief dieser Pfad umgekehrt (Fragments-Edit + Rebuild
-  // des nativen Dokuments aus den Fragments) und verlor dabei STEP-Details.
-  const assignBodyToSelected = (options: BodyElementDraft) => {
-    const next = assignNativeBodyRepresentation(document, selectedId, options);
-    if (next === document) {
-      logAction(
-        `builder.assignBodyRepresentation.skip({ id: ${selectedId}, reason: 'not-assignable' });`,
-      );
-      return;
-    }
-    // Recreate-Rückfall des Mirrors: Weltposition des Produkts, falls das
-    // Fragments-Element keine editierbaren Meshes liefert (z. B. bislang
-    // ohne Repräsentation oder selbst per Mirror erzeugt).
-    const entity = next.entityById.get(selectedId);
-    const world = getNativePlacementWorld(next, selectedId);
-    const viewerPoint = world
-      ? ifcPlacementPointToViewerWorldPoint(
-          { x: world.worldX, y: world.worldY, z: world.worldZ },
-          getNativeLengthUnitScale(next),
-        )
-      : null;
-    commitDocument(
-      next,
-      selectedId,
-      `Assign geometry to #${selectedId}`,
-      `builder.assignBodyRepresentation({ id: ${selectedId}, profile: '${options.profile ?? "rectangle"}', width: ${options.width}, depth: ${options.depth}, height: ${options.height} });`,
-      undefined,
-      {
-        pendingKey: `body:${selectedId}`,
-        reloadViewer: true,
-        viewerMirror: {
-          depth: options.depth,
-          entityId: selectedId,
-          height: options.height,
-          kind: "replace-body",
-          profile: options.profile,
-          recreate: viewerPoint
-            ? {
-                axes: nativePlacementViewerAxes(next, selectedId),
-                category: entity?.type ?? "IFCBUILDINGELEMENTPROXY",
-                globalId: entity?.globalId,
-                name: entity?.name,
-                position: viewerPoint,
-              }
-            : undefined,
-          width: options.width,
-        },
-      },
-    );
-  };
-
-  const addRelationship = (
-    type: string,
-    sourceId: number,
-    targetId: number,
-  ) => {
-    const next = addNativeRelationship(document, type, sourceId, targetId);
-    commitDocument(
-      next,
-      targetId,
-      `Add ${type} from #${sourceId} to #${targetId}`,
-      `addRelationship({ class: '${type}', sourceId: ${sourceId}, targetId: ${targetId} });`,
-    );
-  };
-
-  const addGraphConnectedNode = (
-    sourceId: number,
-    type: string,
-    name: string,
-    relationshipType: string,
-    position: Point,
-  ) => {
-    const addedId = getNextNativeEntityId(document);
-    const withElement = addNativeElement(document, undefined, type, name);
-    const next = addNativeRelationship(
-      withElement,
-      relationshipType,
-      sourceId,
-      addedId,
-    );
-    const nextPositions = new Map(graphPositions);
-    nextPositions.set(addedId, position);
-    commitDocument(
-      next,
-      addedId,
-      `Create ${type} '${name}' from graph and connect #${sourceId} -> #${addedId}`,
-      `graph.addConnectedNode({ sourceId: ${sourceId}, class: '${type}', relationship: '${relationshipType}', targetId: ${addedId} });`,
-      nextPositions,
-    );
-    setGraphPinned((current) => addToSet(addToSet(current, sourceId), addedId));
-    setGraphExpanded((current) => addToSet(current, sourceId));
-    setGraphCollapsed((current) => removeFromSet(current, sourceId));
-  };
-
-  const connectGraphNodes = (
-    sourceId: number,
-    targetId: number,
-    relationshipType: string,
-  ) => {
-    const next = addNativeRelationship(
-      document,
-      relationshipType,
-      sourceId,
-      targetId,
-    );
-    commitDocument(
-      next,
-      targetId,
-      `Connect graph nodes #${sourceId} -> #${targetId} with ${relationshipType}`,
-      `graph.addRelationship({ class: '${relationshipType}', sourceId: ${sourceId}, targetId: ${targetId} });`,
-      new Map(graphPositions),
-    );
-    setGraphPinned((current) =>
-      addToSet(addToSet(current, sourceId), targetId),
-    );
-    setGraphExpanded((current) => addToSet(current, sourceId));
-    setGraphCollapsed((current) => removeFromSet(current, sourceId));
-  };
-
-  const pasteGraphNodes = (
-    sourceId: number,
-    relationshipType: string,
-    copiedNodes: RelationshipFlowClipboardNode[],
-    connect: boolean,
-  ) => {
-    if (
-      (connect && !document.entityById.has(sourceId)) ||
-      copiedNodes.length === 0
-    ) {
-      return;
-    }
-    const pasteableNodes = copiedNodes.filter(
-      (node) => node.type !== "IFCPROJECT",
-    );
-    if (!pasteableNodes.length) {
-      logAction("graph.pasteNodesSkipped({ reason: 'no-pasteable-nodes' });");
-      return;
-    }
-
-    let next = document;
-    const nextPositions = new Map(graphPositions);
-    const pastedIds: number[] = [];
-    pasteableNodes.forEach((node, index) => {
-      const addedId = getNextNativeEntityId(next);
-      const withElement = addNativeElement(
-        next,
-        undefined,
-        node.type,
-        graphCopyName(node.name, node.type, index),
-      );
-      next = connect
-        ? addNativeRelationship(
-            withElement,
-            relationshipType,
-            sourceId,
-            addedId,
-          )
-        : withElement;
-      nextPositions.set(addedId, { x: node.x, y: node.y });
-      pastedIds.push(addedId);
-    });
-
-    commitDocument(
-      next,
-      pastedIds[pastedIds.length - 1],
-      connect
-        ? `Paste ${pastedIds.length.toLocaleString()} graph node${pastedIds.length === 1 ? "" : "s"} under #${sourceId}`
-        : `Paste ${pastedIds.length.toLocaleString()} graph node${pastedIds.length === 1 ? "" : "s"} without relationships`,
-      `graph.pasteNodesCommit({ sourceId: ${sourceId}, relationship: '${relationshipType}', connect: ${connect}, ids: [${pastedIds.join(", ")}] });`,
-      nextPositions,
-    );
-    setGraphPinned(
-      (current) =>
-        new Set([...current, ...(connect ? [sourceId] : []), ...pastedIds]),
-    );
-    if (connect) {
-      setGraphExpanded((current) => addToSet(current, sourceId));
-      setGraphCollapsed((current) => removeFromSet(current, sourceId));
-    }
-  };
-
-  const addEmptyPset = (psetName: string) => {
-    const next = addNativeEmptyPropertySet(document, selectedId, psetName);
-    commitDocument(
-      next,
-      selectedId,
-      `Add empty Pset '${psetName}' to #${selectedId}`,
-      `addEmptyPset({ objectId: ${selectedId}, name: '${psetName}' });`,
-    );
-  };
-
-  const findEntityPsetByName = (
-    sourceDocument: NativeIfcDocument,
-    entityId: number,
-    psetName: string,
-  ) => {
-    const token = psetName.trim().toLowerCase();
-    return (sourceDocument.propertySetsByEntity.get(entityId) ?? []).find(
-      (set) => set.name.trim().toLowerCase() === token,
-    );
-  };
-
-  const addPsetToSelection = (psetName: string) => {
-    const name = psetName.trim();
-    if (!name || batchSelectionIds.length === 0) {
-      return;
-    }
-    let next = document;
-    let added = 0;
-    for (const id of batchSelectionIds) {
-      if (findEntityPsetByName(next, id, name)) {
-        continue;
-      }
-      next = addNativeEmptyPropertySet(next, id, name);
-      added += 1;
-    }
-    if (next === document) {
-      logAction(
-        `psetBatch.addPset.skip({ name: ${JSON.stringify(name)}, reason: 'all-present' });`,
-      );
-      return;
-    }
-    commitDocument(
-      next,
-      selectedId,
-      `Add Pset '${name}' to ${added.toLocaleString()} objects`,
-      `psetBatch.addPset({ name: ${JSON.stringify(name)}, added: ${added}, selected: ${batchSelectionIds.length} });`,
-    );
-  };
-
-  // Add the catalog class currently selected in the Objektkatalog window to the
-  // batch selection: one pset per Merkmalsgruppe (with its catalog properties)
-  // on each selected object.
-  const addCatalogObjectToSelection = () => {
-    if (!activeCatalogObject || batchSelectionIds.length === 0) {
-      return;
-    }
-    const groups = new Map<
-      string,
-      {
-        name: string;
-        properties: Map<string, { name: string; valueType: string }>;
-      }
-    >();
-    for (const rule of activeCatalogObject.propertyRules) {
-      const key = rule.psetName.trim().toLowerCase();
-      if (!key) {
-        continue;
-      }
-      let group = groups.get(key);
-      if (!group) {
-        group = { name: rule.psetName, properties: new Map() };
-        groups.set(key, group);
-      }
-      if (!group.properties.has(rule.propertyName)) {
-        group.properties.set(rule.propertyName, {
-          name: rule.propertyName,
-          valueType: rule.valueType,
-        });
-      }
-    }
-    if (groups.size === 0) {
-      return;
-    }
-    let next = document;
-    let addedPsets = 0;
-    for (const id of batchSelectionIds) {
-      for (const group of groups.values()) {
-        if (findEntityPsetByName(next, id, group.name)) {
-          continue;
-        }
-        next = addNativePropertySetValues(
-          next,
-          id,
-          group.name,
-          [...group.properties.values()].map((property) => ({
-            name: property.name,
-            value: "",
-            valueType: property.valueType,
-          })),
-        );
-        addedPsets += 1;
-      }
-    }
-    if (next === document) {
-      logAction(
-        `psetBatch.addCatalogObject.skip({ object: '${activeCatalogObject.id}', reason: 'all-present' });`,
-      );
-      return;
-    }
-    commitDocument(
-      next,
-      selectedId,
-      `Add catalog class '${catalogObjectLabel(activeCatalogObject)}' (${groups.size.toLocaleString()} psets) to ${batchSelectionIds.length.toLocaleString()} objects`,
-      `psetBatch.addCatalogObject({ object: '${activeCatalogObject.id}', psets: ${groups.size}, addedPsets: ${addedPsets} });`,
-    );
-  };
-
-  // Neue Property auf allen ausgewählten Objekten anlegen; fehlt das Pset auf
-  // einem Objekt, wird es dort mitsamt der Property erzeugt (Coverage-Ziel).
-  const addPropertyToSelection = (
-    psetName: string,
-    propertyName: string,
-    valueType: string,
-    value: string,
-  ) => {
-    const name = propertyName.trim();
-    if (!name || batchSelectionIds.length === 0) {
-      return;
-    }
-    let next = document;
-    let added = 0;
-    for (const id of batchSelectionIds) {
-      const set = findEntityPsetByName(next, id, psetName);
-      if (set) {
-        const exists = set.values.some(
-          (item) => item.name.trim().toLowerCase() === name.toLowerCase(),
-        );
-        if (exists) {
-          continue;
-        }
-        next = addNativePropertyToSet(next, set.id, name, value, valueType);
-      } else {
-        next = addNativePropertySetValues(next, id, psetName, [
-          { name, value, valueType },
-        ]);
-      }
-      added += 1;
-    }
-    if (next === document) {
-      logAction(
-        `psetBatch.addProperty.skip({ pset: ${JSON.stringify(psetName)}, name: ${JSON.stringify(name)}, reason: 'all-present' });`,
-      );
-      return;
-    }
-    commitDocument(
-      next,
-      selectedId,
-      `Add property '${name}' to ${added.toLocaleString()} objects`,
-      `psetBatch.addProperty({ pset: ${JSON.stringify(psetName)}, name: ${JSON.stringify(name)}, type: '${valueType}', objects: ${added} });`,
-    );
-  };
-
-  // Datentyp einer Property zentral für alle ausgewählten Objekte setzen.
-  // updateNativePropertyValue wendet valueType nur zusammen mit einem Wert an,
-  // daher wird der aktuelle Wert mitgereicht (und dabei neu typisiert).
-  const setPropertyTypeForSelection = (
-    psetName: string,
-    propertyName: string,
-    valueType: string,
-  ) => {
-    if (batchSelectionIds.length === 0) {
-      return;
-    }
-    const token = propertyName.trim().toLowerCase();
-    let next = document;
-    let changed = 0;
-    for (const id of batchSelectionIds) {
-      const set = findEntityPsetByName(next, id, psetName);
-      const property = set?.values.find(
-        (item) => item.name.trim().toLowerCase() === token,
-      );
-      if (!property) {
-        continue;
-      }
-      const updated = updateNativePropertyValue(next, property.id, {
-        value: readSimplePropertyValueText(next.entityById.get(property.id)),
-        valueType,
-      });
-      if (updated !== next) {
-        next = updated;
-        changed += 1;
-      }
-    }
-    if (next === document) {
-      return;
-    }
-    commitDocument(
-      next,
-      selectedId,
-      `Set type '${valueType}' for '${propertyName}' on ${changed.toLocaleString()} objects`,
-      `psetBatch.setPropertyType({ pset: ${JSON.stringify(psetName)}, name: ${JSON.stringify(propertyName)}, type: '${valueType}', objects: ${changed} });`,
-    );
-  };
-
-  const editPsetCellValue = (
-    entityId: number,
-    setId: number,
-    propertyId: number | undefined,
-    propertyName: string,
-    value: string,
-  ) => {
-    const next =
-      propertyId != null
-        ? updateNativePropertyValue(document, propertyId, { value })
-        : addNativePropertyToSet(document, setId, propertyName, value);
-    if (next === document) {
-      return;
-    }
-    commitDocument(
-      next,
-      selectedId,
-      `Edit ${propertyName} on #${entityId}`,
-      `psetBatch.editValue({ id: ${entityId}, set: ${setId}, property: ${JSON.stringify(propertyName)} });`,
-    );
-  };
-
-  const addPropertyToSet = (
-    setId: number,
-    propertyName: string,
-    propertyValue: string,
-    propertyValueType = "IFCLABEL",
-  ) => {
-    const next = addNativePropertyToSet(
-      document,
-      setId,
-      propertyName,
-      propertyValue,
-      propertyValueType,
-    );
-    commitDocument(
-      next,
-      selectedId,
-      `Add property '${propertyName}' to #${setId}`,
-      `addPropertyToSet({ setId: ${setId}, name: '${propertyName}', type: '${propertyValueType}' });`,
-    );
-  };
-
-  const addQuantity = (
-    qtoName: string,
-    quantityName: string,
-    quantityValue: string,
-    quantityType = "IFCQUANTITYLENGTH",
-  ) => {
-    const next = addNativeQuantitySet(
-      document,
-      selectedId,
-      qtoName,
-      quantityName,
-      quantityValue,
-      quantityType,
-    );
-    commitDocument(
-      next,
-      selectedId,
-      `Add quantity '${quantityName}' to #${selectedId}`,
-      `addQuantity({ objectId: ${selectedId}, name: '${quantityName}', type: '${quantityType}' });`,
-    );
-  };
-
-  const addMaterial = (materialName: string, materialCategory: string) => {
-    const next = addNativeMaterial(
-      document,
-      selectedId,
-      materialName,
-      materialCategory,
-    );
-    commitDocument(
-      next,
-      selectedId,
-      `Assign material '${materialName}' to #${selectedId}`,
-      `addMaterial({ objectId: ${selectedId}, name: '${materialName}' });`,
-    );
-  };
-
-  const addMaterialWithProperties = (
-    materialName: string,
-    materialCategory: string,
-    propertySetName: string,
-    propertyRows: string,
-  ) => {
-    const next = addNativeMaterialWithProperties(
-      document,
-      selectedId,
-      materialName,
-      materialCategory,
-      propertySetName,
-      propertyRows,
-    );
-    commitDocument(
-      next,
-      selectedId,
-      `Assign material '${materialName}' with properties to #${selectedId}`,
-      `addMaterialWithProperties({ objectId: ${selectedId}, name: ${JSON.stringify(materialName)} });`,
-    );
-  };
-
-  const addMaterialStyle = (
-    materialName: string,
-    materialCategory: string,
-    styleName: string,
-    color: string,
-    transparency: string,
-  ) => {
-    const next = addNativeMaterialStyle(
-      document,
-      selectedId,
-      materialName,
-      materialCategory,
-      styleName,
-      color,
-      transparency,
-    );
-    commitDocument(
-      next,
-      selectedId,
-      `Assign material style '${styleName}' to #${selectedId}`,
-      `addMaterialStyle({ objectId: ${selectedId}, material: ${JSON.stringify(materialName)}, color: ${JSON.stringify(color)} });`,
-    );
-  };
-
-  const addMaterialLayerSet = (setName: string, layerRows: string) => {
-    const next = addNativeMaterialLayerSet(
-      document,
-      selectedId,
-      setName,
-      layerRows,
-    );
-    commitDocument(
-      next,
-      selectedId,
-      `Assign material layer set '${setName}' to #${selectedId}`,
-      `addMaterialLayerSet({ objectId: ${selectedId}, name: ${JSON.stringify(setName)} });`,
-    );
-  };
-
-  const addMaterialLayerSetUsage = (
-    setName: string,
-    layerRows: string,
-    direction: string,
-    directionSense: string,
-    offset: string,
-    referenceExtent: string,
-  ) => {
-    const next = addNativeMaterialLayerSetUsage(
-      document,
-      selectedId,
-      setName,
-      layerRows,
-      direction,
-      directionSense,
-      offset,
-      referenceExtent,
-    );
-    commitDocument(
-      next,
-      selectedId,
-      `Assign material layer set usage '${setName}' to #${selectedId}`,
-      `addMaterialLayerSetUsage({ objectId: ${selectedId}, name: ${JSON.stringify(setName)} });`,
-    );
-  };
-
-  const addMaterialProfileSet = (
-    setName: string,
-    profileName: string,
-    materialName: string,
-    category: string,
-    width: string,
-    depth: string,
-  ) => {
-    const next = addNativeMaterialProfileSet(
-      document,
-      selectedId,
-      setName,
-      profileName,
-      materialName,
-      category,
-      width,
-      depth,
-    );
-    commitDocument(
-      next,
-      selectedId,
-      `Assign material profile set '${setName}' to #${selectedId}`,
-      `addMaterialProfileSet({ objectId: ${selectedId}, name: ${JSON.stringify(setName)} });`,
-    );
-  };
-
-  const addMaterialProfileSetUsage = (
-    setName: string,
-    profileName: string,
-    materialName: string,
-    category: string,
-    width: string,
-    depth: string,
-    cardinalPoint: string,
-    referenceExtent: string,
-  ) => {
-    const next = addNativeMaterialProfileSetUsage(
-      document,
-      selectedId,
-      setName,
-      profileName,
-      materialName,
-      category,
-      width,
-      depth,
-      cardinalPoint,
-      referenceExtent,
-    );
-    commitDocument(
-      next,
-      selectedId,
-      `Assign material profile set usage '${setName}' to #${selectedId}`,
-      `addMaterialProfileSetUsage({ objectId: ${selectedId}, name: ${JSON.stringify(setName)} });`,
-    );
-  };
-
-  const addMaterialConstituentSet = (
-    setName: string,
-    constituentRows: string,
-  ) => {
-    const next = addNativeMaterialConstituentSet(
-      document,
-      selectedId,
-      setName,
-      constituentRows,
-    );
-    commitDocument(
-      next,
-      selectedId,
-      `Assign material constituent set '${setName}' to #${selectedId}`,
-      `addMaterialConstituentSet({ objectId: ${selectedId}, name: ${JSON.stringify(setName)} });`,
-    );
-  };
-
-  const addGroupAssignment = (
-    groupType: string,
-    groupName: string,
-    objectType: string,
-    longName: string,
-  ) => {
-    const next = addNativeGroupAssignment(
-      document,
-      selectedId,
-      groupType,
-      groupName,
-      objectType,
-      longName,
-    );
-    commitDocument(
-      next,
-      selectedId,
-      `Assign ${groupType} '${groupName}' to #${selectedId}`,
-      `addGroupAssignment({ objectId: ${selectedId}, type: ${JSON.stringify(groupType)}, name: ${JSON.stringify(groupName)} });`,
-    );
-  };
-
-  const addClassification = (
-    identification: string,
-    name: string,
-    location: string,
-  ) => {
-    const next = addNativeClassification(
-      document,
-      selectedId,
-      identification,
-      name,
-      location,
-    );
-    commitDocument(
-      next,
-      selectedId,
-      `Assign classification '${identification}' to #${selectedId}`,
-      `addClassification({ objectId: ${selectedId}, id: '${identification}' });`,
-    );
-  };
-
-  const addDocumentReference = (
-    identification: string,
-    name: string,
-    location: string,
-  ) => {
-    const next = addNativeDocumentReference(
-      document,
-      selectedId,
-      identification,
-      name,
-      location,
-    );
-    commitDocument(
-      next,
-      selectedId,
-      `Assign document '${identification}' to #${selectedId}`,
-      `addDocumentReference({ objectId: ${selectedId}, id: '${identification}' });`,
-    );
-  };
-
-  const addLibraryReference = (
-    identification: string,
-    name: string,
-    location: string,
-  ) => {
-    const next = addNativeLibraryReference(
-      document,
-      selectedId,
-      identification,
-      name,
-      location,
-    );
-    commitDocument(
-      next,
-      selectedId,
-      `Assign library '${identification}' to #${selectedId}`,
-      `addLibraryReference({ objectId: ${selectedId}, id: '${identification}' });`,
-    );
-  };
-
-  const addApproval = (identifier: string, name: string, status: string) => {
-    const next = addNativeApproval(
-      document,
-      selectedId,
-      identifier,
-      name,
-      status,
-    );
-    commitDocument(
-      next,
-      selectedId,
-      `Assign approval '${identifier || name}' to #${selectedId}`,
-      `addApproval({ objectId: ${selectedId}, id: '${identifier}' });`,
-    );
-  };
-
-  const addConstraint = (
-    name: string,
-    grade: string,
-    source: string,
-    qualifier: string,
-    intent: string,
-  ) => {
-    const next = addNativeConstraintObjective(
-      document,
-      selectedId,
-      name,
-      grade,
-      source,
-      qualifier,
-      intent,
-    );
-    commitDocument(
-      next,
-      selectedId,
-      `Assign constraint '${name}' to #${selectedId}`,
-      `addConstraint({ objectId: ${selectedId}, name: ${JSON.stringify(name)} });`,
-    );
-  };
-
-  const updateResourceEntityArgs = (
-    updates: Array<{ entityId: number; args: string[] }>,
-    label: string,
-  ) => {
-    if (updates.length === 0) {
-      return;
-    }
-    const next = updates.reduce(
-      (current, update) =>
-        updateNativeEntity(current, update.entityId, { args: update.args }),
-      document,
-    );
-    commitDocument(
-      next,
-      selectedId,
-      label,
-      `updateResourceEntities({ ids: [${updates.map((update) => update.entityId).join(", ")}] });`,
-    );
-  };
-
-  const removeResourceAssociation = (relationshipId: number) => {
-    const relationship = document.entityById.get(relationshipId);
-    const next = removeNativeRelationship(document, relationshipId);
-    commitDocument(
-      next,
-      selectedId,
-      `Remove ${relationship?.type ?? "resource association"} #${relationshipId}`,
-      `removeResourceAssociation({ id: ${relationshipId} });`,
-    );
-  };
-
-  const assignType = (typeName: string, typeClass: string, tag: string) => {
-    const next = addNativeTypeAssignment(
-      document,
-      selectedId,
-      typeName,
-      typeClass,
-      tag,
-    );
-    commitDocument(
-      next,
-      selectedId,
-      `Assign type '${typeName}' to #${selectedId}`,
-      `assignType({ objectId: ${selectedId}, class: '${typeClass}', name: '${typeName}' });`,
-    );
-  };
-
-  const updatePsetProperty = (
-    propertyId: number,
-    propertyName: string,
-    propertyValue: string,
-    propertyValueType: string,
-  ) => {
-    const sourceDocument = document;
-    const next = updateNativePropertyValue(sourceDocument, propertyId, {
-      name: propertyName,
-      value: propertyValue,
-      valueType: propertyValueType,
-    });
-    commitDocument(
-      next,
-      selectedId,
-      `Update property #${propertyId} '${propertyName}'`,
-      `updateProperty({ id: ${propertyId}, name: '${propertyName}' });`,
-    );
-  };
-
-  const deletePsetProperty = (setId: number, propertyId: number) => {
-    const next = removeNativePropertyFromSet(document, setId, propertyId);
-    if (next === document) {
-      return;
-    }
-    commitDocument(
-      next,
-      selectedId,
-      `Delete property #${propertyId} from #${setId}`,
-      `deleteProperty({ setId: ${setId}, id: ${propertyId} });`,
-    );
-  };
-
-  const renamePset = (setId: number, name: string) => {
-    const next = updateNativePropertySetName(document, setId, name);
-    if (next === document) {
-      return;
-    }
-    commitDocument(
-      next,
-      selectedId,
-      `Rename Pset #${setId} to '${name}'`,
-      `renamePset({ setId: ${setId}, name: ${JSON.stringify(name)} });`,
-    );
-  };
-
-  const duplicatePset = (setId: number) => {
-    const set = document.propertySetsByEntity
-      .get(selectedId)
-      ?.find((item) => item.id === setId);
-    const next = duplicateNativePropertySet(
-      document,
-      selectedId,
-      setId,
-      `${set?.name || `#${setId}`} Copy`,
-    );
-    if (next === document) {
-      return;
-    }
-    commitDocument(
-      next,
-      selectedId,
-      `Duplicate ${set?.kind ?? "Pset"} #${setId}${set ? ` '${set.name}'` : ""}`,
-      `duplicatePset({ objectId: ${selectedId}, setId: ${setId} });`,
-    );
-  };
-
-  const deletePset = (setId: number) => {
-    const set = document.propertySetsByEntity
-      .get(selectedId)
-      ?.find((item) => item.id === setId);
-    const next = removeNativePropertySet(document, selectedId, setId);
-    if (next === document) {
-      return;
-    }
-    commitDocument(
-      next,
-      selectedId,
-      `Delete ${set?.kind ?? "Pset"} #${setId}${set ? ` '${set.name}'` : ""}`,
-      `deletePset({ objectId: ${selectedId}, setId: ${setId} });`,
-    );
-  };
-
-  const editRelationship = (
-    relationshipId: number,
-    type: string,
-    sourceId: number,
-    targetId: number,
-  ) => {
-    const next = updateNativeRelationship(document, relationshipId, {
-      sourceId,
-      targetId,
-      type,
-    });
-    commitDocument(
-      next,
-      selectedId,
-      `Update relationship #${relationshipId} ${type}`,
-      `updateRelationship({ id: ${relationshipId}, class: '${type}' });`,
-    );
-  };
-
-  const deleteRelationship = (relationshipId: number) => {
-    const relationship = document.relationships.find(
-      (item) => item.id === relationshipId,
-    );
-    const nextSelection = relationship?.sourceIds.includes(selectedId)
-      ? relationship.targetIds[0]
-      : relationship?.sourceIds[0];
-    const next = removeNativeRelationship(document, relationshipId);
-    commitDocument(
-      next,
-      nextSelection && next.entityById.has(nextSelection)
-        ? nextSelection
-        : selectedId,
-      `Delete relationship #${relationshipId}${relationship ? ` ${relationship.type}` : ""}`,
-      `deleteRelationship({ id: ${relationshipId} });`,
-    );
-  };
-
-  const requestDeleteEntity = (
-    entityId: number,
-    source: "tree" | "graph" | "viewer" | "keyboard",
-  ) => {
-    const entity = document.entityById.get(entityId);
-    if (!entity || entity.type === "IFCPROJECT") {
-      return;
-    }
-    const plan = planNativeEntityRemoval(document, entityId);
-    if (!plan) {
-      return;
-    }
-    setDeleteRequest({
-      documentId: activeSession.id,
-      entity,
-      plan,
-      source,
-      sourceDocument: document,
-    });
-  };
-
-  const confirmDeleteEntity = () => {
-    const request = deleteRequest;
-    if (!request || request.documentId !== activeSession.id) {
-      setDeleteRequest(null);
-      return;
-    }
-    const currentEntity = document.entityById.get(request.entity.id);
-    const currentPlan =
-      request.sourceDocument === document
-        ? request.plan
-        : planNativeEntityRemoval(document, request.entity.id);
-    if (!currentEntity || !currentPlan) {
-      setDeleteRequest(null);
-      return;
-    }
-    const entityId = currentEntity.id;
-    const next = currentPlan.document;
-
-    const nextSelection = findNextSelectionAfterEntityDelete(
-      document,
-      next,
-      entityId,
-    );
-    const nextAnchor = next.entityById.has(graphAnchorId)
-      ? graphAnchorId
-      : next.entityById.has(nextSelection ?? 0)
-        ? (nextSelection as number)
-        : (next.spatialRoots[0]?.id ?? next.entities[0]?.id ?? graphAnchorId);
-    const nextPositions = filterGraphPositions(graphPositions, next);
-
-    setGraphPinned((current) => filterEntitySet(current, next));
-    setGraphExpanded((current) => filterEntitySet(current, next));
-    setGraphCollapsed((current) => filterEntitySet(current, next));
-    setGraphAnchorId(nextAnchor);
-    setDeleteRequest(null);
-
-    commitDocument(
-      next,
-      nextSelection,
-      `Delete #${entityId} ${currentEntity.type}`,
-      `${request.source}.deleteEntity({ id: ${entityId}, class: '${currentEntity.type}' });`,
-      nextPositions,
-      {
-        pendingKey: `hide:${entityId}`,
-        reloadViewer: true,
-        viewerMirror: { entityId, kind: "remove" },
-      },
-    );
-  };
-
-  const moveSelectedPlacement = (x: string, y: string, z: string) => {
-    const sourceDocument = document;
-    const beforeWorld = getNativePlacementWorld(sourceDocument, selectedId);
-    const next = updateNativePlacement(sourceDocument, selectedId, { x, y, z });
-    const afterWorld = getNativePlacementWorld(next, selectedId);
-    // Live-Mirror: Verschiebung als Szenen-Delta (Viewer-Achsen, Meter).
-    const scale = getNativeLengthUnitScale(sourceDocument);
-    const viewerDelta =
-      beforeWorld && afterWorld
-        ? ifcPlacementPointToViewerWorldPoint(
-            {
-              x: afterWorld.worldX - beforeWorld.worldX,
-              y: afterWorld.worldY - beforeWorld.worldY,
-              z: afterWorld.worldZ - beforeWorld.worldZ,
-            },
-            scale,
-          )
-        : null;
-    commitDocument(
-      next,
-      selectedId,
-      `Move #${selectedId} placement to (${x}, ${y}, ${z})`,
-      `movePlacement({ id: ${selectedId}, x: ${JSON.stringify(x)}, y: ${JSON.stringify(y)}, z: ${JSON.stringify(z)} });`,
-      undefined,
-      {
-        pendingKey: `transform:${selectedId}`,
-        reloadViewer: true,
-        viewerMirror: viewerDelta
-          ? {
-              delta: viewerDelta,
-              entityId: selectedId,
-              kind: "move",
-            }
-          : undefined,
-      },
-    );
-  };
-
-  const nudgeSelectedPlacement = (
-    entityId: number,
-    delta: {
-      x?: number;
-      y?: number;
-      z?: number;
-    },
-  ) => {
-    const failNative = (reason: string) => {
-      logAction(
-        `fragments.viewerDeltaSkipped({ id: ${entityId}, reason: '${reason}' });`,
-      );
-    };
-    if (entityId !== selectedId || !document.entityById.has(entityId)) {
-      failNative("selection-changed");
-      return null;
-    }
-    const placement = getNativePlacementWorld(document, entityId);
-    if (!placement) {
-      failNative("no-native-placement");
-      return null;
-    }
-    // Gizmo-Deltas kommen in Metern (Viewer-Welt) — in Modelleinheiten
-    // umrechnen (mm-Modelle!).
-    const ifcDelta = viewerWorldDeltaToIfcPlacementDelta(
-      delta,
-      getNativeLengthUnitScale(document),
-    );
-    const next = updateNativePlacementWorld(document, entityId, {
-      x: placement.worldX + ifcDelta.x,
-      y: placement.worldY + ifcDelta.y,
-      z: placement.worldZ + ifcDelta.z,
-    });
-    if (next === document) {
-      failNative("placement-update-failed");
-      return null;
-    }
-    const label = `Move #${entityId} placement by viewer delta`;
-    const pendingKey = `transform:${entityId}`;
-    commitDocument(
-      next,
-      entityId,
-      label,
-      `fragments.viewerDeltaCommit({ id: ${entityId}, dx: ${delta.x ?? 0}, dy: ${delta.y ?? 0}, dz: ${delta.z ?? 0} });`,
-      undefined,
-      {
-        pendingKey,
-        reloadViewer: true,
-      },
-    );
-    return { label, pendingKey };
-  };
-
-  const rotateSelectedPlacement = (
-    entityId: number,
-    rotation: ViewerRotationChange,
-  ) => {
-    if (entityId !== selectedId || !document.entityById.has(entityId)) {
-      return null;
-    }
-    const worldAxis = viewerWorldDirectionToIfcPlacementDirection(rotation.axis);
-    const worldRefDirection = viewerWorldDirectionToIfcPlacementDirection(
-      rotation.refDirection,
-    );
-    const axis = nativeWorldDirectionInPlacementParentFrame(
-      document,
-      entityId,
-      worldAxis,
-    );
-    const refDirection = nativeWorldDirectionInPlacementParentFrame(
-      document,
-      entityId,
-      worldRefDirection,
-    );
-    if (!axis || !refDirection) {
-      return null;
-    }
-    const next = updateNativePlacementRotation(document, entityId, {
-      axis,
-      refDirection,
-    });
-    if (next === document) {
-      logAction(
-        `fragments.viewerRotateSkipped({ id: ${entityId}, reason: 'placement-update-failed' });`,
-      );
-      return null;
-    }
-    const label = `Rotate #${entityId} placement with viewer gizmo`;
-    const pendingKey = `transform:${entityId}`;
-    commitDocument(
-      next,
-      entityId,
-      label,
-      `fragments.viewerRotateCommit({ id: ${entityId}, rx: ${rotation.rotation.x ?? 0}, ry: ${rotation.rotation.y ?? 0}, rz: ${rotation.rotation.z ?? 0} });`,
-      undefined,
-      {
-        pendingKey,
-        reloadViewer: true,
-      },
-    );
-    return { label, pendingKey };
-  };
-
+  // Strg+Z / Strg(+Umschalt)+Z / Strg+Y / Entf auf Dokument-Ebene.
   useEffect(() => {
     const handleEditorKeyDown = (event: KeyboardEvent) => {
       if (isEditableShortcutTarget(event.target) || event.altKey) {
@@ -2721,20 +408,16 @@ export default function IfcWorkspace() {
       const commandKey = event.ctrlKey || event.metaKey;
       if (commandKey && key === "z") {
         event.preventDefault();
-        if (event.shiftKey) redoDocument();
-        else undoDocument();
+        if (event.shiftKey) sessions.redoDocument();
+        else sessions.undoDocument();
         return;
       }
       if (commandKey && key === "y") {
         event.preventDefault();
-        redoDocument();
+        sessions.redoDocument();
         return;
       }
-      if (
-        !commandKey &&
-        !event.shiftKey &&
-        event.key === "Delete"
-      ) {
+      if (!commandKey && !event.shiftKey && event.key === "Delete") {
         event.preventDefault();
         requestDeleteEntity(selectedId, "keyboard");
       }
@@ -2742,6 +425,12 @@ export default function IfcWorkspace() {
     window.addEventListener("keydown", handleEditorKeyDown);
     return () => window.removeEventListener("keydown", handleEditorKeyDown);
   }, [activeSession, document, selectedId]);
+
+  // Portal-Importe laufen asynchron (Netz-Roundtrip) und übernehmen ihr
+  // Ergebnis gegen den zum Anwendungszeitpunkt aktuellen Stand statt gegen
+  // den Klick-Zeitpunkt — sonst gingen zwischenzeitliche Änderungen verloren.
+  const portalApplyTargetRef = useRef({ document, selectedId });
+  portalApplyTargetRef.current = { document, selectedId };
 
   const storePickedCoordinates = (pick: ViewerCoordinatePick) => {
     const copiedAt = new Date().toLocaleTimeString();
@@ -2790,47 +479,6 @@ export default function IfcWorkspace() {
     return nextClipboard;
   };
 
-  const addUnit = (unitType: string, unitName: string) => {
-    const next = addNativeSiUnit(document, unitType, "$", unitName);
-    commitDocument(
-      next,
-      selectedId,
-      `Add unit ${unitType} ${unitName}`,
-      `addUnit({ unitType: '${unitType}', name: '${unitName}' });`,
-    );
-  };
-
-  const requestActiveViewerLoad = () => {
-    const sessionId = activeSession.id;
-    setDocumentSessions((current) =>
-      current.map((session) => {
-        if (session.id !== sessionId) {
-          return session;
-        }
-        // Ausstehende Geometrie-Änderungen sind noch nicht in viewerModel*:
-        // dann vom aktuellen IFC-Text statt von den Original-Bytes laden.
-        const hasPending = session.pendingViewerChanges.length > 0;
-        return {
-          ...session,
-          pendingViewerChanges: [],
-          viewerModelBytes: hasPending ? null : session.viewerModelBytes,
-          viewerModelDeferredReason: "",
-          viewerModelFile: hasPending ? null : session.viewerModelFile,
-          viewerModelLoadRequested: true,
-          viewerModelRevision: session.viewerModelRevision + 1,
-          viewerModelText: hasPending
-            ? session.documentTextDirty
-              ? serializeNativeIfcDocument(session.document)
-              : session.documentText
-            : session.viewerModelText,
-        };
-      }),
-    );
-    logAction(
-      `viewer.loadRequested({ file: '${activeSession.document.fileName}' });`,
-    );
-  };
-
   const renderStructure = () => (
     <TileContent>
       <SegmentedControl
@@ -2854,7 +502,7 @@ export default function IfcWorkspace() {
           revealSelectionNonce={treeRevealNonce}
           search={search}
           selectedId={selectedId}
-          onAddChild={addChildElement}
+          onAddChild={geometryActions.addChildElement}
           onCenterCamera={(id) => centerViewerCamera(id, "tree")}
           onRemove={(id) => requestDeleteEntity(id, "tree")}
           onSelect={selectEntity}
@@ -2864,12 +512,12 @@ export default function IfcWorkspace() {
         <GraphPanel
           anchorId={graphAnchorId}
           classOptions={ENTITY_TYPES.map(typeOption)}
-          collapsed={graphCollapsed}
+          collapsed={activeSession.graphCollapsed}
           depth={graphDepth}
           document={document}
-          expanded={graphExpanded}
+          expanded={activeSession.graphExpanded}
           focusRequest={graphFocusRequest}
-          pinned={graphPinned}
+          pinned={activeSession.graphPinned}
           positions={graphPositions}
           preset={graphPreset}
           relationshipOptions={RELATION_TYPES.map(typeOption)}
@@ -2877,15 +525,15 @@ export default function IfcWorkspace() {
           search={search}
           searchMatches={searchMatchedEntities}
           selectedId={selectedId}
-          onConnectNodes={connectGraphNodes}
-          onCreateNodeFromConnection={addGraphConnectedNode}
+          onConnectNodes={relationshipActions.connectGraphNodes}
+          onCreateNodeFromConnection={relationshipActions.addGraphConnectedNode}
           onDepth={setGraphDepth}
           onLog={logAction}
-          onPasteNodes={pasteGraphNodes}
+          onPasteNodes={relationshipActions.pasteGraphNodes}
           onPreset={setGraphPreset}
-          onPositions={setGraphPositions}
+          onPositions={sessions.setGraphPositions}
           onRemoveNode={(id) => requestDeleteEntity(id, "graph")}
-          onRemoveRelationship={deleteRelationship}
+          onRemoveRelationship={relationshipActions.deleteRelationship}
           onRelationshipTypeFilters={(filters) =>
             setGraphRelationshipTypes(new Set(filters))
           }
@@ -2893,22 +541,22 @@ export default function IfcWorkspace() {
           onSelect={selectEntity}
           onToggleChildren={(id, loaded) => {
             if (loaded) {
-              setGraphExpanded((current) => removeFromSet(current, id));
-              setGraphCollapsed((current) => addToSet(current, id));
+              sessions.setGraphExpanded((current) => removeFromSet(current, id));
+              sessions.setGraphCollapsed((current) => addToSet(current, id));
             } else {
-              setGraphCollapsed((current) => removeFromSet(current, id));
-              setGraphExpanded((current) => addToSet(current, id));
+              sessions.setGraphCollapsed((current) => removeFromSet(current, id));
+              sessions.setGraphExpanded((current) => addToSet(current, id));
             }
             logAction(`graph.children({ id: ${id}, loaded: ${!loaded} });`);
           }}
           onTogglePin={(id, point) => {
-            setGraphPinned((current) => {
+            sessions.setGraphPinned((current) => {
               const pinning = !current.has(id);
               const next = current.has(id)
                 ? removeFromSet(current, id)
                 : addToSet(current, id);
               if (pinning && point) {
-                setGraphPositions((currentPositions) => {
+                sessions.setGraphPositions((currentPositions) => {
                   const nextPositions = new Map(currentPositions);
                   nextPositions.set(id, point);
                   return nextPositions;
@@ -2922,139 +570,6 @@ export default function IfcWorkspace() {
       )}
     </TileContent>
   );
-
-  const renderInspector = () => (
-    <TileContent>
-      <SegmentedControl
-        options={INSPECTOR_MODES}
-        value={inspectorMode}
-        onChange={(value) => setInspectorMode(value as InspectorMode)}
-      />
-      <InspectorPanel
-        activeCatalogObjectId={activeCatalogObjectId}
-        catalog={catalog}
-        catalogFindings={catalogFindings}
-        document={viewerDocument}
-        mode={inspectorMode}
-        objectInfoFindings={objectInfoFindings}
-        objectInfoIndex={objectInfoIndex}
-        selectedId={selectedId}
-        onAddGroupAssignment={addGroupAssignment}
-        onAddMaterial={addMaterial}
-        onAddMaterialConstituentSet={addMaterialConstituentSet}
-        onAddMaterialLayerSet={addMaterialLayerSet}
-        onAddMaterialLayerSetUsage={addMaterialLayerSetUsage}
-        onAddMaterialProfileSet={addMaterialProfileSet}
-        onAddMaterialProfileSetUsage={addMaterialProfileSetUsage}
-        onAddMaterialStyle={addMaterialStyle}
-        onAddMaterialWithProperties={addMaterialWithProperties}
-        onAssignType={assignType}
-        onAssignBodyToSelected={assignBodyToSelected}
-        onAddEmptyPset={addEmptyPset}
-        onAddPropertyToSet={addPropertyToSet}
-        onAddQuantity={addQuantity}
-        onAddUnit={addUnit}
-        onApplyCatalogFindings={applyCatalogFindings}
-        onAddRelationship={addRelationship}
-        onDuplicatePropertySet={duplicatePset}
-        onRemoveRelationship={deleteRelationship}
-        onRemovePropertyFromSet={deletePsetProperty}
-        onRemovePropertySet={deletePset}
-        onSaveEdit={saveSelectedEdit}
-        onMovePlacement={moveSelectedPlacement}
-        onRenamePropertySet={renamePset}
-        onSelectEntity={selectEntity}
-        onUpdateProperty={updatePsetProperty}
-        onUpdateRelationship={editRelationship}
-      />
-    </TileContent>
-  );
-
-  const renderResourceReferences = () => (
-    <TileContent>
-      <ResourceReferencesPanel
-        document={viewerDocument}
-        selectedId={selectedId}
-        onAddClassification={addClassification}
-        onAddDocumentReference={addDocumentReference}
-        onAddLibraryReference={addLibraryReference}
-        onRemoveAssociation={removeResourceAssociation}
-        onUpdateEntityArgs={updateResourceEntityArgs}
-      />
-    </TileContent>
-  );
-
-  const renderResourceControls = () => (
-    <TileContent>
-      <ResourceControlsPanel
-        document={viewerDocument}
-        selectedId={selectedId}
-        onAddApproval={addApproval}
-        onAddConstraint={addConstraint}
-        onRemoveAssociation={removeResourceAssociation}
-        onUpdateEntityArgs={updateResourceEntityArgs}
-      />
-    </TileContent>
-  );
-
-  const detachMosaicView = (id: MosaicViewId) => {
-    if (id === "viewer") {
-      logAction(
-        `ui.detachWindow({ view: '${id}', ok: false, reason: 'viewer-stays-in-main' });`,
-      );
-      return;
-    }
-    if (typeof window === "undefined" || typeof window.open !== "function") {
-      logAction(
-        `ui.detachWindow({ view: '${id}', ok: false, reason: 'no-window-open' });`,
-      );
-      return;
-    }
-    setDetachedViews((current) => {
-      if (current.has(id)) {
-        return current;
-      }
-      const next = new Set(current);
-      next.add(id);
-      return next;
-    });
-    logAction(`ui.detachWindow({ view: '${id}', mode: 'portal', ok: true });`);
-  };
-
-  const reattachMosaicView = (id: MosaicViewId) => {
-    setDetachedViews((current) => {
-      if (!current.has(id)) {
-        return current;
-      }
-      const next = new Set(current);
-      next.delete(id);
-      return next;
-    });
-    logAction(`ui.detachWindow.close({ view: '${id}' });`);
-  };
-
-  const renderToolbarControls = (id: MosaicViewId) => [
-    id !== "viewer" && !detachedViews.has(id) ? (
-      <button
-        key="detach"
-        aria-label={`${MOSAIC_TITLES[id]} als eigenes Fenster öffnen`}
-        className="mosaic-default-control detach-button"
-        title="Als eigenes Fenster öffnen"
-        type="button"
-        onClick={(event) => {
-          event.stopPropagation();
-          detachMosaicView(id);
-        }}
-      >
-        <PanelTopOpen aria-hidden className="size-3.5" />
-      </button>
-    ) : null,
-    ...DEFAULT_CONTROLS_WITHOUT_CREATION.map((control, index) =>
-      isValidElement(control)
-        ? cloneElement(control, { key: `default-${index}` })
-        : control,
-    ),
-  ];
 
   const renderViewContent = (id: MosaicViewId) => {
     switch (id) {
@@ -3072,28 +587,104 @@ export default function IfcWorkspace() {
               activeModelLoaded={activeSession.viewerModelLoadRequested}
               editCapabilities={viewerEditCapabilities}
               focusRequest={viewerFocusRequest}
-              mirrorRequest={viewerMirrorRequest}
+              mirrorRequest={sessions.viewerMirrorRequest}
               models={viewerModels}
               pendingViewerChanges={activeSession.pendingViewerChanges.map(
                 (change) => change.label,
               )}
               onLog={logAction}
-              onLoadActiveModel={requestActiveViewerLoad}
-              onMirrorApplied={applyViewerMirrorResult}
-              onMoveSelected={nudgeSelectedPlacement}
+              onLoadActiveModel={sessions.requestActiveViewerLoad}
+              onMirrorApplied={sessions.applyViewerMirrorResult}
+              onMoveSelected={geometryActions.nudgeSelectedPlacement}
               onPickCoordinates={storePickedCoordinates}
-              onRecalculateModel={recalculateViewerModel}
-              onRotateSelected={rotateSelectedPlacement}
+              onRecalculateModel={sessions.recalculateViewerModel}
+              onRotateSelected={geometryActions.rotateSelectedPlacement}
               onSelect={selectEntity}
             />
           </TileContent>
         );
       case "inspector":
-        return renderInspector();
+        return (
+          <TileContent>
+            <SegmentedControl
+              options={INSPECTOR_MODES}
+              value={inspectorMode}
+              onChange={(value) => setInspectorMode(value as InspectorMode)}
+            />
+            <InspectorPanel
+              activeCatalogObjectId={activeCatalogObjectId}
+              catalog={catalog}
+              catalogFindings={catalogFindings}
+              document={document}
+              mode={inspectorMode}
+              objectInfoFindings={objectInfoFindings}
+              objectInfoIndex={objectInfoIndex}
+              selectedId={selectedId}
+              onAddGroupAssignment={resourceActions.addGroupAssignment}
+              onAddMaterial={resourceActions.addMaterial}
+              onAddMaterialConstituentSet={
+                resourceActions.addMaterialConstituentSet
+              }
+              onAddMaterialLayerSet={resourceActions.addMaterialLayerSet}
+              onAddMaterialLayerSetUsage={
+                resourceActions.addMaterialLayerSetUsage
+              }
+              onAddMaterialProfileSet={resourceActions.addMaterialProfileSet}
+              onAddMaterialProfileSetUsage={
+                resourceActions.addMaterialProfileSetUsage
+              }
+              onAddMaterialStyle={resourceActions.addMaterialStyle}
+              onAddMaterialWithProperties={
+                resourceActions.addMaterialWithProperties
+              }
+              onAssignType={resourceActions.assignType}
+              onAssignBodyToSelected={geometryActions.assignBodyToSelected}
+              onAddEmptyPset={propertyActions.addEmptyPset}
+              onAddPropertyToSet={propertyActions.addPropertyToSet}
+              onAddQuantity={propertyActions.addQuantity}
+              onAddUnit={propertyActions.addUnit}
+              onApplyCatalogFindings={catalogActions.applyCatalogFindings}
+              onAddRelationship={relationshipActions.addRelationship}
+              onDuplicatePropertySet={propertyActions.duplicatePset}
+              onRemoveRelationship={relationshipActions.deleteRelationship}
+              onRemovePropertyFromSet={propertyActions.deletePsetProperty}
+              onRemovePropertySet={propertyActions.deletePset}
+              onSaveEdit={geometryActions.saveSelectedEdit}
+              onMovePlacement={geometryActions.moveSelectedPlacement}
+              onRenamePropertySet={propertyActions.renamePset}
+              onSelectEntity={selectEntity}
+              onUpdateProperty={propertyActions.updatePsetProperty}
+              onUpdateRelationship={relationshipActions.editRelationship}
+            />
+          </TileContent>
+        );
       case "resource-references":
-        return renderResourceReferences();
+        return (
+          <TileContent>
+            <ResourceReferencesPanel
+              document={document}
+              selectedId={selectedId}
+              onAddClassification={resourceActions.addClassification}
+              onAddDocumentReference={resourceActions.addDocumentReference}
+              onAddLibraryReference={resourceActions.addLibraryReference}
+              onRemoveAssociation={resourceActions.removeResourceAssociation}
+              onUpdateEntityArgs={resourceActions.updateResourceEntityArgs}
+            />
+          </TileContent>
+        );
       case "resource-controls":
-        return renderResourceControls();
+        return (
+          <TileContent>
+            <ResourceControlsPanel
+              document={document}
+              selectedId={selectedId}
+              onAddApproval={resourceActions.addApproval}
+              onAddConstraint={resourceActions.addConstraint}
+              onRemoveAssociation={resourceActions.removeResourceAssociation}
+              onUpdateEntityArgs={resourceActions.updateResourceEntityArgs}
+            />
+          </TileContent>
+        );
       case "builder":
         return (
           <TileContent>
@@ -3101,9 +692,9 @@ export default function IfcWorkspace() {
               coordinateClipboard={coordinateClipboard}
               document={document}
               selectedId={selectedId}
-              onAddBodyElement={addBodyElement}
+              onAddBodyElement={geometryActions.addBodyElement}
               onLoadSystemCoordinates={loadSystemCoordinateClipboard}
-              onRemoveBodyFromSelected={removeBodyFromSelected}
+              onRemoveBodyFromSelected={geometryActions.removeBodyFromSelected}
             />
           </TileContent>
         );
@@ -3112,14 +703,14 @@ export default function IfcWorkspace() {
           <TileContent>
             <CatalogPanel
               catalog={catalog}
-              catalogKind={catalogKind}
-              document={viewerDocument}
-              importing={catalogImporting}
+              catalogKind={catalogState.catalogKind}
+              document={document}
+              importing={catalogState.catalogImporting}
               selectedCatalogObjectId={activeCatalogObjectId}
               selectedId={selectedId}
-              onChangeCatalogKind={setCatalogKind}
-              onImportCatalog={importCatalog}
-              onSelectCatalogObject={setSelectedCatalogObjectId}
+              onChangeCatalogKind={catalogState.setCatalogKind}
+              onImportCatalog={catalogState.importCatalog}
+              onSelectCatalogObject={catalogState.setSelectedCatalogObjectId}
             />
           </TileContent>
         );
@@ -3130,7 +721,7 @@ export default function IfcWorkspace() {
               catalog={catalog}
               findings={catalogFindings}
               selectedCatalogObjectId={activeCatalogObjectId}
-              onApplyFinding={applyCatalogFinding}
+              onApplyFinding={catalogActions.applyCatalogFinding}
             />
           </TileContent>
         );
@@ -3145,11 +736,11 @@ export default function IfcWorkspace() {
                   ? catalogObjectLabel(activeCatalogObject)
                   : null
               }
-              onAddEmptyPset={addPsetToSelection}
-              onAddCatalogObject={addCatalogObjectToSelection}
-              onAddProperty={addPropertyToSelection}
-              onEditValue={editPsetCellValue}
-              onSetPropertyType={setPropertyTypeForSelection}
+              onAddEmptyPset={batchPsetActions.addPsetToSelection}
+              onAddCatalogObject={batchPsetActions.addCatalogObjectToSelection}
+              onAddProperty={batchPsetActions.addPropertyToSelection}
+              onEditValue={batchPsetActions.editPsetCellValue}
+              onSetPropertyType={batchPsetActions.setPropertyTypeForSelection}
             />
           </TileContent>
         );
@@ -3157,7 +748,7 @@ export default function IfcWorkspace() {
         return (
           <TileContent>
             <ObjectInfoPanel
-              document={viewerDocument}
+              document={document}
               findings={objectInfoFindings}
               index={objectInfoIndex}
               selectedId={selectedId}
@@ -3170,17 +761,19 @@ export default function IfcWorkspace() {
           <TileContent>
             <DiagnosticsAssistantPanel
               catalog={catalog}
-              document={viewerDocument}
+              document={document}
               selectedId={selectedId}
-              onSetObjectiveReferences={setDiagnosticObjectiveReferences}
-              onAddPropertyToSet={addPropertyToSet}
-              onApplyObjectInfo={applyDiagnosticObjectInfoDraft}
-              onApplyProcedure={applyDiagnosticProcedure}
-              onDuplicatePropertySet={duplicatePset}
-              onRemovePropertyFromSet={deletePsetProperty}
-              onRemovePropertySet={deletePset}
-              onRenamePropertySet={renamePset}
-              onUpdateProperty={updatePsetProperty}
+              onSetObjectiveReferences={
+                catalogActions.setDiagnosticObjectiveReferences
+              }
+              onAddPropertyToSet={propertyActions.addPropertyToSet}
+              onApplyObjectInfo={catalogActions.applyDiagnosticObjectInfoDraft}
+              onApplyProcedure={catalogActions.applyDiagnosticProcedure}
+              onDuplicatePropertySet={propertyActions.duplicatePset}
+              onRemovePropertyFromSet={propertyActions.deletePsetProperty}
+              onRemovePropertySet={propertyActions.deletePset}
+              onRenamePropertySet={propertyActions.renamePset}
+              onUpdateProperty={propertyActions.updatePsetProperty}
             />
           </TileContent>
         );
@@ -3189,13 +782,13 @@ export default function IfcWorkspace() {
           <TileContent>
             <RecentFilesPanel
               activeDocumentId={activeSession.id}
-              entries={recentIfcFiles}
-              onClear={() => setRecentIfcFiles([])}
+              entries={persistence.recentIfcFiles}
+              onClear={() => persistence.setRecentIfcFiles([])}
               onSelectDocument={(documentId) => {
                 if (
                   documentSessions.some((session) => session.id === documentId)
                 ) {
-                  setActiveDocumentId(documentId);
+                  sessions.setActiveDocumentId(documentId);
                 }
               }}
             />
@@ -3204,7 +797,10 @@ export default function IfcWorkspace() {
       case "notes":
         return (
           <TileContent>
-            <NotesPanel notes={notes} onNotesChange={setNotes} />
+            <NotesPanel
+              notes={persistence.notes}
+              onNotesChange={persistence.setNotes}
+            />
           </TileContent>
         );
       case "portal":
@@ -3214,8 +810,8 @@ export default function IfcWorkspace() {
               document={document}
               getApplyTarget={() => portalApplyTargetRef.current}
               selectedId={selectedId}
-              settings={portalSettings}
-              tokens={portalTokens}
+              settings={persistence.portalSettings}
+              tokens={persistence.portalTokens}
               onApplyImport={(nextDocument, summary) =>
                 commitDocument(
                   nextDocument,
@@ -3227,8 +823,8 @@ export default function IfcWorkspace() {
                 )
               }
               onSelectEntity={(id) => selectEntity(id, "portal")}
-              onSettingsChange={setPortalSettings}
-              onTokensChange={setPortalTokens}
+              onSettingsChange={persistence.setPortalSettings}
+              onTokensChange={persistence.setPortalTokens}
             />
           </TileContent>
         );
@@ -3236,8 +832,8 @@ export default function IfcWorkspace() {
         return (
           <TileContent>
             <PortalSettingsPanel
-              settings={portalSettings}
-              onSettingsChange={setPortalSettings}
+              settings={persistence.portalSettings}
+              onSettingsChange={persistence.setPortalSettings}
             />
           </TileContent>
         );
@@ -3245,7 +841,7 @@ export default function IfcWorkspace() {
   };
 
   const renderTileContent = (id: MosaicViewId) => {
-    if (detachedViews.has(id)) {
+    if (layout.detachedViews.has(id)) {
       return (
         <TileContent>
           <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-sm text-muted-foreground">
@@ -3253,7 +849,7 @@ export default function IfcWorkspace() {
             <div>
               {MOSAIC_TITLES[id]} ist in einem eigenen Fenster geöffnet.
             </div>
-            <Button onClick={() => reattachMosaicView(id)}>
+            <Button onClick={() => layout.reattachMosaicView(id)}>
               Zurück ins Hauptfenster
             </Button>
           </div>
@@ -3262,6 +858,29 @@ export default function IfcWorkspace() {
     }
     return renderViewContent(id);
   };
+
+  const renderToolbarControls = (id: MosaicViewId) => [
+    id !== "viewer" && !layout.detachedViews.has(id) ? (
+      <button
+        key="detach"
+        aria-label={`${MOSAIC_TITLES[id]} als eigenes Fenster öffnen`}
+        className="mosaic-default-control detach-button"
+        title="Als eigenes Fenster öffnen"
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          layout.detachMosaicView(id);
+        }}
+      >
+        <PanelTopOpen aria-hidden className="size-3.5" />
+      </button>
+    ) : null,
+    ...DEFAULT_CONTROLS_WITHOUT_CREATION.map((control, index) =>
+      isValidElement(control)
+        ? cloneElement(control, { key: `default-${index}` })
+        : control,
+    ),
+  ];
 
   const renderMosaicTile = (id: MosaicViewId, path: MosaicPath) => (
     <MosaicWindow<MosaicViewId>
@@ -3279,251 +898,30 @@ export default function IfcWorkspace() {
     </MosaicWindow>
   );
 
-  const renderWorkspaceSwitcher = () => (
-    <div className="flex shrink-0 items-center gap-1">
-      <Select
-        value={activeWorkspace?.id ?? DEFAULT_WORKSPACE_ID}
-        onValueChange={(nextValue) => {
-          if (nextValue) {
-            selectWorkspace(nextValue);
-          }
-        }}
-      >
-        <SelectTrigger
-          aria-label="Workspace"
-          className="w-52 bg-background"
-          size="sm"
-        >
-          <SelectValue>{activeWorkspace?.name ?? "Workspace"}</SelectValue>
-        </SelectTrigger>
-        <SelectContent
-          align="start"
-          className="!w-[30rem] max-w-[calc(100vw-2rem)]"
-        >
-          <SelectGroup>
-            <SelectLabel>Standard</SelectLabel>
-            {BUILT_IN_WORKSPACES.map((workspace) => (
-              <SelectItem key={workspace.id} value={workspace.id}>
-                <span className="flex min-w-0 flex-col">
-                  <span className="truncate">{workspace.name}</span>
-                  <span className="truncate text-xs text-muted-foreground">
-                    {workspace.description}
-                  </span>
-                </span>
-              </SelectItem>
-            ))}
-          </SelectGroup>
-          {customWorkspaces.length ? (
-            <>
-              <SelectSeparator />
-              <SelectGroup>
-                <SelectLabel>Eigene</SelectLabel>
-                {customWorkspaces.map((workspace) => (
-                  <SelectItem key={workspace.id} value={workspace.id}>
-                    <span className="flex min-w-0 flex-col">
-                      <span className="truncate">{workspace.name}</span>
-                      <span className="truncate text-xs text-muted-foreground">
-                        {workspace.updatedAt
-                          ? new Date(workspace.updatedAt).toLocaleString()
-                          : workspace.description}
-                      </span>
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </>
-          ) : null}
-        </SelectContent>
-      </Select>
-      <IconButton
-        aria-label="Neuen Workspace hinzufügen"
-        size="icon-sm"
-        title="Neuen Workspace hinzufügen"
-        variant="outline"
-        onClick={createWorkspaceFromCurrentLayout}
-      >
-        <Plus aria-hidden className="size-3.5" />
-      </IconButton>
-      <IconButton
-        aria-label="Workspace speichern"
-        disabled={Boolean(activeWorkspace?.builtIn)}
-        size="icon-sm"
-        title={
-          activeWorkspace?.builtIn
-            ? "Standard-Workspaces sind fix"
-            : "Workspace speichern"
-        }
-        variant="outline"
-        onClick={saveActiveWorkspace}
-      >
-        <Save aria-hidden className="size-3.5" />
-      </IconButton>
-      {!activeWorkspace?.builtIn ? (
-        <IconButton
-          aria-label="Workspace löschen"
-          size="icon-sm"
-          title="Workspace löschen"
-          variant="outline"
-          onClick={deleteActiveWorkspace}
-        >
-          <Trash2 aria-hidden className="size-3.5" />
-        </IconButton>
-      ) : null}
-    </div>
-  );
-
-  const closeDocumentSession = (sessionId: string) => {
-    const session = documentSessions.find((item) => item.id === sessionId);
-    if (!session || documentSessions.length <= 1) {
-      return;
-    }
-    if (
-      session.documentTextDirty &&
-      !globalThis.confirm(
-        `"${session.document.fileName}" hat ungespeicherte Änderungen. Trotzdem schließen?`,
-      )
-    ) {
-      return;
-    }
-    const remaining = documentSessions.filter((item) => item.id !== sessionId);
-    setDocumentSessions(remaining);
-    if (activeDocumentId === sessionId && remaining.length) {
-      setActiveDocumentId(remaining[0].id);
-    }
-    logAction(
-      `workspace.closeDocument({ file: '${session.document.fileName}' });`,
-    );
-  };
-
-  const renderDocumentTabs = () => (
-    <Tabs
-      value={activeSession.id}
-      onValueChange={(nextValue) => {
-        if (nextValue) {
-          setActiveDocumentId(nextValue);
-        }
-      }}
-      className="min-w-0 overflow-hidden"
-    >
-      <div className="-mx-1 overflow-x-auto overflow-y-hidden px-1">
-        <TabsList
-          variant="line"
-          className="h-auto min-w-max justify-start gap-1 bg-transparent p-0 pb-px"
-        >
-          {documentSessions.map((session) => (
-            // Wrapper statt Button-im-Button: der Schließen-Button liegt als
-            // Geschwister absolut über dem Tab (valides HTML, eigener Fokus).
-            <span key={session.id} className="group/tab relative inline-flex">
-              <TabsTrigger
-                value={session.id}
-                className="group relative h-auto min-w-36 max-w-56 flex-col items-start gap-0.5 rounded-t-md border-x border-t border-transparent bg-transparent py-1.5 pr-7 pl-2.5 text-left transition-colors hover:bg-muted/40 data-active:border-border data-active:bg-card data-active:shadow-[0_1px_0_0_var(--color-card)]"
-              >
-                <span className="flex w-full items-center gap-1.5">
-                  <span className="size-1.5 shrink-0 rounded-full bg-muted-foreground/40 group-data-active:bg-primary" />
-                  <span className="min-w-0 flex-1 truncate text-xs font-medium">
-                    {session.document.fileName}
-                  </span>
-                  {session.documentTextDirty ? (
-                    <span
-                      aria-label="Ungespeicherte Änderungen"
-                      className="size-1.5 shrink-0 rounded-full bg-warning"
-                      title="Ungespeicherte Änderungen"
-                    />
-                  ) : null}
-                </span>
-                <span className="w-full truncate pl-3 text-[0.65rem] font-normal text-muted-foreground">
-                  {session.document.schema} ·{" "}
-                  {session.document.entities.length.toLocaleString("de-DE")}{" "}
-                  Entitäten
-                </span>
-              </TabsTrigger>
-              {documentSessions.length > 1 ? (
-                <button
-                  aria-label={`${session.document.fileName} schließen`}
-                  className="absolute top-1.5 right-1.5 grid size-4 cursor-pointer place-items-center rounded-sm text-muted-foreground/60 opacity-0 transition-opacity group-hover/tab:opacity-100 hover:bg-muted hover:text-foreground focus-visible:opacity-100"
-                  title="Schließen"
-                  type="button"
-                  onClick={() => closeDocumentSession(session.id)}
-                >
-                  <X aria-hidden className="size-3" />
-                </button>
-              ) : null}
-            </span>
-          ))}
-        </TabsList>
-      </div>
-    </Tabs>
-  );
-
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
-      <header className="relative z-20 flex shrink-0 flex-col gap-2 border-b border-border/70 bg-card/95 px-3 pt-2 pb-0 shadow-sm backdrop-blur lg:flex-row lg:items-center lg:gap-3">
-        {renderWorkspaceSwitcher()}
-        <div className="min-w-0 flex-1">{renderDocumentTabs()}</div>
-        <div className="flex shrink-0 items-center gap-1.5 pb-2 lg:pb-0">
-          <Button
-            disabled={Boolean(loadingIfcName)}
-            variant="default"
-            onClick={() => void openIfc()}
-          >
-            <FolderOpen aria-hidden className="size-3.5" />
-            <span className="hidden xl:inline">
-              {loadingIfcName ? "Lädt…" : "IFC öffnen"}
-            </span>
-          </Button>
-          <Button
-            disabled={Boolean(loadingIfcName)}
-            title="Weitere IFC-Dateien hinzufügen"
-            onClick={() => void addIfcFiles()}
-          >
-            <FilePlus2 aria-hidden className="size-3.5" />
-            <span className="hidden xl:inline">Hinzufügen</span>
-          </Button>
-          <Button
-            disabled={Boolean(loadingIfcName)}
-            title="Aktives Dokument als IFC exportieren"
-            onClick={() => void exportIfc()}
-          >
-            <HardDriveDownload aria-hidden className="size-3.5" />
-            <span className="hidden xl:inline">Exportieren</span>
-          </Button>
-          <div className="mx-1 h-5 w-px bg-border/70" />
-          <IconButton
-            aria-label="Rückgängig"
-            disabled={!undoStack.length}
-            size="icon-sm"
-            title={
-              undoStack.length
-                ? `Rückgängig: ${undoStack.at(-1)?.summary} · Strg+Z`
-                : "Nichts rückgängig zu machen"
-            }
-            variant="outline"
-            onClick={undoDocument}
-          >
-            <Undo2 aria-hidden className="size-3.5" />
-          </IconButton>
-          <IconButton
-            aria-label="Wiederholen"
-            disabled={!redoStack.length}
-            size="icon-sm"
-            title={
-              redoStack.length
-                ? `Wiederholen: ${redoStack.at(-1)?.summary} · Strg+Umschalt+Z`
-                : "Nichts zu wiederholen"
-            }
-            variant="outline"
-            onClick={redoDocument}
-          >
-            <Redo2 aria-hidden className="size-3.5" />
-          </IconButton>
-          <div className="mx-1 h-5 w-px bg-border/70" />
-          <MosaicWindowMenu
-            closedIds={closedMosaicIds}
-            onRestore={restoreMosaicView}
-          />
-          <ThemeToggle />
-        </div>
-      </header>
+      <WorkspaceHeader
+        activeSessionId={activeSession.id}
+        activeWorkspace={layout.activeWorkspace}
+        closedMosaicIds={layout.closedMosaicIds}
+        customWorkspaces={layout.customWorkspaces}
+        documentSessions={documentSessions}
+        loadingIfcName={loadingIfcName}
+        redoStack={redoStack}
+        undoStack={undoStack}
+        onAddIfcFiles={() => void fileActions.addIfcFiles()}
+        onCloseSession={sessions.closeDocumentSession}
+        onCreateWorkspace={layout.createWorkspaceFromCurrentLayout}
+        onDeleteWorkspace={layout.deleteActiveWorkspace}
+        onExportIfc={() => void fileActions.exportIfc()}
+        onOpenIfc={() => void fileActions.openIfc()}
+        onRedo={sessions.redoDocument}
+        onRestoreView={layout.restoreMosaicView}
+        onSaveWorkspace={layout.saveActiveWorkspace}
+        onSelectSession={sessions.setActiveDocumentId}
+        onSelectWorkspace={layout.selectWorkspace}
+        onUndo={sessions.undoDocument}
+      />
 
       <main className="min-h-0 flex-1 p-1.5">
         <div className="h-full overflow-hidden rounded-lg border border-border/60 bg-muted/30">
@@ -3531,15 +929,15 @@ export default function IfcWorkspace() {
             className="ifcnative-mosaic"
             renderTile={renderMosaicTile}
             resize={{ minimumPaneSizePercentage: 12 }}
-            value={mosaicValue}
+            value={layout.mosaicValue}
             zeroStateView={
               <div className="flex h-full items-center justify-center">
-                <Button variant="default" onClick={resetMosaicLayout}>
+                <Button variant="default" onClick={layout.resetMosaicLayout}>
                   Layout wiederherstellen
                 </Button>
               </div>
             }
-            onChange={setMosaicValue}
+            onChange={layout.setMosaicValue}
           />
         </div>
       </main>
@@ -3547,69 +945,24 @@ export default function IfcWorkspace() {
       <DeleteEntityDialog
         entity={deleteRequest?.entity ?? null}
         plan={deleteRequest?.plan ?? null}
-        onCancel={() => setDeleteRequest(null)}
+        onCancel={cancelDeleteEntity}
         onConfirm={confirmDeleteEntity}
       />
 
-      <footer className="flex h-6 shrink-0 items-center gap-3 overflow-hidden border-t border-border/70 bg-card px-3 text-[11px] text-muted-foreground">
-        <span className="shrink-0 font-medium text-foreground/80">
-          {document.schema}
-        </span>
-        <span className="shrink-0">
-          {document.entities.length.toLocaleString("de-DE")} Entitäten
-        </span>
-        {selectedIds.size > 1 ? (
-          <span className="shrink-0 text-primary">
-            {selectedIds.size.toLocaleString("de-DE")} ausgewählt
-          </span>
-        ) : selectedEntity ? (
-          <span className="min-w-0 truncate">
-            #{selectedEntity.id} {selectedEntity.type}
-            {selectedEntity.name ? ` · ${selectedEntity.name}` : ""}
-          </span>
-        ) : null}
-        <span className="ml-auto flex shrink-0 items-center gap-3">
-          {loadingIfcName ? (
-            <span className="text-primary">Lädt {loadingIfcName}…</span>
-          ) : null}
-          {documentTextDirty ? (
-            <span className="flex items-center gap-1 text-warning-foreground dark:text-warning">
-              <span className="size-1.5 rounded-full bg-warning" />
-              Ungespeichert
-            </span>
-          ) : (
-            <span>Gespeichert</span>
-          )}
-          <Select
-            value={String(uiScale)}
-            onValueChange={(next) => {
-              if (next) {
-                setUiScale(Number(next) as UiScale);
-              }
-            }}
-          >
-            <SelectTrigger
-              aria-label="Schriftgröße"
-              title="Globale Schriftgröße"
-              className="h-5 min-w-0 gap-1 rounded border-transparent bg-transparent px-1 py-0 text-[11px] text-muted-foreground shadow-none hover:border-input hover:text-foreground [&_svg]:size-3"
-            >
-              <SelectValue>{uiScale} %</SelectValue>
-            </SelectTrigger>
-            <SelectContent align="end" className="w-auto min-w-24">
-              {UI_SCALE_OPTIONS.map((option) => (
-                <SelectItem key={option} value={String(option)}>
-                  {option} %
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </span>
-      </footer>
-      {[...detachedViews].map((id) => (
+      <WorkspaceStatusBar
+        document={document}
+        documentTextDirty={activeSession.documentTextDirty}
+        loadingIfcName={loadingIfcName}
+        selectedEntity={selectedEntity}
+        selectedIds={selectedIds}
+        uiScale={uiScale}
+        onUiScaleChange={setUiScale}
+      />
+      {[...layout.detachedViews].map((id) => (
         <ChildWindow
           key={id}
           title={`IFCnative – ${MOSAIC_TITLES[id]}`}
-          onClose={() => reattachMosaicView(id)}
+          onClose={() => layout.reattachMosaicView(id)}
         >
           <div className="flex h-full min-h-0 flex-1 flex-col bg-background p-3 text-foreground">
             {renderViewContent(id)}
@@ -3622,286 +975,4 @@ export default function IfcWorkspace() {
 
 function TileContent({ children }: { children: React.ReactNode }) {
   return <div className="flex h-full min-h-0 flex-col gap-3">{children}</div>;
-}
-
-function pickIfcFile() {
-  return pickIfcFiles(false).then((files) => files[0]);
-}
-
-function pickIfcFiles(multiple: boolean) {
-  return new Promise<{ file: File; name: string }[]>((resolve, reject) => {
-    const input = globalThis.document.createElement("input");
-    input.type = "file";
-    input.multiple = multiple;
-    input.accept =
-      ".ifc,application/x-step,text/plain,application/octet-stream";
-    input.onchange = () => {
-      const files = Array.from(input.files ?? []).map((file) => ({
-        file,
-        name: file.name,
-      }));
-      resolve(files);
-    };
-    input.onerror = () => reject(new Error("File picker failed."));
-    input.click();
-  });
-}
-
-function pickCatalogFile() {
-  return new Promise<{ file: File; name: string } | undefined>(
-    (resolve, reject) => {
-      const input = globalThis.document.createElement("input");
-      input.type = "file";
-      input.accept =
-        ".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel";
-      input.onchange = () => {
-        const file = input.files?.[0];
-        resolve(file ? { file, name: file.name } : undefined);
-      };
-      input.onerror = () => reject(new Error("File picker failed."));
-      input.click();
-    },
-  );
-}
-
-function removeFromSet<T>(current: Set<T>, value: T) {
-  const next = new Set(current);
-  next.delete(value);
-  return next;
-}
-
-/** Lesbaren Wert einer einfachen Property/Quantity aus dem Entity ziehen. */
-function readSimplePropertyValueText(entity?: NativeIfcEntity) {
-  if (!entity) {
-    return "";
-  }
-  if (entity.type.startsWith("IFCQUANTITY")) {
-    const raw = (entity.args[3] ?? "").trim();
-    return raw === "$" ? "" : raw;
-  }
-  const raw = (entity.args[2] ?? "").trim();
-  if (!raw || raw === "$") {
-    return "";
-  }
-  const match = raw.match(/^[A-Za-z0-9_]+\(([\s\S]*)\)$/);
-  const inner = match ? match[1].trim() : raw;
-  if (/^\.[TF]\.$/i.test(inner)) {
-    return inner.toUpperCase() === ".T." ? "True" : "False";
-  }
-  return inner.replace(/^'([\s\S]*)'$/, "$1");
-}
-
-function isEditableShortcutTarget(target: EventTarget | null) {
-  if (!(target instanceof HTMLElement)) {
-    return false;
-  }
-  return (
-    target.isContentEditable ||
-    target instanceof HTMLInputElement ||
-    target instanceof HTMLTextAreaElement ||
-    target instanceof HTMLSelectElement
-  );
-}
-
-function filterEntitySet(current: Set<number>, document: NativeIfcDocument) {
-  return new Set([...current].filter((id) => document.entityById.has(id)));
-}
-
-function filterGraphPositions(
-  current: Map<number, Point>,
-  document: NativeIfcDocument,
-) {
-  return new Map([...current].filter(([id]) => document.entityById.has(id)));
-}
-
-function findNextSelectionAfterEntityDelete(
-  current: NativeIfcDocument,
-  next: NativeIfcDocument,
-  entityId: number,
-) {
-  const related = current.relationshipsByEntity.get(entityId) ?? [];
-  const candidates = [
-    ...related.flatMap((relationship) =>
-      relationship.targetIds.includes(entityId) ? relationship.sourceIds : [],
-    ),
-    ...related.flatMap((relationship) => relationship.sourceIds),
-    ...related.flatMap((relationship) => relationship.targetIds),
-    next.spatialRoots[0]?.id,
-    next.entities[0]?.id,
-  ].filter(
-    (candidate): candidate is number =>
-      Number.isFinite(candidate) && candidate !== entityId,
-  );
-
-  return candidates.find((candidate) => next.entityById.has(candidate));
-}
-
-function addToSet<T>(current: Set<T>, value: T) {
-  return new Set(current).add(value);
-}
-
-function graphCopyName(name: string, type: string, index: number) {
-  const baseName = name.trim() || type.replace(/^IFC/i, "");
-  return `${baseName} Copy${index > 0 ? ` ${index + 1}` : ""}`;
-}
-
-function getMosaicLeaves<T extends string | number>(
-  node: MosaicNode<T> | null,
-): T[] {
-  if (node == null) {
-    return [];
-  }
-  if (typeof node !== "object") {
-    return [node];
-  }
-  return [...getMosaicLeaves(node.first), ...getMosaicLeaves(node.second)];
-}
-
-function addMosaicView<T extends string | number>(
-  node: MosaicNode<T> | null,
-  id: T,
-): MosaicNode<T> {
-  if (getMosaicLeaves(node).includes(id)) {
-    return node ?? id;
-  }
-  if (node == null) {
-    return id;
-  }
-  return {
-    direction: "row",
-    first: node,
-    second: id,
-    splitPercentage: 74,
-  };
-}
-
-function formatCoordinate(value: number) {
-  if (!Number.isFinite(value)) {
-    return "0";
-  }
-  const rounded = Math.round(value * 1000) / 1000;
-  return String(Object.is(rounded, -0) ? 0 : rounded);
-}
-
-function mergePendingViewerChange(
-  current: { key?: string; label: string }[],
-  next: { key?: string; label: string },
-): { key?: string; label: string }[] {
-  if (next.key) {
-    const index = current.findIndex((change) => change.key === next.key);
-    if (index >= 0) {
-      const merged = [...current];
-      merged[index] = next;
-      return merged;
-    }
-  }
-  return [...current, next];
-}
-
-function readBodyCoordinate(value: string | undefined) {
-  const numeric = Number(
-    String(value ?? "")
-      .trim()
-      .replace(",", "."),
-  );
-  return Number.isFinite(numeric) ? numeric : 0;
-}
-
-function parseCoordinateClipboardText(
-  text: string,
-): ParsedCoordinates | undefined {
-  const trimmed = text.trim();
-  if (!trimmed) {
-    return undefined;
-  }
-  try {
-    const data = JSON.parse(trimmed) as Record<string, unknown>;
-    const x = readClipboardCoordinate(data.x);
-    const y = readClipboardCoordinate(data.y);
-    const z = readClipboardCoordinate(data.z);
-    if (x && y && z) {
-      const parsed = toParsedCoordinates(x, y, z);
-      const documentId = readClipboardString(data.documentId);
-      const entityId = readClipboardNumber(data.entityId);
-      const fileName = readClipboardString(data.fileName);
-      const localId = readClipboardNumber(data.localId);
-      const modelId = readClipboardString(data.modelId);
-      return {
-        ...parsed,
-        ...(documentId ? { documentId } : {}),
-        ...(entityId ? { entityId } : {}),
-        ...(fileName ? { fileName } : {}),
-        ...(localId ? { localId } : {}),
-        ...(modelId ? { modelId } : {}),
-        ...(data.source === "thatopen" ? { source: "thatopen" as const } : {}),
-      };
-    }
-  } catch {
-    // fall through to plain text parsing
-  }
-
-  const labeled = [
-    ...trimmed.matchAll(/\b([xyz])\s*[:=]?\s*(-?\d+(?:[.,]\d+)?)/gi),
-  ];
-  if (labeled.length >= 3) {
-    const coordinates = new Map(
-      labeled.map((match) => [
-        match[1].toLowerCase(),
-        normalizeCoordinateText(match[2]),
-      ]),
-    );
-    const x = coordinates.get("x");
-    const y = coordinates.get("y");
-    const z = coordinates.get("z");
-    if (x && y && z) {
-      return toParsedCoordinates(x, y, z);
-    }
-  }
-
-  const numbers = trimmed
-    .match(/-?\d+(?:[.,]\d+)?/g)
-    ?.map(normalizeCoordinateText);
-  if (numbers && numbers.length >= 3) {
-    const [x, y, z] = numbers;
-    if (x && y && z) {
-      return toParsedCoordinates(x, y, z);
-    }
-  }
-  return undefined;
-}
-
-function toParsedCoordinates(
-  x: string,
-  y: string,
-  z: string,
-): ParsedCoordinates {
-  return { x, y, z };
-}
-
-function readClipboardCoordinate(value: unknown) {
-  if (typeof value === "number") {
-    return formatCoordinate(value);
-  }
-  if (typeof value === "string") {
-    return normalizeCoordinateText(value);
-  }
-  return undefined;
-}
-
-function readClipboardString(value: unknown) {
-  return typeof value === "string" && value.trim() ? value : undefined;
-}
-
-function readClipboardNumber(value: unknown) {
-  return typeof value === "number" && Number.isFinite(value)
-    ? value
-    : undefined;
-}
-
-function normalizeCoordinateText(value: string) {
-  const normalized = Number(value.trim().replace(",", "."));
-  if (!Number.isFinite(normalized)) {
-    return undefined;
-  }
-  return formatCoordinate(normalized);
 }

@@ -184,13 +184,47 @@ export function StructurePanel({
     let animationFrame = 0;
     let revealFrame = 0;
 
+    // Sichtbaren Zeilen-Index des Ziels aus dem eigenen Baum-Modell ableiten
+    // (die FileTree-API stellt keinen Fokus-Index bereit): Pfade in
+    // Vorordnung zählen und Unterbäume eingeklappter Ordner überspringen.
+    let cachedRowIndex: number | null = null;
+    const computeVisibleRowIndex = () => {
+      let index = 0;
+      let collapsedPrefix: string | null = null;
+      for (const candidate of treeModel.paths) {
+        const base = candidate.endsWith("/")
+          ? candidate.slice(0, -1)
+          : candidate;
+        if (collapsedPrefix && `${base}/`.startsWith(collapsedPrefix)) {
+          continue;
+        }
+        collapsedPrefix = null;
+        if (candidate === path) {
+          return index;
+        }
+        index += 1;
+        if (candidate.endsWith("/")) {
+          const candidateItem = model.getItem(candidate);
+          if (
+            candidateItem &&
+            "isExpanded" in candidateItem &&
+            !candidateItem.isExpanded()
+          ) {
+            collapsedPrefix = candidate;
+          }
+        }
+      }
+      return -1;
+    };
+
     const revealSelectedItem = () => {
       revealFrame += 1;
       const shadowRoot = model.getFileTreeContainer()?.shadowRoot;
       const scrollElement = shadowRoot?.querySelector<HTMLElement>(
         "[data-file-tree-virtualized-scroll]",
       );
-      const focusedIndex = model.getFocusedIndex();
+      cachedRowIndex ??= computeVisibleRowIndex();
+      const focusedIndex = cachedRowIndex;
       if (!shadowRoot || !scrollElement || focusedIndex < 0) {
         if (revealFrame < TREE_REVEAL_MAX_FRAMES) {
           animationFrame = window.requestAnimationFrame(revealSelectedItem);
