@@ -11,6 +11,7 @@ import {
 import {
     addNativeElement,
     addNativeEmptyPropertySet,
+    addNativePropertySetValues,
     addNativePropertyToSet,
     createNativeSampleDocument,
 } from "../src/ifc/nativeDocument";
@@ -22,10 +23,11 @@ test("catalog workbook parser imports object class sheets", () => {
   assert.equal(catalog.objectTypes[0].name, "Testwand");
   assert.equal(catalog.objectTypes[0].code, "BWD - TW");
   assert.equal(catalog.objectTypes[0].ifcClass, "IFCWALL");
-  assert.equal(catalog.objectTypes[0].propertyRules.length, 2);
+  assert.equal(catalog.objectTypes[0].propertyRules.length, 3);
   assert.equal(catalog.objectTypes[0].propertyRules[0].psetName, "ePset_Test");
   assert.equal(catalog.objectTypes[0].propertyRules[0].valueType, "IFCLABEL");
   assert.equal(catalog.objectTypes[0].propertyRules[1].valueType, "IFCREAL");
+  assert.equal(catalog.objectTypes[0].propertyRules[2].requirement, "optional");
 });
 
 test("catalog parser prefers master property rows by object code suffix", () => {
@@ -162,7 +164,7 @@ test("catalog validation can quick-fix missing psets and classification", () => 
   assert.ok(pset);
   assert.deepEqual(
     pset.values.map((value) => value.name),
-    ["_Status_TW", "_Breite_TW"],
+    ["_Status_TW", "_Breite_TW", "_Kommentar_TW"],
   );
 
   const withClassification = applyCatalogQuickFix(
@@ -174,6 +176,47 @@ test("catalog validation can quick-fix missing psets and classification", () => 
     withClassification.resourcesByEntity
       .get(wall.id)
       ?.some((resource) => resource.includes("BWD - TW")),
+  );
+});
+
+test("catalog quick-fix completes an existing partial pset without duplicating it", () => {
+  const catalog = parseCatalogWorkbook(createCatalogWorkbook(), "catalog.xlsx");
+  const objectType = catalog.objectTypes[0];
+  const sample = createNativeSampleDocument();
+  const storey = sample.entities.find(
+    (entity) => entity.type === "IFCBUILDINGSTOREY",
+  );
+  assert.ok(storey);
+  const withWall = addNativeElement(sample, storey.id, "IFCWALL", "Testwand");
+  const wall = withWall.entities.find(
+    (entity) => entity.type === "IFCWALL" && entity.name === "Testwand",
+  );
+  assert.ok(wall);
+  const partial = addNativePropertySetValues(
+    withWall,
+    wall.id,
+    "ePset_Test",
+    [{ name: "_Status_TW", value: "", valueType: "IFCLABEL" }],
+  );
+  const missingProperties = validateEntityAgainstCatalogObject(
+    partial,
+    wall.id,
+    objectType,
+  ).find((finding) => finding.kind === "missing-property");
+  assert.ok(missingProperties?.quickFix);
+
+  const completed = applyCatalogQuickFix(
+    partial,
+    wall.id,
+    missingProperties,
+  );
+  const matchingSets = (completed.propertySetsByEntity.get(wall.id) ?? []).filter(
+    (set) => set.name === "ePset_Test",
+  );
+  assert.equal(matchingSets.length, 1);
+  assert.deepEqual(
+    matchingSets[0].values.map((value) => value.name),
+    ["_Status_TW", "_Breite_TW", "_Kommentar_TW"],
   );
 });
 
@@ -268,6 +311,18 @@ function createCatalogWorkbook() {
       "Fliesskommazahl",
       "m",
       "erforderlich",
+      "X",
+      "X",
+      "-",
+      "X",
+    ],
+    [
+      "ePset_Test",
+      "_Kommentar_TW",
+      "IfcLabel",
+      "Text",
+      "ohne",
+      "optional",
       "X",
       "X",
       "-",

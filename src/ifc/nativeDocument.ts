@@ -2339,6 +2339,58 @@ export function addNativePropertySetValues(
   return appendNativeEntities(document, next);
 }
 
+export function mergeNativePropertySetValues(
+  document: NativeIfcDocument,
+  entityId: number,
+  psetName: string,
+  properties: Array<{ name: string; value: string; valueType?: string }>,
+) {
+  if (!document.entityById.has(entityId) || properties.length === 0) {
+    return document;
+  }
+  const normalizeName = (value: string) => value.trim().toLocaleLowerCase();
+  const psetToken = normalizeName(psetName);
+  const existingSet = (document.propertySetsByEntity.get(entityId) ?? []).find(
+    (set) => normalizeName(set.name) === psetToken,
+  );
+  const uniqueProperties = properties.filter((property, index, all) => {
+    const token = normalizeName(property.name);
+    return (
+      token !== "" &&
+      all.findIndex((candidate) => normalizeName(candidate.name) === token) ===
+        index
+    );
+  });
+  if (!existingSet) {
+    return addNativePropertySetValues(
+      document,
+      entityId,
+      psetName,
+      uniqueProperties,
+    );
+  }
+
+  const existingNames = new Set(
+    existingSet.values.map((property) => normalizeName(property.name)),
+  );
+  let next = document;
+  for (const property of uniqueProperties) {
+    const token = normalizeName(property.name);
+    if (existingNames.has(token)) {
+      continue;
+    }
+    next = addNativePropertyToSet(
+      next,
+      existingSet.id,
+      property.name,
+      property.value,
+      property.valueType ?? "IFCLABEL",
+    );
+    existingNames.add(token);
+  }
+  return next;
+}
+
 export function addNativeEmptyPropertySet(
   document: NativeIfcDocument,
   entityId: number,

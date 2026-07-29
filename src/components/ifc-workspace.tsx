@@ -81,6 +81,7 @@ import {
     getNextNativeEntityId,
     ifcPlacementPointToViewerWorldPoint,
     nativeWorldDirectionInPlacementParentFrame,
+    mergeNativePropertySetValues,
     parseNativeIfcFileInWorker,
     planNativeEntityRemoval,
     removeNativeBodyRepresentation,
@@ -1851,22 +1852,36 @@ export default function IfcWorkspace() {
     }
     let next = document;
     let addedPsets = 0;
+    let addedProperties = 0;
     for (const id of batchSelectionIds) {
       for (const group of groups.values()) {
-        if (findEntityPsetByName(next, id, group.name)) {
+        const existingSet = findEntityPsetByName(next, id, group.name);
+        const existingNames = new Set(
+          (existingSet?.values ?? []).map((property) =>
+            property.name.trim().toLowerCase(),
+          ),
+        );
+        const missingProperties = [...group.properties.values()].filter(
+          (property) =>
+            !existingNames.has(property.name.trim().toLowerCase()),
+        );
+        if (missingProperties.length === 0) {
           continue;
         }
-        next = addNativePropertySetValues(
+        next = mergeNativePropertySetValues(
           next,
           id,
           group.name,
-          [...group.properties.values()].map((property) => ({
+          missingProperties.map((property) => ({
             name: property.name,
             value: "",
             valueType: property.valueType,
           })),
         );
-        addedPsets += 1;
+        addedProperties += missingProperties.length;
+        if (!existingSet) {
+          addedPsets += 1;
+        }
       }
     }
     if (next === document) {
@@ -1878,8 +1893,8 @@ export default function IfcWorkspace() {
     commitDocument(
       next,
       selectedId,
-      `Add catalog class '${catalogObjectLabel(activeCatalogObject)}' (${groups.size.toLocaleString()} psets) to ${batchSelectionIds.length.toLocaleString()} objects`,
-      `psetBatch.addCatalogObject({ object: '${activeCatalogObject.id}', psets: ${groups.size}, addedPsets: ${addedPsets} });`,
+      `Apply catalog class '${catalogObjectLabel(activeCatalogObject)}' (${addedProperties.toLocaleString()} properties) to ${batchSelectionIds.length.toLocaleString()} objects`,
+      `psetBatch.addCatalogObject({ object: '${activeCatalogObject.id}', psets: ${groups.size}, addedPsets: ${addedPsets}, addedProperties: ${addedProperties} });`,
     );
   };
 

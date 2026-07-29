@@ -11,7 +11,7 @@ import {
 } from "./catalog";
 import {
     addNativeClassification,
-    addNativePropertySetValues,
+    mergeNativePropertySetValues,
     type NativeIfcDocument,
     type NativeIfcPropertySet,
 } from "./nativeDocument";
@@ -71,8 +71,10 @@ export function validateEntityAgainstCatalogObject(
     });
   }
 
+  const allRuleGroups = groupCatalogRulesByPset(objectType.propertyRules);
   const requiredRules = objectType.propertyRules.filter(isRequiredCatalogRule);
   for (const [psetName, rules] of groupCatalogRulesByPset(requiredRules)) {
+    const allRules = findRuleGroup(allRuleGroups, psetName) ?? rules;
     const set = findPset(
       document.propertySetsByEntity.get(entityId) ?? [],
       psetName,
@@ -83,12 +85,12 @@ export function validateEntityAgainstCatalogObject(
         entityId,
         id: findingId(entityId, objectType.id, "missing-pset", psetName),
         kind: "missing-pset",
-        message: `${psetName} is missing on #${entityId}; ${rules.length.toLocaleString()} required properties are defined by ${objectLabel}.`,
+        message: `${psetName} is missing on #${entityId}; ${rules.length.toLocaleString()} required and ${allRules.length.toLocaleString()} total properties are defined by ${objectLabel}.`,
         psetName,
         quickFix: {
           kind: "add-pset-properties",
-          label: `Add ${psetName}`,
-          properties: rules,
+          label: `Add ${psetName} with ${allRules.length.toLocaleString()} properties`,
+          properties: allRules,
           psetName,
         },
         severity: "warning",
@@ -100,6 +102,9 @@ export function validateEntityAgainstCatalogObject(
       (rule) => !findProperty(set, rule.propertyName),
     );
     if (missingRules.length > 0) {
+      const missingCatalogRules = allRules.filter(
+        (rule) => !findProperty(set, rule.propertyName),
+      );
       findings.push({
         catalogObjectId: objectType.id,
         entityId,
@@ -110,7 +115,7 @@ export function validateEntityAgainstCatalogObject(
         quickFix: {
           kind: "add-pset-properties",
           label: `Add missing ${psetName} properties`,
-          properties: missingRules,
+          properties: missingCatalogRules,
           psetName,
         },
         severity: "warning",
@@ -187,7 +192,7 @@ export function applyCatalogQuickFix(
     );
   }
   if (fix.kind === "add-pset-properties") {
-    return addNativePropertySetValues(
+    return mergeNativePropertySetValues(
       document,
       entityId,
       fix.psetName ?? finding.psetName ?? "Pset_Catalog",
@@ -251,6 +256,16 @@ function hasCatalogClassification(
 function findPset(sets: NativeIfcPropertySet[], psetName: string) {
   const token = normalizeCatalogToken(psetName);
   return sets.find((set) => normalizeCatalogToken(set.name) === token);
+}
+
+function findRuleGroup(
+  groups: Map<string, CatalogPropertyRule[]>,
+  psetName: string,
+) {
+  const token = normalizeCatalogToken(psetName);
+  return [...groups].find(
+    ([name]) => normalizeCatalogToken(name) === token,
+  )?.[1];
 }
 
 function findProperty(set: NativeIfcPropertySet, propertyName: string) {
