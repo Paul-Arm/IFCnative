@@ -19,6 +19,7 @@ import type {
   Renderer,
   SectionPlane,
 } from "@ifc-lite/renderer";
+import { composeOriginShift, rebaseGeoreference } from "./georef";
 
 export type ViewerColor = [number, number, number, number];
 
@@ -191,7 +192,17 @@ export async function startViewer(
     const renderer = new Renderer(canvas);
     const geometry = new GeometryProcessor();
     await Promise.all([renderer.init(), geometry.init()]);
-    return createSession(renderer, geometry, canvas, ifcBytes, onStatus);
+    // Georeferenz aus der KOPIE für den Tessellierungslauf nehmen (Begründung
+    // und Messwerte in core/georef). Das Dokument selbst bleibt unberührt.
+    const rebased = rebaseGeoreference(ifcBytes);
+    return createSession(
+      renderer,
+      geometry,
+      canvas,
+      rebased.bytes,
+      rebased.removed,
+      onStatus,
+    );
   } catch (error) {
     onStatus({ kind: "error", reason: String(error) });
     return IDLE;
@@ -292,6 +303,66 @@ function buildGridLines(bounds: {
   return new Float32Array(points);
 }
 
+/**
+ * Ab dieser Entfernung des Modellschwerpunkts vom Renderer-Ursprung holt
+ * `ensureOriginShift` das Modell nachträglich an den Ursprung (Meter).
+ *
+ * Hintergrund: Der Vertex-Shader des Renderers rechnet die ABSOLUTE
+ * Weltposition in f32 aus (`worldPos = model * position`, model =
+ * translate(batchOrigin)) — die batch-relative f64-Faltung beim Mergen
+ * rettet nur die Speicherung, nicht die Auswertung. Die f32-Auflösung
+ * wächst linear mit dem Abstand vom Ursprung: bei 1 km sind es 0,06 mm,
+ * bei 300 km rund 20 mm. Oberhalb weniger Zentimeter durchdringen
+ * benachbarte Bauteile einander, und die Berührflächen zerfallen in das
+ * typische Z-Fighting-Punktraster.
+ *
+ * 1 km ist bewusst konservativ gewählt: darunter ist der Fehler kleiner
+ * als jede Fertigungstoleranz, und wir fassen das Modell gar nicht erst an.
+ */
+const ORIGIN_SHIFT_THRESHOLD_M = 1000;
+
+/**
+ * Robuster Modellmittelpunkt aus den Element-Ursprüngen (Median je Achse,
+ * Renderer-Rahmen). null, wenn der Batch keine brauchbaren Stützpunkte hat.
+ *
+ * Bewusst MEDIAN statt Mittelwert: Zusammenführungs-Exporte tragen
+ * regelmäßig einzelne Elemente, die noch auf der vollen Georeferenz sitzen
+ * (Nibelungenbrücke: drei Bauteile bei x ≈ −3,26e7, während die übrigen 233
+ * bei x ≈ −1,0e5 liegen). Ein Mittelwert würde von solchen Ausreißern um
+ * Hunderte Kilometer verzogen und die Verschiebung damit wertlos machen —
+ * der Median ignoriert sie.
+ *
+ * Stützpunkt ist `MeshData.origin` (der Platzierungspunkt des Elements);
+ * die `positions` sind dazu relativ und bauteilklein. Fehlt der Ursprung,
+ * tritt der erste Vertex an seine Stelle (dann sind die Positionen absolut).
+ */
+function medianOrigin(
+  meshes: readonly MeshData[],
+): { x: number; y: number; z: number } | null {
+  const xs: number[] = [];
+  const ys: number[] = [];
+  const zs: number[] = [];
+  for (const mesh of meshes) {
+    const o = mesh.origin;
+    const x = o ? o[0] : mesh.positions[0];
+    const y = o ? o[1] : mesh.positions[1];
+    const z = o ? o[2] : mesh.positions[2];
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z))
+      continue;
+    xs.push(x);
+    ys.push(y);
+    zs.push(z);
+  }
+  if (xs.length === 0) return null;
+  const mid = (values: number[]): number => {
+    values.sort((a, b) => a - b);
+    return values[values.length >> 1];
+  };
+  // Auf ganze Meter runden: hält die Verschiebung menschenlesbar und
+  // verschiebt das Vertex-Gitter nicht um krumme Beträge.
+  return { x: Math.round(mid(xs)), y: Math.round(mid(ys)), z: Math.round(mid(zs)) };
+}
+
 /** Vorschau-Meshes tragen eine Sentinel-Id fern aller echten expressIds. */
 const PREVIEW_EXPRESS_ID = 2_147_480_000;
 
@@ -334,6 +405,8 @@ function createSession(
   geometry: GeometryProcessor,
   canvas: HTMLCanvasElement,
   ifcBytes: Uint8Array,
+  /** Vor der Tessellierung entfernte Georeferenz (IFC Z-up); null = keine. */
+  removedGeoref: { x: number; y: number; z: number } | null,
   onStatus: (status: ViewerStatus) => void,
 ): ViewerHandle {
   const camera = renderer.getCamera();
@@ -400,6 +473,79 @@ function createSession(
     renderer.requestRender();
   };
 
+  /**
+   * Nachgelagerte RTC-Verschiebung (Renderer-Rahmen, Meter); null = keine
+   * nötig. Wird EINMAL am ersten Batch festgelegt und danach unverändert auf
+   * alle Folge-Batches angewandt — eine batchweise wechselnde Verschiebung
+   * würde das Modell zerreißen.
+   */
+  let extraShift: { x: number; y: number; z: number } | null = null;
+  let shiftDecided = false;
+
+  /**
+   * Verschiebung am ersten Batch festlegen. @ifc-lite/geometry hat einen
+   * eigenen RTC-Pfad (CoordinateHandler), der hier aber regelmäßig nicht
+   * greift: seine „hat die WASM schon verschoben?"-Erkennung prüft nur
+   * `positions[0..2]` und lässt `MeshData.origin` außen vor. Da die
+   * Positionen elementlokal (und damit immer klein) sind, kommt sie
+   * grundsätzlich zu „ja, schon verschoben" — und der Shift entfällt, auch
+   * wenn die Ursprünge 300 km entfernt liegen (`hasLargeCoordinates: false`
+   * bei einem Modell, dessen Elemente bei x ≈ −1,0e5 / z ≈ +2,9e5 sitzen).
+   *
+   * Wir entscheiden deshalb an der einzigen belastbaren Größe: dem
+   * tatsächlichen Abstand des Modells vom Renderer-Ursprung. Hat der
+   * Geometrie-Lauf sauber verschoben, liegt der Median nahe null und wir
+   * fassen nichts an — die Prüfung ist also selbstkorrigierend.
+   */
+  const ensureOriginShift = (meshes: readonly MeshData[]): void => {
+    if (shiftDecided || meshes.length === 0) return;
+    const center = medianOrigin(meshes);
+    if (!center) return;
+    shiftDecided = true;
+    const distance = Math.hypot(center.x, center.y, center.z);
+    if (distance > ORIGIN_SHIFT_THRESHOLD_M) extraShift = center;
+  };
+
+  /** Verschiebung auf einen Batch anwenden (in place, vor `addMeshes`). */
+  const applyOriginShift = (meshes: readonly MeshData[]): void => {
+    if (!extraShift) return;
+    for (const mesh of meshes) {
+      if (mesh.origin) {
+        mesh.origin[0] -= extraShift.x;
+        mesh.origin[1] -= extraShift.y;
+        mesh.origin[2] -= extraShift.z;
+        continue;
+      }
+      // Ohne Elementursprung sind die Positionen absolut — dann müssen sie
+      // selbst verschoben werden. Verlustfrei ist das nicht (f32 auf
+      // Großkoordinaten), aber immer noch der bessere Ausgangspunkt.
+      const p = mesh.positions;
+      for (let i = 0; i < p.length; i += 3) {
+        p[i] -= extraShift.x;
+        p[i + 1] -= extraShift.y;
+        p[i + 2] -= extraShift.z;
+      }
+    }
+  };
+
+  /**
+   * RTC-Verschiebung, die die Overlays sehen: der Shift des Geometrie-Laufs
+   * plus unsere nachgelagerte Verschiebung — Letztere umgerechnet in den
+   * IFC-Rahmen, in dem `originShift` laut Vertrag (worldCoords) angegeben ist.
+   *
+   * Herleitung aus `rendererToIfcPoint(p, s) = (p.x+s.x, −p.z+s.y, p.y+s.z)`:
+   * Wir liefern dem Renderer p' = p − S, der IFC-Punkt muss gleich bleiben,
+   * also s' = (s.x + S.x, s.y − S.z, s.z + S.y). Damit bleiben Pick-Anzeige,
+   * Gizmo-Pivots, Schnittebene und Clip-Box unverändert in echten
+   * IFC-Koordinaten — die Verschiebung ist reine Darstellungsangelegenheit.
+   */
+  const effectiveOriginShift = (): { x: number; y: number; z: number } =>
+    composeOriginShift(
+      coordInfo?.originShift ?? { x: 0, y: 0, z: 0 },
+      removedGeoref,
+      extraShift,
+    );
+
   void (async () => {
     let meshCount = 0;
     try {
@@ -411,6 +557,12 @@ function createSession(
         if (event.type === "complete") coordInfo = event.coordinateInfo;
         if (event.type !== "batch") continue;
         if (event.coordinateInfo) coordInfo = event.coordinateInfo;
+        // Vor allem anderen: Großkoordinaten abfangen. meshCache, Szene und
+        // die Overlay-Bounds lesen dieselben MeshData-Objekte, deshalb muss
+        // die Verschiebung hier ganz oben stehen — danach ist der gesamte
+        // Renderer-Rahmen konsistent verschoben.
+        ensureOriginShift(event.meshes);
+        applyOriginShift(event.meshes);
         meshCount += event.meshes.length;
         // MeshData für die Live-Vorschau merken (bis zum Vertex-Deckel).
         if (!cacheFull) {
@@ -557,7 +709,7 @@ function createSession(
       return {
         renderer,
         isStreaming: () => streaming,
-        originShift: () => coordInfo?.originShift ?? { x: 0, y: 0, z: 0 },
+        originShift: effectiveOriginShift,
 
         entityBounds(expressId) {
           const cached = meshCache.get(expressId);
