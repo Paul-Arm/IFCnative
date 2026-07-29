@@ -221,8 +221,10 @@ function isGroupObject(type: string) {
     type === "IFCBUILDINGSYSTEM" ||
     type === "IFCBUILTSYSTEM" ||
     type === "IFCDISTRIBUTIONSYSTEM" ||
+    type === "IFCDISTRIBUTIONCIRCUIT" ||
     type === "IFCSTRUCTURALANALYSISMODEL" ||
     type === "IFCSTRUCTURALLOADGROUP" ||
+    type === "IFCSTRUCTURALLOADCASE" ||
     type === "IFCSTRUCTURALRESULTGROUP" ||
     type === "IFCINVENTORY"
   );

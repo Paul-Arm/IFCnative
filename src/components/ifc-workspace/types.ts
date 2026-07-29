@@ -1,6 +1,6 @@
 import type { NativeBodyProfile } from "@/ifc";
 
-export type StructureMode = "tree" | "graph";
+export type StructureMode = "tree" | "graph" | "groups";
 
 export type InspectorMode =
   | "overview"

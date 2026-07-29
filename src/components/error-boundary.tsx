@@ -1,5 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 
+import { getDiagnosticsReport, recordDiagnostic } from "../diagnostics/watchdog";
+
 type EmergencySaver = () => void;
 
 const emergencySavers = new Set<EmergencySaver>();
@@ -35,6 +37,7 @@ interface ErrorBoundaryProps {
 }
 
 interface ErrorBoundaryState {
+  copied: boolean;
   error: Error | null;
   saved: boolean;
 }
@@ -43,7 +46,7 @@ export class ErrorBoundary extends Component<
   ErrorBoundaryProps,
   ErrorBoundaryState
 > {
-  state: ErrorBoundaryState = { error: null, saved: false };
+  state: ErrorBoundaryState = { copied: false, error: null, saved: false };
 
   static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
     return { error };
@@ -52,11 +55,27 @@ export class ErrorBoundary extends Component<
   componentDidCatch(error: Error, info: ErrorInfo) {
     const saved = runEmergencySaves();
     this.setState({ saved: saved > 0 });
+    recordDiagnostic(
+      "error",
+      `React-Render-Fehler: ${error.message}\n${info.componentStack ?? ""}`,
+    );
     console.error("IFCnative ist abgestuerzt:", error, info.componentStack);
   }
 
   private handleRetry = () => {
-    this.setState({ error: null, saved: false });
+    this.setState({ copied: false, error: null, saved: false });
+  };
+
+  private handleCopyDiagnostics = async () => {
+    const report = getDiagnosticsReport();
+    try {
+      await navigator.clipboard.writeText(report);
+      this.setState({ copied: true });
+    } catch {
+      // Ohne Clipboard-Recht bleibt der Bericht wenigstens in der Konsole.
+      console.info(report);
+      this.setState({ copied: true });
+    }
   };
 
   private handleResetUi = () => {
@@ -78,7 +97,7 @@ export class ErrorBoundary extends Component<
   };
 
   render() {
-    const { error, saved } = this.state;
+    const { copied, error, saved } = this.state;
     if (!error) {
       return this.props.children;
     }
@@ -102,6 +121,11 @@ export class ErrorBoundary extends Component<
             Die Anwendung hat einen unerwarteten Fehler abgefangen, statt
             abzustürzen. Deine Notizen und zuletzt geöffneten Dateien wurden
             {saved ? " gesichert." : " soweit möglich gesichert."}
+          </p>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Nicht exportierte IFC-Änderungen liegen im Wiederherstellungsspeicher
+            und werden nach „Erneut versuchen“ oder „Neu laden“ zum
+            Zurückholen angeboten.
           </p>
 
           <details className="mt-4 rounded-md border border-border/60 bg-muted/40 p-3 text-xs">
@@ -135,6 +159,14 @@ export class ErrorBoundary extends Component<
               onClick={this.handleReload}
             >
               Neu laden
+            </button>
+            <button
+              className="rounded-md border border-border/70 bg-card px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted/50"
+              title="Ereignisprotokoll dieses und des vorherigen Laufs in die Zwischenablage kopieren"
+              type="button"
+              onClick={() => void this.handleCopyDiagnostics()}
+            >
+              {copied ? "Diagnose kopiert" : "Diagnose kopieren"}
             </button>
           </div>
         </div>

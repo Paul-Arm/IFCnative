@@ -3694,6 +3694,89 @@ export function removeNativeRelationship(
   );
 }
 
+/**
+ * Weist ein Objekt einer BESTEHENDEN Gruppe zu: hängt es an die vorhandene
+ * IFCRELASSIGNSTOGROUP-Zuweisung der Gruppe an oder legt eine neue Zuweisung
+ * an, falls die Gruppe noch keine hat. Bereits bestehende Mitgliedschaft und
+ * Selbst-Zuweisung sind No-ops.
+ */
+export function addNativeEntityToGroup(
+  document: NativeIfcDocument,
+  entityId: number,
+  groupId: number,
+) {
+  const entity = document.entityById.get(entityId);
+  const group = document.entityById.get(groupId);
+  if (!entity || !group || entityId === groupId) {
+    return document;
+  }
+  const next = cloneDocumentEntities(document);
+  const existing = next.find((candidate) => {
+    if (!candidate.type.startsWith("IFCRELASSIGNSTOGROUP")) {
+      return false;
+    }
+    const [, targetIds] = relationshipEnds(candidate);
+    return targetIds.includes(groupId);
+  });
+  if (existing) {
+    const [sourceIds] = relationshipEnds(existing);
+    if (sourceIds.includes(entityId)) {
+      return document;
+    }
+    appendReference(existing.args, 4, entityId);
+  } else {
+    next.push(
+      createGroupAssignmentEntity(
+        nextEntityId(next),
+        entityId,
+        groupId,
+        `${group.name || group.type} Assignment`,
+      ),
+    );
+  }
+  return parseNativeIfcText(
+    serializeEntities(document, next),
+    document.fileName,
+  );
+}
+
+/**
+ * Löst die Mitgliedschaft eines Objekts in einer Gruppe: das Objekt wird aus
+ * den RelatedObjects aller IFCRELASSIGNSTOGROUP(-BYFACTOR)-Zuweisungen dieser
+ * Gruppe ausgetragen. Eine dadurch leere Zuweisung wird komplett entfernt;
+ * Objekt und Gruppe selbst bleiben bestehen.
+ */
+export function removeNativeGroupMembership(
+  document: NativeIfcDocument,
+  memberId: number,
+  groupId: number,
+) {
+  let changed = false;
+  const next = cloneDocumentEntities(document).filter((entity) => {
+    if (!entity.type.startsWith("IFCRELASSIGNSTOGROUP")) {
+      return true;
+    }
+    const [sourceIds, targetIds] = relationshipEnds(entity);
+    if (!targetIds.includes(groupId) || !sourceIds.includes(memberId)) {
+      return true;
+    }
+    changed = true;
+    const remaining = sourceIds.filter((id) => id !== memberId);
+    if (remaining.length === 0) {
+      return false;
+    }
+    entity.args[4] = formatReferenceList(remaining);
+    return true;
+  });
+  if (!changed) {
+    return document;
+  }
+  return parseNativeIfcText(
+    serializeEntities(document, next),
+    document.fileName,
+  );
+}
+
 export interface NativeEntityRemovalPlan {
   document: NativeIfcDocument;
   entityId: number;
@@ -3838,8 +3921,16 @@ const ORPHAN_PROTECTED_TYPES = new Set([
   "IFCGROUP",
   "IFCSYSTEM",
   "IFCZONE",
+  "IFCASSET",
+  "IFCINVENTORY",
   "IFCBUILDINGSYSTEM",
+  "IFCBUILTSYSTEM",
   "IFCDISTRIBUTIONSYSTEM",
+  "IFCDISTRIBUTIONCIRCUIT",
+  "IFCSTRUCTURALANALYSISMODEL",
+  "IFCSTRUCTURALLOADGROUP",
+  "IFCSTRUCTURALLOADCASE",
+  "IFCSTRUCTURALRESULTGROUP",
 ]);
 
 function isOrphanProtected(type: string): boolean {
@@ -6139,8 +6230,10 @@ function isGroupObject(type: string) {
     type === "IFCBUILDINGSYSTEM" ||
     type === "IFCBUILTSYSTEM" ||
     type === "IFCDISTRIBUTIONSYSTEM" ||
+    type === "IFCDISTRIBUTIONCIRCUIT" ||
     type === "IFCSTRUCTURALANALYSISMODEL" ||
     type === "IFCSTRUCTURALLOADGROUP" ||
+    type === "IFCSTRUCTURALLOADCASE" ||
     type === "IFCSTRUCTURALRESULTGROUP" ||
     type === "IFCINVENTORY"
   );

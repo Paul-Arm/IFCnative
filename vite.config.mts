@@ -38,6 +38,10 @@ export default defineConfig({
   server: {
     host: "127.0.0.1",
     port: 5173,
+    strictPort: true,
+    watch: {
+      ignored: ["**/src-tauri/**"],
+    },
     // MKP-Portal-Dev-Proxy: umgeht CORS im Browser-Dev-Modus. Die
     // Portal-Default-URLs zeigen auf diese Pfade (src/portal/types.ts).
     proxy: {

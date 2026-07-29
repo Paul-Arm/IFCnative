@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { recordDiagnostic } from "../diagnostics/watchdog";
 import {
     convertIfcToFragmentsInWorker,
     type ConvertIfcToFragmentsProgress,
@@ -207,7 +208,18 @@ export default function ThatOpenViewer({
     let cancelled = false;
     setError("");
     setStatus("Converting IFC with ThatOpen...");
-    const frameId = requestAnimationFrame(() => {
+    // requestAnimationFrame feuert nicht, solange das Fenster verdeckt oder
+    // minimiert ist. Ohne Timeout-Rückfall bliebe eine im Hintergrund
+    // angestoßene Konvertierung endlos in "Converting…" hängen und der Viewer
+    // wirkte nach dem Zurückwechseln tot.
+    let started = false;
+    const startSync = () => {
+      if (started || cancelled) {
+        return;
+      }
+      started = true;
+      window.clearTimeout(fallbackId);
+      cancelAnimationFrame(frameId);
       void runtime
         .syncModels(modelsRef.current, { fitAfterLoad: true })
         .then(async () => {
@@ -232,11 +244,20 @@ export default function ThatOpenViewer({
           setStatus("ThatOpen IFC load failed");
           onLogRef.current?.(`viewer.loadError(${JSON.stringify(message)});`);
         });
-    });
+    };
+    const frameId = requestAnimationFrame(startSync);
+    const fallbackId = window.setTimeout(() => {
+      recordDiagnostic(
+        "note",
+        "Modell-Sync per Timeout gestartet (kein Animationsframe — Fenster im Hintergrund?)",
+      );
+      startSync();
+    }, 2_000);
 
     return () => {
       cancelled = true;
       cancelAnimationFrame(frameId);
+      window.clearTimeout(fallbackId);
     };
   }, [modelLoadSignature, runtimeReady]);
 
@@ -929,6 +950,29 @@ async function createThatOpenRuntime(
 
   const canvas = world.renderer.three.domElement;
 
+  // Nach längerer Hintergrundlaufzeit kann Windows/WebView2 den GPU-Prozess
+  // recyceln — der WebGL-Kontext geht verloren. three.js schluckt danach jeden
+  // render()-Aufruf still: der Viewer bleibt eingefroren stehen, ohne dass
+  // irgendwo ein Fehler auftaucht. Deshalb hier melden und beim Restore neu
+  // zeichnen lassen.
+  const handleContextLost = (event: Event) => {
+    event.preventDefault();
+    recordDiagnostic("webgl", "WebGL-Kontext verloren");
+    callbacks.onError(
+      "Die 3D-Ansicht hat den Grafikkontext verloren (z. B. nach längerer Hintergrundlaufzeit oder einem Grafiktreiber-Reset). Sie wird automatisch wiederhergestellt, sobald das Fenster wieder aktiv ist.",
+    );
+    callbacks.onStatus("3D-Kontext verloren");
+  };
+  const handleContextRestored = () => {
+    recordDiagnostic("webgl", "WebGL-Kontext wiederhergestellt");
+    callbacks.onError("");
+    callbacks.onStatus("3D-Kontext wiederhergestellt");
+    world.renderer?.resize();
+    void fragments.core.update(true).catch(() => undefined);
+  };
+  canvas.addEventListener("webglcontextlost", handleContextLost);
+  canvas.addEventListener("webglcontextrestored", handleContextRestored);
+
   const selectFromPointer = async (event: MouseEvent) => {
     if (!modelsByDocumentId.size || !world.renderer) {
       return;
@@ -1385,6 +1429,9 @@ async function createThatOpenRuntime(
         }
       } else if (op.kind === "remove") {
         await removeMirroredElement(loaded, op.entityId);
+        for (const cascadeId of op.cascadeEntityIds ?? []) {
+          await removeMirroredElement(loaded, cascadeId);
+        }
       } else if (op.kind === "replace-body") {
         const localId = resolveLocalId(loaded, op.entityId);
         const changed = await replaceFragmentElementGeometry(
@@ -1466,6 +1513,8 @@ async function createThatOpenRuntime(
       capture: true,
     });
     canvas.removeEventListener("click", selectFromPointer, { capture: true });
+    canvas.removeEventListener("webglcontextlost", handleContextLost);
+    canvas.removeEventListener("webglcontextrestored", handleContextRestored);
     resizeObserver.disconnect();
     themeObserver.disconnect();
     world.camera.controls.removeEventListener("update", updateFragmentsOnCamera);

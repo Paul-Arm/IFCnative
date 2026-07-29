@@ -6,7 +6,9 @@ module.exports = [
     ignores: [
       "dist/**",
       "dist-electron/**",
+      "editor-2.0/**",
       "release/**",
+      "src-tauri/target/**",
       "node_modules/**",
       "NativeWindows/**",
       "public/fragments/**",
@@ -47,16 +49,6 @@ module.exports = [
     },
     rules: {
       "@typescript-eslint/no-require-imports": "off",
-    },
-  },
-  {
-    files: ["src-electron/**/*.ts"],
-    languageOptions: {
-      globals: {
-        __dirname: "readonly",
-        process: "readonly",
-        Response: "readonly",
-      },
     },
   },
 ];

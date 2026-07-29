@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default permissions for the IFCnative main window",
+  "windows": ["main", "popout-*"],
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "https://auth.marxkrontal.com/*" },
+        { "url": "https://portal.dev.marxkrontal.com/*" },
+        { "url": "http://localhost:8000/*" }
+      ]
+    }
+  ]
+}
