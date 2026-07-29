@@ -605,6 +605,30 @@ body,
   padding: 8px 10px;
 }
 
+.ifcnative-thatopen-cut-plane-hint {
+  align-items: center;
+  background: color-mix(in oklab, oklch(0.715 0.143 215.2) 88%, transparent);
+  border: 1px solid color-mix(in oklab, oklch(0.715 0.143 215.2) 70%, white);
+  border-radius: var(--radius-sm);
+  color: oklch(0.18 0.035 220);
+  display: flex;
+  font-size: 11px;
+  font-weight: 700;
+  gap: 10px;
+  left: 56px;
+  padding: 7px 10px;
+  pointer-events: none;
+  position: absolute;
+  top: 12px;
+  z-index: 3;
+}
+
+.ifcnative-thatopen-cut-plane-hint span {
+  font-size: 10px;
+  font-weight: 500;
+  opacity: 0.8;
+}
+
 .ifcnative-thatopen-deferred-load {
   align-items: center;
   background: color-mix(in oklab, var(--popover) 94%, transparent);

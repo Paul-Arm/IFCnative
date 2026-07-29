@@ -9,7 +9,7 @@ import {
   Target,
   Trash2,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import {
   getNativeBodyRepresentation,
@@ -21,6 +21,10 @@ import {
 
 import { ENTITY_TYPES } from "./constants";
 import type { BodyElementDraft, CoordinateClipboard } from "./types";
+import type {
+  ViewerCutPlaneMode,
+  ViewerCutPlaneState,
+} from "../that-open-viewer.types";
 import {
   Badge,
   Button,
@@ -58,26 +62,44 @@ const ROUND_PROFILES: ReadonlySet<NativeBodyProfile> = new Set([
   "ellipse",
 ]);
 
+const CUT_PLANE_AXIS_OPTIONS = [
+  { label: "X", value: "x" },
+  { label: "Y (Höhe)", value: "y" },
+  { label: "Z", value: "z" },
+];
+
 export function BuilderPanel({
   coordinateClipboard,
+  cutPlane,
   document,
   selectedId,
   selectedIds,
   onAddBodyElement,
   onCombineSelected,
+  onCutPlaneActiveChange,
+  onCutPlaneChange,
+  onCutPlaneModeChange,
+  onCutPlaneReset,
   onLoadSystemCoordinates,
   onRemoveBodyFromSelected,
   onSplitSelected,
 }: {
   coordinateClipboard: CoordinateClipboard | null;
+  cutPlane: ViewerCutPlaneState;
   document: NativeIfcDocument;
   selectedId: number;
   selectedIds: number[];
   onAddBodyElement(options: BodyElementDraft): void;
   onCombineSelected(name: string, removeSources: boolean): void;
+  onCutPlaneActiveChange(active: boolean): void;
+  onCutPlaneChange(
+    change: Pick<ViewerCutPlaneState, "normal" | "position">,
+  ): void;
+  onCutPlaneModeChange(mode: ViewerCutPlaneMode): void;
+  onCutPlaneReset(): void;
   onLoadSystemCoordinates(): Promise<CoordinateClipboard | undefined>;
   onRemoveBodyFromSelected(): void;
-  onSplitSelected(partCount: number): void;
+  onSplitSelected(): void;
 }) {
   const [bodyType, setBodyType] = useState("IFCBUILTELEMENT");
   const [bodyName, setBodyName] = useState("Neuer 3D-Körper");
@@ -93,7 +115,15 @@ export function BuilderPanel({
   const [bodyY, setBodyY] = useState("0");
   const [bodyZ, setBodyZ] = useState("0");
   const [bodyTag, setBodyTag] = useState("IFCNATIVE-BODY");
-  const [splitPartCount, setSplitPartCount] = useState("2");
+  const [planeX, setPlaneX] = useState("0");
+  const [planeY, setPlaneY] = useState("0");
+  const [planeZ, setPlaneZ] = useState("0");
+  const [normalX, setNormalX] = useState("0");
+  const [normalY, setNormalY] = useState("1");
+  const [normalZ, setNormalZ] = useState("0");
+  const [planeBaseAxis, setPlaneBaseAxis] = useState("y");
+  const [planeRotationAxis, setPlaneRotationAxis] = useState("x");
+  const [planeAngle, setPlaneAngle] = useState("0");
   const [combinedName, setCombinedName] = useState("Kombiniertes Teil");
   const [keepCombineSources, setKeepCombineSources] = useState(false);
   const selectedEntity = document.entityById.get(selectedId);
@@ -101,6 +131,9 @@ export function BuilderPanel({
   const selectedBody = getNativeBodyRepresentation(document, selectedId);
   const unitScale = getNativeLengthUnitScale(document);
   const unitLabel = describeLengthUnit(unitScale);
+  const splitSupported =
+    selectedBody.hasRepresentation &&
+    Boolean(getNativePlacement(document, selectedId));
   const combineSupported =
     selectedIds.length >= 2 &&
     selectedIds.every(
@@ -108,6 +141,58 @@ export function BuilderPanel({
         getNativeBodyRepresentation(document, id).hasRepresentation &&
         Boolean(getNativePlacement(document, id)),
     );
+
+  useEffect(() => {
+    if (cutPlane.position) {
+      setPlaneX(formatCutPlaneNumber(cutPlane.position.x));
+      setPlaneY(formatCutPlaneNumber(cutPlane.position.y));
+      setPlaneZ(formatCutPlaneNumber(cutPlane.position.z));
+    }
+    setNormalX(formatCutPlaneNumber(cutPlane.normal.x));
+    setNormalY(formatCutPlaneNumber(cutPlane.normal.y));
+    setNormalZ(formatCutPlaneNumber(cutPlane.normal.z));
+  }, [
+    cutPlane.normal.x,
+    cutPlane.normal.y,
+    cutPlane.normal.z,
+    cutPlane.position?.x,
+    cutPlane.position?.y,
+    cutPlane.position?.z,
+  ]);
+
+  const applyNumericCutPlane = () => {
+    onCutPlaneChange({
+      normal: normalizeCutPlaneVector({
+        x: readCutPlaneNumber(normalX),
+        y: readCutPlaneNumber(normalY),
+        z: readCutPlaneNumber(normalZ),
+      }),
+      position: {
+        x: readCutPlaneNumber(planeX),
+        y: readCutPlaneNumber(planeY),
+        z: readCutPlaneNumber(planeZ),
+      },
+    });
+  };
+
+  const applyAxisAngleCutPlane = () => {
+    const normal = axisAngleCutPlaneNormal(
+      planeBaseAxis,
+      planeRotationAxis,
+      readCutPlaneNumber(planeAngle),
+    );
+    setNormalX(formatCutPlaneNumber(normal.x));
+    setNormalY(formatCutPlaneNumber(normal.y));
+    setNormalZ(formatCutPlaneNumber(normal.z));
+    onCutPlaneChange({
+      normal,
+      position: {
+        x: readCutPlaneNumber(planeX),
+        y: readCutPlaneNumber(planeY),
+        z: readCutPlaneNumber(planeZ),
+      },
+    });
+  };
 
   const loadCoordinateClipboard = async () => {
     if (!coordinateClipboard) {
@@ -346,37 +431,132 @@ export function BuilderPanel({
                 Körper teilen
               </h3>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                Teilt den gewählten Extrusionskörper entlang seiner Längsachse
-                in eigenständige IFC-Objekte.
+                Die Ebene wird direkt im 3D-Viewer verschoben oder gedreht und
+                schneidet auch kombinierte Mehrkörperobjekte.
               </p>
             </div>
-            <div className="grid grid-cols-[minmax(0,1fr)_minmax(10rem,1fr)] gap-2">
-              <LabeledInput
-                label="Anzahl Proben"
-                keyboardType="numeric"
-                value={splitPartCount}
-                onChangeText={setSplitPartCount}
-              />
+            <div className="grid grid-cols-2 gap-2">
               <Button
-                className="self-end"
-                disabled={!selectedBody.canEdit}
-                title={
-                  selectedBody.canEdit
-                    ? `#${selectedId} in gleich lange Proben teilen`
-                    : "Nur einzelne extrudierte Rechteck- und Kreisprofile können geteilt werden"
-                }
-                variant="outline"
-                onClick={() => onSplitSelected(Number(splitPartCount))}
+                variant={cutPlane.active ? "default" : "outline"}
+                disabled={!splitSupported}
+                onClick={() => onCutPlaneActiveChange(!cutPlane.active)}
               >
                 <Scissors aria-hidden className="size-3.5" />
-                In Proben teilen
+                {cutPlane.active ? "Ebene ausblenden" : "Schnittebene anzeigen"}
+              </Button>
+              <Button
+                disabled={!splitSupported}
+                variant="outline"
+                onClick={onCutPlaneReset}
+              >
+                <Crosshair aria-hidden className="size-3.5" />
+                Auf Auswahl zentrieren
               </Button>
             </div>
-            {selectedBody.hasRepresentation && !selectedBody.canEdit ? (
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                variant={
+                  cutPlane.active && cutPlane.mode === "translate"
+                    ? "default"
+                    : "outline"
+                }
+                onClick={() => onCutPlaneModeChange("translate")}
+              >
+                Verschieben · W
+              </Button>
+              <Button
+                variant={
+                  cutPlane.active && cutPlane.mode === "rotate"
+                    ? "default"
+                    : "outline"
+                }
+                onClick={() => onCutPlaneModeChange("rotate")}
+              >
+                Rotieren · R
+              </Button>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <LabeledInput
+                label="Punkt X (m)"
+                keyboardType="numeric"
+                value={planeX}
+                onChangeText={setPlaneX}
+              />
+              <LabeledInput
+                label="Punkt Y (m)"
+                keyboardType="numeric"
+                value={planeY}
+                onChangeText={setPlaneY}
+              />
+              <LabeledInput
+                label="Punkt Z (m)"
+                keyboardType="numeric"
+                value={planeZ}
+                onChangeText={setPlaneZ}
+              />
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <LabeledInput
+                label="Normale X"
+                keyboardType="numeric"
+                value={normalX}
+                onChangeText={setNormalX}
+              />
+              <LabeledInput
+                label="Normale Y"
+                keyboardType="numeric"
+                value={normalY}
+                onChangeText={setNormalY}
+              />
+              <LabeledInput
+                label="Normale Z"
+                keyboardType="numeric"
+                value={normalZ}
+                onChangeText={setNormalZ}
+              />
+            </div>
+            <Button variant="outline" onClick={applyNumericCutPlane}>
+              Punkt und Normale übernehmen
+            </Button>
+            <div className="grid grid-cols-[1fr_1fr_0.8fr] gap-2">
+              <DropdownField
+                label="Ausgangsnormale"
+                options={CUT_PLANE_AXIS_OPTIONS}
+                value={planeBaseAxis}
+                onChange={setPlaneBaseAxis}
+              />
+              <DropdownField
+                label="Drehachse"
+                options={CUT_PLANE_AXIS_OPTIONS}
+                value={planeRotationAxis}
+                onChange={setPlaneRotationAxis}
+              />
+              <LabeledInput
+                label="Winkel (°)"
+                keyboardType="numeric"
+                value={planeAngle}
+                onChangeText={setPlaneAngle}
+              />
+            </div>
+            <Button variant="outline" onClick={applyAxisAngleCutPlane}>
+              Achse und Winkel übernehmen
+            </Button>
+            {!splitSupported && selectedBody.hasRepresentation ? (
               <InlineAlert tone="warning">
-                Diese Geometrie ist kein einzelner editierbarer Extrusionskörper.
+                Die Auswahl besitzt keine geeignete Produktplatzierung.
               </InlineAlert>
             ) : null}
+            <Button
+              disabled={
+                !splitSupported || !cutPlane.active || !cutPlane.position
+              }
+              title="Erzeugt zwei eigenständige IFC-Objekte auf beiden Seiten der Ebene"
+              variant="default"
+              onClick={onSplitSelected}
+            >
+              <Scissors aria-hidden className="size-3.5" />
+              An Schnittebene teilen
+            </Button>
           </div>
 
           <div className="grid gap-2 rounded-md border border-border/60 bg-muted/20 p-2.5">
@@ -538,6 +718,73 @@ function coordinateClipboardToBodyPlacement(clipboard: CoordinateClipboard) {
 function readCoordinateNumber(value: string) {
   const parsed = Number(value.trim().replace(",", "."));
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function readCutPlaneNumber(value: string) {
+  return readCoordinateNumber(value);
+}
+
+function formatCutPlaneNumber(value: number) {
+  const rounded = Math.round(value * 1_000_000) / 1_000_000;
+  return String(Object.is(rounded, -0) ? 0 : rounded);
+}
+
+function normalizeCutPlaneVector(vector: {
+  x: number;
+  y: number;
+  z: number;
+}) {
+  const length = Math.hypot(vector.x, vector.y, vector.z);
+  if (!Number.isFinite(length) || length < 1e-9) {
+    return { x: 0, y: 1, z: 0 };
+  }
+  return {
+    x: vector.x / length,
+    y: vector.y / length,
+    z: vector.z / length,
+  };
+}
+
+function axisAngleCutPlaneNormal(
+  baseAxis: string,
+  rotationAxis: string,
+  degrees: number,
+) {
+  const base = axisVector(baseAxis);
+  const axis = axisVector(rotationAxis);
+  const radians = (degrees * Math.PI) / 180;
+  const cosine = Math.cos(radians);
+  const sine = Math.sin(radians);
+  const dot = base.x * axis.x + base.y * axis.y + base.z * axis.z;
+  const cross = {
+    x: axis.y * base.z - axis.z * base.y,
+    y: axis.z * base.x - axis.x * base.z,
+    z: axis.x * base.y - axis.y * base.x,
+  };
+  return normalizeCutPlaneVector({
+    x:
+      base.x * cosine +
+      cross.x * sine +
+      axis.x * dot * (1 - cosine),
+    y:
+      base.y * cosine +
+      cross.y * sine +
+      axis.y * dot * (1 - cosine),
+    z:
+      base.z * cosine +
+      cross.z * sine +
+      axis.z * dot * (1 - cosine),
+  });
+}
+
+function axisVector(axis: string) {
+  if (axis === "x") {
+    return { x: 1, y: 0, z: 0 };
+  }
+  if (axis === "z") {
+    return { x: 0, y: 0, z: 1 };
+  }
+  return { x: 0, y: 1, z: 0 };
 }
 
 function formatBodyCoordinate(value: number) {

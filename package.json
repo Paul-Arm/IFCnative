@@ -1,6 +1,6 @@
 {
   "name": "ifcnative",
-  "version": "1.4.9",
+  "version": "1.4.10",
   "description": "Desktop IFC builder and viewer built with Vite, React, and Tauri.",
   "engines": {
     "node": ">=22.13.0",

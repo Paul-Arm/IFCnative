@@ -1558,7 +1558,7 @@ dependencies = [
 
 [[package]]
 name = "ifcnative"
-version = "1.4.9"
+version = "1.4.10"
 dependencies = [
  "tauri",
  "tauri-build",

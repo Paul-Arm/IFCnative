@@ -7,6 +7,7 @@ import {
     Move,
     RefreshCw,
     RotateCw,
+    Slice,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -24,6 +25,9 @@ import type {
     ThatOpenViewerModel,
     ThatOpenViewerProps,
     ViewerCoordinatePick,
+    ViewerCutPlaneChange,
+    ViewerCutPlaneMode,
+    ViewerCutPlaneState,
     ViewerMirrorOp,
     ViewerMirrorRequest,
     ViewerMirrorResult,
@@ -39,6 +43,7 @@ export default function ThatOpenViewer({
   activeModelDeferredReason,
   activeModelFileName,
   activeModelLoaded = true,
+  cutPlane,
   editCapabilities = {
     canMove: false,
     canRotate: false,
@@ -47,6 +52,9 @@ export default function ThatOpenViewer({
   mirrorRequest,
   models,
   onLoadActiveModel,
+  onCutPlaneActiveChange,
+  onCutPlaneChange,
+  onCutPlaneModeChange,
   onLog,
   onMirrorApplied,
   onMoveSelected,
@@ -62,6 +70,7 @@ export default function ThatOpenViewer({
   const modelsRef = useRef(models);
   const selectedByDocumentIdRef = useRef(new Map<string, number>());
   const onLogRef = useRef(onLog);
+  const onCutPlaneChangeRef = useRef(onCutPlaneChange);
   const onMirrorAppliedRef = useRef(onMirrorApplied);
   const onMoveSelectedRef = useRef(onMoveSelected);
   const onRotateSelectedRef = useRef(onRotateSelected);
@@ -112,6 +121,7 @@ export default function ThatOpenViewer({
     models.map((model) => [model.documentId, model.selectedId]),
   );
   onLogRef.current = onLog;
+  onCutPlaneChangeRef.current = onCutPlaneChange;
   onMirrorAppliedRef.current = onMirrorApplied;
   onMoveSelectedRef.current = onMoveSelected;
   onRotateSelectedRef.current = onRotateSelected;
@@ -151,6 +161,8 @@ export default function ThatOpenViewer({
           setStatus("ThatOpen viewer error");
         },
         onLog: (line) => onLogRef.current?.(line),
+        onCutPlaneChange: (change) =>
+          onCutPlaneChangeRef.current?.(change),
         onMoveSelected: (entityId, delta) =>
           onMoveSelectedRef.current?.(entityId, delta) ?? null,
         onRotateSelected: (entityId, rotation) =>
@@ -319,8 +331,8 @@ export default function ThatOpenViewer({
     if (!runtime || !runtimeReady) {
       return;
     }
-    void runtime.setMoveGizmoEnabled(moveGizmoActive);
-  }, [moveGizmoActive, runtimeReady]);
+    void runtime.setMoveGizmoEnabled(moveGizmoActive && !cutPlane?.active);
+  }, [cutPlane?.active, moveGizmoActive, runtimeReady]);
 
   useEffect(() => {
     const runtime = runtimeRef.current;
@@ -329,6 +341,28 @@ export default function ThatOpenViewer({
     }
     runtime.setMoveGizmoMode(moveGizmoMode);
   }, [moveGizmoMode, runtimeReady]);
+
+  useEffect(() => {
+    const runtime = runtimeRef.current;
+    if (!runtime || !runtimeReady || !modelReady) {
+      return;
+    }
+    void runtime.setCutPlane(cutPlane);
+  }, [
+    activeDocumentId,
+    activeSelectedId,
+    cutPlane?.active,
+    cutPlane?.mode,
+    cutPlane?.normal.x,
+    cutPlane?.normal.y,
+    cutPlane?.normal.z,
+    cutPlane?.position?.x,
+    cutPlane?.position?.y,
+    cutPlane?.position?.z,
+    cutPlane?.resetNonce,
+    modelReady,
+    runtimeReady,
+  ]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -341,11 +375,19 @@ export default function ThatOpenViewer({
         return;
       }
       if (event.key === "Escape") {
+        if (cutPlane?.active) {
+          onCutPlaneActiveChange?.(false);
+        }
         setMoveGizmoActive(false);
         setPickerActive(false);
         return;
       }
       const key = event.key.toLowerCase();
+      if (cutPlane?.active && (key === "w" || key === "r")) {
+        event.preventDefault();
+        onCutPlaneModeChange?.(key === "w" ? "translate" : "rotate");
+        return;
+      }
       if (key === "w" && editCapabilities.canMove) {
         event.preventDefault();
         setPickerActive(false);
@@ -360,7 +402,13 @@ export default function ThatOpenViewer({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [editCapabilities.canMove, editCapabilities.canRotate]);
+  }, [
+    cutPlane?.active,
+    editCapabilities.canMove,
+    editCapabilities.canRotate,
+    onCutPlaneActiveChange,
+    onCutPlaneModeChange,
+  ]);
 
   useEffect(() => {
     if (
@@ -386,10 +434,11 @@ export default function ThatOpenViewer({
         <div className="ifcnative-thatopen-viewport-toolbar">
           <button
             aria-label="Auswählen"
-            className={`ifcnative-thatopen-tool${!moveGizmoActive && !pickerActive ? " is-active" : ""}`}
+            className={`ifcnative-thatopen-tool${!moveGizmoActive && !pickerActive && !cutPlane?.active ? " is-active" : ""}`}
             title="Auswählen"
             type="button"
             onClick={() => {
+              onCutPlaneActiveChange?.(false);
               setMoveGizmoActive(false);
               setPickerActive(false);
             }}
@@ -397,11 +446,16 @@ export default function ThatOpenViewer({
             <MousePointer2 aria-hidden size={16} />
           </button>
           <button
-            aria-label="Verschieben (Gizmo)"
-            className={`ifcnative-thatopen-tool${moveGizmoActive && moveGizmoMode === "translate" ? " is-active" : ""}`}
-            disabled={!activeModelVisible || !editCapabilities.canMove}
+            aria-label={cutPlane?.active ? "Schnittebene verschieben" : "Verschieben (Gizmo)"}
+            className={`ifcnative-thatopen-tool${cutPlane?.active ? cutPlane.mode === "translate" ? " is-active" : "" : moveGizmoActive && moveGizmoMode === "translate" ? " is-active" : ""}`}
+            disabled={
+              !activeModelVisible ||
+              (!cutPlane?.active && !editCapabilities.canMove)
+            }
             title={
-              editCapabilities.canMove
+              cutPlane?.active
+                ? "Schnittebene verschieben · W"
+                : editCapabilities.canMove
                 ? "Verschieben (Gizmo) · W"
                 : editCapabilities.transformDisabledReason ??
                   "Auswahl kann nicht verschoben werden"
@@ -409,6 +463,10 @@ export default function ThatOpenViewer({
             type="button"
             onClick={() => {
               setPickerActive(false);
+              if (cutPlane?.active) {
+                onCutPlaneModeChange?.("translate");
+                return;
+              }
               setMoveGizmoMode("translate");
               setMoveGizmoActive((current) =>
                 moveGizmoMode === "translate" ? !current : true,
@@ -418,11 +476,16 @@ export default function ThatOpenViewer({
             <Move aria-hidden size={16} />
           </button>
           <button
-            aria-label="Rotieren (Gizmo)"
-            className={`ifcnative-thatopen-tool${moveGizmoActive && moveGizmoMode === "rotate" ? " is-active" : ""}`}
-            disabled={!activeModelVisible || !editCapabilities.canRotate}
+            aria-label={cutPlane?.active ? "Schnittebene rotieren" : "Rotieren (Gizmo)"}
+            className={`ifcnative-thatopen-tool${cutPlane?.active ? cutPlane.mode === "rotate" ? " is-active" : "" : moveGizmoActive && moveGizmoMode === "rotate" ? " is-active" : ""}`}
+            disabled={
+              !activeModelVisible ||
+              (!cutPlane?.active && !editCapabilities.canRotate)
+            }
             title={
-              editCapabilities.canRotate
+              cutPlane?.active
+                ? "Schnittebene rotieren · R"
+                : editCapabilities.canRotate
                 ? "Rotieren (Gizmo) · R"
                 : editCapabilities.transformDisabledReason ??
                   "Auswahl kann nicht rotiert werden"
@@ -430,6 +493,10 @@ export default function ThatOpenViewer({
             type="button"
             onClick={() => {
               setPickerActive(false);
+              if (cutPlane?.active) {
+                onCutPlaneModeChange?.("rotate");
+                return;
+              }
               setMoveGizmoMode("rotate");
               setMoveGizmoActive((current) =>
                 moveGizmoMode === "rotate" ? !current : true,
@@ -437,6 +504,24 @@ export default function ThatOpenViewer({
             }}
           >
             <RotateCw aria-hidden size={16} />
+          </button>
+          <button
+            aria-label="Schnittebene"
+            className={`ifcnative-thatopen-tool${cutPlane?.active ? " is-active" : ""}`}
+            disabled={!activeModelVisible}
+            title={
+              cutPlane?.active
+                ? "Schnittebene ausblenden · Esc"
+                : "Schnittebene auf der Auswahl einblenden"
+            }
+            type="button"
+            onClick={() => {
+              setMoveGizmoActive(false);
+              setPickerActive(false);
+              onCutPlaneActiveChange?.(!cutPlane?.active);
+            }}
+          >
+            <Slice aria-hidden size={16} />
           </button>
           <div aria-hidden className="ifcnative-thatopen-tool-divider" />
           <button
@@ -496,6 +581,12 @@ export default function ThatOpenViewer({
         {pickerActive ? (
           <div className="ifcnative-thatopen-picker-hint">
             Punkt im Modell anklicken
+          </div>
+        ) : null}
+        {cutPlane?.active ? (
+          <div className="ifcnative-thatopen-cut-plane-hint">
+            Schnittebene · {cutPlane.mode === "translate" ? "Verschieben" : "Rotieren"}
+            <span>W / R · Esc beendet</span>
           </div>
         ) : null}
         {lastPick ? (
@@ -569,6 +660,7 @@ async function createThatOpenRuntime(
     onError(message: string): void;
     onCoordinatePickerUsed(): void;
     onLog(line: string): void;
+    onCutPlaneChange(change: ViewerCutPlaneChange): void;
     onMoveSelected(
       entityId: number,
       delta: ViewerMoveDelta,
@@ -859,6 +951,54 @@ async function createThatOpenRuntime(
     return result;
   };
 
+  const ifcWorldToScenePoint = (
+    loaded: LoadedViewerModel,
+    point: { x: number; y: number; z: number },
+  ) => {
+    const result = new THREE.Vector3(point.x, point.y, point.z);
+    if (loaded.ifcWorldToModel) {
+      result.applyMatrix4(loaded.ifcWorldToModel);
+    }
+    loaded.model.object.updateMatrixWorld(true);
+    return result.applyMatrix4(loaded.model.object.matrixWorld);
+  };
+
+  const ifcWorldToSceneDirection = (
+    loaded: LoadedViewerModel,
+    direction: { x: number; y: number; z: number },
+  ) => {
+    const result = new THREE.Vector3(direction.x, direction.y, direction.z);
+    if (loaded.ifcWorldToModel) {
+      result.applyMatrix3(
+        new THREE.Matrix3().setFromMatrix4(loaded.ifcWorldToModel),
+      );
+    }
+    loaded.model.object.updateMatrixWorld(true);
+    return result
+      .applyMatrix3(
+        new THREE.Matrix3().setFromMatrix4(loaded.model.object.matrixWorld),
+      )
+      .normalize();
+  };
+
+  const sceneToIfcWorldDirection = (
+    loaded: LoadedViewerModel,
+    direction: { x: number; y: number; z: number },
+  ) => {
+    loaded.model.object.updateMatrixWorld(true);
+    const objectRotation = new THREE.Matrix3()
+      .setFromMatrix4(loaded.model.object.matrixWorld)
+      .invert();
+    const result = new THREE.Vector3(direction.x, direction.y, direction.z)
+      .applyMatrix3(objectRotation);
+    if (loaded.modelToIfcWorld) {
+      result.applyMatrix3(
+        new THREE.Matrix3().setFromMatrix4(loaded.modelToIfcWorld),
+      );
+    }
+    return result.normalize();
+  };
+
   const modelsByDocumentId = new Map<string, LoadedViewerModel>();
   const documentIdByModelId = new Map<string, string>();
 
@@ -867,6 +1007,82 @@ async function createThatOpenRuntime(
   // mirrorEntityIdByLocalId.
   const resolveLocalId = (loaded: LoadedViewerModel, entityId: number) =>
     loaded.mirrorLocalIdByEntityId.get(entityId) ?? entityId;
+
+  const cutPlaneGizmo = createCutPlaneGizmo(
+    THREE,
+    transformControlsModule.TransformControls,
+    world.scene.three,
+    world.camera.three,
+    world.camera.controls,
+    canvasFromRenderer(world.renderer),
+    (change) => {
+      const documentId = callbacks.getActiveDocumentId();
+      const loaded = modelsByDocumentId.get(documentId);
+      if (!loaded) {
+        return;
+      }
+      const point = sceneToIfcWorldPoint(loaded, change.position);
+      const normal = sceneToIfcWorldDirection(loaded, change.normal);
+      callbacks.onCutPlaneChange({
+        normal: { x: normal.x, y: normal.y, z: normal.z },
+        position: { x: point.x, y: point.y, z: point.z },
+      });
+      callbacks.onLog(
+        `viewer.cutPlane.changed({ position: { x: ${formatCoordinate(point.x)}, y: ${formatCoordinate(point.y)}, z: ${formatCoordinate(point.z)} }, normal: { x: ${formatCoordinate(normal.x)}, y: ${formatCoordinate(normal.y)}, z: ${formatCoordinate(normal.z)} } });`,
+      );
+    },
+    () => void fragments.core.update(true),
+  );
+  let cutPlaneUpdateNonce = 0;
+
+  async function setCutPlane(state: ViewerCutPlaneState | undefined) {
+    const updateNonce = ++cutPlaneUpdateNonce;
+    const documentId = callbacks.getActiveDocumentId();
+    const loaded = modelsByDocumentId.get(documentId);
+    if (!state?.active || !loaded) {
+      cutPlaneGizmo.setState({ active: false });
+      return;
+    }
+    const entityId = callbacks.getSelectedId(documentId);
+    const localId = resolveLocalId(loaded, entityId);
+    const box = await loaded.model.getMergedBox([localId]).catch(() => null);
+    if (updateNonce !== cutPlaneUpdateNonce) {
+      return;
+    }
+    const boxCenter = box && !box.isEmpty()
+      ? fragmentModelPointToScene(box.getCenter(new THREE.Vector3()), loaded.model.object)
+      : new THREE.Vector3();
+    const boxSize = box && !box.isEmpty()
+      ? box.getSize(new THREE.Vector3()).length()
+      : 4;
+    const position = state.position
+      ? ifcWorldToScenePoint(loaded, state.position)
+      : boxCenter;
+    const normal = ifcWorldToSceneDirection(loaded, state.normal);
+    cutPlaneGizmo.setState({
+      active: true,
+      mode: state.mode,
+      normal,
+      position,
+      size: Math.min(100, Math.max(1, boxSize * 1.35)),
+    });
+    if (!state.position) {
+      const initialPoint = sceneToIfcWorldPoint(loaded, position);
+      const initialNormal = sceneToIfcWorldDirection(loaded, normal);
+      callbacks.onCutPlaneChange({
+        normal: {
+          x: initialNormal.x,
+          y: initialNormal.y,
+          z: initialNormal.z,
+        },
+        position: {
+          x: initialPoint.x,
+          y: initialPoint.y,
+          z: initialPoint.z,
+        },
+      });
+    }
+  }
 
   async function updateGrid(documentId: string) {
     const loaded = modelsByDocumentId.get(documentId);
@@ -977,7 +1193,7 @@ async function createThatOpenRuntime(
     if (!modelsByDocumentId.size || !world.renderer) {
       return;
     }
-    if (moveGizmo.isDragging()) {
+    if (moveGizmo.isDragging() || cutPlaneGizmo.isDragging()) {
       return;
     }
     if (pointerDown) {
@@ -1531,6 +1747,7 @@ async function createThatOpenRuntime(
     modelsByDocumentId.clear();
     documentIdByModelId.clear();
     fragments.dispose();
+    cutPlaneGizmo.dispose();
     moveGizmo.dispose();
     viewCube.dispose();
     coordinateCursor.dispose();
@@ -1554,6 +1771,7 @@ async function createThatOpenRuntime(
     highlight,
     hideCoordinateCursor: coordinateCursor.hide,
     resetCamera,
+    setCutPlane,
     setMoveGizmoEnabled: moveGizmo.setEnabled,
     setMoveGizmoMode: moveGizmo.setMode,
     syncModels,
@@ -1641,6 +1859,141 @@ function canvasFromRenderer(
   renderer: import("@thatopen/components").SimpleRenderer,
 ) {
   return renderer.three.domElement;
+}
+
+function createCutPlaneGizmo(
+  THREE: typeof import("three"),
+  TransformControls: TransformControlsConstructor,
+  scene: import("three").Scene,
+  camera: import("three").Camera,
+  cameraControls: CameraControlsLike,
+  canvas: HTMLCanvasElement,
+  onCommit: (change: {
+    normal: { x: number; y: number; z: number };
+    position: { x: number; y: number; z: number };
+  }) => void,
+  onSceneChange: () => void,
+) {
+  const group = new THREE.Group();
+  group.name = "IFCnativeCutPlane";
+  group.visible = false;
+  const fillMaterial = new THREE.MeshBasicMaterial({
+    color: 0x06b6d4,
+    depthTest: false,
+    depthWrite: false,
+    opacity: 0.22,
+    side: THREE.DoubleSide,
+    transparent: true,
+  });
+  const edgeMaterial = new THREE.LineBasicMaterial({
+    color: 0x0891b2,
+    depthTest: false,
+    transparent: true,
+  });
+  const planeGeometry = new THREE.PlaneGeometry(1, 1);
+  const edgeGeometry = new THREE.EdgesGeometry(planeGeometry);
+  const fill = new THREE.Mesh(planeGeometry, fillMaterial);
+  fill.renderOrder = 50;
+  const edges = new THREE.LineSegments(edgeGeometry, edgeMaterial);
+  edges.renderOrder = 51;
+  const normalArrow = new THREE.ArrowHelper(
+    new THREE.Vector3(0, 0, 1),
+    new THREE.Vector3(0, 0, 0),
+    0.35,
+    0x0e7490,
+    0.1,
+    0.06,
+  );
+  normalArrow.renderOrder = 52;
+  group.add(fill, edges, normalArrow);
+  scene.add(group);
+
+  const controls = new TransformControls(camera, canvas);
+  controls.setMode("translate");
+  controls.setSpace("world");
+  controls.size = 0.78;
+  const helper = controls.getHelper();
+  helper.name = "IFCnativeCutPlaneGizmo";
+  helper.visible = false;
+  scene.add(helper);
+  let active = false;
+  let dragging = false;
+
+  const emitChange = () => {
+    if (!active) {
+      return;
+    }
+    group.updateWorldMatrix(true, false);
+    const position = group.getWorldPosition(new THREE.Vector3());
+    const normal = new THREE.Vector3(0, 0, 1)
+      .applyQuaternion(group.getWorldQuaternion(new THREE.Quaternion()))
+      .normalize();
+    onCommit({
+      normal: { x: normal.x, y: normal.y, z: normal.z },
+      position: { x: position.x, y: position.y, z: position.z },
+    });
+  };
+  const onDraggingChanged = (event: { value: unknown }) => {
+    dragging = Boolean(event.value);
+    cameraControls.enabled = !dragging;
+  };
+  const onChange = () => onSceneChange();
+  const onMouseUp = () => emitChange();
+  controls.addEventListener("dragging-changed", onDraggingChanged);
+  controls.addEventListener("change", onChange);
+  controls.addEventListener("mouseUp", onMouseUp);
+
+  const setState = (
+    state:
+      | { active: false }
+      | {
+          active: true;
+          mode: ViewerCutPlaneMode;
+          normal: import("three").Vector3;
+          position: import("three").Vector3;
+          size: number;
+        },
+  ) => {
+    active = state.active;
+    group.visible = active;
+    helper.visible = active;
+    if (!state.active) {
+      controls.detach();
+      cameraControls.enabled = true;
+      dragging = false;
+      onSceneChange();
+      return;
+    }
+    group.position.copy(state.position);
+    group.quaternion.setFromUnitVectors(
+      new THREE.Vector3(0, 0, 1),
+      state.normal.clone().normalize(),
+    );
+    group.scale.set(state.size, state.size, state.size);
+    group.updateMatrixWorld(true);
+    controls.setMode(state.mode);
+    controls.attach(group);
+    helper.visible = true;
+    onSceneChange();
+  };
+
+  const dispose = () => {
+    controls.removeEventListener("dragging-changed", onDraggingChanged);
+    controls.removeEventListener("change", onChange);
+    controls.removeEventListener("mouseUp", onMouseUp);
+    controls.detach();
+    controls.dispose();
+    cameraControls.enabled = true;
+    helper.removeFromParent();
+    group.removeFromParent();
+    planeGeometry.dispose();
+    edgeGeometry.dispose();
+    fillMaterial.dispose();
+    edgeMaterial.dispose();
+    normalArrow.dispose();
+  };
+
+  return { dispose, isDragging: () => dragging, setState };
 }
 
 function createMoveGizmo(

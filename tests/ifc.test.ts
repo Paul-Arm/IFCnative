@@ -87,6 +87,7 @@ import {
     removeNativeRelationship,
     resolveNativeMovableProductId,
     serializeNativeIfcDocument,
+    splitNativeBodyByPlane,
     splitNativeBodyElement,
     summarizeNativeIfcGeometry,
     unquote,
@@ -2699,6 +2700,77 @@ test("native bodies combine into one mapped multi-body product", async () => {
   assert.equal(roundCoordinate(bounds.max[1]), 1);
   assert.equal(roundCoordinate(bounds.min[2]), -0.5);
   assert.equal(roundCoordinate(bounds.max[2]), 0.5);
+  api.CloseModel(modelID);
+});
+
+test("mapped multi-body product splits with a freely oriented IFC plane", async () => {
+  const sample = createNativeSampleDocument();
+  const storey = sample.entities.find(
+    (entity) => entity.type === "IFCBUILDINGSTOREY",
+  );
+  assert.ok(storey);
+  const withFirst = addNativeBodyElement(sample, {
+    depth: "1",
+    height: "1",
+    name: "Cut A",
+    parentId: storey.id,
+    type: "IFCBUILDINGELEMENTPROXY",
+    width: "1",
+    x: "0",
+    y: "0",
+    z: "0",
+  });
+  const first = withFirst.entities.find((entity) => entity.name === "Cut A");
+  assert.ok(first);
+  const withSecond = addNativeBodyElement(withFirst, {
+    depth: "1",
+    height: "1",
+    name: "Cut B",
+    parentId: storey.id,
+    type: "IFCBUILDINGELEMENTPROXY",
+    width: "1",
+    x: "3",
+    y: "0",
+    z: "0",
+  });
+  const second = withSecond.entities.find((entity) => entity.name === "Cut B");
+  assert.ok(second);
+  const combined = combineNativeBodyElements(
+    withSecond,
+    [first.id, second.id],
+    { name: "Cut Compound", removeSources: true },
+  );
+  assert.ok(combined);
+
+  const split = splitNativeBodyByPlane(combined.document, combined.productId, {
+    point: { x: 1.5, y: 0, z: 0 },
+    normal: { x: 1, y: 0, z: 1 },
+  });
+  assert.ok(split);
+  assert.equal(split.partIds.length, 2);
+  assert.equal(split.document.entityById.has(combined.productId), false);
+  assert.equal(
+    split.document.entities.filter(
+      (entity) => entity.type === "IFCBOOLEANCLIPPINGRESULT",
+    ).length,
+    4,
+  );
+
+  const api = new WebIFC.IfcAPI();
+  await api.Init();
+  const modelID = api.OpenModel(
+    new TextEncoder().encode(serializeNativeIfcDocument(split.document)),
+  );
+  assert.ok(modelID >= 0);
+  const firstBounds = streamElementWorldBounds(api, modelID, split.partIds[0]);
+  const secondBounds = streamElementWorldBounds(api, modelID, split.partIds[1]);
+  const xBounds = [firstBounds, secondBounds].sort(
+    (left, right) => left.min[0] - right.min[0],
+  );
+  assert.equal(roundCoordinate(xBounds[0].min[0]), -0.5);
+  assert.equal(roundCoordinate(xBounds[0].max[0]), 0.5);
+  assert.equal(roundCoordinate(xBounds[1].min[0]), 2.5);
+  assert.equal(roundCoordinate(xBounds[1].max[0]), 3.5);
   api.CloseModel(modelID);
 });
 

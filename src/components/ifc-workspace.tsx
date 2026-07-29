@@ -94,7 +94,7 @@ import {
     removeNativeRelationship,
     resolveNativeMovableProductId,
     serializeNativeIfcDocument,
-    splitNativeBodyElement,
+    splitNativeBodyByPlane,
     summarizeNativeIfcGeometry,
     setDiagnosticObjectiveReferences as setNativeDiagnosticObjectiveReferences,
     splitTopLevel,
@@ -204,6 +204,9 @@ import type { RelationshipFlowClipboardNode } from "./relationship-flow.types";
 import ThatOpenViewer from "./that-open-viewer";
 import type {
     ViewerCoordinatePick,
+    ViewerCutPlaneChange,
+    ViewerCutPlaneMode,
+    ViewerCutPlaneState,
     ViewerMirrorOp,
     ViewerMirrorRequest,
     ViewerMirrorResult,
@@ -400,6 +403,12 @@ export default function IfcWorkspace() {
   } | null>(null);
   const [viewerMirrorRequest, setViewerMirrorRequest] =
     useState<ViewerMirrorRequest | null>(null);
+  const [viewerCutPlane, setViewerCutPlane] = useState<ViewerCutPlaneState>({
+    active: false,
+    mode: "translate",
+    normal: { x: 0, y: 1, z: 0 },
+    resetNonce: 0,
+  });
   const [loadingIfcName, setLoadingIfcName] = useState("");
   const [catalog, setCatalog] = useState<IfcObjectCatalog | null>(null);
   const [catalogKind, setCatalogKind] = useState<CatalogKind>("diagnostik");
@@ -1763,19 +1772,84 @@ export default function IfcWorkspace() {
     );
   };
 
-  const splitSelectedBody = (partCount: number) => {
-    const result = splitNativeBodyElement(document, selectedId, partCount);
+  const setCutPlaneActive = (active: boolean) => {
+    setViewerCutPlane((current) => ({
+      ...current,
+      active,
+      mode: active ? current.mode : "translate",
+      position: active ? undefined : current.position,
+      resetNonce: active ? current.resetNonce + 1 : current.resetNonce,
+    }));
+  };
+
+  const setCutPlaneMode = (mode: ViewerCutPlaneMode) => {
+    setViewerCutPlane((current) => ({ ...current, mode }));
+  };
+
+  const applyViewerCutPlaneChange = (change: ViewerCutPlaneChange) => {
+    setViewerCutPlane((current) => ({
+      ...current,
+      normal: change.normal,
+      position: change.position,
+    }));
+  };
+
+  const updateCutPlane = (
+    change: Pick<ViewerCutPlaneState, "normal" | "position">,
+  ) => {
+    setViewerCutPlane((current) => ({
+      ...current,
+      active: true,
+      normal: change.normal,
+      position: change.position,
+    }));
+  };
+
+  const resetCutPlane = () => {
+    setViewerCutPlane((current) => ({
+      ...current,
+      active: true,
+      position: undefined,
+      resetNonce: current.resetNonce + 1,
+    }));
+  };
+
+  const splitSelectedBody = () => {
+    if (!viewerCutPlane.active || !viewerCutPlane.position) {
+      setStatusAlert({
+        message: "Schnittebene zuerst im 3D-Viewer positionieren.",
+        tone: "danger",
+      });
+      return;
+    }
+    const metersPerUnit = getNativeLengthUnitScale(document);
+    const point = viewerWorldPointToIfcPlacementPoint(
+      viewerCutPlane.position,
+      metersPerUnit,
+    );
+    const normal = viewerWorldDirectionToIfcPlacementDirection(
+      viewerCutPlane.normal,
+    );
+    const result = splitNativeBodyByPlane(document, selectedId, {
+      normal,
+      point,
+    });
     if (!result) {
       logAction(
         `builder.splitBody.skip({ id: ${selectedId}, reason: 'unsupported-geometry' });`,
       );
+      setStatusAlert({
+        message:
+          "Die ausgewählte Body-Repräsentation enthält Geometrie, die nicht als IFC-Boolean-Operand geschnitten werden kann.",
+        tone: "danger",
+      });
       return;
     }
     commitDocument(
       result.document,
       result.partIds[0],
-      `Split #${selectedId} into ${result.partIds.length} parts`,
-      `builder.splitBody({ id: ${selectedId}, parts: [${result.partIds.join(", ")}] });`,
+      `Cut #${selectedId} with plane into ${result.partIds.length} parts`,
+      `builder.splitBodyByPlane({ id: ${selectedId}, parts: [${result.partIds.join(", ")}], point: ${JSON.stringify(point)}, normal: ${JSON.stringify(normal)} });`,
       undefined,
       {
         pendingKey: `split:${selectedId}`,
@@ -1783,6 +1857,11 @@ export default function IfcWorkspace() {
       },
     );
     setSelectedIds(new Set(result.partIds));
+    setViewerCutPlane((current) => ({ ...current, active: false }));
+    setStatusAlert({
+      message: `Objekt #${selectedId} wurde an der Schnittebene in zwei IFC-Objekte geteilt.`,
+      tone: "success",
+    });
   };
 
   const combineSelectedBodies = (name: string, removeSources: boolean) => {
@@ -3393,6 +3472,7 @@ export default function IfcWorkspace() {
               }
               activeModelFileName={activeSession.document.fileName}
               activeModelLoaded={activeSession.viewerModelLoadRequested}
+              cutPlane={viewerCutPlane}
               editCapabilities={viewerEditCapabilities}
               focusRequest={viewerFocusRequest}
               mirrorRequest={viewerMirrorRequest}
@@ -3401,6 +3481,9 @@ export default function IfcWorkspace() {
                 (change) => change.label,
               )}
               onLog={logAction}
+              onCutPlaneActiveChange={setCutPlaneActive}
+              onCutPlaneChange={applyViewerCutPlaneChange}
+              onCutPlaneModeChange={setCutPlaneMode}
               onLoadActiveModel={requestActiveViewerLoad}
               onMirrorApplied={applyViewerMirrorResult}
               onMoveSelected={nudgeSelectedPlacement}
@@ -3422,11 +3505,16 @@ export default function IfcWorkspace() {
           <TileContent>
             <BuilderPanel
               coordinateClipboard={coordinateClipboard}
+              cutPlane={viewerCutPlane}
               document={document}
               selectedId={selectedId}
               selectedIds={batchSelectionIds}
               onAddBodyElement={addBodyElement}
               onCombineSelected={combineSelectedBodies}
+              onCutPlaneActiveChange={setCutPlaneActive}
+              onCutPlaneChange={updateCutPlane}
+              onCutPlaneModeChange={setCutPlaneMode}
+              onCutPlaneReset={resetCutPlane}
               onLoadSystemCoordinates={loadSystemCoordinateClipboard}
               onRemoveBodyFromSelected={removeBodyFromSelected}
               onSplitSelected={splitSelectedBody}

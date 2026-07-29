@@ -134,6 +134,13 @@ export interface NativeBodySplitResult {
   partIds: number[];
 }
 
+export interface NativeCutPlane {
+  /** Punkt auf der Ebene in absoluten IFC-Weltkoordinaten (Modelleinheiten). */
+  point: { x: number; y: number; z: number };
+  /** Einheitenlose Ebenennormale in IFC-Weltachsen. */
+  normal: { x: number; y: number; z: number };
+}
+
 export interface NativeBodyCombineOptions {
   name?: string;
   removeSources?: boolean;
@@ -2422,6 +2429,563 @@ export function splitNativeBodyElement(
     ),
     partIds,
   };
+}
+
+interface NativeAffineFrame {
+  origin: NativeVector3;
+  scale: number;
+  xAxis: NativeVector3;
+  yAxis: NativeVector3;
+  zAxis: NativeVector3;
+}
+
+interface NativeCutLeaf {
+  contextRef: string;
+  itemId: number;
+  transform: NativeAffineFrame;
+}
+
+const IDENTITY_AFFINE_FRAME: NativeAffineFrame = {
+  ...IDENTITY_PLACEMENT_FRAME,
+  scale: 1,
+};
+
+const IFC_BOOLEAN_OPERAND_TYPES = new Set([
+  "IFCADVANCEDBREP",
+  "IFCADVANCEDBREPWITHVOIDS",
+  "IFCBLOCK",
+  "IFCBOOLEANCLIPPINGRESULT",
+  "IFCBOOLEANRESULT",
+  "IFCCSGSOLID",
+  "IFCEXTRUDEDAREASOLID",
+  "IFCEXTRUDEDAREASOLIDTAPERED",
+  "IFCFACETEDBREP",
+  "IFCFACETEDBREPWITHVOIDS",
+  "IFCFIXEDREFERENCESWEPTAREASOLID",
+  "IFCMANIFOLDSOLIDBREP",
+  "IFCREVOLVEDAREASOLID",
+  "IFCREVOLVEDAREASOLIDTAPERED",
+  "IFCSECTIONEDSOLID",
+  "IFCSECTIONEDSOLIDHORIZONTAL",
+  "IFCSPHERE",
+  "IFCSWEPTAREASOLID",
+  "IFCSWEPTDISKSOLID",
+  "IFCSWEPTDISKSOLIDPOLYGONAL",
+]);
+
+/**
+ * Schneidet ein Produkt mit einer frei orientierten Welt-Ebene in zwei neue
+ * IFC-Produkte. Auch verschachtelte IFCMAPPEDITEM-Mehrkörper werden bis zu
+ * ihren boolesch schneidbaren Solid-Operanden aufgelöst. Die Geometrie bleibt
+ * parametrisch/referenzierbar; es findet keine verlustbehaftete Tessellierung
+ * statt.
+ */
+export function splitNativeBodyByPlane(
+  document: NativeIfcDocument,
+  entityId: number,
+  plane: NativeCutPlane,
+): NativeBodySplitResult | undefined {
+  const product = document.entityById.get(entityId);
+  const placement = getNativePlacement(document, entityId);
+  const productFrame = getNativePlacementWorldFrame(document, entityId);
+  const body = getNativeBodyRepresentation(document, entityId);
+  const bodyRepresentation = body.bodyRepresentationId
+    ? document.entityById.get(body.bodyRepresentationId)
+    : undefined;
+  if (
+    !product ||
+    !placement ||
+    !productFrame ||
+    !isPhysicalProduct(product.type) ||
+    bodyRepresentation?.type !== "IFCSHAPEREPRESENTATION"
+  ) {
+    return undefined;
+  }
+
+  const normal = normalizeDirection(plane.normal, { x: 0, y: 0, z: 1 });
+  if (
+    ![plane.point.x, plane.point.y, plane.point.z].every(Number.isFinite) ||
+    ![normal.x, normal.y, normal.z].every(Number.isFinite)
+  ) {
+    return undefined;
+  }
+  const leaves = resolveNativeCutLeaves(
+    document,
+    bodyRepresentation.id,
+    IDENTITY_AFFINE_FRAME,
+    new Set(),
+    0,
+  );
+  if (!leaves?.length) {
+    return undefined;
+  }
+
+  const productPlanePoint = pointInPlacementFrame(productFrame, plane.point);
+  const productPlaneNormal = directionInPlacementFrame(productFrame, normal);
+  const placementEntity = document.entityById.get(placement.placementId);
+  const placementAxis = document.entityById.get(placement.axisPlacementId);
+  const placementPoint = document.entityById.get(placement.pointId);
+  if (
+    placementEntity?.type !== "IFCLOCALPLACEMENT" ||
+    placementAxis?.type !== "IFCAXIS2PLACEMENT3D" ||
+    placementPoint?.type !== "IFCCARTESIANPOINT"
+  ) {
+    return undefined;
+  }
+
+  const next = cloneDocumentEntities(document);
+  let nextId = nextEntityId(next);
+  const allocateId = () => nextId++;
+  const baseName = product.name.trim() || `#${entityId}`;
+  const partIds: number[] = [];
+
+  for (let sideIndex = 0; sideIndex < 2; sideIndex += 1) {
+    const partId = allocateId();
+    const partPlacementId = allocateId();
+    const partPlacementAxisId = allocateId();
+    const partPlacementPointId = allocateId();
+    const partShapeId = allocateId();
+    const partRepresentationId = allocateId();
+    const partName = `${baseName} – Schnitt ${sideIndex === 0 ? "A" : "B"}`;
+    const mappedItemIds: number[] = [];
+    const partGeometryEntities: NativeIfcEntity[] = [];
+
+    for (const leaf of leaves) {
+      const inverseTransform = invertNativeAffineFrame(leaf.transform);
+      const localPoint = transformNativeAffinePoint(
+        inverseTransform,
+        productPlanePoint,
+      );
+      const localNormal = normalizeDirection(
+        transformNativeAffineDirection(inverseTransform, productPlaneNormal),
+        { x: 0, y: 0, z: 1 },
+      );
+      const refDirection = perpendicularDirection(localNormal);
+      const planePointId = allocateId();
+      const planeNormalId = allocateId();
+      const planeRefDirectionId = allocateId();
+      const planeAxisId = allocateId();
+      const planeId = allocateId();
+      const halfSpaceId = allocateId();
+      const clippingResultId = allocateId();
+      const clippingRepresentationId = allocateId();
+      const mapOriginPointId = allocateId();
+      const mapOriginId = allocateId();
+      const representationMapId = allocateId();
+      const targetOriginId = allocateId();
+      const targetAxis1Id = allocateId();
+      const targetAxis2Id = allocateId();
+      const targetAxis3Id = allocateId();
+      const targetOperatorId = allocateId();
+      const mappedItemId = allocateId();
+      mappedItemIds.push(mappedItemId);
+      partGeometryEntities.push(
+        {
+          args: [
+            `(${formatDecimal(localPoint.x)},${formatDecimal(localPoint.y)},${formatDecimal(localPoint.z)})`,
+          ],
+          description: "",
+          globalId: "",
+          id: planePointId,
+          name: "",
+          type: "IFCCARTESIANPOINT",
+        },
+        createDirectionEntity(planeNormalId, localNormal),
+        createDirectionEntity(planeRefDirectionId, refDirection),
+        {
+          args: [
+            `#${planePointId}`,
+            `#${planeNormalId}`,
+            `#${planeRefDirectionId}`,
+          ],
+          description: "",
+          globalId: "",
+          id: planeAxisId,
+          name: "",
+          type: "IFCAXIS2PLACEMENT3D",
+        },
+        {
+          args: [`#${planeAxisId}`],
+          description: "",
+          globalId: "",
+          id: planeId,
+          name: "",
+          type: "IFCPLANE",
+        },
+        {
+          args: [`#${planeId}`, sideIndex === 0 ? ".T." : ".F."],
+          description: "",
+          globalId: "",
+          id: halfSpaceId,
+          name: "",
+          type: "IFCHALFSPACESOLID",
+        },
+        {
+          args: [
+            ".DIFFERENCE.",
+            `#${leaf.itemId}`,
+            `#${halfSpaceId}`,
+          ],
+          description: "",
+          globalId: "",
+          id: clippingResultId,
+          name: "",
+          type: "IFCBOOLEANCLIPPINGRESULT",
+        },
+        {
+          args: [
+            leaf.contextRef,
+            quote("Body"),
+            quote("Clipping"),
+            `(#${clippingResultId})`,
+          ],
+          description: "",
+          globalId: "",
+          id: clippingRepresentationId,
+          name: "Body",
+          type: "IFCSHAPEREPRESENTATION",
+        },
+        {
+          args: ["(0.,0.,0.)"],
+          description: "",
+          globalId: "",
+          id: mapOriginPointId,
+          name: "",
+          type: "IFCCARTESIANPOINT",
+        },
+        {
+          args: [`#${mapOriginPointId}`, "$", "$"],
+          description: "",
+          globalId: "",
+          id: mapOriginId,
+          name: "",
+          type: "IFCAXIS2PLACEMENT3D",
+        },
+        {
+          args: [`#${mapOriginId}`, `#${clippingRepresentationId}`],
+          description: "",
+          globalId: "",
+          id: representationMapId,
+          name: "",
+          type: "IFCREPRESENTATIONMAP",
+        },
+        {
+          args: [
+            `(${formatDecimal(leaf.transform.origin.x)},${formatDecimal(leaf.transform.origin.y)},${formatDecimal(leaf.transform.origin.z)})`,
+          ],
+          description: "",
+          globalId: "",
+          id: targetOriginId,
+          name: "",
+          type: "IFCCARTESIANPOINT",
+        },
+        createDirectionEntity(targetAxis1Id, leaf.transform.xAxis),
+        createDirectionEntity(targetAxis2Id, leaf.transform.yAxis),
+        createDirectionEntity(targetAxis3Id, leaf.transform.zAxis),
+        {
+          args: [
+            `#${targetAxis1Id}`,
+            `#${targetAxis2Id}`,
+            `#${targetOriginId}`,
+            formatDecimal(leaf.transform.scale),
+            `#${targetAxis3Id}`,
+          ],
+          description: "",
+          globalId: "",
+          id: targetOperatorId,
+          name: "",
+          type: "IFCCARTESIANTRANSFORMATIONOPERATOR3D",
+        },
+        {
+          args: [`#${representationMapId}`, `#${targetOperatorId}`],
+          description: "",
+          globalId: "",
+          id: mappedItemId,
+          name: "",
+          type: "IFCMAPPEDITEM",
+        },
+      );
+    }
+
+    const partProduct: NativeIfcEntity = {
+      ...product,
+      args: [...product.args],
+      globalId: createIfcGuid(partId),
+      id: partId,
+      name: partName,
+    };
+    setArg(partProduct.args, 0, quote(partProduct.globalId));
+    setArg(partProduct.args, 2, quote(partName));
+    setArg(partProduct.args, 5, `#${partPlacementId}`);
+    setArg(partProduct.args, 6, `#${partShapeId}`);
+    if (partProduct.args.length > 7) {
+      setArg(partProduct.args, 7, quote(`IFCNATIVE-CUT-${entityId}-${sideIndex + 1}`));
+    }
+    next.push(
+      partProduct,
+      {
+        ...placementEntity,
+        args: placementEntity.args.map((arg, index) =>
+          index === 1 ? `#${partPlacementAxisId}` : arg,
+        ),
+        id: partPlacementId,
+      },
+      {
+        ...placementAxis,
+        args: placementAxis.args.map((arg, index) =>
+          index === 0 ? `#${partPlacementPointId}` : arg,
+        ),
+        id: partPlacementAxisId,
+      },
+      {
+        ...placementPoint,
+        args: [...placementPoint.args],
+        id: partPlacementPointId,
+      },
+      {
+        args: ["$", "$", `(#${partRepresentationId})`],
+        description: "",
+        globalId: "",
+        id: partShapeId,
+        name: "",
+        type: "IFCPRODUCTDEFINITIONSHAPE",
+      },
+      {
+        args: [
+          bodyRepresentation.args[0],
+          quote("Body"),
+          quote("MappedRepresentation"),
+          `(${mappedItemIds.map((id) => `#${id}`).join(",")})`,
+        ],
+        description: "",
+        globalId: "",
+        id: partRepresentationId,
+        name: "Body",
+        type: "IFCSHAPEREPRESENTATION",
+      },
+      ...partGeometryEntities,
+    );
+    copyNativeProductMemberships(document, next, entityId, partId, {
+      includeQuantities: false,
+    });
+    partIds.push(partId);
+  }
+
+  let splitDocument = parseNativeIfcText(
+    serializeEntities(document, next),
+    document.fileName,
+  );
+  splitDocument = removeSpecificNativeProducts(splitDocument, [entityId]);
+  return { document: splitDocument, partIds };
+}
+
+function resolveNativeCutLeaves(
+  document: NativeIfcDocument,
+  representationId: number,
+  parentTransform: NativeAffineFrame,
+  visited: Set<number>,
+  depth: number,
+): NativeCutLeaf[] | undefined {
+  if (depth > 12 || visited.has(representationId)) {
+    return undefined;
+  }
+  const representation = document.entityById.get(representationId);
+  if (representation?.type !== "IFCSHAPEREPRESENTATION") {
+    return undefined;
+  }
+  const nextVisited = new Set(visited);
+  nextVisited.add(representationId);
+  const result: NativeCutLeaf[] = [];
+  for (const itemId of readReferences(representation.args[3] ?? "")) {
+    const item = document.entityById.get(itemId);
+    if (!item) {
+      return undefined;
+    }
+    if (item.type === "IFCMAPPEDITEM") {
+      const representationMap = document.entityById.get(
+        readReferences(item.args[0] ?? "")[0],
+      );
+      const targetOperator = document.entityById.get(
+        readReferences(item.args[1] ?? "")[0],
+      );
+      if (
+        representationMap?.type !== "IFCREPRESENTATIONMAP" ||
+        targetOperator?.type !== "IFCCARTESIANTRANSFORMATIONOPERATOR3D"
+      ) {
+        return undefined;
+      }
+      const mappedRepresentationId = readReferences(
+        representationMap.args[1] ?? "",
+      )[0];
+      const mappingOrigin = readAxis2Placement3dFrame(
+        document,
+        readReferences(representationMap.args[0] ?? "")[0],
+      );
+      const target = readNativeTransformationOperator(
+        document,
+        targetOperator,
+      );
+      if (!mappedRepresentationId || !mappingOrigin || !target) {
+        return undefined;
+      }
+      const mappingOriginFrame: NativeAffineFrame = {
+        ...mappingOrigin,
+        scale: 1,
+      };
+      const mappedTransform = composeNativeAffineFrames(
+        parentTransform,
+        composeNativeAffineFrames(
+          target,
+          invertNativeAffineFrame(mappingOriginFrame),
+        ),
+      );
+      const nested = resolveNativeCutLeaves(
+        document,
+        mappedRepresentationId,
+        mappedTransform,
+        nextVisited,
+        depth + 1,
+      );
+      if (!nested) {
+        return undefined;
+      }
+      result.push(...nested);
+      continue;
+    }
+    if (!IFC_BOOLEAN_OPERAND_TYPES.has(item.type)) {
+      return undefined;
+    }
+    result.push({
+      contextRef: representation.args[0],
+      itemId,
+      transform: parentTransform,
+    });
+  }
+  return result.length ? result : undefined;
+}
+
+function readNativeTransformationOperator(
+  document: NativeIfcDocument,
+  operator: NativeIfcEntity,
+): NativeAffineFrame | undefined {
+  const point = document.entityById.get(readReferences(operator.args[2] ?? "")[0]);
+  if (point?.type !== "IFCCARTESIANPOINT") {
+    return undefined;
+  }
+  const [x, y, z] = parseCoordinateTuple(point.args[0]);
+  const xAxis = readDirectionVector(document, operator.args[0], {
+    x: 1,
+    y: 0,
+    z: 0,
+  });
+  const yAxis = readDirectionVector(document, operator.args[1], {
+    x: 0,
+    y: 1,
+    z: 0,
+  });
+  const zAxis = readDirectionVector(document, operator.args[4],
+    normalizeDirection(crossVectors(xAxis, yAxis), { x: 0, y: 0, z: 1 }),
+  );
+  const scale = readStepNumber(operator.args[3]) ?? 1;
+  if (!Number.isFinite(scale) || Math.abs(scale) < 0.000001) {
+    return undefined;
+  }
+  return { origin: { x, y, z }, scale, xAxis, yAxis, zAxis };
+}
+
+function transformNativeAffinePoint(
+  frame: NativeAffineFrame,
+  point: NativeVector3,
+): NativeVector3 {
+  const rotated = transformFramePoint(frame, point);
+  return {
+    x: frame.origin.x + (rotated.x - frame.origin.x) * frame.scale,
+    y: frame.origin.y + (rotated.y - frame.origin.y) * frame.scale,
+    z: frame.origin.z + (rotated.z - frame.origin.z) * frame.scale,
+  };
+}
+
+function transformNativeAffineDirection(
+  frame: NativeAffineFrame,
+  direction: NativeVector3,
+): NativeVector3 {
+  const rotated = rotateFrameDirection(frame, direction);
+  return {
+    x: rotated.x * frame.scale,
+    y: rotated.y * frame.scale,
+    z: rotated.z * frame.scale,
+  };
+}
+
+function composeNativeAffineFrames(
+  parent: NativeAffineFrame,
+  child: NativeAffineFrame,
+): NativeAffineFrame {
+  return {
+    origin: transformNativeAffinePoint(parent, child.origin),
+    scale: parent.scale * child.scale,
+    xAxis: normalizeDirection(
+      transformNativeAffineDirection(parent, child.xAxis),
+      { x: 1, y: 0, z: 0 },
+    ),
+    yAxis: normalizeDirection(
+      transformNativeAffineDirection(parent, child.yAxis),
+      { x: 0, y: 1, z: 0 },
+    ),
+    zAxis: normalizeDirection(
+      transformNativeAffineDirection(parent, child.zAxis),
+      { x: 0, y: 0, z: 1 },
+    ),
+  };
+}
+
+function invertNativeAffineFrame(frame: NativeAffineFrame): NativeAffineFrame {
+  const inverseScale = 1 / frame.scale;
+  const xAxis = {
+    x: frame.xAxis.x,
+    y: frame.yAxis.x,
+    z: frame.zAxis.x,
+  };
+  const yAxis = {
+    x: frame.xAxis.y,
+    y: frame.yAxis.y,
+    z: frame.zAxis.y,
+  };
+  const zAxis = {
+    x: frame.xAxis.z,
+    y: frame.yAxis.z,
+    z: frame.zAxis.z,
+  };
+  const inverseRotation: NativePlacementFrame = {
+    origin: { x: 0, y: 0, z: 0 },
+    xAxis,
+    yAxis,
+    zAxis,
+  };
+  const rotatedOrigin = rotateFrameDirection(inverseRotation, frame.origin);
+  return {
+    origin: {
+      x: -rotatedOrigin.x * inverseScale,
+      y: -rotatedOrigin.y * inverseScale,
+      z: -rotatedOrigin.z * inverseScale,
+    },
+    scale: inverseScale,
+    xAxis,
+    yAxis,
+    zAxis,
+  };
+}
+
+function perpendicularDirection(normal: NativeVector3): NativeVector3 {
+  const helper =
+    Math.abs(normal.z) < 0.9
+      ? { x: 0, y: 0, z: 1 }
+      : { x: 0, y: 1, z: 0 };
+  return normalizeDirection(crossVectors(helper, normal), {
+    x: 1,
+    y: 0,
+    z: 0,
+  });
 }
 
 /**

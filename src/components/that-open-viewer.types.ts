@@ -29,6 +29,7 @@ export interface ThatOpenViewerProps {
   activeModelDeferredReason?: string;
   activeModelFileName?: string;
   activeModelLoaded?: boolean;
+  cutPlane?: ViewerCutPlaneState;
   focusRequest?: { documentId: string; entityId: number; nonce: number } | null;
   editCapabilities?: ViewerEditCapabilities;
   /**
@@ -39,6 +40,9 @@ export interface ThatOpenViewerProps {
   mirrorRequest?: ViewerMirrorRequest | null;
   models: ThatOpenViewerModel[];
   onLoadActiveModel?(): void;
+  onCutPlaneActiveChange?(active: boolean): void;
+  onCutPlaneChange?(change: ViewerCutPlaneChange): void;
+  onCutPlaneModeChange?(mode: ViewerCutPlaneMode): void;
   onLog?(line: string): void;
   onMirrorApplied?(result: ViewerMirrorResult): void;
   onMoveSelected?(
@@ -62,6 +66,23 @@ export interface ThatOpenViewerProps {
    * mit "Modell neu berechnen" in das Fragments-Modell übernommen werden.
    */
   pendingViewerChanges?: string[];
+}
+
+export type ViewerCutPlaneMode = "translate" | "rotate";
+
+export interface ViewerCutPlaneState {
+  active: boolean;
+  mode: ViewerCutPlaneMode;
+  normal: { x: number; y: number; z: number };
+  /** Absolute IFC-Weltposition in Viewerachsen und Metern. */
+  position?: { x: number; y: number; z: number };
+  /** Änderung erzwingt eine neue Zentrierung auf der aktuellen Auswahl. */
+  resetNonce: number;
+}
+
+export interface ViewerCutPlaneChange {
+  normal: { x: number; y: number; z: number };
+  position: { x: number; y: number; z: number };
 }
 
 export interface ViewerEditCapabilities {
