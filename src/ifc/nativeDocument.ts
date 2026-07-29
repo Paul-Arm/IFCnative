@@ -129,6 +129,22 @@ export interface NativeIfcGeometrySummary {
   shapeRepresentationCount: number;
 }
 
+export interface NativeBodySplitResult {
+  document: NativeIfcDocument;
+  partIds: number[];
+}
+
+export interface NativeBodyCombineOptions {
+  name?: string;
+  removeSources?: boolean;
+}
+
+export interface NativeBodyCombineResult {
+  document: NativeIfcDocument;
+  productId: number;
+  sourceIds: number[];
+}
+
 interface NativeMaterialRow {
   category: string;
   materialName: string;
@@ -2168,6 +2184,726 @@ function updateNativeBodyQuantities(
       setArg(entity.args, 3, values.volume);
     }
   }
+}
+
+/**
+ * Teilt einen einfachen extrudierten Körper entlang seiner Extrusionsachse in
+ * gleich lange, eigenständige IFC-Produkte. Metadaten-Zuordnungen (Psets,
+ * Typen, Material, Gruppen und räumliche Einordnung) werden für die neuen
+ * Teile übernommen; Mengen werden je Teil separat geführt.
+ */
+export function splitNativeBodyElement(
+  document: NativeIfcDocument,
+  entityId: number,
+  requestedPartCount = 2,
+): NativeBodySplitResult | undefined {
+  const product = document.entityById.get(entityId);
+  const placement = getNativePlacement(document, entityId);
+  const body = getNativeBodyRepresentation(document, entityId);
+  const shape = body.shapeId
+    ? document.entityById.get(body.shapeId)
+    : undefined;
+  const bodyRepresentation = body.bodyRepresentationId
+    ? document.entityById.get(body.bodyRepresentationId)
+    : undefined;
+  const solid = body.solidId
+    ? document.entityById.get(body.solidId)
+    : undefined;
+  const placementEntity = placement
+    ? document.entityById.get(placement.placementId)
+    : undefined;
+  const placementAxis = placement
+    ? document.entityById.get(placement.axisPlacementId)
+    : undefined;
+  const bodyItems = readReferences(bodyRepresentation?.args[3] ?? "");
+
+  if (
+    !product ||
+    !placement ||
+    placementEntity?.type !== "IFCLOCALPLACEMENT" ||
+    placementAxis?.type !== "IFCAXIS2PLACEMENT3D" ||
+    shape?.type !== "IFCPRODUCTDEFINITIONSHAPE" ||
+    bodyRepresentation?.type !== "IFCSHAPEREPRESENTATION" ||
+    solid?.type !== "IFCEXTRUDEDAREASOLID" ||
+    !body.canEdit ||
+    !body.height ||
+    body.height <= 0 ||
+    bodyItems.length !== 1 ||
+    bodyItems[0] !== solid.id
+  ) {
+    return undefined;
+  }
+
+  const partCount = Math.min(
+    20,
+    Math.max(2, Math.round(Number(requestedPartCount) || 2)),
+  );
+  const partLength = body.height / partCount;
+  if (!Number.isFinite(partLength) || partLength <= 0) {
+    return undefined;
+  }
+
+  const solidAxisId = readReferences(solid.args[1] ?? "")[0];
+  const solidFrame =
+    readAxis2Placement3dFrame(document, solidAxisId) ??
+    IDENTITY_PLACEMENT_FRAME;
+  const solidDirection = readDirectionVector(document, solid.args[2], {
+    x: 0,
+    y: 0,
+    z: 1,
+  });
+  const productLocalExtrusion = normalizeDirection(
+    rotateFrameDirection(solidFrame, solidDirection),
+    { x: 0, y: 0, z: 1 },
+  );
+  const productPlacementFrame =
+    readAxis2Placement3dFrame(document, placement.axisPlacementId) ??
+    IDENTITY_PLACEMENT_FRAME;
+  const parentLocalExtrusion = normalizeDirection(
+    rotateFrameDirection(productPlacementFrame, productLocalExtrusion),
+    { x: 0, y: 0, z: 1 },
+  );
+
+  const next = cloneDocumentEntities(document);
+  let nextId = nextEntityId(next);
+  const allocateId = () => nextId++;
+  const partLengthStep = formatDecimal(partLength);
+  const footprintArea = nativeBodyFootprintArea(body);
+  const baseName = product.name.trim() || `#${entityId}`;
+  const partIds = [entityId];
+  const nextOriginal = next.find((entity) => entity.id === entityId);
+  const nextOriginalSolid = next.find((entity) => entity.id === solid.id);
+  if (!nextOriginal || !nextOriginalSolid) {
+    return undefined;
+  }
+  setArg(nextOriginal.args, 2, quote(`${baseName} – Teil 1/${partCount}`));
+  nextOriginal.name = `${baseName} – Teil 1/${partCount}`;
+  setArg(nextOriginalSolid.args, 3, partLengthStep);
+  updateNativeBodyQuantities(next, document, entityId, {
+    area: footprintArea,
+    height: partLengthStep,
+    volume: multiplyStepNumbers(footprintArea, partLengthStep),
+  });
+  if (!hasNativeBodyQuantities(document, entityId)) {
+    appendNativeBodyQuantities(
+      next,
+      allocateId,
+      entityId,
+      footprintArea,
+      partLengthStep,
+    );
+  }
+
+  for (let partIndex = 1; partIndex < partCount; partIndex += 1) {
+    const partId = allocateId();
+    const partPlacementId = allocateId();
+    const partPlacementAxisId = allocateId();
+    const partPlacementPointId = allocateId();
+    const partShapeId = allocateId();
+    const partRepresentationId = allocateId();
+    const partSolidId = allocateId();
+    const partName = `${baseName} – Teil ${partIndex + 1}/${partCount}`;
+    const offset = partLength * partIndex;
+    const partPoint = {
+      x: placement.x + parentLocalExtrusion.x * offset,
+      y: placement.y + parentLocalExtrusion.y * offset,
+      z: placement.z + parentLocalExtrusion.z * offset,
+    };
+    const partProduct: NativeIfcEntity = {
+      ...product,
+      args: [...product.args],
+      globalId: createIfcGuid(partId),
+      id: partId,
+      name: partName,
+    };
+    setArg(partProduct.args, 0, quote(partProduct.globalId));
+    setArg(partProduct.args, 2, quote(partName));
+    setArg(partProduct.args, 5, `#${partPlacementId}`);
+    setArg(partProduct.args, 6, `#${partShapeId}`);
+    if (partProduct.args.length > 7) {
+      setArg(
+        partProduct.args,
+        7,
+        quote(`IFCNATIVE-SPLIT-${entityId}-${partIndex + 1}`),
+      );
+    }
+
+    const partRepresentations = readReferences(shape.args[2] ?? "").map(
+      (representationId) =>
+        representationId === bodyRepresentation.id
+          ? partRepresentationId
+          : representationId,
+    );
+    next.push(
+      partProduct,
+      {
+        ...placementEntity,
+        args: [...placementEntity.args],
+        id: partPlacementId,
+      },
+      {
+        ...placementAxis,
+        args: [...placementAxis.args],
+        id: partPlacementAxisId,
+      },
+      {
+        args: [
+          `(${formatDecimal(partPoint.x)},${formatDecimal(partPoint.y)},${formatDecimal(partPoint.z)})`,
+        ],
+        description: "",
+        globalId: "",
+        id: partPlacementPointId,
+        name: "",
+        type: "IFCCARTESIANPOINT",
+      },
+      {
+        ...shape,
+        args: [...shape.args],
+        id: partShapeId,
+      },
+      {
+        ...bodyRepresentation,
+        args: [...bodyRepresentation.args],
+        id: partRepresentationId,
+      },
+      {
+        ...solid,
+        args: [...solid.args],
+        id: partSolidId,
+      },
+    );
+    const nextPlacement = next.find(
+      (entity) => entity.id === partPlacementId,
+    );
+    const nextPlacementAxis = next.find(
+      (entity) => entity.id === partPlacementAxisId,
+    );
+    const nextShape = next.find((entity) => entity.id === partShapeId);
+    const nextRepresentation = next.find(
+      (entity) => entity.id === partRepresentationId,
+    );
+    const nextSolid = next.find((entity) => entity.id === partSolidId);
+    if (
+      !nextPlacement ||
+      !nextPlacementAxis ||
+      !nextShape ||
+      !nextRepresentation ||
+      !nextSolid
+    ) {
+      return undefined;
+    }
+    setArg(nextPlacement.args, 1, `#${partPlacementAxisId}`);
+    setArg(nextPlacementAxis.args, 0, `#${partPlacementPointId}`);
+    setArg(
+      nextShape.args,
+      2,
+      `(${partRepresentations.map((id) => `#${id}`).join(",")})`,
+    );
+    setArg(nextRepresentation.args, 3, `(#${partSolidId})`);
+    setArg(nextSolid.args, 3, partLengthStep);
+
+    copyNativeProductMemberships(document, next, entityId, partId, {
+      includeQuantities: false,
+    });
+    appendNativeBodyQuantities(
+      next,
+      allocateId,
+      partId,
+      footprintArea,
+      partLengthStep,
+    );
+    partIds.push(partId);
+  }
+
+  return {
+    document: parseNativeIfcText(
+      serializeEntities(document, next),
+      document.fileName,
+    ),
+    partIds,
+  };
+}
+
+/**
+ * Führt die Body-Repräsentationen mehrerer Produkte in einem neuen IFC-
+ * Produkt zusammen. IFCMAPPEDITEM bewahrt dabei für jedes Teil seine eigene
+ * Welttransformation und funktioniert auch mit voneinander getrennten Körpern.
+ */
+export function combineNativeBodyElements(
+  document: NativeIfcDocument,
+  requestedEntityIds: Iterable<number>,
+  options: NativeBodyCombineOptions = {},
+): NativeBodyCombineResult | undefined {
+  const sourceIds = unique([...requestedEntityIds]);
+  if (sourceIds.length < 2) {
+    return undefined;
+  }
+
+  const sources = sourceIds.map((id) => {
+    const product = document.entityById.get(id);
+    const placement = getNativePlacement(document, id);
+    const frame = getNativePlacementWorldFrame(document, id);
+    const body = getNativeBodyRepresentation(document, id);
+    const representation = body.bodyRepresentationId
+      ? document.entityById.get(body.bodyRepresentationId)
+      : undefined;
+    return { body, frame, placement, product, representation };
+  });
+  if (
+    sources.some(
+      ({ body, frame, placement, product, representation }) =>
+        !product ||
+        !isPhysicalProduct(product.type) ||
+        !placement ||
+        !frame ||
+        !body.hasRepresentation ||
+        representation?.type !== "IFCSHAPEREPRESENTATION",
+    )
+  ) {
+    return undefined;
+  }
+
+  const primary = sources[0];
+  const primaryProduct = primary.product as NativeIfcEntity;
+  const primaryPlacement = primary.placement as NativePlacementSummary;
+  const primaryFrame = primary.frame as NativeWorldPlacementFrame;
+  const primaryPlacementEntity = document.entityById.get(
+    primaryPlacement.placementId,
+  );
+  const primaryAxis = document.entityById.get(
+    primaryPlacement.axisPlacementId,
+  );
+  const primaryPoint = document.entityById.get(primaryPlacement.pointId);
+  if (
+    primaryPlacementEntity?.type !== "IFCLOCALPLACEMENT" ||
+    primaryAxis?.type !== "IFCAXIS2PLACEMENT3D" ||
+    primaryPoint?.type !== "IFCCARTESIANPOINT"
+  ) {
+    return undefined;
+  }
+
+  const next = cloneDocumentEntities(document);
+  let nextId = nextEntityId(next);
+  const allocateId = () => nextId++;
+  const productId = allocateId();
+  const placementId = allocateId();
+  const placementAxisId = allocateId();
+  const placementPointId = allocateId();
+  const mapOriginId = allocateId();
+  const mapOriginPointId = allocateId();
+  const shapeId = allocateId();
+  const representationId = allocateId();
+  const mappedItemIds: number[] = [];
+  const mappedEntities: NativeIfcEntity[] = [];
+
+  for (const source of sources) {
+    const sourceFrame = source.frame as NativeWorldPlacementFrame;
+    const sourceRepresentation = source.representation as NativeIfcEntity;
+    const axis1 = directionInPlacementFrame(primaryFrame, sourceFrame.xAxis);
+    const axis2 = directionInPlacementFrame(primaryFrame, sourceFrame.yAxis);
+    const axis3 = directionInPlacementFrame(primaryFrame, sourceFrame.zAxis);
+    const translation = pointInPlacementFrame(
+      primaryFrame,
+      sourceFrame.origin,
+    );
+    const axis1Id = allocateId();
+    const axis2Id = allocateId();
+    const axis3Id = allocateId();
+    const originId = allocateId();
+    const operatorId = allocateId();
+    const mapId = allocateId();
+    const mappedItemId = allocateId();
+    mappedItemIds.push(mappedItemId);
+    mappedEntities.push(
+      createDirectionEntity(axis1Id, axis1),
+      createDirectionEntity(axis2Id, axis2),
+      createDirectionEntity(axis3Id, axis3),
+      {
+        args: [
+          `(${formatDecimal(translation.x)},${formatDecimal(translation.y)},${formatDecimal(translation.z)})`,
+        ],
+        description: "",
+        globalId: "",
+        id: originId,
+        name: "",
+        type: "IFCCARTESIANPOINT",
+      },
+      {
+        args: [
+          `#${axis1Id}`,
+          `#${axis2Id}`,
+          `#${originId}`,
+          "1.",
+          `#${axis3Id}`,
+        ],
+        description: "",
+        globalId: "",
+        id: operatorId,
+        name: "",
+        type: "IFCCARTESIANTRANSFORMATIONOPERATOR3D",
+      },
+      {
+        args: [`#${mapOriginId}`, `#${sourceRepresentation.id}`],
+        description: "",
+        globalId: "",
+        id: mapId,
+        name: "",
+        type: "IFCREPRESENTATIONMAP",
+      },
+      {
+        args: [`#${mapId}`, `#${operatorId}`],
+        description: "",
+        globalId: "",
+        id: mappedItemId,
+        name: "",
+        type: "IFCMAPPEDITEM",
+      },
+    );
+  }
+
+  const combinedName =
+    options.name?.trim() || `${primaryProduct.name || "Objekt"} – kombiniert`;
+  const combinedProduct: NativeIfcEntity = {
+    ...primaryProduct,
+    args: [...primaryProduct.args],
+    globalId: createIfcGuid(productId),
+    id: productId,
+    name: combinedName,
+  };
+  setArg(combinedProduct.args, 0, quote(combinedProduct.globalId));
+  setArg(combinedProduct.args, 2, quote(combinedName));
+  setArg(combinedProduct.args, 5, `#${placementId}`);
+  setArg(combinedProduct.args, 6, `#${shapeId}`);
+  if (combinedProduct.args.length > 7) {
+    setArg(combinedProduct.args, 7, quote(`IFCNATIVE-COMBINE-${productId}`));
+  }
+  const contextRef = (primary.representation as NativeIfcEntity).args[0];
+
+  next.push(
+    combinedProduct,
+    {
+      ...primaryPlacementEntity,
+      args: [...primaryPlacementEntity.args],
+      id: placementId,
+    },
+    {
+      ...primaryAxis,
+      args: [...primaryAxis.args],
+      id: placementAxisId,
+    },
+    {
+      ...primaryPoint,
+      args: [...primaryPoint.args],
+      id: placementPointId,
+    },
+    {
+      args: [`#${mapOriginPointId}`, "$", "$"],
+      description: "",
+      globalId: "",
+      id: mapOriginId,
+      name: "",
+      type: "IFCAXIS2PLACEMENT3D",
+    },
+    {
+      args: ["(0.,0.,0.)"],
+      description: "",
+      globalId: "",
+      id: mapOriginPointId,
+      name: "",
+      type: "IFCCARTESIANPOINT",
+    },
+    {
+      args: ["$", "$", `(#${representationId})`],
+      description: "",
+      globalId: "",
+      id: shapeId,
+      name: "",
+      type: "IFCPRODUCTDEFINITIONSHAPE",
+    },
+    {
+      args: [
+        contextRef,
+        quote("Body"),
+        quote("MappedRepresentation"),
+        `(${mappedItemIds.map((id) => `#${id}`).join(",")})`,
+      ],
+      description: "",
+      globalId: "",
+      id: representationId,
+      name: "Body",
+      type: "IFCSHAPEREPRESENTATION",
+    },
+    ...mappedEntities,
+  );
+  const nextPlacement = next.find((entity) => entity.id === placementId);
+  const nextAxis = next.find((entity) => entity.id === placementAxisId);
+  if (!nextPlacement || !nextAxis) {
+    return undefined;
+  }
+  setArg(nextPlacement.args, 1, `#${placementAxisId}`);
+  setArg(nextAxis.args, 0, `#${placementPointId}`);
+
+  // Der primäre Datensatz bestimmt Klassifikation/Metadaten des neuen Teils.
+  // Mengen werden nicht blind übernommen, da sie bei beliebigen Freiform-
+  // Geometrien nicht zuverlässig addiert werden können.
+  copyNativeProductMemberships(document, next, sourceIds[0], productId, {
+    includeQuantities: false,
+  });
+
+  let combinedDocument = parseNativeIfcText(
+    serializeEntities(document, next),
+    document.fileName,
+  );
+  if (options.removeSources !== false) {
+    combinedDocument = removeSpecificNativeProducts(
+      combinedDocument,
+      sourceIds,
+    );
+  }
+  return { document: combinedDocument, productId, sourceIds };
+}
+
+function nativeBodyFootprintArea(body: NativeBodyRepresentationSummary) {
+  if (body.profile === "cylinder" && body.radius !== undefined) {
+    return circleAreaStepNumber(formatDecimal(body.radius));
+  }
+  return multiplyStepNumbers(
+    formatDecimal(body.width ?? 0),
+    formatDecimal(body.depth ?? 0),
+  );
+}
+
+function hasNativeBodyQuantities(
+  document: NativeIfcDocument,
+  entityId: number,
+) {
+  return Boolean(
+    document.propertySetsByEntity
+      .get(entityId)
+      ?.some(
+        (set) =>
+          set.kind === "Qto" && set.name === "IFCnative_BaseQuantities",
+      ),
+  );
+}
+
+function appendNativeBodyQuantities(
+  entities: NativeIfcEntity[],
+  allocateId: () => number,
+  productId: number,
+  footprintArea: string,
+  height: string,
+) {
+  const quantityId = allocateId();
+  const heightQuantityId = allocateId();
+  const areaQuantityId = allocateId();
+  const volumeQuantityId = allocateId();
+  const relationshipId = allocateId();
+  entities.push(
+    {
+      args: [
+        quote(createIfcGuid(quantityId)),
+        "$",
+        quote("IFCnative_BaseQuantities"),
+        "$",
+        quote("SplitBodyQuantities"),
+        `(#${heightQuantityId},#${areaQuantityId},#${volumeQuantityId})`,
+      ],
+      description: "",
+      globalId: createIfcGuid(quantityId),
+      id: quantityId,
+      name: "IFCnative_BaseQuantities",
+      type: "IFCELEMENTQUANTITY",
+    },
+    {
+      args: [quote("Height"), "$", "$", height, "$"],
+      description: "",
+      globalId: "",
+      id: heightQuantityId,
+      name: "Height",
+      type: "IFCQUANTITYLENGTH",
+    },
+    {
+      args: [quote("FootprintArea"), "$", "$", footprintArea, "$"],
+      description: "",
+      globalId: "",
+      id: areaQuantityId,
+      name: "FootprintArea",
+      type: "IFCQUANTITYAREA",
+    },
+    {
+      args: [
+        quote("NetVolume"),
+        "$",
+        "$",
+        multiplyStepNumbers(footprintArea, height),
+        "$",
+      ],
+      description: "",
+      globalId: "",
+      id: volumeQuantityId,
+      name: "NetVolume",
+      type: "IFCQUANTITYVOLUME",
+    },
+    {
+      args: [
+        quote(createIfcGuid(relationshipId)),
+        "$",
+        "$",
+        "$",
+        `(#${productId})`,
+        `#${quantityId}`,
+      ],
+      description: "",
+      globalId: createIfcGuid(relationshipId),
+      id: relationshipId,
+      name: "",
+      type: "IFCRELDEFINESBYPROPERTIES",
+    },
+  );
+}
+
+function copyNativeProductMemberships(
+  document: NativeIfcDocument,
+  entities: NativeIfcEntity[],
+  sourceId: number,
+  targetId: number,
+  options: { includeQuantities: boolean },
+) {
+  for (const relationship of document.relationshipsByEntity.get(sourceId) ??
+    []) {
+    const relationshipEntity = entities.find(
+      (entity) => entity.id === relationship.id,
+    );
+    if (!relationshipEntity) {
+      continue;
+    }
+    if (
+      (relationship.type === "IFCRELAGGREGATES" ||
+        relationship.type === "IFCRELNESTS") &&
+      relationship.targetIds.includes(sourceId)
+    ) {
+      relationshipEntity.args[5] = appendStepReference(
+        relationshipEntity.args[5],
+        targetId,
+      );
+      continue;
+    }
+    if (
+      (relationship.type === "IFCRELCONTAINEDINSPATIALSTRUCTURE" ||
+        relationship.type === "IFCRELREFERENCEDINSPATIALSTRUCTURE") &&
+      relationship.targetIds.includes(sourceId)
+    ) {
+      relationshipEntity.args[4] = appendStepReference(
+        relationshipEntity.args[4],
+        targetId,
+      );
+      continue;
+    }
+    if (
+      !relationship.sourceIds.includes(sourceId) ||
+      !(
+        relationship.type.startsWith("IFCRELDEFINES") ||
+        relationship.type.startsWith("IFCRELASSOCIATES") ||
+        relationship.type.startsWith("IFCRELASSIGNS")
+      )
+    ) {
+      continue;
+    }
+    if (!options.includeQuantities) {
+      const relatedDefinition = relationship.targetIds
+        .map((id) => document.entityById.get(id))
+        .find((entity) => entity?.type === "IFCELEMENTQUANTITY");
+      if (relatedDefinition) {
+        continue;
+      }
+    }
+    relationshipEntity.args[4] = appendStepReference(
+      relationshipEntity.args[4],
+      targetId,
+    );
+  }
+}
+
+function appendStepReference(value: string | undefined, id: number) {
+  const ids = unique([...readReferences(value ?? ""), id]);
+  return `(${ids.map((item) => `#${item}`).join(",")})`;
+}
+
+function directionInPlacementFrame(
+  frame: NativeWorldPlacementFrame,
+  direction: NativeVector3,
+): NativeVector3 {
+  return normalizeDirection(
+    {
+      x: dotVectors(direction, frame.xAxis),
+      y: dotVectors(direction, frame.yAxis),
+      z: dotVectors(direction, frame.zAxis),
+    },
+    { x: 1, y: 0, z: 0 },
+  );
+}
+
+function pointInPlacementFrame(
+  frame: NativeWorldPlacementFrame,
+  point: NativeVector3,
+): NativeVector3 {
+  const delta = {
+    x: point.x - frame.origin.x,
+    y: point.y - frame.origin.y,
+    z: point.z - frame.origin.z,
+  };
+  return {
+    x: dotVectors(delta, frame.xAxis),
+    y: dotVectors(delta, frame.yAxis),
+    z: dotVectors(delta, frame.zAxis),
+  };
+}
+
+function createDirectionEntity(
+  id: number,
+  value: NativeVector3,
+): NativeIfcEntity {
+  return {
+    args: [formatDirectionTuple(value)],
+    description: "",
+    globalId: "",
+    id,
+    name: "",
+    type: "IFCDIRECTION",
+  };
+}
+
+/** Entfernt nur die verbrauchten Produkte, nicht deren Hierarchie-Kinder. */
+function removeSpecificNativeProducts(
+  document: NativeIfcDocument,
+  productIds: Iterable<number>,
+) {
+  const removedIds = new Set(
+    [...productIds].filter((id) => document.entityById.has(id)),
+  );
+  const survivors: NativeIfcEntity[] = [];
+  for (const current of cloneDocumentEntities(document)) {
+    if (removedIds.has(current.id)) {
+      continue;
+    }
+    if (
+      current.type.startsWith("IFCREL") &&
+      pruneRelationshipMembers(current, removedIds) === "drop"
+    ) {
+      removedIds.add(current.id);
+      continue;
+    }
+    survivors.push(current);
+  }
+  collectOrphanedResources(document, survivors, removedIds);
+  return parseNativeIfcText(
+    serializeEntities(
+      document,
+      survivors.filter((entity) => !removedIds.has(entity.id)),
+    ),
+    document.fileName,
+  );
 }
 
 export function addNativeRelationship(

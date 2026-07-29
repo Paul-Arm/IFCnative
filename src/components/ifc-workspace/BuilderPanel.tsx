@@ -1,9 +1,11 @@
 import {
   Box,
   ClipboardPaste,
+  Combine,
   Crosshair,
   MousePointer2,
   Ruler,
+  Scissors,
   Target,
   Trash2,
 } from "lucide-react";
@@ -12,6 +14,7 @@ import { useState, type ReactNode } from "react";
 import {
   getNativeBodyRepresentation,
   getNativeLengthUnitScale,
+  getNativePlacement,
   type NativeBodyProfile,
   type NativeIfcDocument,
 } from "@/ifc";
@@ -21,6 +24,7 @@ import type { BodyElementDraft, CoordinateClipboard } from "./types";
 import {
   Badge,
   Button,
+  CheckboxField,
   DropdownField,
   InlineAlert,
   LabeledInput,
@@ -58,16 +62,22 @@ export function BuilderPanel({
   coordinateClipboard,
   document,
   selectedId,
+  selectedIds,
   onAddBodyElement,
+  onCombineSelected,
   onLoadSystemCoordinates,
   onRemoveBodyFromSelected,
+  onSplitSelected,
 }: {
   coordinateClipboard: CoordinateClipboard | null;
   document: NativeIfcDocument;
   selectedId: number;
+  selectedIds: number[];
   onAddBodyElement(options: BodyElementDraft): void;
+  onCombineSelected(name: string, removeSources: boolean): void;
   onLoadSystemCoordinates(): Promise<CoordinateClipboard | undefined>;
   onRemoveBodyFromSelected(): void;
+  onSplitSelected(partCount: number): void;
 }) {
   const [bodyType, setBodyType] = useState("IFCBUILTELEMENT");
   const [bodyName, setBodyName] = useState("Neuer 3D-Körper");
@@ -83,11 +93,21 @@ export function BuilderPanel({
   const [bodyY, setBodyY] = useState("0");
   const [bodyZ, setBodyZ] = useState("0");
   const [bodyTag, setBodyTag] = useState("IFCNATIVE-BODY");
+  const [splitPartCount, setSplitPartCount] = useState("2");
+  const [combinedName, setCombinedName] = useState("Kombiniertes Teil");
+  const [keepCombineSources, setKeepCombineSources] = useState(false);
   const selectedEntity = document.entityById.get(selectedId);
   const selectedParentId = findHierarchyParentId(document, selectedId);
   const selectedBody = getNativeBodyRepresentation(document, selectedId);
   const unitScale = getNativeLengthUnitScale(document);
   const unitLabel = describeLengthUnit(unitScale);
+  const combineSupported =
+    selectedIds.length >= 2 &&
+    selectedIds.every(
+      (id) =>
+        getNativeBodyRepresentation(document, id).hasRepresentation &&
+        Boolean(getNativePlacement(document, id)),
+    );
 
   const loadCoordinateClipboard = async () => {
     if (!coordinateClipboard) {
@@ -318,6 +338,87 @@ export function BuilderPanel({
             Die Auswahl hat keinen Parent in der IFC-Struktur.
           </InlineAlert>
         ) : null}
+
+        <div className="grid min-w-0 gap-3 border-t border-border/60 pt-3">
+          <div className="grid gap-2 rounded-md border border-border/60 bg-muted/20 p-2.5">
+            <div>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground">
+                Körper teilen
+              </h3>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Teilt den gewählten Extrusionskörper entlang seiner Längsachse
+                in eigenständige IFC-Objekte.
+              </p>
+            </div>
+            <div className="grid grid-cols-[minmax(0,1fr)_minmax(10rem,1fr)] gap-2">
+              <LabeledInput
+                label="Anzahl Proben"
+                keyboardType="numeric"
+                value={splitPartCount}
+                onChangeText={setSplitPartCount}
+              />
+              <Button
+                className="self-end"
+                disabled={!selectedBody.canEdit}
+                title={
+                  selectedBody.canEdit
+                    ? `#${selectedId} in gleich lange Proben teilen`
+                    : "Nur einzelne extrudierte Rechteck- und Kreisprofile können geteilt werden"
+                }
+                variant="outline"
+                onClick={() => onSplitSelected(Number(splitPartCount))}
+              >
+                <Scissors aria-hidden className="size-3.5" />
+                In Proben teilen
+              </Button>
+            </div>
+            {selectedBody.hasRepresentation && !selectedBody.canEdit ? (
+              <InlineAlert tone="warning">
+                Diese Geometrie ist kein einzelner editierbarer Extrusionskörper.
+              </InlineAlert>
+            ) : null}
+          </div>
+
+          <div className="grid gap-2 rounded-md border border-border/60 bg-muted/20 p-2.5">
+            <div>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground">
+                Körper kombinieren
+              </h3>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Verbindet die Mehrfachauswahl zu einem IFC-Objekt mit einer
+                gemeinsamen Mehrkörper-Geometrie.
+              </p>
+            </div>
+            <LabeledInput
+              label="Name des neuen Teils"
+              value={combinedName}
+              onChangeText={setCombinedName}
+            />
+            <CheckboxField
+              checked={keepCombineSources}
+              description="Aus: Die bisherigen Objekte werden nach erfolgreichem Kombinieren entfernt (per Undo rückgängig)."
+              label="Quellobjekte behalten"
+              onCheckedChange={setKeepCombineSources}
+            />
+            <Button
+              disabled={!combineSupported}
+              title={
+                combineSupported
+                  ? `${selectedIds.length} Geometrien zu einem Teil kombinieren`
+                  : "Mindestens zwei platzierte Objekte mit Geometrie per Strg-/Umschalt-Klick auswählen"
+              }
+              variant="default"
+              onClick={() =>
+                onCombineSelected(combinedName, !keepCombineSources)
+              }
+            >
+              <Combine aria-hidden className="size-3.5" />
+              {selectedIds.length >= 2
+                ? `${selectedIds.length} Geometrien kombinieren`
+                : "Mehrfachauswahl kombinieren"}
+            </Button>
+          </div>
+        </div>
 
         <div className="border-t border-border/60 pt-2.5">
           <Button

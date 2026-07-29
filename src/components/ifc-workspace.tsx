@@ -72,6 +72,7 @@ import {
     assignNativeBodyRepresentation,
     buildObjectInfoIndex,
     catalogObjectLabel,
+    combineNativeBodyElements,
     createNativeSampleDocument,
     duplicateNativePropertySet,
     findCatalogObject,
@@ -93,6 +94,7 @@ import {
     removeNativeRelationship,
     resolveNativeMovableProductId,
     serializeNativeIfcDocument,
+    splitNativeBodyElement,
     summarizeNativeIfcGeometry,
     setDiagnosticObjectiveReferences as setNativeDiagnosticObjectiveReferences,
     splitTopLevel,
@@ -1761,6 +1763,57 @@ export default function IfcWorkspace() {
     );
   };
 
+  const splitSelectedBody = (partCount: number) => {
+    const result = splitNativeBodyElement(document, selectedId, partCount);
+    if (!result) {
+      logAction(
+        `builder.splitBody.skip({ id: ${selectedId}, reason: 'unsupported-geometry' });`,
+      );
+      return;
+    }
+    commitDocument(
+      result.document,
+      result.partIds[0],
+      `Split #${selectedId} into ${result.partIds.length} parts`,
+      `builder.splitBody({ id: ${selectedId}, parts: [${result.partIds.join(", ")}] });`,
+      undefined,
+      {
+        pendingKey: `split:${selectedId}`,
+        reloadViewer: true,
+      },
+    );
+    setSelectedIds(new Set(result.partIds));
+  };
+
+  const combineSelectedBodies = (name: string, removeSources: boolean) => {
+    const sourceIds = [
+      selectedId,
+      ...batchSelectionIds.filter((id) => id !== selectedId),
+    ];
+    const result = combineNativeBodyElements(document, sourceIds, {
+      name,
+      removeSources,
+    });
+    if (!result) {
+      logAction(
+        `builder.combineBodies.skip({ ids: [${sourceIds.join(", ")}], reason: 'unsupported-selection' });`,
+      );
+      return;
+    }
+    commitDocument(
+      result.document,
+      result.productId,
+      `Combine ${result.sourceIds.length} objects as #${result.productId}`,
+      `builder.combineBodies({ ids: [${result.sourceIds.join(", ")}], resultId: ${result.productId}, name: ${JSON.stringify(name)}, removeSources: ${removeSources} });`,
+      undefined,
+      {
+        pendingKey: `combine:${result.productId}`,
+        reloadViewer: true,
+      },
+    );
+    setSelectedIds(new Set([result.productId]));
+  };
+
   // Dual-Write statt Fragments-first: die Geometrie wird im nativen Dokument
   // (Source of Truth) zugewiesen und nur zur Anzeige in das Fragments-Modell
   // gespiegelt. Vorher lief dieser Pfad umgekehrt (Fragments-Edit + Rebuild
@@ -3371,9 +3424,12 @@ export default function IfcWorkspace() {
               coordinateClipboard={coordinateClipboard}
               document={document}
               selectedId={selectedId}
+              selectedIds={batchSelectionIds}
               onAddBodyElement={addBodyElement}
+              onCombineSelected={combineSelectedBodies}
               onLoadSystemCoordinates={loadSystemCoordinateClipboard}
               onRemoveBodyFromSelected={removeBodyFromSelected}
+              onSplitSelected={splitSelectedBody}
             />
           </TileContent>
         );

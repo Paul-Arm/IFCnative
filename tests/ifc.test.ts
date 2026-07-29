@@ -66,6 +66,7 @@ import {
     addNativeSiUnit,
     addNativeTypeAssignment,
     assignNativeBodyRepresentation,
+    combineNativeBodyElements,
     createNativeSampleDocument,
     duplicateNativePropertySet,
     getNativeBodyRepresentation,
@@ -86,6 +87,7 @@ import {
     removeNativeRelationship,
     resolveNativeMovableProductId,
     serializeNativeIfcDocument,
+    splitNativeBodyElement,
     summarizeNativeIfcGeometry,
     unquote,
     updateNativeEntity,
@@ -2552,6 +2554,151 @@ test("native body preset creates cylindrical swept solid geometry", async () => 
   );
   assert.ok(modelID >= 0);
   assert.ok(streamGeometryVertexCount(api, modelID) > 0);
+  api.CloseModel(modelID);
+});
+
+test("native cylindrical body splits into independent equal samples", async () => {
+  const sample = createNativeSampleDocument();
+  const storey = sample.entities.find(
+    (entity) => entity.type === "IFCBUILDINGSTOREY",
+  );
+  assert.ok(storey);
+  const withCylinder = addNativeBodyElement(sample, {
+    depth: "2",
+    height: "4",
+    name: "Bohrkern",
+    parentId: storey.id,
+    profile: "cylinder",
+    type: "IFCBUILDINGELEMENTPROXY",
+    width: "2",
+    x: "0",
+    y: "0",
+    z: "0",
+  });
+  const cylinder = withCylinder.entities.find(
+    (entity) => entity.name === "Bohrkern",
+  );
+  assert.ok(cylinder);
+  const withMetadata = addNativePropertySet(
+    withCylinder,
+    cylinder.id,
+    "Pset_Probe",
+    "Status",
+    "bereit",
+  );
+
+  const split = splitNativeBodyElement(withMetadata, cylinder.id, 2);
+  assert.ok(split);
+  assert.equal(split.partIds.length, 2);
+  assert.equal(split.document.entityById.get(split.partIds[0])?.name, "Bohrkern – Teil 1/2");
+  assert.equal(split.document.entityById.get(split.partIds[1])?.name, "Bohrkern – Teil 2/2");
+  for (const id of split.partIds) {
+    const body = getNativeBodyRepresentation(split.document, id);
+    assert.equal(body.profile, "cylinder");
+    assert.equal(body.height, 2);
+    assert.ok(
+      split.document.propertySetsByEntity
+        .get(id)
+        ?.some((set) => set.name === "Pset_Probe"),
+    );
+    assert.equal(
+      split.document.propertySetsByEntity
+        .get(id)
+        ?.find((set) => set.name === "IFCnative_BaseQuantities")
+        ?.values.find((value) => value.name === "NetVolume")?.value,
+      "6.2832",
+    );
+  }
+
+  const api = new WebIFC.IfcAPI();
+  await api.Init();
+  const modelID = api.OpenModel(
+    new TextEncoder().encode(serializeNativeIfcDocument(split.document)),
+  );
+  assert.ok(modelID >= 0);
+  const firstBounds = streamElementWorldBounds(api, modelID, split.partIds[0]);
+  const secondBounds = streamElementWorldBounds(api, modelID, split.partIds[1]);
+  // web-ifc streams the Z-up IFC extrusion in its Y-up mesh coordinates.
+  assert.equal(roundCoordinate(firstBounds.min[1]), 0);
+  assert.equal(roundCoordinate(firstBounds.max[1]), 2);
+  assert.equal(roundCoordinate(secondBounds.min[1]), 2);
+  assert.equal(roundCoordinate(secondBounds.max[1]), 4);
+  api.CloseModel(modelID);
+});
+
+test("native bodies combine into one mapped multi-body product", async () => {
+  const sample = createNativeSampleDocument();
+  const storey = sample.entities.find(
+    (entity) => entity.type === "IFCBUILDINGSTOREY",
+  );
+  assert.ok(storey);
+  const withFirst = addNativeBodyElement(sample, {
+    depth: "1",
+    height: "1",
+    name: "Segment A",
+    parentId: storey.id,
+    type: "IFCBUILDINGELEMENTPROXY",
+    width: "1",
+    x: "0",
+    y: "0",
+    z: "0",
+  });
+  const first = withFirst.entities.find((entity) => entity.name === "Segment A");
+  assert.ok(first);
+  const withSecond = addNativeBodyElement(withFirst, {
+    depth: "1",
+    height: "1",
+    name: "Segment B",
+    parentId: storey.id,
+    type: "IFCBUILDINGELEMENTPROXY",
+    width: "1",
+    x: "3",
+    y: "0",
+    z: "0",
+  });
+  const second = withSecond.entities.find((entity) => entity.name === "Segment B");
+  assert.ok(second);
+  const withMetadata = addNativePropertySet(
+    withSecond,
+    first.id,
+    "Pset_Kombination",
+    "Quelle",
+    "A",
+  );
+
+  const combined = combineNativeBodyElements(
+    withMetadata,
+    [first.id, second.id],
+    { name: "Gemeinsames Teil", removeSources: true },
+  );
+  assert.ok(combined);
+  assert.equal(combined.document.entityById.has(first.id), false);
+  assert.equal(combined.document.entityById.has(second.id), false);
+  assert.equal(combined.document.entityById.get(combined.productId)?.name, "Gemeinsames Teil");
+  assert.equal(
+    combined.document.entities.filter((entity) => entity.type === "IFCMAPPEDITEM")
+      .length,
+    2,
+  );
+  assert.ok(
+    combined.document.propertySetsByEntity
+      .get(combined.productId)
+      ?.some((set) => set.name === "Pset_Kombination"),
+  );
+
+  const api = new WebIFC.IfcAPI();
+  await api.Init();
+  const modelID = api.OpenModel(
+    new TextEncoder().encode(serializeNativeIfcDocument(combined.document)),
+  );
+  assert.ok(modelID >= 0);
+  const bounds = streamElementWorldBounds(api, modelID, combined.productId);
+  assert.equal(roundCoordinate(bounds.min[0]), -0.5);
+  assert.equal(roundCoordinate(bounds.max[0]), 3.5);
+  assert.equal(roundCoordinate(bounds.min[1]), 0);
+  assert.equal(roundCoordinate(bounds.max[1]), 1);
+  assert.equal(roundCoordinate(bounds.min[2]), -0.5);
+  assert.equal(roundCoordinate(bounds.max[2]), 0.5);
   api.CloseModel(modelID);
 });
 
