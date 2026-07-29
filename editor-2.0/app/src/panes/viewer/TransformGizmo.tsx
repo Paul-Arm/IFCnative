@@ -33,7 +33,9 @@ import {
   isNoticeableDelta,
   rayPlaneY,
   scaleFactorFrom,
+  snapYawRad,
 } from "./gizmoMath";
+import { mirroredMoveCommand, mirroredRotateCommand } from "./sceneMirror";
 import {
   ifcToRendererDelta,
   ifcToRendererPoint,
@@ -287,7 +289,12 @@ export default function TransformGizmo({
     } else if (mode === "rotate") {
       const yaw = yawAt(event.clientX, event.clientY);
       if (yaw === null) return;
-      const deltaRad = angleDelta(yaw, current.startYaw);
+      // Raster 5°, mit Umschalt 1° — Vorschau, Anzeige und Commit nutzen
+      // denselben gerasterten Wert.
+      const deltaRad = snapYawRad(
+        angleDelta(yaw, current.startYaw),
+        event.shiftKey,
+      );
       next = { ...current, yawRad: deltaRad };
       onLiveDelta({ x: (deltaRad * 180) / Math.PI, y: 0, z: 0 });
     } else {
@@ -331,30 +338,38 @@ export default function TransformGizmo({
           z: roundMm(current.delta.z),
         };
         if (!isNoticeableDelta(delta)) return;
-        const command = cmdMoveElement(
-          session,
+        // Gespiegelter Command: run/redo ziehen die Szene mit, undo wendet
+        // die Inverse an — kein Zurückspringen UND kein Geister-Offset.
+        const command = mirroredMoveCommand(
+          docId,
+          cmdMoveElement(session, elementId, delta.x, delta.y, delta.z),
           elementId,
-          delta.x,
-          delta.y,
-          delta.z,
+          delta,
         );
         useCommands.getState().execute(docId, command);
-        // Verschiebung direkt in die Szene spiegeln — kein Zurückspringen
-        // bis zum nächsten Voll-Rebuild.
-        const mirrored = access.applyCommittedDelta(
-          elementId,
-          ifcToRendererDelta(delta),
-        );
         onDone(
-          mirrored
+          command.mirrored()
             ? command.label
             : `${command.label} — „Modell neu berechnen" zeigt den Stand.`,
         );
       } else if (mode === "rotate") {
         if (Math.abs(current.yawRad) < ROTATE_EPSILON_RAD) return;
-        const command = cmdRotateElement(session, elementId, current.yawRad);
+        // Pivot in IFC-Metern (Platzierungspunkt) — der Spiegel übersetzt
+        // ihn erst beim Anwenden mit dem originShift der LIVE-Instanz.
+        const coords = capability.placement!.coords;
+        const command = mirroredRotateCommand(
+          docId,
+          cmdRotateElement(session, elementId, current.yawRad),
+          elementId,
+          current.yawRad,
+          { x: coords[0], y: coords[1], z: coords[2] },
+        );
         useCommands.getState().execute(docId, command);
-        onDone(`${command.label} — „Modell neu berechnen" zeigt den Stand.`);
+        onDone(
+          command.mirrored()
+            ? command.label
+            : `${command.label} — „Modell neu berechnen" zeigt den Stand.`,
+        );
       } else {
         const f = current.factors;
         if (

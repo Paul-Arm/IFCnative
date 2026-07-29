@@ -173,7 +173,7 @@ export function useViewerTools(
     } else if (moveTarget !== null) {
       extraParts.push(
         transformMode === "rotate"
-          ? "Rotieren: Ring ziehen (Yaw um Z), Esc bricht ab"
+          ? "Rotieren: Ring ziehen (Raster 5°, Umschalt = 1°), Esc bricht ab"
           : transformMode === "scale"
             ? "Skalieren: Achsgriff ziehen, Umschalt = uniform"
             : "Verschieben: Achsenpfeil ziehen, Esc bricht ab",
