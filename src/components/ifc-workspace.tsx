@@ -121,6 +121,7 @@ import {
     type NativeEntityRemovalPlan,
 } from "@/ifc";
 import { type NativeGraphPreset } from "@/ifc/nativeGraph";
+import { readDesktopStartupIfcAssets } from "@/desktop/startupIfc";
 
 import {
     Button,
@@ -358,6 +359,7 @@ function applyStateAction<T>(current: T, action: SetStateAction<T>) {
 }
 
 export default function IfcWorkspace() {
+  const startupIfcHandledRef = useRef(false);
   const [workspaceBootState] = useState(() => {
     const customWorkspaces = loadCustomWorkspaces();
     const workspace = resolveWorkspace(
@@ -1129,33 +1131,71 @@ export default function IfcWorkspace() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [activeSession, selectedId, structureMode]);
 
+  const openIfcAsset = async (
+    asset: { file: File; name: string },
+    source: "desktop" | "picker",
+  ) => {
+    setLoadingIfcName(asset.name);
+    logAction(
+      `ui.openIfc.start({ file: '${asset.name}', source: '${source}', parser: 'worker' });`,
+    );
+    const parsed = await parseNativeIfcFileInWorker(asset.file, asset.name);
+    const session = replaceDocument(
+      parsed.document,
+      undefined,
+      `ui.openIfc({ file: '${asset.name}', source: '${source}', parser: 'worker', ms: ${Math.round(parsed.elapsedMs)} });`,
+      undefined,
+      undefined,
+      parsed.bytes,
+      asset.file,
+    );
+    rememberRecentIfc(session, "opened", asset.file);
+    setStatusAlert({
+      message: `${asset.name} geöffnet.`,
+      tone: "success",
+    });
+  };
+
   const openIfc = async () => {
     try {
       const asset = await pickIfcFile();
       if (!asset) {
         return;
       }
-      setLoadingIfcName(asset.name);
-      logAction(
-        `ui.openIfc.start({ file: '${asset.name}', parser: 'worker' });`,
-      );
-      const parsed = await parseNativeIfcFileInWorker(asset.file, asset.name);
-      const session = replaceDocument(
-        parsed.document,
-        undefined,
-        `ui.openIfc({ file: '${asset.name}', parser: 'worker', ms: ${Math.round(parsed.elapsedMs)} });`,
-        undefined,
-        undefined,
-        parsed.bytes,
-        asset.file,
-      );
-      rememberRecentIfc(session, "opened", asset.file);
+      await openIfcAsset(asset, "picker");
     } catch (error) {
       reportFailure("IFC konnte nicht geöffnet werden", error);
     } finally {
       setLoadingIfcName("");
     }
   };
+
+  useEffect(() => {
+    if (startupIfcHandledRef.current) {
+      return;
+    }
+    startupIfcHandledRef.current = true;
+    void readDesktopStartupIfcAssets()
+      .then(async (assets) => {
+        const asset = assets[0];
+        if (!asset) {
+          return;
+        }
+        try {
+          await openIfcAsset(asset, "desktop");
+        } catch (error) {
+          reportFailure(
+            `Per Windows übergebene IFC-Datei ${asset.name} konnte nicht geöffnet werden`,
+            error,
+          );
+        } finally {
+          setLoadingIfcName("");
+        }
+      })
+      .catch((error) => {
+        reportFailure("Windows-Dateiübergabe konnte nicht gelesen werden", error);
+      });
+  }, []);
 
   const addIfcFiles = async () => {
     try {
