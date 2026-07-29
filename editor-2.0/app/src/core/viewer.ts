@@ -39,8 +39,16 @@ export interface ViewerViewState {
   sky: boolean;
   /** Bodenraster unterhalb des Modells. */
   grid: boolean;
-  /** Objekt während einer Transform-Vorschau ausblenden (expressId → Alpha). */
-  previewGhost: ReadonlyMap<number, number> | null;
+  /**
+   * Objekte, die während einer Transform-Vorschau VERSTECKT werden (die
+   * Vorschau-Kopie übernimmt die Darstellung). Bewusst über hiddenIds statt
+   * transparencyOverrides gelöst: Der Renderer nimmt AUSGEWÄHLTE Objekte von
+   * Alpha-Overrides aus (alphaForMesh/alphaForBatch) — und das Gizmo-Ziel ist
+   * per Definition ausgewählt, das Original bliebe also voll sichtbar stehen
+   * und die Vorschau wirkte „kaputt". Der hiddenIds-Pfad deckt dagegen
+   * Batches, Instanzen UND die Selektions-Highlight-Meshes ab (Hide-Werkzeug).
+   */
+  previewHidden: ReadonlySet<number> | null;
 }
 
 /**
@@ -87,11 +95,23 @@ export interface ViewerOverlayAccess {
    * Meter) — das Objekt bleibt nach dem Loslassen an der neuen Stelle,
    * ohne teuren Voll-Rebuild. false, wenn die Szene das für diese Entity
    * nicht kann (farb-gemergte Batches) — dann zeigt erst „Neu berechnen"
-   * den Stand.
+   * den Stand. Aufrufer ist der Szene-Spiegel (panes/viewer/sceneMirror):
+   * er ruft die Inverse bei Undo, damit kein Geister-Offset zurückbleibt.
    */
   applyCommittedDelta(
     expressId: number,
     delta: { x: number; y: number; z: number },
+  ): boolean;
+  /**
+   * Committete ROTATION (Yaw, rad — Renderer-Y entspricht IFC-Z, Herleitung
+   * gizmoMath) um den Pivot (Renderer-Rahmen, Meter) in die Szene spiegeln.
+   * false bei farb-gemergten Batches und GPU-Instanzen (die Szene rotiert
+   * nur flache Meshes) — dann zeigt erst „Neu berechnen" den Stand.
+   */
+  applyCommittedRotation(
+    expressId: number,
+    yawRad: number,
+    pivot: { x: number; y: number; z: number },
   ): boolean;
 }
 
@@ -211,8 +231,9 @@ function buildOptions(
     options.ghostExceptIds = new Set();
     options.ghostAlpha = 0.12;
   }
-  if (view.previewGhost && view.previewGhost.size > 0) {
-    options.transparencyOverrides = new Map(view.previewGhost);
+  if (view.previewHidden && view.previewHidden.size > 0) {
+    // Original während der Vorschau ausblenden (Begründung am Feld).
+    for (const id of view.previewHidden) options.hiddenIds!.add(id);
   }
   return options;
 }
@@ -282,8 +303,11 @@ const PREVIEW_EXPRESS_ID = 2_147_480_000;
  */
 const PREVIEW_CACHE_VERTEX_LIMIT = 16_000_000;
 
-/** Spaltenmajor-4×4: T(pivot+delta) · R_y(yaw) · S · T(−pivot). */
-function composePreviewMatrix(
+/**
+ * Spaltenmajor-4×4: T(pivot+delta) · R_y(yaw) · S · T(−pivot).
+ * Exportiert für die Logiktests (tests/m10-preview) — WebGPU-frei.
+ */
+export function composePreviewMatrix(
   out: Float32Array,
   pivot: { x: number; y: number; z: number },
   delta: { x: number; y: number; z: number },
@@ -322,7 +346,7 @@ function createSession(
     xray: false,
     sky: true,
     grid: true,
-    previewGhost: null,
+    previewHidden: null,
   };
   let options = buildOptions(view, true);
   let disposed = false;
@@ -578,7 +602,7 @@ function createSession(
           renderer.ensureMeshResources();
           previewActive = true;
           // Original ausblenden — die Vorschau übernimmt die Darstellung.
-          view.previewGhost = new Map([[expressId, 0.15]]);
+          view.previewHidden = new Set([expressId]);
           refresh();
           return true;
         },
@@ -602,13 +626,18 @@ function createSession(
           if (!previewActive) return;
           previewActive = false;
           renderer.getScene().removeMeshesForEntity(PREVIEW_EXPRESS_ID);
-          view.previewGhost = null;
+          view.previewHidden = null;
           refresh();
         },
 
         applyCommittedDelta(expressId, delta) {
           const scene = renderer.getScene();
           const vec: [number, number, number] = [delta.x, delta.y, delta.z];
+          // translateMeshesForEntity mutiert `MeshData.positions` IN PLACE —
+          // und der meshCache hält REFERENZEN auf genau diese Arrays. Der
+          // Cache zieht also automatisch mit; eine zusätzliche origin-
+          // Verschiebung würde Bounds und spätere Vorschauen DOPPELT
+          // versetzen (Geister-Offset nach dem ersten Commit).
           const moved =
             scene.translateMeshesForEntity(expressId, vec) ||
             scene.translateInstancedEntity(expressId, vec);
@@ -616,15 +645,24 @@ function createSession(
           const device = renderer.getGPUDevice();
           const pipeline = renderer.getPipeline();
           if (device && pipeline) scene.rebuildPendingBatches(device, pipeline);
-          // Geometrie-Cache mitziehen: sonst starten spätere Vorschauen und
-          // Bounds-Abfragen wieder an der alten Position.
-          const cached = meshCache.get(expressId);
-          if (cached) {
-            for (const mesh of cached) {
-              const [ox, oy, oz] = mesh.origin ?? [0, 0, 0];
-              mesh.origin = [ox + delta.x, oy + delta.y, oz + delta.z];
-            }
-          }
+          renderer.requestRender();
+          return true;
+        },
+
+        applyCommittedRotation(expressId, yawRad, pivot) {
+          const scene = renderer.getScene();
+          // Rotiert nur flache Meshes (Szene-Vertrag); positions/normals
+          // werden in place mutiert — der meshCache (geteilte Arrays) zieht
+          // wie beim Verschieben automatisch mit.
+          const rotated = scene.rotateMeshesForEntity(expressId, yawRad, [
+            pivot.x,
+            pivot.y,
+            pivot.z,
+          ]);
+          if (!rotated) return false;
+          const device = renderer.getGPUDevice();
+          const pipeline = renderer.getPipeline();
+          if (device && pipeline) scene.rebuildPendingBatches(device, pipeline);
           renderer.requestRender();
           return true;
         },

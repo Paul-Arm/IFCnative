@@ -19,6 +19,7 @@ import {
 import { useActiveDocument } from "../../store/documents";
 import { useSelection, useSelectionOf } from "../../store/selection";
 import { attachViewerControls } from "./controls";
+import { registerSceneMirror } from "./sceneMirror";
 import { useGeometryRebuild } from "./useGeometryRebuild";
 import { useViewerOverrides } from "./overrides";
 import { useViewerTools } from "./useViewerTools";
@@ -103,6 +104,13 @@ export default function ViewerPane() {
 
   // Overlay-Zugriff (Gizmo/Pick) — ein Objekt je Viewer-Instanz.
   const access = useMemo(() => handle?.overlay() ?? null, [handle]);
+
+  // Szene-Spiegel: gespiegelte Move-/Rotate-Commands (Undo inklusive) lösen
+  // den Viewer-Zugriff über diese Registry auf — dispose-sicher über Rebuilds.
+  useEffect(() => {
+    if (!access || !docId) return;
+    return registerSceneMirror(docId, access);
+  }, [access, docId]);
 
   // Sicht-Zustand ist dokumentgebunden.
   useEffect(() => {

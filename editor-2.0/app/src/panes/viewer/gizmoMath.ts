@@ -158,6 +158,20 @@ export function angleDelta(a: number, b: number): number {
 /** Unterhalb dieser Schwelle (rad ≈ 0,1°) gilt eine Drehung als „nichts". */
 export const ROTATE_EPSILON_RAD = 0.0017;
 
+/** Rotations-Raster: 5° Standard. */
+export const ROTATE_SNAP_COARSE_RAD = (5 * Math.PI) / 180;
+/** Rotations-Raster: 1° im Feinmodus (Umschalt). */
+export const ROTATE_SNAP_FINE_RAD = Math.PI / 180;
+
+/**
+ * Yaw auf das Rotations-Raster runden: 5°-Schritte, mit Umschalt (fein) 1°.
+ * Vorschau, Winkelanzeige und Commit nutzen denselben gerasterten Wert.
+ */
+export function snapYawRad(rad: number, fine: boolean): number {
+  const step = fine ? ROTATE_SNAP_FINE_RAD : ROTATE_SNAP_COARSE_RAD;
+  return Math.round(rad / step) * step;
+}
+
 /** Skalierfaktor aus der Parameterdifferenz entlang einer Achse. */
 export function scaleFactorFrom(ds: number, armLength: number): number {
   return Math.max(0.05, 1 + ds / Math.max(armLength, 1e-3));
