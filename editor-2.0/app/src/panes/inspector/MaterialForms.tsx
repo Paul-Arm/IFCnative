@@ -40,7 +40,7 @@ export function MaterialForm({
 
   const options = useMemo(
     () => existingResourceOptions(session, ["IFCMATERIAL"]),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
     [session, revision],
   );
 

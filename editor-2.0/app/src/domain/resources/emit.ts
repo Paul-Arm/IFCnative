@@ -11,7 +11,6 @@
  * src/ifc/nativeDocument.ts, der ebenfalls schemaunabhängig IFC4-Arity
  * schreibt); der StepExporter serialisiert die Listen positional.
  */
-import { generateIfcGuid } from "@ifc-lite/encoding";
 import type { IfcAttributeValue, NewEntity } from "@ifc-lite/mutations";
 import { EntityExtractor } from "@ifc-lite/parser";
 import type { ModelSession } from "../../core/session";

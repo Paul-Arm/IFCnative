@@ -82,7 +82,7 @@ export default function IdsValidationPane() {
     const colors = idsColors(result, modesRef.current);
     if (colors.size === 0) clearOverrides();
     else applyOverrides(docId, IDS_HIGHLIGHT_SOURCE, colors, NO_HIDDEN);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [result]);
 
   const summary = useMemo(() => {

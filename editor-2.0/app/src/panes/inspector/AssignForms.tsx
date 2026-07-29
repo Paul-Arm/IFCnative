@@ -115,7 +115,7 @@ export function GroupForm({ docId, session, expressId, revision }: TargetProps) 
   const options = useMemo(
     () =>
       existingResourceOptions(session, ["IFCGROUP", "IFCZONE", "IFCSYSTEM"]),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
     [session, revision],
   );
   const useExisting = groupId !== NEW_OPTION;
@@ -182,7 +182,7 @@ export function TypeForm({ docId, session, expressId, revision }: TargetProps) {
         session,
         TYPE_CLASSES.map((def) => def.ifcClass),
       ),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
     [session, revision],
   );
   const useExisting = typeId !== NEW_OPTION;

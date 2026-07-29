@@ -1,4 +1,5 @@
 const js = require("@eslint/js");
+const reactHooks = require("eslint-plugin-react-hooks");
 const tseslint = require("typescript-eslint");
 
 module.exports = [
@@ -27,11 +28,18 @@ module.exports = [
         window: "readonly",
       },
     },
+    plugins: {
+      "react-hooks": reactHooks,
+    },
     rules: {
       "@typescript-eslint/no-unused-vars": [
         "warn",
         { argsIgnorePattern: "^_" },
       ],
+      "react-hooks/rules-of-hooks": "error",
+      // Bewusst aus: Effekte in diesem Repo arbeiten vielfach mit gezielt
+      // unvollständigen Dependency-Arrays (z. B. Viewer-Setup, Shortcuts).
+      "react-hooks/exhaustive-deps": "off",
     },
   },
   {

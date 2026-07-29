@@ -73,7 +73,7 @@ export function useClipBox(
       : modelRangeIfc();
     if (next) setBox(next);
     // selectionBounds/modelRangeIfc lesen access/handle/selection direkt.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [boxRequest, access, handle, selection, setBox]);
 
   const clipBox = useMemo(
@@ -87,7 +87,7 @@ export function useClipBox(
   const rangeIfc = useMemo(
     () => (boxIfc && access ? modelRangeIfc() : null),
     // Bewusst grob: neu rechnen, sobald Panel sichtbar wird oder Box wechselt.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
     [boxIfc, access, handle],
   );
 
