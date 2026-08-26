@@ -49,6 +49,102 @@ export interface ConvertIfcToFragmentsResult {
 
 let nextRequestId = 0;
 
+/**
+ * Ein geteilter, persistenter Worker statt eines Wegwerf-Workers pro
+ * Konvertierung: bei mehreren geladenen IFCs bzw. Rekonvertierungen entfällt
+ * so der wiederholte Worker-/Modul-Bootstrap. Nach kurzer Leerlaufzeit wird
+ * er beendet, um WASM-/Heap-Speicher freizugeben.
+ */
+const WORKER_IDLE_TIMEOUT_MS = 30_000;
+let sharedWorker: Worker | null = null;
+let idleTimer: ReturnType<typeof setTimeout> | undefined;
+const pendingRequests = new Map<
+  number,
+  {
+    onProgress?: (progress: ConvertIfcToFragmentsProgress) => void;
+    resolve: (result: ConvertIfcToFragmentsResult) => void;
+    reject: (error: Error) => void;
+  }
+>();
+
+function acquireWorker() {
+  if (idleTimer !== undefined) {
+    clearTimeout(idleTimer);
+    idleTimer = undefined;
+  }
+  if (sharedWorker) {
+    return sharedWorker;
+  }
+  const worker = new Worker(
+    new URL("./fragmentConversion.worker.ts", import.meta.url),
+    {
+      name: "ifcnative-fragment-converter",
+      type: "module",
+    },
+  );
+  worker.addEventListener(
+    "message",
+    (event: MessageEvent<ConvertIfcToFragmentsWorkerResponse>) => {
+      const message = event.data;
+      const pending = pendingRequests.get(message.requestId);
+      if (!pending) {
+        return;
+      }
+      if (message.ok === "progress") {
+        pending.onProgress?.(message.progress);
+        return;
+      }
+      pendingRequests.delete(message.requestId);
+      if (message.ok) {
+        pending.resolve({
+          coordination: message.coordination,
+          elapsedMs: message.elapsedMs,
+          fragments: message.fragments,
+        });
+      } else {
+        pending.reject(new Error(message.error));
+      }
+      releaseWorkerIfIdle();
+    },
+  );
+  worker.addEventListener("error", (event: ErrorEvent) => {
+    const error = new Error(
+      event.message || "IFC fragment conversion worker failed.",
+    );
+    for (const pending of pendingRequests.values()) {
+      pending.reject(error);
+    }
+    pendingRequests.clear();
+    disposeSharedWorker();
+  });
+  sharedWorker = worker;
+  return worker;
+}
+
+function releaseWorkerIfIdle() {
+  if (pendingRequests.size > 0 || !sharedWorker) {
+    return;
+  }
+  if (idleTimer !== undefined) {
+    clearTimeout(idleTimer);
+  }
+  idleTimer = setTimeout(() => {
+    idleTimer = undefined;
+    if (pendingRequests.size === 0) {
+      disposeSharedWorker();
+    }
+  }, WORKER_IDLE_TIMEOUT_MS);
+}
+
+function disposeSharedWorker() {
+  if (idleTimer !== undefined) {
+    clearTimeout(idleTimer);
+    idleTimer = undefined;
+  }
+  sharedWorker?.terminate();
+  sharedWorker = null;
+}
+
 export function convertIfcToFragmentsInWorker(
   request: ConvertIfcToFragmentsRequest,
   onProgress?: (progress: ConvertIfcToFragmentsProgress) => void,
@@ -61,52 +157,8 @@ export function convertIfcToFragmentsInWorker(
   nextRequestId = requestId;
 
   return new Promise((resolve, reject) => {
-    const worker = new Worker(
-      new URL("./fragmentConversion.worker.ts", import.meta.url),
-      {
-        name: "ifcnative-fragment-converter",
-        type: "module",
-      },
-    );
-
-    const dispose = () => {
-      worker.removeEventListener("message", handleMessage);
-      worker.removeEventListener("error", handleError);
-      worker.terminate();
-    };
-
-    const handleMessage = (
-      event: MessageEvent<ConvertIfcToFragmentsWorkerResponse>,
-    ) => {
-      const message = event.data;
-      if (message.requestId !== requestId) {
-        return;
-      }
-      if (message.ok === "progress") {
-        onProgress?.(message.progress);
-        return;
-      }
-      dispose();
-      if (message.ok) {
-        resolve({
-          coordination: message.coordination,
-          elapsedMs: message.elapsedMs,
-          fragments: message.fragments,
-        });
-      } else {
-        reject(new Error(message.error));
-      }
-    };
-
-    const handleError = (event: ErrorEvent) => {
-      dispose();
-      reject(
-        new Error(event.message || "IFC fragment conversion worker failed."),
-      );
-    };
-
-    worker.addEventListener("message", handleMessage);
-    worker.addEventListener("error", handleError);
+    const worker = acquireWorker();
+    pendingRequests.set(requestId, { onProgress, reject, resolve });
     worker.postMessage({
       ...request,
       requestId,

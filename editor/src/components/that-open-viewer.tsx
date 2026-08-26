@@ -161,14 +161,12 @@ export default function ThatOpenViewer({
           setStatus("ThatOpen viewer error");
         },
         onLog: (line) => onLogRef.current?.(line),
-        onCutPlaneChange: (change) =>
-          onCutPlaneChangeRef.current?.(change),
+        onCutPlaneChange: (change) => onCutPlaneChangeRef.current?.(change),
         onMoveSelected: (entityId, delta) =>
           onMoveSelectedRef.current?.(entityId, delta) ?? null,
         onRotateSelected: (entityId, rotation) =>
           onRotateSelectedRef.current?.(entityId, rotation) ?? null,
-        onTransformResult: (result) =>
-          onMirrorAppliedRef.current?.(result),
+        onTransformResult: (result) => onMirrorAppliedRef.current?.(result),
         onPickCoordinates: (pick) => {
           setLastPick(pick);
           onPickCoordinatesRef.current?.(pick);
@@ -446,8 +444,12 @@ export default function ThatOpenViewer({
             <MousePointer2 aria-hidden size={16} />
           </button>
           <button
-            aria-label={cutPlane?.active ? "Schnittebene verschieben" : "Verschieben (Gizmo)"}
-            className={`ifcnative-thatopen-tool${cutPlane?.active ? cutPlane.mode === "translate" ? " is-active" : "" : moveGizmoActive && moveGizmoMode === "translate" ? " is-active" : ""}`}
+            aria-label={
+              cutPlane?.active
+                ? "Schnittebene verschieben"
+                : "Verschieben (Gizmo)"
+            }
+            className={`ifcnative-thatopen-tool${cutPlane?.active ? (cutPlane.mode === "translate" ? " is-active" : "") : moveGizmoActive && moveGizmoMode === "translate" ? " is-active" : ""}`}
             disabled={
               !activeModelVisible ||
               (!cutPlane?.active && !editCapabilities.canMove)
@@ -456,9 +458,9 @@ export default function ThatOpenViewer({
               cutPlane?.active
                 ? "Schnittebene verschieben · W"
                 : editCapabilities.canMove
-                ? "Verschieben (Gizmo) · W"
-                : editCapabilities.transformDisabledReason ??
-                  "Auswahl kann nicht verschoben werden"
+                  ? "Verschieben (Gizmo) · W"
+                  : (editCapabilities.transformDisabledReason ??
+                    "Auswahl kann nicht verschoben werden")
             }
             type="button"
             onClick={() => {
@@ -476,8 +478,10 @@ export default function ThatOpenViewer({
             <Move aria-hidden size={16} />
           </button>
           <button
-            aria-label={cutPlane?.active ? "Schnittebene rotieren" : "Rotieren (Gizmo)"}
-            className={`ifcnative-thatopen-tool${cutPlane?.active ? cutPlane.mode === "rotate" ? " is-active" : "" : moveGizmoActive && moveGizmoMode === "rotate" ? " is-active" : ""}`}
+            aria-label={
+              cutPlane?.active ? "Schnittebene rotieren" : "Rotieren (Gizmo)"
+            }
+            className={`ifcnative-thatopen-tool${cutPlane?.active ? (cutPlane.mode === "rotate" ? " is-active" : "") : moveGizmoActive && moveGizmoMode === "rotate" ? " is-active" : ""}`}
             disabled={
               !activeModelVisible ||
               (!cutPlane?.active && !editCapabilities.canRotate)
@@ -486,9 +490,9 @@ export default function ThatOpenViewer({
               cutPlane?.active
                 ? "Schnittebene rotieren · R"
                 : editCapabilities.canRotate
-                ? "Rotieren (Gizmo) · R"
-                : editCapabilities.transformDisabledReason ??
-                  "Auswahl kann nicht rotiert werden"
+                  ? "Rotieren (Gizmo) · R"
+                  : (editCapabilities.transformDisabledReason ??
+                    "Auswahl kann nicht rotiert werden")
             }
             type="button"
             onClick={() => {
@@ -585,7 +589,8 @@ export default function ThatOpenViewer({
         ) : null}
         {cutPlane?.active ? (
           <div className="ifcnative-thatopen-cut-plane-hint">
-            Schnittebene · {cutPlane.mode === "translate" ? "Verschieben" : "Rotieren"}
+            Schnittebene ·{" "}
+            {cutPlane.mode === "translate" ? "Verschieben" : "Rotieren"}
             <span>W / R · Esc beendet</span>
           </div>
         ) : null}
@@ -780,9 +785,7 @@ async function createThatOpenRuntime(
     }
   };
   fragments.list.onItemSet.add(handleFragmentModelSet);
-  fragments.core.models.materials.list.onItemSet.add(
-    handleFragmentMaterialSet,
-  );
+  fragments.core.models.materials.list.onItemSet.add(handleFragmentMaterialSet);
   const viewCube = createThatOpenViewCube(THREE, container, world.camera);
   const moveGizmo = createMoveGizmo(
     THREE,
@@ -856,8 +859,8 @@ async function createThatOpenRuntime(
         pendingKey: receipt.pendingKey,
         reason: change.applied ? undefined : "fragments-edit-failed",
       });
-      await highlight(receipt.documentId, receipt.entityId).catch(() =>
-        undefined,
+      await highlight(receipt.documentId, receipt.entityId).catch(
+        () => undefined,
       );
       callbacks.onLog(
         `fragments.transformFinished({ id: ${receipt.entityId}, mode: '${change.mode}', applied: ${change.applied} });`,
@@ -893,6 +896,15 @@ async function createThatOpenRuntime(
     mirrorEntityIdByLocalId: Map<number, number>;
     mirrorLocalIdByEntityId: Map<number, number>;
     model: import("@thatopen/fragments").FragmentsModel;
+    /**
+     * Partiell rekonvertierte Teilmodelle (Mirror-Op "reconvert-subset"):
+     * eigenständige Fragments-Modelle, die einzelne Produkte des Basismodells
+     * ersetzen. entityIds = native Express-Ids, die das Subset rendert.
+     */
+    subsetModels: {
+      entityIds: Set<number>;
+      model: import("@thatopen/fragments").FragmentsModel;
+    }[];
     /**
      * Rebase aus der Konvertierung (COORDINATE_TO_ORIGIN): lokaler Modellraum
      * → echte IFC-Welt (Viewer-Achsen, Meter) und Umkehrung. Die zusätzliche
@@ -989,8 +1001,11 @@ async function createThatOpenRuntime(
     const objectRotation = new THREE.Matrix3()
       .setFromMatrix4(loaded.model.object.matrixWorld)
       .invert();
-    const result = new THREE.Vector3(direction.x, direction.y, direction.z)
-      .applyMatrix3(objectRotation);
+    const result = new THREE.Vector3(
+      direction.x,
+      direction.y,
+      direction.z,
+    ).applyMatrix3(objectRotation);
     if (loaded.modelToIfcWorld) {
       result.applyMatrix3(
         new THREE.Matrix3().setFromMatrix4(loaded.modelToIfcWorld),
@@ -1007,6 +1022,19 @@ async function createThatOpenRuntime(
   // mirrorEntityIdByLocalId.
   const resolveLocalId = (loaded: LoadedViewerModel, entityId: number) =>
     loaded.mirrorLocalIdByEntityId.get(entityId) ?? entityId;
+
+  // Besitzendes Fragments-Modell eines Elements: partiell rekonvertierte
+  // Produkte rendern (und editieren) in ihrem Subset-Modell, alle anderen im
+  // Basismodell. Rückwärts, damit das jüngste Subset gewinnt.
+  const resolveElementModel = (loaded: LoadedViewerModel, entityId: number) => {
+    for (let index = loaded.subsetModels.length - 1; index >= 0; index -= 1) {
+      const subset = loaded.subsetModels[index];
+      if (subset.entityIds.has(entityId)) {
+        return subset.model;
+      }
+    }
+    return loaded.model;
+  };
 
   const cutPlaneGizmo = createCutPlaneGizmo(
     THREE,
@@ -1045,16 +1073,20 @@ async function createThatOpenRuntime(
     }
     const entityId = callbacks.getSelectedId(documentId);
     const localId = resolveLocalId(loaded, entityId);
-    const box = await loaded.model.getMergedBox([localId]).catch(() => null);
+    const targetModel = resolveElementModel(loaded, entityId);
+    const box = await targetModel.getMergedBox([localId]).catch(() => null);
     if (updateNonce !== cutPlaneUpdateNonce) {
       return;
     }
-    const boxCenter = box && !box.isEmpty()
-      ? fragmentModelPointToScene(box.getCenter(new THREE.Vector3()), loaded.model.object)
-      : new THREE.Vector3();
-    const boxSize = box && !box.isEmpty()
-      ? box.getSize(new THREE.Vector3()).length()
-      : 4;
+    const boxCenter =
+      box && !box.isEmpty()
+        ? fragmentModelPointToScene(
+            box.getCenter(new THREE.Vector3()),
+            targetModel.object,
+          )
+        : new THREE.Vector3();
+    const boxSize =
+      box && !box.isEmpty() ? box.getSize(new THREE.Vector3()).length() : 4;
     const position = state.position
       ? ifcWorldToScenePoint(loaded, state.position)
       : boxCenter;
@@ -1146,8 +1178,19 @@ async function createThatOpenRuntime(
         continue;
       }
       await fragments.core.disposeModel(modelId).catch(() => undefined);
+      callbacks.onLog(`viewer.disposeDeltaModel({ modelId: '${modelId}' });`);
+    }
+  }
+
+  async function disposeSubsetModels(loaded: LoadedViewerModel) {
+    for (const subset of loaded.subsetModels.splice(0)) {
+      await disposeDeltaModels(subset.model.modelId);
+      documentIdByModelId.delete(subset.model.modelId);
+      await fragments.core
+        .disposeModel(subset.model.modelId)
+        .catch(() => undefined);
       callbacks.onLog(
-        `viewer.disposeDeltaModel({ modelId: '${modelId}' });`,
+        `viewer.disposeSubsetModel({ modelId: '${subset.model.modelId}' });`,
       );
     }
   }
@@ -1327,6 +1370,7 @@ async function createThatOpenRuntime(
     await moveGizmo.updateSelection(0, null);
     for (const [documentId, loaded] of modelsByDocumentId) {
       if (!nextDocumentIds.has(documentId)) {
+        await disposeSubsetModels(loaded);
         await disposeDeltaModels(loaded.model.modelId);
         await fragments.core
           .disposeModel(loaded.model.modelId)
@@ -1344,6 +1388,7 @@ async function createThatOpenRuntime(
         continue;
       }
       if (current) {
+        await disposeSubsetModels(current);
         await disposeDeltaModels(current.model.modelId);
         await fragments.core
           .disposeModel(current.model.modelId)
@@ -1420,6 +1465,7 @@ async function createThatOpenRuntime(
         mirrorLocalIdByEntityId: new Map(),
         model,
         modelToIfcWorld,
+        subsetModels: [],
       });
       documentIdByModelId.set(model.modelId, nextModel.documentId);
       callbacks.onLog(
@@ -1471,13 +1517,22 @@ async function createThatOpenRuntime(
       return;
     }
     const localId = resolveLocalId(loaded, entityId);
-    // Auch die Delta-Modelle des Elternmodells einfärben — per Edit-API
-    // erzeugte/verschobene Elemente rendern dort, nicht im Basismodell.
+    // Auch die Subset- und Delta-Modelle des Elternmodells einfärben — per
+    // Edit-API oder Rekonvertierung erzeugte Elemente rendern dort, nicht im
+    // Basismodell.
+    const subsetParentIds = new Set(
+      loaded.subsetModels
+        .filter((subset) => subset.entityIds.has(localId))
+        .map((subset) => subset.model.modelId),
+    );
     const targets: Record<string, Set<number>> = {};
     for (const [modelId, model] of fragments.list) {
+      const parentId = model.isDeltaModel ? model.parentModelId : undefined;
       if (
         modelId === loaded.model.modelId ||
-        (model.isDeltaModel && model.parentModelId === loaded.model.modelId)
+        subsetParentIds.has(modelId) ||
+        (parentId !== undefined &&
+          (parentId === loaded.model.modelId || subsetParentIds.has(parentId)))
       ) {
         targets[modelId] = new Set([localId]);
       }
@@ -1486,7 +1541,10 @@ async function createThatOpenRuntime(
     await fragments.highlight(selectionMaterial, targets);
     await fragments.core.update(true);
     if (options?.updateGizmo ?? true) {
-      await moveGizmo.updateSelection(localId, loaded.model);
+      await moveGizmo.updateSelection(
+        localId,
+        resolveElementModel(loaded, entityId),
+      );
     }
   }
 
@@ -1497,9 +1555,10 @@ async function createThatOpenRuntime(
     const activeDocumentId = callbacks.getActiveDocumentId();
     const activeModel = modelsByDocumentId.get(activeDocumentId);
     if (activeModel) {
+      const selectedId = callbacks.getSelectedId(activeDocumentId);
       await moveGizmo.updateSelection(
-        resolveLocalId(activeModel, callbacks.getSelectedId(activeDocumentId)),
-        activeModel.model,
+        resolveLocalId(activeModel, selectedId),
+        resolveElementModel(activeModel, selectedId),
       );
     }
     await world.camera.fitToItems(getFitItems());
@@ -1514,7 +1573,7 @@ async function createThatOpenRuntime(
     await highlight(documentId, entityId).catch(() => undefined);
     await world.camera
       .fitToItems({
-        [loaded.model.modelId]: new Set([localId]),
+        [resolveElementModel(loaded, entityId).modelId]: new Set([localId]),
       })
       .catch(() => fit());
     callbacks.onLog(
@@ -1586,6 +1645,14 @@ async function createThatOpenRuntime(
         await loaded.model.setVisible([localId], false);
       }
     }
+    // Rendert ein Subset-Modell das Element (partielle Rekonvertierung),
+    // dort ebenfalls ausblenden — das Basismodell kennt es ggf. gar nicht.
+    for (const subset of loaded.subsetModels) {
+      if (subset.entityIds.has(entityId)) {
+        await subset.model.setVisible([entityId], false).catch(() => undefined);
+        subset.entityIds.delete(entityId);
+      }
+    }
     loaded.mirrorLocalIdByEntityId.delete(entityId);
     loaded.mirrorEntityIdByLocalId.delete(localId);
   }
@@ -1608,8 +1675,9 @@ async function createThatOpenRuntime(
     try {
       if (op.kind === "move") {
         const localId = resolveLocalId(loaded, op.entityId);
+        const targetModel = resolveElementModel(loaded, op.entityId);
         const [element] = await fragments.core.editor.getElements(
-          loaded.model.modelId,
+          targetModel.modelId,
           [localId],
         );
         if (!element) {
@@ -1630,11 +1698,11 @@ async function createThatOpenRuntime(
           disposed = true;
           const requests = element.getRequests();
           if (requests?.length) {
-            await fragments.core.editor.edit(loaded.model.modelId, requests);
+            await fragments.core.editor.edit(targetModel.modelId, requests);
           }
           await setFragmentElementVisible(
             fragments.core,
-            loaded.model,
+            targetModel,
             element,
             true,
           );
@@ -1648,11 +1716,41 @@ async function createThatOpenRuntime(
         for (const cascadeId of op.cascadeEntityIds ?? []) {
           await removeMirroredElement(loaded, cascadeId);
         }
+      } else if (op.kind === "reconvert-subset") {
+        callbacks.onStatus(
+          `Rekonvertiere ${op.entityIds.length} Element(e) von ${loaded.fileName}…`,
+        );
+        const converted = await convertIfcToFragmentsInWorker({
+          bytes: null,
+          fileName: loaded.fileName,
+          text: op.subsetIfcText,
+          wasmPath: resolvePublicAssetUrl("wasm/"),
+        });
+        const subsetModel = await fragments.core.load(converted.fragments, {
+          modelId: `${loaded.model.modelId}-subset-${++loadCounter}`,
+          raw: true,
+        });
+        documentIdByModelId.set(subsetModel.modelId, request.documentId);
+        // Ersetzte Produkte im Basismodell und in früheren Subsets ausblenden
+        // — ihre neue Gestalt rendert ab jetzt das frische Teilmodell.
+        for (const entityId of op.replacedEntityIds) {
+          await removeMirroredElement(loaded, entityId).catch(() => undefined);
+        }
+        loaded.subsetModels.push({
+          entityIds: new Set(op.entityIds),
+          model: subsetModel,
+        });
+        callbacks.onLog(
+          `viewer.reconvertSubset({ file: '${loaded.fileName}', modelId: '${subsetModel.modelId}', entities: [${op.entityIds.join(", ")}], replaced: [${op.replacedEntityIds.join(", ")}], ms: ${Math.round(converted.elapsedMs)} });`,
+        );
+        callbacks.onStatus(
+          `Teilmodell aktualisiert (${op.entityIds.length} Element(e), ${Math.round(converted.elapsedMs)} ms).`,
+        );
       } else if (op.kind === "replace-body") {
         const localId = resolveLocalId(loaded, op.entityId);
         const changed = await replaceFragmentElementGeometry(
           fragments.core,
-          loaded.model,
+          resolveElementModel(loaded, op.entityId),
           localId,
           op,
           THREE,
@@ -1709,14 +1807,18 @@ async function createThatOpenRuntime(
         loaded.mirrorEntityIdByLocalId.set(created.localId, op.entityId);
       }
       await fragments.core.update(true);
+      const focusEntityId =
+        op.kind === "reconvert-subset" ? op.entityIds[0] : op.entityId;
       if (
         request.documentId === callbacks.getActiveDocumentId() &&
-        callbacks.getSelectedId(request.documentId) === op.entityId
+        callbacks.getSelectedId(request.documentId) === focusEntityId
       ) {
-        await highlight(request.documentId, op.entityId).catch(() => undefined);
+        await highlight(request.documentId, focusEntityId).catch(
+          () => undefined,
+        );
       }
       callbacks.onLog(
-        `viewer.mirror({ kind: '${op.kind}', file: '${loaded.fileName}', id: ${op.entityId} });`,
+        `viewer.mirror({ kind: '${op.kind}', file: '${loaded.fileName}', id: ${focusEntityId} });`,
       );
       return finish(true);
     } catch (reason) {
@@ -1733,12 +1835,16 @@ async function createThatOpenRuntime(
     canvas.removeEventListener("webglcontextrestored", handleContextRestored);
     resizeObserver.disconnect();
     themeObserver.disconnect();
-    world.camera.controls.removeEventListener("update", updateFragmentsOnCamera);
+    world.camera.controls.removeEventListener(
+      "update",
+      updateFragmentsOnCamera,
+    );
     fragments.list.onItemSet.remove(handleFragmentModelSet);
     fragments.core.models.materials.list.onItemSet.remove(
       handleFragmentMaterialSet,
     );
     for (const loaded of modelsByDocumentId.values()) {
+      await disposeSubsetModels(loaded).catch(() => undefined);
       await disposeDeltaModels(loaded.model.modelId).catch(() => undefined);
       await fragments.core
         .disposeModel(loaded.model.modelId)
@@ -1822,8 +1928,8 @@ async function setFragmentElementVisible(
   visible: boolean,
 ) {
   const relatedModelIds = new Set(
-    [model.modelId, model.deltaModelId].filter(
-      (value): value is string => Boolean(value),
+    [model.modelId, model.deltaModelId].filter((value): value is string =>
+      Boolean(value),
     ),
   );
   const promises: Promise<void>[] = [];
@@ -2195,118 +2301,120 @@ function createMoveGizmo(
   };
 
   const commitCurrentTransform = async () => {
-    const result = await enqueue(async (): Promise<{
-      commit: MoveGizmoCommit;
-      receipt: MoveGizmoCommitReceipt;
-    } | null> => {
-      const target = editMeshes;
-      const meshes = editMeshes;
-      const element = editElement;
-      if (
-        !target ||
-        !meshes ||
-        !element ||
-        !selectedModel ||
-        selectedLocalId <= 0
-      ) {
-        onSceneChange();
-        return null;
-      }
-      target.updateWorldMatrix(true, false);
-      const endWorldPosition = target.getWorldPosition(new THREE.Vector3());
-      const endWorldQuaternion = target.getWorldQuaternion(
-        new THREE.Quaternion(),
-      );
-      const delta = endWorldPosition.sub(dragStartWorldPosition);
-      const rotation = {
-        x: target.rotation.x - dragStartLocalRotation.x,
-        y: target.rotation.y - dragStartLocalRotation.y,
-        z: target.rotation.z - dragStartLocalRotation.z,
-      };
-      const rotationChange = readRotationChange(THREE, target, rotation);
-      const changed =
-        mode === "translate"
-          ? delta.lengthSq() >= 0.000001
-          : dragStartWorldQuaternion.angleTo(endWorldQuaternion) >= 0.000001;
-      if (!changed) {
-        onSceneChange();
-        return null;
-      }
+    const result = await enqueue(
+      async (): Promise<{
+        commit: MoveGizmoCommit;
+        receipt: MoveGizmoCommitReceipt;
+      } | null> => {
+        const target = editMeshes;
+        const meshes = editMeshes;
+        const element = editElement;
+        if (
+          !target ||
+          !meshes ||
+          !element ||
+          !selectedModel ||
+          selectedLocalId <= 0
+        ) {
+          onSceneChange();
+          return null;
+        }
+        target.updateWorldMatrix(true, false);
+        const endWorldPosition = target.getWorldPosition(new THREE.Vector3());
+        const endWorldQuaternion = target.getWorldQuaternion(
+          new THREE.Quaternion(),
+        );
+        const delta = endWorldPosition.sub(dragStartWorldPosition);
+        const rotation = {
+          x: target.rotation.x - dragStartLocalRotation.x,
+          y: target.rotation.y - dragStartLocalRotation.y,
+          z: target.rotation.z - dragStartLocalRotation.z,
+        };
+        const rotationChange = readRotationChange(THREE, target, rotation);
+        const changed =
+          mode === "translate"
+            ? delta.lengthSq() >= 0.000001
+            : dragStartWorldQuaternion.angleTo(endWorldQuaternion) >= 0.000001;
+        if (!changed) {
+          onSceneChange();
+          return null;
+        }
 
-      const localId = selectedLocalId;
-      const model = selectedModel;
-      const change: MoveGizmoChange = {
-        localId,
-        mode,
-        ...(mode === "translate"
-          ? { delta: { x: delta.x, y: delta.y, z: delta.z } }
-          : { rotation, rotationChange }),
-      };
-      let applied = false;
-      try {
-        // That Open EditElements commit order:
-        // setMeshes -> dispose preview -> getRequests -> editor.edit -> update.
-        // No native STEP write happens until this worker-backed edit succeeds.
-        await element.setMeshes(meshes);
+        const localId = selectedLocalId;
+        const model = selectedModel;
+        const change: MoveGizmoChange = {
+          localId,
+          mode,
+          ...(mode === "translate"
+            ? { delta: { x: delta.x, y: delta.y, z: delta.z } }
+            : { rotation, rotationChange }),
+        };
+        let applied = false;
+        try {
+          // That Open EditElements commit order:
+          // setMeshes -> dispose preview -> getRequests -> editor.edit -> update.
+          // No native STEP write happens until this worker-backed edit succeeds.
+          await element.setMeshes(meshes);
+          controls.detach();
+          helper.visible = false;
+          element.disposeMeshes(meshes);
+          editMeshes = null;
+          const requests = element.getRequests();
+          if (requests?.length) {
+            await fragments.editor.edit(model.modelId, requests);
+            applied = true;
+          }
+        } catch (reason) {
+          onLog(
+            `viewer.transformGizmo.editError(${JSON.stringify(String(reason))});`,
+          );
+        }
         controls.detach();
         helper.visible = false;
-        element.disposeMeshes(meshes);
+        if (editMeshes) {
+          editMeshes.removeFromParent();
+          try {
+            element.disposeMeshes(editMeshes);
+          } catch {
+            // The owning model may already be disposed after a reload.
+          }
+        }
+        editElement = null;
         editMeshes = null;
-        const requests = element.getRequests();
-        if (requests?.length) {
-          await fragments.editor.edit(model.modelId, requests);
-          applied = true;
-        }
-      } catch (reason) {
-        onLog(
-          `viewer.transformGizmo.editError(${JSON.stringify(String(reason))});`,
+        removeOrphanEditMeshes();
+        // Restore visibility using the tutorial's base/delta rule. After a
+        // successful edit the stale base item stays hidden and the delta item
+        // becomes visible.
+        await setFragmentElementVisible(fragments, model, element, true).catch(
+          () => undefined,
         );
-      }
-      controls.detach();
-      helper.visible = false;
-      if (editMeshes) {
-        editMeshes.removeFromParent();
+        await fragments.update(true).catch(() => undefined);
+        if (!applied) {
+          onLog(
+            `viewer.transformGizmo.reverted({ id: ${localId}, reason: 'fragments-edit-failed' });`,
+          );
+          return null;
+        }
+        // Fragments is now authoritative for the completed interaction. Mirror
+        // the resulting world transform into the native STEP document so IFC
+        // export preserves the same pose.
+        let receipt: MoveGizmoCommitReceipt | null = null;
         try {
-          element.disposeMeshes(editMeshes);
-        } catch {
-          // The owning model may already be disposed after a reload.
+          receipt = await onNativeSync(change);
+        } catch (reason) {
+          onLog(
+            `viewer.transformGizmo.nativeSyncError(${JSON.stringify(String(reason))});`,
+          );
         }
-      }
-      editElement = null;
-      editMeshes = null;
-      removeOrphanEditMeshes();
-      // Restore visibility using the tutorial's base/delta rule. After a
-      // successful edit the stale base item stays hidden and the delta item
-      // becomes visible.
-      await setFragmentElementVisible(fragments, model, element, true).catch(
-        () => undefined,
-      );
-      await fragments.update(true).catch(() => undefined);
-      if (!applied) {
-        onLog(
-          `viewer.transformGizmo.reverted({ id: ${localId}, reason: 'fragments-edit-failed' });`,
-        );
-        return null;
-      }
-      // Fragments is now authoritative for the completed interaction. Mirror
-      // the resulting world transform into the native STEP document so IFC
-      // export preserves the same pose.
-      let receipt: MoveGizmoCommitReceipt | null = null;
-      try {
-        receipt = await onNativeSync(change);
-      } catch (reason) {
-        onLog(
-          `viewer.transformGizmo.nativeSyncError(${JSON.stringify(String(reason))});`,
-        );
-      }
-      if (!receipt) {
-        onLog(
-          `viewer.transformGizmo.nativeSyncRejected({ id: ${localId} });`,
-        );
-        return null;
-      }
-      return { commit: { ...change, applied }, receipt };
-    });
+        if (!receipt) {
+          onLog(
+            `viewer.transformGizmo.nativeSyncRejected({ id: ${localId} });`,
+          );
+          return null;
+        }
+        return { commit: { ...change, applied }, receipt };
+      },
+    );
     if (!result) {
       return;
     }

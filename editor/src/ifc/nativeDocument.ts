@@ -238,11 +238,59 @@ export function parseNativeIfcText(
   const headerText = readHeader(text);
   const schema = readSchema(headerText) ?? "UNKNOWN";
   const entities = readEntities(text, diagnostics);
+  const core = buildCoreIndexes(entities);
+  const derived = buildDerivedIndexes(entities, core.entityById);
+
+  diagnostics.push(`Loaded ${entities.length.toLocaleString()} STEP entities.`);
+  diagnostics.push(`Detected schema: ${schema}.`);
+  diagnostics.push(
+    `Indexed ${derived.relationships.length.toLocaleString()} relationships.`,
+  );
+  diagnostics.push(
+    ...validateNativeDocument(
+      text,
+      schema,
+      entities,
+      core.entityById,
+      derived.relationships,
+      derived.units,
+      core.outgoingRefs,
+    ),
+  );
+
+  return {
+    diagnostics,
+    entities,
+    fileName,
+    headerText,
+    schema,
+    ...core,
+    ...derived,
+  };
+}
+
+interface NativeCoreIndexes {
+  entityById: Map<number, NativeIfcEntity>;
+  entitiesByType: Map<string, NativeIfcEntity[]>;
+  outgoingRefs: Map<number, number[]>;
+  incomingRefs: Map<number, NativeIfcEntity[]>;
+}
+
+interface NativeDerivedIndexes {
+  relationships: NativeIfcRelationship[];
+  relationshipsByEntity: Map<number, NativeIfcRelationship[]>;
+  propertySetsByEntity: Map<number, NativeIfcPropertySet[]>;
+  typeAssignmentsByEntity: Map<number, NativeIfcTypeAssignment[]>;
+  resourcesByEntity: Map<number, string[]>;
+  units: string[];
+  spatialRoots: NativeIfcTreeNode[];
+}
+
+function buildCoreIndexes(entities: NativeIfcEntity[]): NativeCoreIndexes {
   const entityById = new Map(entities.map((entity) => [entity.id, entity]));
   const entitiesByType = new Map<string, NativeIfcEntity[]>();
   const outgoingRefs = new Map<number, number[]>();
   const incomingRefs = new Map<number, NativeIfcEntity[]>();
-
   for (const entity of entities) {
     pushMapValue(entitiesByType, entity.type, entity);
     const refs = readUniqueReferencesFromArgs(entity.args);
@@ -251,7 +299,13 @@ export function parseNativeIfcText(
       pushMapValue(incomingRefs, ref, entity);
     }
   }
+  return { entitiesByType, entityById, incomingRefs, outgoingRefs };
+}
 
+function buildDerivedIndexes(
+  entities: NativeIfcEntity[],
+  entityById: Map<number, NativeIfcEntity>,
+): NativeDerivedIndexes {
   const relationships = readRelationships(entities);
   const relationshipsByEntity = new Map<number, NativeIfcRelationship[]>();
   for (const relationship of relationships) {
@@ -270,46 +324,598 @@ export function parseNativeIfcText(
     }
   }
 
-  const propertySetsByEntity = readPropertySets(entities, entityById);
-  const typeAssignmentsByEntity = readTypeAssignments(entities, entityById);
-  const resourcesByEntity = readResources(entities, entityById);
-  const units = readUnits(entities, entityById);
-  const spatialRoots = buildSpatialRoots(entities, entityById, relationships);
+  return {
+    propertySetsByEntity: readPropertySets(entities, entityById),
+    relationships,
+    relationshipsByEntity,
+    resourcesByEntity: readResources(entities, entityById),
+    spatialRoots: buildSpatialRoots(entities, entityById, relationships),
+    typeAssignmentsByEntity: readTypeAssignments(entities, entityById),
+    units: readUnits(entities, entityById),
+  };
+}
 
-  diagnostics.push(`Loaded ${entities.length.toLocaleString()} STEP entities.`);
-  diagnostics.push(`Detected schema: ${schema}.`);
-  diagnostics.push(
-    `Indexed ${relationships.length.toLocaleString()} relationships.`,
-  );
-  diagnostics.push(
-    ...validateNativeDocument(
-      text,
-      schema,
-      entities,
-      entityById,
-      relationships,
-      units,
-    ),
-  );
+/**
+ * Reine Geometrie-/Platzierungs-Typen: Änderungen daran beeinflussen keinen
+ * abgeleiteten Index (Baum, Psets, Typen, Ressourcen, Einheiten) — diese
+ * Indizes können bei solchen Edits unverändert übernommen werden.
+ */
+const GEOMETRY_ONLY_TYPES = new Set([
+  "IFCARBITRARYCLOSEDPROFILEDEF",
+  "IFCAXIS2PLACEMENT2D",
+  "IFCAXIS2PLACEMENT3D",
+  "IFCBOOLEANCLIPPINGRESULT",
+  "IFCBOOLEANRESULT",
+  "IFCCARTESIANPOINT",
+  "IFCCARTESIANPOINTLIST2D",
+  "IFCCARTESIANPOINTLIST3D",
+  "IFCCARTESIANTRANSFORMATIONOPERATOR3D",
+  "IFCCARTESIANTRANSFORMATIONOPERATOR3DNONUNIFORM",
+  "IFCCIRCLEPROFILEDEF",
+  "IFCCLOSEDSHELL",
+  "IFCDIRECTION",
+  "IFCELLIPSEPROFILEDEF",
+  "IFCEXTRUDEDAREASOLID",
+  "IFCFACE",
+  "IFCFACEBOUND",
+  "IFCFACEOUTERBOUND",
+  "IFCFACETEDBREP",
+  "IFCHALFSPACESOLID",
+  "IFCINDEXEDPOLYGONALFACE",
+  "IFCINDEXEDPOLYGONALFACEWITHVOIDS",
+  "IFCLOCALPLACEMENT",
+  "IFCMAPPEDITEM",
+  "IFCOPENSHELL",
+  "IFCPLANE",
+  "IFCPOLYGONALBOUNDEDHALFSPACE",
+  "IFCPOLYGONALFACESET",
+  "IFCPOLYLINE",
+  "IFCPOLYLOOP",
+  "IFCPRODUCTDEFINITIONSHAPE",
+  "IFCREPRESENTATIONMAP",
+  "IFCSHAPEREPRESENTATION",
+  "IFCSHELLBASEDSURFACEMODEL",
+  "IFCTRIANGULATEDFACESET",
+]);
+
+/** Ab dieser Änderungsmenge lohnt sich der volle Index-Neuaufbau. */
+const INCREMENTAL_REBUILD_LIMIT = 4096;
+
+export interface NativeDocumentDelta {
+  added: NativeIfcEntity[];
+  changed: { before: NativeIfcEntity; after: NativeIfcEntity }[];
+  removed: NativeIfcEntity[];
+}
+
+function sameEntityArgs(left: string[], right: string[]) {
+  if (left.length !== right.length) {
+    return false;
+  }
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Normalisiert eine mutierte/neue Entität exakt wie der STEP-Reparse: Typ in
+ * Großschreibung, name/globalId/description aus den args abgeleitet. Direkt
+ * gesetzte Felder werden — wie beim früheren Serialize+Parse — verworfen.
+ */
+function normalizeCommittedEntity(entity: NativeIfcEntity): NativeIfcEntity {
+  const type = entity.type.toUpperCase();
+  return {
+    args: entity.args,
+    description: readEntityDescription(type, entity.args),
+    globalId: unquote(entity.args[0]) ?? "",
+    id: entity.id,
+    name: readEntityName(type, entity.args),
+    type,
+  };
+}
+
+/**
+ * Übernimmt einen mutierten Entity-Stand OHNE STEP-Serialize+Reparse in ein
+ * neues Dokument. Unveränderte Entities werden per Referenz aus dem alten
+ * Dokument übernommen (Structural Sharing — macht Undo-Snapshots und Diffs
+ * billig); für kleine Änderungsmengen werden die Kern-Indizes inkrementell
+ * gepatcht statt neu gebaut. Abgeleitete Indizes (Baum, Psets, Typen,
+ * Ressourcen, Einheiten) werden nur neu berechnet, wenn Nicht-Geometrie-Typen
+ * betroffen sind. Die Validierung läuft bewusst nicht im Edit-Pfad.
+ */
+export function rebuildNativeDocument(
+  document: NativeIfcDocument,
+  nextEntities: NativeIfcEntity[],
+): NativeIfcDocument {
+  const changed: { before: NativeIfcEntity; after: NativeIfcEntity }[] = [];
+  const added: NativeIfcEntity[] = [];
+  const entities: NativeIfcEntity[] = new Array(nextEntities.length);
+  for (let index = 0; index < nextEntities.length; index += 1) {
+    const candidate = nextEntities[index];
+    const before = document.entityById.get(candidate.id);
+    if (before === candidate) {
+      entities[index] = before;
+    } else if (
+      before &&
+      before.type === candidate.type &&
+      sameEntityArgs(before.args, candidate.args)
+    ) {
+      entities[index] = before;
+    } else {
+      const normalized = normalizeCommittedEntity(candidate);
+      entities[index] = normalized;
+      if (before) {
+        changed.push({ after: normalized, before });
+      } else {
+        added.push(normalized);
+      }
+    }
+  }
+
+  const removed: NativeIfcEntity[] = [];
+  if (entities.length - added.length !== document.entities.length) {
+    const nextIds = new Set<number>();
+    for (const entity of entities) {
+      nextIds.add(entity.id);
+    }
+    for (const entity of document.entities) {
+      if (!nextIds.has(entity.id)) {
+        removed.push(entity);
+      }
+    }
+  }
+
+  if (changed.length === 0 && added.length === 0 && removed.length === 0) {
+    return document;
+  }
+
+  for (let index = 1; index < entities.length; index += 1) {
+    if (entities[index - 1].id > entities[index].id) {
+      entities.sort((left, right) => left.id - right.id);
+      break;
+    }
+  }
+
+  const affectedCount = changed.length + added.length + removed.length;
+  const useIncremental =
+    affectedCount <= INCREMENTAL_REBUILD_LIMIT &&
+    affectedCount * 4 < entities.length;
+  const core = useIncremental
+    ? patchCoreIndexes(document, changed, added, removed)
+    : buildCoreIndexes(entities);
+
+  const affectsDerived =
+    changed.some(
+      (pair) =>
+        !GEOMETRY_ONLY_TYPES.has(pair.before.type) ||
+        !GEOMETRY_ONLY_TYPES.has(pair.after.type),
+    ) ||
+    added.some((entity) => !GEOMETRY_ONLY_TYPES.has(entity.type)) ||
+    removed.some((entity) => !GEOMETRY_ONLY_TYPES.has(entity.type));
+  const derived: NativeDerivedIndexes = affectsDerived
+    ? buildDerivedIndexes(entities, core.entityById)
+    : {
+        propertySetsByEntity: document.propertySetsByEntity,
+        relationships: document.relationships,
+        relationshipsByEntity: document.relationshipsByEntity,
+        resourcesByEntity: document.resourcesByEntity,
+        spatialRoots: document.spatialRoots,
+        typeAssignmentsByEntity: document.typeAssignmentsByEntity,
+        units: document.units,
+      };
+
+  // Bei Metadaten-/Beziehungs-Änderungen wird die Validierung wie beim
+  // früheren Reparse aktualisiert; reine Geometrie-Edits ändern keine
+  // Referenz-/Beziehungswarnungen und behalten den bisherigen Stand.
+  const diagnostics = affectsDerived
+    ? [
+        `Loaded ${entities.length.toLocaleString()} STEP entities.`,
+        `Detected schema: ${document.schema}.`,
+        `Indexed ${derived.relationships.length.toLocaleString()} relationships.`,
+        ...validateNativeDocument(
+          null,
+          document.schema,
+          entities,
+          core.entityById,
+          derived.relationships,
+          derived.units,
+          core.outgoingRefs,
+        ),
+      ]
+    : document.diagnostics;
 
   return {
     diagnostics,
     entities,
-    entitiesByType,
-    entityById,
-    fileName,
-    headerText,
-    incomingRefs,
-    outgoingRefs,
-    propertySetsByEntity,
-    relationships,
-    relationshipsByEntity,
-    resourcesByEntity,
-    schema,
-    spatialRoots,
-    typeAssignmentsByEntity,
-    units,
+    fileName: document.fileName,
+    headerText: document.headerText,
+    schema: document.schema,
+    ...core,
+    ...derived,
   };
+}
+
+/** Copy-on-write-Patch der Kern-Indizes für kleine Änderungsmengen. */
+function patchCoreIndexes(
+  document: NativeIfcDocument,
+  changed: { before: NativeIfcEntity; after: NativeIfcEntity }[],
+  added: NativeIfcEntity[],
+  removed: NativeIfcEntity[],
+): NativeCoreIndexes {
+  const entityById = new Map(document.entityById);
+  const entitiesByType = new Map(document.entitiesByType);
+  const outgoingRefs = new Map(document.outgoingRefs);
+  const incomingRefs = new Map(document.incomingRefs);
+  const copiedTypeArrays = new Set<string>();
+  const copiedIncoming = new Set<number>();
+
+  const typeArrayFor = (type: string) => {
+    if (!copiedTypeArrays.has(type)) {
+      entitiesByType.set(type, [...(entitiesByType.get(type) ?? [])]);
+      copiedTypeArrays.add(type);
+    }
+    return entitiesByType.get(type) as NativeIfcEntity[];
+  };
+  const incomingFor = (id: number) => {
+    if (!copiedIncoming.has(id)) {
+      incomingRefs.set(id, [...(incomingRefs.get(id) ?? [])]);
+      copiedIncoming.add(id);
+    }
+    return incomingRefs.get(id) as NativeIfcEntity[];
+  };
+  const removeById = (list: NativeIfcEntity[], id: number) => {
+    const index = list.findIndex((entity) => entity.id === id);
+    if (index >= 0) {
+      list.splice(index, 1);
+    }
+  };
+  const replaceById = (list: NativeIfcEntity[], entity: NativeIfcEntity) => {
+    const index = list.findIndex((item) => item.id === entity.id);
+    if (index >= 0) {
+      list[index] = entity;
+    } else {
+      list.push(entity);
+    }
+  };
+  const insertSorted = (list: NativeIfcEntity[], entity: NativeIfcEntity) => {
+    list.push(entity);
+    if (list.length > 1 && list[list.length - 2].id > entity.id) {
+      list.sort((left, right) => left.id - right.id);
+    }
+  };
+
+  for (const entity of removed) {
+    entityById.delete(entity.id);
+    removeById(typeArrayFor(entity.type), entity.id);
+    for (const ref of document.outgoingRefs.get(entity.id) ?? []) {
+      removeById(incomingFor(ref), entity.id);
+    }
+    outgoingRefs.delete(entity.id);
+  }
+
+  for (const { after, before } of changed) {
+    entityById.set(after.id, after);
+    if (before.type === after.type) {
+      replaceById(typeArrayFor(after.type), after);
+    } else {
+      removeById(typeArrayFor(before.type), before.id);
+      insertSorted(typeArrayFor(after.type), after);
+    }
+    const beforeRefs = document.outgoingRefs.get(before.id) ?? [];
+    const afterRefs = readUniqueReferencesFromArgs(after.args);
+    outgoingRefs.set(after.id, afterRefs);
+    const beforeSet = new Set(beforeRefs);
+    const afterSet = new Set(afterRefs);
+    for (const ref of beforeRefs) {
+      if (afterSet.has(ref)) {
+        // Identität der geänderten Entität in den Ziel-Listen erneuern.
+        replaceById(incomingFor(ref), after);
+      } else {
+        removeById(incomingFor(ref), before.id);
+      }
+    }
+    for (const ref of afterRefs) {
+      if (!beforeSet.has(ref)) {
+        incomingFor(ref).push(after);
+      }
+    }
+  }
+
+  for (const entity of added) {
+    entityById.set(entity.id, entity);
+    insertSorted(typeArrayFor(entity.type), entity);
+    const refs = readUniqueReferencesFromArgs(entity.args);
+    outgoingRefs.set(entity.id, refs);
+    for (const ref of refs) {
+      incomingFor(ref).push(entity);
+    }
+  }
+
+  return { entitiesByType, entityById, incomingRefs, outgoingRefs };
+}
+
+/**
+ * Entity-Delta zwischen zwei Dokumentständen. Dank Structural Sharing von
+ * rebuildNativeDocument sind das überwiegend Pointer-Vergleiche — die Basis
+ * für speicherarme Undo/Redo-Einträge statt vollständiger Snapshots.
+ */
+export function diffNativeDocuments(
+  before: NativeIfcDocument,
+  after: NativeIfcDocument,
+): NativeDocumentDelta {
+  const delta: NativeDocumentDelta = { added: [], changed: [], removed: [] };
+  for (const entity of after.entities) {
+    const previous = before.entityById.get(entity.id);
+    if (!previous) {
+      delta.added.push(entity);
+    } else if (
+      previous !== entity &&
+      (previous.type !== entity.type ||
+        !sameEntityArgs(previous.args, entity.args))
+    ) {
+      delta.changed.push({ after: entity, before: previous });
+    }
+  }
+  if (before.entities.length !== after.entities.length - delta.added.length) {
+    for (const entity of before.entities) {
+      if (!after.entityById.has(entity.id)) {
+        delta.removed.push(entity);
+      }
+    }
+  }
+  return delta;
+}
+
+export function isEmptyNativeDocumentDelta(delta: NativeDocumentDelta) {
+  return (
+    delta.added.length === 0 &&
+    delta.changed.length === 0 &&
+    delta.removed.length === 0
+  );
+}
+
+/** Wendet ein Delta vorwärts (redo) oder rückwärts (undo) an. */
+export function applyNativeDocumentDelta(
+  document: NativeIfcDocument,
+  delta: NativeDocumentDelta,
+  direction: "undo" | "redo",
+): NativeIfcDocument {
+  const undo = direction === "undo";
+  const removeIds = new Set(
+    (undo ? delta.added : delta.removed).map((entity) => entity.id),
+  );
+  const replaceById = new Map(
+    delta.changed.map((pair) => [
+      pair.before.id,
+      undo ? pair.before : pair.after,
+    ]),
+  );
+  const entities: NativeIfcEntity[] = [];
+  for (const entity of document.entities) {
+    if (removeIds.has(entity.id)) {
+      continue;
+    }
+    entities.push(replaceById.get(entity.id) ?? entity);
+  }
+  for (const entity of undo ? delta.removed : delta.added) {
+    if (!document.entityById.has(entity.id)) {
+      entities.push(entity);
+    }
+  }
+  return rebuildNativeDocument(document, entities);
+}
+
+export interface NativeSubsetIfc {
+  entityCount: number;
+  text: string;
+}
+
+/**
+ * Extrahiert ein eigenständiges Mini-IFC für die angegebenen Produkte:
+ * Platzierungsketten, Geometrie, Repräsentationskontexte, Einheiten,
+ * Öffnungen, Stile/Material-Farben und die (auf das Subset reduzierte)
+ * räumliche Kette. Express-Ids bleiben erhalten, damit Fragments-localIds
+ * weiter den nativen Ids entsprechen. Grundlage der partiellen
+ * Viewer-Rekonvertierung — statt bei Split/Combine das ganze IFC neu zu
+ * konvertieren, wird nur dieses Subset konvertiert und im geladenen Modell
+ * ausgetauscht. Liefert undefined, wenn das Subset zu groß ausfällt.
+ */
+export function extractNativeSubsetIfc(
+  document: NativeIfcDocument,
+  productIds: number[],
+  options?: { maxEntities?: number },
+): NativeSubsetIfc | undefined {
+  const seeds = productIds.filter((id) => document.entityById.has(id));
+  if (seeds.length === 0) {
+    return undefined;
+  }
+  const maxEntities =
+    options?.maxEntities ??
+    Math.max(4096, Math.ceil(document.entities.length / 2));
+  const include = new Set<number>();
+  const queue: number[] = [];
+  // Beziehungen, deren Objektliste auf das Subset reduziert wird (geteilte
+  // Containment-/Material-Zuweisungen dürfen keine fremden Produkte ziehen).
+  const prunedListByRelId = new Map<
+    number,
+    { listIndex: number; kept: Set<number> }
+  >();
+  // Räumliche Kette nur als Hülle: eigene Geometrie (z. B. Gelände einer
+  // Site) bleibt im Basismodell und darf nicht doppelt gerendert werden.
+  const strippedRepresentationIds = new Set<number>();
+
+  const enqueue = (id: number) => {
+    if (!include.has(id) && document.entityById.has(id)) {
+      include.add(id);
+      queue.push(id);
+    }
+  };
+  const drainQueue = () => {
+    while (queue.length) {
+      const id = queue.pop() as number;
+      if (include.size > maxEntities) {
+        return false;
+      }
+      if (strippedRepresentationIds.has(id)) {
+        continue;
+      }
+      for (const ref of document.outgoingRefs.get(id) ?? []) {
+        enqueue(ref);
+      }
+    }
+    return true;
+  };
+  const pruneListArg = (
+    rel: NativeIfcEntity,
+    listIndex: number,
+    keepIds: Iterable<number>,
+  ) => {
+    include.add(rel.id);
+    let entry = prunedListByRelId.get(rel.id);
+    if (!entry) {
+      entry = { kept: new Set(), listIndex };
+      prunedListByRelId.set(rel.id, entry);
+    }
+    for (const keepId of keepIds) {
+      entry.kept.add(keepId);
+    }
+    // Alle Nicht-Listen-Referenzen (OwnerHistory, RelatingStructure/Material)
+    // müssen im Subset auflösbar bleiben.
+    const listRefs = new Set(readReferences(rel.args[listIndex] ?? ""));
+    for (const ref of document.outgoingRefs.get(rel.id) ?? []) {
+      if (!listRefs.has(ref)) {
+        enqueue(ref);
+      }
+    }
+  };
+  const includeSpatialShell = (id: number) => {
+    const entity = document.entityById.get(id);
+    if (!entity || include.has(id)) {
+      return;
+    }
+    include.add(id);
+    strippedRepresentationIds.add(id);
+    const representationRefs = new Set(readReferences(entity.args[6] ?? ""));
+    for (const ref of document.outgoingRefs.get(id) ?? []) {
+      if (!representationRefs.has(ref)) {
+        enqueue(ref);
+      }
+    }
+  };
+
+  for (const project of document.entitiesByType.get("IFCPROJECT") ?? []) {
+    enqueue(project.id);
+  }
+  for (const id of seeds) {
+    enqueue(id);
+  }
+  if (!drainQueue()) {
+    return undefined;
+  }
+
+  // Öffnungen und Material-Zuweisungen der betroffenen Produkte mitnehmen —
+  // ohne sie verlören rekonvertierte Wände ihre Löcher bzw. Farben.
+  const seedSet = new Set(seeds);
+  for (const id of seeds) {
+    for (const incoming of document.incomingRefs.get(id) ?? []) {
+      if (incoming.type === "IFCRELVOIDSELEMENT") {
+        enqueue(incoming.id);
+      } else if (incoming.type === "IFCRELASSOCIATESMATERIAL") {
+        const related = readReferences(incoming.args[4] ?? "").filter((ref) =>
+          seedSet.has(ref),
+        );
+        if (related.length) {
+          pruneListArg(incoming, 4, related);
+        }
+      }
+    }
+  }
+
+  // Räumliche Kette (Storey → Building → Site → Project) als Hülle anbinden.
+  const chainQueue = [...seeds];
+  const chainVisited = new Set<number>();
+  while (chainQueue.length) {
+    const id = chainQueue.pop() as number;
+    if (chainVisited.has(id)) {
+      continue;
+    }
+    chainVisited.add(id);
+    for (const incoming of document.incomingRefs.get(id) ?? []) {
+      if (incoming.type === "IFCRELCONTAINEDINSPATIALSTRUCTURE") {
+        const related = readReferences(incoming.args[4] ?? "").filter((ref) =>
+          seedSet.has(ref),
+        );
+        if (!related.length) {
+          continue;
+        }
+        // Shell VOR dem Prune registrieren — sonst zöge die RelatingStructure-
+        // Referenz die volle Geometrie der Site/des Storeys ins Subset.
+        const structureId = readReferences(incoming.args[5] ?? "")[0];
+        if (structureId) {
+          includeSpatialShell(structureId);
+          chainQueue.push(structureId);
+        }
+        pruneListArg(incoming, 4, related);
+      } else if (incoming.type === "IFCRELAGGREGATES") {
+        if (!readReferences(incoming.args[5] ?? "").includes(id)) {
+          continue;
+        }
+        const parentId = readReferences(incoming.args[4] ?? "")[0];
+        if (parentId) {
+          includeSpatialShell(parentId);
+          chainQueue.push(parentId);
+        }
+        pruneListArg(incoming, 5, [id]);
+      }
+    }
+  }
+  if (!drainQueue()) {
+    return undefined;
+  }
+
+  // Direkte Stile und Material-Darstellungen der eingeschlossenen Entitäten.
+  for (const id of [...include]) {
+    for (const incoming of document.incomingRefs.get(id) ?? []) {
+      if (
+        incoming.type === "IFCSTYLEDITEM" ||
+        incoming.type === "IFCMATERIALDEFINITIONREPRESENTATION"
+      ) {
+        enqueue(incoming.id);
+      }
+    }
+  }
+  if (!drainQueue() || include.size > maxEntities) {
+    return undefined;
+  }
+
+  const lines: string[] = [
+    "ISO-10303-21;",
+    document.headerText.trim(),
+    "DATA;",
+  ];
+  for (const entity of document.entities) {
+    if (!include.has(entity.id)) {
+      continue;
+    }
+    let args = entity.args;
+    const pruned = prunedListByRelId.get(entity.id);
+    if (pruned) {
+      args = [...args];
+      const kept = readReferences(args[pruned.listIndex] ?? "").filter((id) =>
+        pruned.kept.has(id),
+      );
+      args[pruned.listIndex] = `(${kept.map((id) => `#${id}`).join(",")})`;
+    }
+    if (strippedRepresentationIds.has(entity.id) && args[6]) {
+      args = args === entity.args ? [...args] : args;
+      args[6] = "$";
+    }
+    lines.push(`#${entity.id}= ${entity.type}(${args.join(",")});`);
+  }
+  lines.push("ENDSEC;", "END-ISO-10303-21;", "");
+  return { entityCount: include.size, text: lines.join("\n") };
 }
 
 export function serializeNativeIfcDocument(document: NativeIfcDocument) {
@@ -398,10 +1004,7 @@ export function updateNativeEntity(
     setArg(entity.args, 3, quoteOrDollar(updates.description));
   }
 
-  return parseNativeIfcText(
-    serializeEntities(document, next),
-    document.fileName,
-  );
+  return rebuildNativeDocument(document, next);
 }
 
 export function getNativePlacement(
@@ -1081,26 +1684,19 @@ export function updateNativePlacement(
     args: [`(${x},${y},${z})`],
   };
 
-  const pointIsShared = (document.incomingRefs.get(placement.pointId)?.length ?? 0) > 1;
+  const pointIsShared =
+    (document.incomingRefs.get(placement.pointId)?.length ?? 0) > 1;
   const axisIsShared =
     (document.incomingRefs.get(placement.axisPlacementId)?.length ?? 0) > 1;
   if (!pointIsShared && !axisIsShared) {
-    // Placement-Bewegungen ändern keine Referenzen. Für den häufigsten
-    // Gizmo-Pfad reicht daher ein strukturelles Update der zwei Entity-Indizes;
-    // ein vollständiges STEP-Serialize+Parse des ganzen IFC entfällt.
-    const entities = document.entities.map((entity) =>
-      entity.id === nextPoint.id ? nextPoint : entity,
-    );
-    const entityById = new Map(document.entityById);
-    entityById.set(nextPoint.id, nextPoint);
-    const entitiesByType = new Map(document.entitiesByType);
-    entitiesByType.set(
-      nextPoint.type,
-      (entitiesByType.get(nextPoint.type) ?? []).map((entity) =>
+    // Häufigster Gizmo-Pfad: nur der Punkt ändert sich — der inkrementelle
+    // Rebuild patcht die Indizes, ohne das ganze IFC anzufassen.
+    return rebuildNativeDocument(
+      document,
+      document.entities.map((entity) =>
         entity.id === nextPoint.id ? nextPoint : entity,
       ),
     );
-    return { ...document, entities, entityById, entitiesByType };
   }
 
   // Copy-on-write für ungewöhnliche IFCs, die Punkt oder Axis-Placement
@@ -1109,7 +1705,8 @@ export function updateNativePlacement(
   const next = cloneDocumentEntities(document);
   const nextPlacement = next.find(
     (entity) =>
-      entity.id === placement.placementId && entity.type === "IFCLOCALPLACEMENT",
+      entity.id === placement.placementId &&
+      entity.type === "IFCLOCALPLACEMENT",
   );
   const nextAxis = next.find(
     (entity) =>
@@ -1135,10 +1732,7 @@ export function updateNativePlacement(
     setArg(nextAxis.args, 0, `#${copiedPoint.id}`);
   }
 
-  return parseNativeIfcText(
-    serializeEntities(document, next),
-    document.fileName,
-  );
+  return rebuildNativeDocument(document, next);
 }
 
 /** Schreibt einen absoluten IFC-Weltpunkt korrekt als lokales Placement. */
@@ -1148,9 +1742,7 @@ export function updateNativePlacementWorld(
   world: { x: number; y: number; z: number },
 ) {
   const local = nativeWorldToLocalPlacementPoint(document, entityId, world);
-  return local
-    ? updateNativePlacement(document, entityId, local)
-    : document;
+  return local ? updateNativePlacement(document, entityId, local) : document;
 }
 
 export function updateNativePlacementRotation(
@@ -1227,10 +1819,7 @@ export function updateNativePlacementRotation(
   setArg(axisPlacement.args, 1, `#${axisDirection.id}`);
   setArg(axisPlacement.args, 2, `#${refDirectionEntity.id}`);
 
-  return parseNativeIfcText(
-    serializeEntities(document, next),
-    document.fileName,
-  );
+  return rebuildNativeDocument(document, next);
 }
 
 export function addNativeElement(
@@ -1331,10 +1920,7 @@ export function addNativeElement(
     });
   }
 
-  return parseNativeIfcText(
-    serializeEntities(document, next),
-    document.fileName,
-  );
+  return rebuildNativeDocument(document, next);
 }
 
 /**
@@ -1822,10 +2408,7 @@ export function addNativeBodyElement(
     },
   );
 
-  return parseNativeIfcText(
-    serializeEntities(document, next),
-    document.fileName,
-  );
+  return rebuildNativeDocument(document, next);
 }
 
 export function assignNativeBodyRepresentation(
@@ -1957,10 +2540,7 @@ export function assignNativeBodyRepresentation(
         volume: netVolume,
       });
 
-      return parseNativeIfcText(
-        serializeEntities(document, next),
-        document.fileName,
-      );
+      return rebuildNativeDocument(document, next);
     }
   }
 
@@ -2157,10 +2737,7 @@ export function assignNativeBodyRepresentation(
     },
   );
 
-  return parseNativeIfcText(
-    serializeEntities(document, next),
-    document.fileName,
-  );
+  return rebuildNativeDocument(document, next);
 }
 
 function updateNativeBodyQuantities(
@@ -2379,9 +2956,7 @@ export function splitNativeBodyElement(
         id: partSolidId,
       },
     );
-    const nextPlacement = next.find(
-      (entity) => entity.id === partPlacementId,
-    );
+    const nextPlacement = next.find((entity) => entity.id === partPlacementId);
     const nextPlacementAxis = next.find(
       (entity) => entity.id === partPlacementAxisId,
     );
@@ -2423,10 +2998,7 @@ export function splitNativeBodyElement(
   }
 
   return {
-    document: parseNativeIfcText(
-      serializeEntities(document, next),
-      document.fileName,
-    ),
+    document: rebuildNativeDocument(document, next),
     partIds,
   };
 }
@@ -2621,11 +3193,7 @@ export function splitNativeBodyByPlane(
           type: "IFCHALFSPACESOLID",
         },
         {
-          args: [
-            ".DIFFERENCE.",
-            `#${leaf.itemId}`,
-            `#${halfSpaceId}`,
-          ],
+          args: [".DIFFERENCE.", `#${leaf.itemId}`, `#${halfSpaceId}`],
           description: "",
           globalId: "",
           id: clippingResultId,
@@ -2719,7 +3287,11 @@ export function splitNativeBodyByPlane(
     setArg(partProduct.args, 5, `#${partPlacementId}`);
     setArg(partProduct.args, 6, `#${partShapeId}`);
     if (partProduct.args.length > 7) {
-      setArg(partProduct.args, 7, quote(`IFCNATIVE-CUT-${entityId}-${sideIndex + 1}`));
+      setArg(
+        partProduct.args,
+        7,
+        quote(`IFCNATIVE-CUT-${entityId}-${sideIndex + 1}`),
+      );
     }
     next.push(
       partProduct,
@@ -2771,10 +3343,7 @@ export function splitNativeBodyByPlane(
     partIds.push(partId);
   }
 
-  let splitDocument = parseNativeIfcText(
-    serializeEntities(document, next),
-    document.fileName,
-  );
+  let splitDocument = rebuildNativeDocument(document, next);
   splitDocument = removeSpecificNativeProducts(splitDocument, [entityId]);
   return { document: splitDocument, partIds };
 }
@@ -2821,10 +3390,7 @@ function resolveNativeCutLeaves(
         document,
         readReferences(representationMap.args[0] ?? "")[0],
       );
-      const target = readNativeTransformationOperator(
-        document,
-        targetOperator,
-      );
+      const target = readNativeTransformationOperator(document, targetOperator);
       if (!mappedRepresentationId || !mappingOrigin || !target) {
         return undefined;
       }
@@ -2868,7 +3434,9 @@ function readNativeTransformationOperator(
   document: NativeIfcDocument,
   operator: NativeIfcEntity,
 ): NativeAffineFrame | undefined {
-  const point = document.entityById.get(readReferences(operator.args[2] ?? "")[0]);
+  const point = document.entityById.get(
+    readReferences(operator.args[2] ?? "")[0],
+  );
   if (point?.type !== "IFCCARTESIANPOINT") {
     return undefined;
   }
@@ -2883,7 +3451,9 @@ function readNativeTransformationOperator(
     y: 1,
     z: 0,
   });
-  const zAxis = readDirectionVector(document, operator.args[4],
+  const zAxis = readDirectionVector(
+    document,
+    operator.args[4],
     normalizeDirection(crossVectors(xAxis, yAxis), { x: 0, y: 0, z: 1 }),
   );
   const scale = readStepNumber(operator.args[3]) ?? 1;
@@ -2978,9 +3548,7 @@ function invertNativeAffineFrame(frame: NativeAffineFrame): NativeAffineFrame {
 
 function perpendicularDirection(normal: NativeVector3): NativeVector3 {
   const helper =
-    Math.abs(normal.z) < 0.9
-      ? { x: 0, y: 0, z: 1 }
-      : { x: 0, y: 1, z: 0 };
+    Math.abs(normal.z) < 0.9 ? { x: 0, y: 0, z: 1 } : { x: 0, y: 1, z: 0 };
   return normalizeDirection(crossVectors(helper, normal), {
     x: 1,
     y: 0,
@@ -3034,9 +3602,7 @@ export function combineNativeBodyElements(
   const primaryPlacementEntity = document.entityById.get(
     primaryPlacement.placementId,
   );
-  const primaryAxis = document.entityById.get(
-    primaryPlacement.axisPlacementId,
-  );
+  const primaryAxis = document.entityById.get(primaryPlacement.axisPlacementId);
   const primaryPoint = document.entityById.get(primaryPlacement.pointId);
   if (
     primaryPlacementEntity?.type !== "IFCLOCALPLACEMENT" ||
@@ -3066,10 +3632,7 @@ export function combineNativeBodyElements(
     const axis1 = directionInPlacementFrame(primaryFrame, sourceFrame.xAxis);
     const axis2 = directionInPlacementFrame(primaryFrame, sourceFrame.yAxis);
     const axis3 = directionInPlacementFrame(primaryFrame, sourceFrame.zAxis);
-    const translation = pointInPlacementFrame(
-      primaryFrame,
-      sourceFrame.origin,
-    );
+    const translation = pointInPlacementFrame(primaryFrame, sourceFrame.origin);
     const axis1Id = allocateId();
     const axis2Id = allocateId();
     const axis3Id = allocateId();
@@ -3214,10 +3777,7 @@ export function combineNativeBodyElements(
     includeQuantities: false,
   });
 
-  let combinedDocument = parseNativeIfcText(
-    serializeEntities(document, next),
-    document.fileName,
-  );
+  let combinedDocument = rebuildNativeDocument(document, next);
   if (options.removeSources !== false) {
     combinedDocument = removeSpecificNativeProducts(
       combinedDocument,
@@ -3245,8 +3805,7 @@ function hasNativeBodyQuantities(
     document.propertySetsByEntity
       .get(entityId)
       ?.some(
-        (set) =>
-          set.kind === "Qto" && set.name === "IFCnative_BaseQuantities",
+        (set) => set.kind === "Qto" && set.name === "IFCnative_BaseQuantities",
       ),
   );
 }
@@ -3461,12 +4020,9 @@ function removeSpecificNativeProducts(
     survivors.push(current);
   }
   collectOrphanedResources(document, survivors, removedIds);
-  return parseNativeIfcText(
-    serializeEntities(
-      document,
-      survivors.filter((entity) => !removedIds.has(entity.id)),
-    ),
-    document.fileName,
+  return rebuildNativeDocument(
+    document,
+    survivors.filter((entity) => !removedIds.has(entity.id)),
   );
 }
 
@@ -3523,10 +4079,7 @@ export function addNativeRelationship(
     name: "",
     type: relationshipType,
   });
-  return parseNativeIfcText(
-    serializeEntities(document, next),
-    document.fileName,
-  );
+  return rebuildNativeDocument(document, next);
 }
 
 export function addNativePropertySet(
@@ -3818,10 +4371,7 @@ export function removeNativePropertyFromSet(
     ? next.filter((entity) => entity.id !== propertyId)
     : next;
 
-  return parseNativeIfcText(
-    serializeEntities(document, nextEntities),
-    document.fileName,
-  );
+  return rebuildNativeDocument(document, nextEntities);
 }
 
 export function updateNativePropertySetName(
@@ -3976,12 +4526,9 @@ export function removeNativePropertySet(
     }
   }
 
-  return parseNativeIfcText(
-    serializeEntities(
-      document,
-      next.filter((entity) => !removedIds.has(entity.id)),
-    ),
-    document.fileName,
+  return rebuildNativeDocument(
+    document,
+    next.filter((entity) => !removedIds.has(entity.id)),
   );
 }
 
@@ -4916,10 +5463,7 @@ export function addNativeConstraintObjective(
     name: "Constraint",
     type: "IFCRELASSOCIATESCONSTRAINT",
   });
-  return parseNativeIfcText(
-    serializeEntities(document, next),
-    document.fileName,
-  );
+  return rebuildNativeDocument(document, next);
 }
 
 export function addNativeTypeAssignment(
@@ -4970,10 +5514,7 @@ export function addNativeTypeAssignment(
     name: "Type",
     type: "IFCRELDEFINESBYTYPE",
   });
-  return parseNativeIfcText(
-    serializeEntities(document, next),
-    document.fileName,
-  );
+  return rebuildNativeDocument(document, next);
 }
 
 export function removeNativeRelationship(
@@ -4988,10 +5529,7 @@ export function removeNativeRelationship(
   const next = cloneDocumentEntities(document).filter(
     (entity) => entity.id !== relationshipId,
   );
-  return parseNativeIfcText(
-    serializeEntities(document, next),
-    document.fileName,
-  );
+  return rebuildNativeDocument(document, next);
 }
 
 /**
@@ -5034,10 +5572,7 @@ export function addNativeEntityToGroup(
       ),
     );
   }
-  return parseNativeIfcText(
-    serializeEntities(document, next),
-    document.fileName,
-  );
+  return rebuildNativeDocument(document, next);
 }
 
 /**
@@ -5071,10 +5606,7 @@ export function removeNativeGroupMembership(
   if (!changed) {
     return document;
   }
-  return parseNativeIfcText(
-    serializeEntities(document, next),
-    document.fileName,
-  );
+  return rebuildNativeDocument(document, next);
 }
 
 export interface NativeEntityRemovalPlan {
@@ -5135,10 +5667,7 @@ export function planNativeEntityRemoval(
     document.entityById.has(id),
   );
   return {
-    document: parseNativeIfcText(
-      serializeEntities(document, next),
-      document.fileName,
-    ),
+    document: rebuildNativeDocument(document, next),
     entityId,
     relationshipCount: removedEntityIds.filter((id) =>
       document.entityById.get(id)?.type.startsWith("IFCREL"),
@@ -5195,10 +5724,7 @@ export function removeNativeBodyRepresentation(
   collectOrphanedResources(document, survivors, removedIds, [shapeId]);
 
   const next = survivors.filter((item) => !removedIds.has(item.id));
-  return parseNativeIfcText(
-    serializeEntities(document, next),
-    document.fileName,
-  );
+  return rebuildNativeDocument(document, next);
 }
 
 /**
@@ -5398,10 +5924,7 @@ export function updateNativeRelationship(
   relationship.type = relationshipType;
   setRelationshipArgs(relationship, relationshipType, sourceId, targetId);
 
-  return parseNativeIfcText(
-    serializeEntities(document, next),
-    document.fileName,
-  );
+  return rebuildNativeDocument(document, next);
 }
 
 export function addNativeSiUnit(
@@ -5433,10 +5956,7 @@ export function addNativeSiUnit(
       .map((id) => `#${id}`)
       .join(",")})`;
   }
-  return parseNativeIfcText(
-    serializeEntities(document, next),
-    document.fileName,
-  );
+  return rebuildNativeDocument(document, next);
 }
 
 function addNativeAssociation(
@@ -5463,10 +5983,7 @@ function addNativeAssociation(
     name: relationshipName,
     type: relationshipType,
   });
-  return parseNativeIfcText(
-    serializeEntities(document, entities),
-    document.fileName,
-  );
+  return rebuildNativeDocument(document, entities);
 }
 
 function readHeader(text: string) {
@@ -5974,22 +6491,23 @@ function readUnits(
 }
 
 function validateNativeDocument(
-  sourceText: string,
+  sourceText: string | null,
   schema: string,
   entities: NativeIfcEntity[],
   entityById: Map<number, NativeIfcEntity>,
   relationships: NativeIfcRelationship[],
   units: string[],
+  outgoingRefs?: Map<number, number[]>,
 ) {
   const diagnostics: string[] = [];
   const globalIdOwners = new Map<string, number[]>();
 
-  if (!/^\s*ISO-10303-21;/i.test(sourceText)) {
+  if (sourceText !== null && !/^\s*ISO-10303-21;/i.test(sourceText)) {
     diagnostics.push(
       "Warning: STEP file is missing ISO-10303-21 start marker.",
     );
   }
-  if (!/END-ISO-10303-21;\s*$/i.test(sourceText)) {
+  if (sourceText !== null && !/END-ISO-10303-21;\s*$/i.test(sourceText)) {
     diagnostics.push(
       "Warning: STEP file is missing END-ISO-10303-21 end marker.",
     );
@@ -6001,9 +6519,9 @@ function validateNativeDocument(
     if (entity.globalId && entity.globalId !== "$") {
       pushMapValue(globalIdOwners, entity.globalId, entity.id);
     }
-    const missingRefs = readUniqueReferencesFromArgs(entity.args).filter(
-      (id) => !entityById.has(id),
-    );
+    const missingRefs = (
+      outgoingRefs?.get(entity.id) ?? readUniqueReferencesFromArgs(entity.args)
+    ).filter((id) => !entityById.has(id));
     if (missingRefs.length > 0) {
       diagnostics.push(
         `Warning: #${entity.id} ${entity.type} references missing ${missingRefs.map((id) => `#${id}`).join(", ")}.`,
@@ -6954,26 +7472,6 @@ function isPhysicalProduct(type: string) {
     type === "IFCELEMENTASSEMBLY" ||
     type === "IFCTRANSPORTELEMENT"
   );
-}
-
-function serializeEntities(
-  document: NativeIfcDocument,
-  entities: NativeIfcEntity[],
-) {
-  return [
-    "ISO-10303-21;",
-    document.headerText.trim(),
-    "DATA;",
-    ...entities
-      .slice()
-      .sort((left, right) => left.id - right.id)
-      .map(
-        (entity) => `#${entity.id}= ${entity.type}(${entity.args.join(",")});`,
-      ),
-    "ENDSEC;",
-    "END-ISO-10303-21;",
-    "",
-  ].join("\n");
 }
 
 function nextEntityId(entities: NativeIfcEntity[]) {

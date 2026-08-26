@@ -164,6 +164,22 @@ export type ViewerMirrorOp =
       delta: { x: number; y: number; z: number };
     }
   | {
+      /**
+       * Partielle Rekonvertierung: nur die betroffenen Produkte werden als
+       * Mini-IFC neu konvertiert und als Zusatzmodell lagerichtig über das
+       * Basismodell gelegt (Fragments koordiniert über die im Subset
+       * erhaltenen IFC-Weltkoordinaten); die ersetzten/entfernten Elemente
+       * werden im Basismodell ausgeblendet. Express-Ids bleiben erhalten.
+       */
+      kind: "reconvert-subset";
+      /** Produkte, die das Subset rendert (neue Teile, geänderte Körper). */
+      entityIds: number[];
+      /** Im Basismodell (und früheren Subsets) auszublendende Produkte. */
+      replacedEntityIds: number[];
+      /** Eigenständiges Mini-IFC (STEP-Text) mit erhaltenen Express-Ids. */
+      subsetIfcText: string;
+    }
+  | {
       kind: "remove";
       entityId: number;
       /**

@@ -41,6 +41,7 @@ import {
     type MosaicPath,
 } from "react-mosaic-component";
 
+import { readDesktopStartupIfcAssets } from "@/desktop/startupIfc";
 import {
     addNativeApproval,
     addNativeBodyElement,
@@ -69,12 +70,15 @@ import {
     applyCatalogQuickFix,
     applyDiagnosticObjectInfo,
     applyDiagnosticProcedureFromCatalog,
+    applyNativeDocumentDelta,
     assignNativeBodyRepresentation,
     buildObjectInfoIndex,
     catalogObjectLabel,
     combineNativeBodyElements,
     createNativeSampleDocument,
+    diffNativeDocuments,
     duplicateNativePropertySet,
+    extractNativeSubsetIfc,
     findCatalogObject,
     getNativeBodyRepresentation,
     getNativeLengthUnitScale,
@@ -83,8 +87,8 @@ import {
     getNativePlacementWorldFrame,
     getNextNativeEntityId,
     ifcPlacementPointToViewerWorldPoint,
-    nativeWorldDirectionInPlacementParentFrame,
     mergeNativePropertySetValues,
+    nativeWorldDirectionInPlacementParentFrame,
     parseNativeIfcFileInWorker,
     planNativeEntityRemoval,
     removeNativeBodyRepresentation,
@@ -94,15 +98,15 @@ import {
     removeNativeRelationship,
     resolveNativeMovableProductId,
     serializeNativeIfcDocument,
-    splitNativeBodyByPlane,
-    summarizeNativeIfcGeometry,
     setDiagnosticObjectiveReferences as setNativeDiagnosticObjectiveReferences,
+    splitNativeBodyByPlane,
     splitTopLevel,
     suggestCatalogObjectForEntity,
+    summarizeNativeIfcGeometry,
     updateNativeEntity,
     updateNativePlacement,
-    updateNativePlacementWorld,
     updateNativePlacementRotation,
+    updateNativePlacementWorld,
     updateNativePropertySetName,
     updateNativePropertyValue,
     updateNativeRelationship,
@@ -116,12 +120,12 @@ import {
     type CatalogValidationFinding,
     type DiagnosticObjectInfoDraft,
     type IfcObjectCatalog,
+    type NativeDocumentDelta,
+    type NativeEntityRemovalPlan,
     type NativeIfcDocument,
     type NativeIfcEntity,
-    type NativeEntityRemovalPlan,
 } from "@/ifc";
 import { type NativeGraphPreset } from "@/ifc/nativeGraph";
-import { readDesktopStartupIfcAssets } from "@/desktop/startupIfc";
 
 import {
     Button,
@@ -134,6 +138,7 @@ import {
     useUiScale,
     type UiScale,
 } from "@/hooks/use-ui-scale";
+import { recordDiagnostic } from "../diagnostics/watchdog";
 import { ChildWindow } from "./child-window";
 import { registerEmergencySave } from "./error-boundary";
 import { BuilderPanel } from "./ifc-workspace/BuilderPanel";
@@ -147,27 +152,27 @@ import {
     MOSAIC_VIEW_IDS,
     RELATION_TYPES,
 } from "./ifc-workspace/constants";
-import { DiagnosticsAssistantPanel } from "./ifc-workspace/DiagnosticsAssistantPanel";
 import { DeleteEntityDialog } from "./ifc-workspace/DeleteEntityDialog";
-import { GraphPanel } from "./ifc-workspace/GraphPanel";
-import {
-    INSPECTOR_MODES,
-    InspectorPanel,
-    ResourceControlsPanel,
-    ResourceReferencesPanel,
-} from "./ifc-workspace/InspectorPanel";
+import { DiagnosticsAssistantPanel } from "./ifc-workspace/DiagnosticsAssistantPanel";
 import {
     clearRecoveryDocuments,
     readRecoveryDocuments,
     writeRecoveryDocuments,
     type RecoveredDocument,
 } from "./ifc-workspace/documentRecovery";
+import { GraphPanel } from "./ifc-workspace/GraphPanel";
+import { GroupManagerDialog } from "./ifc-workspace/GroupManagerDialog";
+import { GroupsPanel } from "./ifc-workspace/GroupsPanel";
+import {
+    INSPECTOR_MODES,
+    InspectorPanel,
+    ResourceControlsPanel,
+    ResourceReferencesPanel,
+} from "./ifc-workspace/InspectorPanel";
 import { ObjectInfoPanel } from "./ifc-workspace/ObjectInfoPanel";
 import { PortalPanel } from "./ifc-workspace/PortalPanel";
 import { PortalSettingsPanel } from "./ifc-workspace/PortalSettingsPanel";
 import { PsetBatchPanel } from "./ifc-workspace/PsetBatchPanel";
-import { GroupManagerDialog } from "./ifc-workspace/GroupManagerDialog";
-import { GroupsPanel } from "./ifc-workspace/GroupsPanel";
 import { StructurePanel } from "./ifc-workspace/StructurePanel";
 import { ThemeToggle } from "./ifc-workspace/ThemeToggle";
 import type {
@@ -200,7 +205,6 @@ import {
     saveRecentIfcFiles,
     type RecentIfcFileEntry,
 } from "./ifc-workspace/workspaceStorage";
-import { recordDiagnostic } from "../diagnostics/watchdog";
 import type { RelationshipFlowClipboardNode } from "./relationship-flow.types";
 import ThatOpenViewer from "./that-open-viewer";
 import type {
@@ -214,8 +218,7 @@ import type {
     ViewerRotationChange,
 } from "./that-open-viewer.types";
 
-interface WorkspaceDocumentSnapshot {
-  document: NativeIfcDocument;
+interface WorkspaceUiSnapshot {
   graphAnchorId: number;
   graphCollapsed: Set<number>;
   graphExpanded: Set<number>;
@@ -225,9 +228,15 @@ interface WorkspaceDocumentSnapshot {
   selectedIds: Set<number>;
 }
 
+/**
+ * Undo/Redo-Eintrag: statt vollständiger Dokument-Snapshots wird nur das
+ * Entity-Delta gespeichert. Dank Structural Sharing des Dokuments sind das
+ * wenige geteilte Objektreferenzen — auch bei großen IFCs.
+ */
 interface WorkspaceHistoryEntry {
-  snapshot: WorkspaceDocumentSnapshot;
+  delta: NativeDocumentDelta;
   summary: string;
+  ui: WorkspaceUiSnapshot;
 }
 
 interface WorkspaceDocumentSession {
@@ -320,11 +329,10 @@ function createWorkspaceDocumentId(fileName: string) {
   return `${fileName || "IFC"}:${Date.now().toString(36)}:${nextWorkspaceDocumentId}`;
 }
 
-function createWorkspaceDocumentSnapshot(
+function createWorkspaceUiSnapshot(
   session: WorkspaceDocumentSession,
-): WorkspaceDocumentSnapshot {
+): WorkspaceUiSnapshot {
   return {
-    document: session.document,
     graphAnchorId: session.graphAnchorId,
     graphCollapsed: new Set(session.graphCollapsed),
     graphExpanded: new Set(session.graphExpanded),
@@ -783,7 +791,6 @@ export default function IfcWorkspace() {
     },
   ) => {
     const committedSessionId = activeSession.id;
-    const previousSnapshot = createWorkspaceDocumentSnapshot(activeSession);
     const resolvedSelectedId = next.entityById.has(nextSelectedId ?? 0)
       ? (nextSelectedId as number)
       : (next.spatialRoots[0]?.id ?? next.entities[0]?.id ?? selectedId);
@@ -792,6 +799,16 @@ export default function IfcWorkspace() {
         if (session.id !== committedSessionId) {
           return session;
         }
+        // Delta statt Voll-Snapshot: dank Structural Sharing des Dokuments
+        // sind das überwiegend Pointer-Vergleiche und wenige geteilte Refs.
+        const documentChanged = next !== session.document;
+        const historyEntry: WorkspaceHistoryEntry | undefined = documentChanged
+          ? {
+              delta: diffNativeDocuments(session.document, next),
+              summary,
+              ui: createWorkspaceUiSnapshot(session),
+            }
+          : undefined;
         return {
           ...session,
           document: next,
@@ -805,14 +822,13 @@ export default function IfcWorkspace() {
           // übernimmt "Modell neu berechnen" (Revision-Bump) sie in den
           // Viewer. viewerModel* bleibt bis dahin unverändert (stabiler
           // Load-Key).
-          pendingViewerChanges:
-            options?.reloadViewer
-              ? mergePendingViewerChange(session.pendingViewerChanges, {
-                  key: options.pendingKey,
-                  label: summary,
-                })
-              : session.pendingViewerChanges,
-          redoStack: next === session.document ? (session.redoStack ?? []) : [],
+          pendingViewerChanges: options?.reloadViewer
+            ? mergePendingViewerChange(session.pendingViewerChanges, {
+                key: options.pendingKey,
+                label: summary,
+              })
+            : session.pendingViewerChanges,
+          redoStack: documentChanged ? [] : (session.redoStack ?? []),
           selectedId: resolvedSelectedId,
           selectedIds: new Set(
             [...session.selectedIds].filter((id) => next.entityById.has(id)),
@@ -826,16 +842,11 @@ export default function IfcWorkspace() {
                 "3D-Konvertierung pausiert."
             : session.viewerModelDeferredReason,
           viewerModelLoadRequested: session.viewerModelLoadRequested,
-          undoStack:
-            next === session.document
-              ? (session.undoStack ?? [])
-              : [
-                  ...(session.undoStack ?? []),
-                  {
-                    snapshot: previousSnapshot,
-                    summary,
-                  },
-                ].slice(-DOCUMENT_HISTORY_LIMIT),
+          undoStack: historyEntry
+            ? [...(session.undoStack ?? []), historyEntry].slice(
+                -DOCUMENT_HISTORY_LIMIT,
+              )
+            : (session.undoStack ?? []),
         };
       }),
     );
@@ -902,20 +913,26 @@ export default function IfcWorkspace() {
       return;
     }
     setDocumentSessions((current) =>
-      current.map((session) =>
-        session.id === sessionId
-          ? {
-              ...session,
-              pendingViewerChanges: [],
-              viewerModelBytes: null,
-              viewerModelFile: null,
-              viewerModelRevision: session.viewerModelRevision + 1,
-              viewerModelText: session.documentTextDirty
-                ? serializeNativeIfcDocument(session.document)
-                : session.documentText,
-            }
-          : session,
-      ),
+      current.map((session) => {
+        if (session.id !== sessionId) {
+          return session;
+        }
+        // Einmal serialisieren, beide Stände teilen sich den String — der
+        // Export muss danach nicht erneut serialisieren.
+        const text = session.documentTextDirty
+          ? serializeNativeIfcDocument(session.document)
+          : session.documentText;
+        return {
+          ...session,
+          documentText: text,
+          documentTextDirty: false,
+          pendingViewerChanges: [],
+          viewerModelBytes: null,
+          viewerModelFile: null,
+          viewerModelRevision: session.viewerModelRevision + 1,
+          viewerModelText: text,
+        };
+      }),
     );
     logAction(
       `viewer.recalculate({ file: '${activeSession.document.fileName}', pending: ${pendingCount} });`,
@@ -923,21 +940,25 @@ export default function IfcWorkspace() {
   };
 
   const restoreDocumentHistory = (direction: "undo" | "redo") => {
-    const sourceStack =
-      direction === "undo" ? undoStack : redoStack;
+    const sourceStack = direction === "undo" ? undoStack : redoStack;
     const entry = sourceStack.at(-1);
     if (!entry) {
       return;
     }
-    const restored = entry.snapshot;
-    const restoredSelectedId = restored.document.entityById.has(
-      restored.selectedId,
+    // Delta rückwärts/vorwärts anwenden statt einen Voll-Snapshot zu laden.
+    const restoredDocument = applyNativeDocumentDelta(
+      activeSession.document,
+      entry.delta,
+      direction,
+    );
+    const restoredSelectedId = restoredDocument.entityById.has(
+      entry.ui.selectedId,
     )
-      ? restored.selectedId
-      : (restored.document.spatialRoots[0]?.id ??
-        restored.document.entities[0]?.id ??
+      ? entry.ui.selectedId
+      : (restoredDocument.spatialRoots[0]?.id ??
+        restoredDocument.entities[0]?.id ??
         0);
-    const viewerModelText = serializeNativeIfcDocument(restored.document);
+    const viewerModelText = serializeNativeIfcDocument(restoredDocument);
     const sessionId = activeSession.id;
     setDeleteRequest(null);
     setDocumentSessions((current) =>
@@ -946,18 +967,20 @@ export default function IfcWorkspace() {
           return session;
         }
         const currentEntry: WorkspaceHistoryEntry = {
-          snapshot: createWorkspaceDocumentSnapshot(session),
+          delta: entry.delta,
           summary: entry.summary,
+          ui: createWorkspaceUiSnapshot(session),
         };
         return {
           ...session,
-          document: restored.document,
-          documentTextDirty: true,
-          graphAnchorId: restored.graphAnchorId,
-          graphCollapsed: new Set(restored.graphCollapsed),
-          graphExpanded: new Set(restored.graphExpanded),
-          graphPinned: new Set(restored.graphPinned),
-          graphPositions: new Map(restored.graphPositions),
+          document: restoredDocument,
+          documentText: viewerModelText,
+          documentTextDirty: false,
+          graphAnchorId: entry.ui.graphAnchorId,
+          graphCollapsed: new Set(entry.ui.graphCollapsed),
+          graphExpanded: new Set(entry.ui.graphExpanded),
+          graphPinned: new Set(entry.ui.graphPinned),
+          graphPositions: new Map(entry.ui.graphPositions),
           pendingViewerChanges: [],
           redoStack:
             direction === "undo"
@@ -967,8 +990,8 @@ export default function IfcWorkspace() {
               : (session.redoStack ?? []).slice(0, -1),
           selectedId: restoredSelectedId,
           selectedIds: new Set(
-            [...restored.selectedIds].filter((id) =>
-              restored.document.entityById.has(id),
+            [...entry.ui.selectedIds].filter((id) =>
+              restoredDocument.entityById.has(id),
             ),
           ),
           sourceIfcBytes: null,
@@ -1193,7 +1216,10 @@ export default function IfcWorkspace() {
         }
       })
       .catch((error) => {
-        reportFailure("Windows-Dateiübergabe konnte nicht gelesen werden", error);
+        reportFailure(
+          "Windows-Dateiübergabe konnte nicht gelesen werden",
+          error,
+        );
       });
   }, []);
 
@@ -1495,7 +1521,8 @@ export default function IfcWorkspace() {
   const autosaveSessionsRef = useRef(documentSessions);
   autosaveSessionsRef.current = documentSessions;
   const autosaveBlockedRef = useRef(true);
-  autosaveBlockedRef.current = !recoveryChecked || recoveredDocuments.length > 0;
+  autosaveBlockedRef.current =
+    !recoveryChecked || recoveredDocuments.length > 0;
 
   const autosaveRef = useRef<(force?: boolean) => void>(() => {});
   autosaveRef.current = (force = false) => {
@@ -1515,7 +1542,9 @@ export default function IfcWorkspace() {
     const cache = persistedDocumentsRef.current;
     const unchanged =
       dirty.length === cache.size &&
-      dirty.every((session) => cache.get(session.id)?.document === session.document);
+      dirty.every(
+        (session) => cache.get(session.id)?.document === session.document,
+      );
     if (unchanged) {
       return;
     }
@@ -1885,6 +1914,9 @@ export default function IfcWorkspace() {
       });
       return;
     }
+    // Partielle Rekonvertierung: nur die neuen Teile als Mini-IFC in den
+    // Viewer spiegeln; schlägt sie fehl, bleibt "Modell neu berechnen".
+    const subset = extractNativeSubsetIfc(result.document, result.partIds);
     commitDocument(
       result.document,
       result.partIds[0],
@@ -1894,6 +1926,14 @@ export default function IfcWorkspace() {
       {
         pendingKey: `split:${selectedId}`,
         reloadViewer: true,
+        viewerMirror: subset
+          ? {
+              entityIds: result.partIds,
+              kind: "reconvert-subset",
+              replacedEntityIds: [selectedId],
+              subsetIfcText: subset.text,
+            }
+          : undefined,
       },
     );
     setSelectedIds(new Set(result.partIds));
@@ -1919,6 +1959,7 @@ export default function IfcWorkspace() {
       );
       return;
     }
+    const subset = extractNativeSubsetIfc(result.document, [result.productId]);
     commitDocument(
       result.document,
       result.productId,
@@ -1928,6 +1969,14 @@ export default function IfcWorkspace() {
       {
         pendingKey: `combine:${result.productId}`,
         reloadViewer: true,
+        viewerMirror: subset
+          ? {
+              entityIds: [result.productId],
+              kind: "reconvert-subset",
+              replacedEntityIds: removeSources ? result.sourceIds : [],
+              subsetIfcText: subset.text,
+            }
+          : undefined,
       },
     );
     setSelectedIds(new Set([result.productId]));
@@ -2211,8 +2260,7 @@ export default function IfcWorkspace() {
           ),
         );
         const missingProperties = [...group.properties.values()].filter(
-          (property) =>
-            !existingNames.has(property.name.trim().toLowerCase()),
+          (property) => !existingNames.has(property.name.trim().toLowerCase()),
         );
         if (missingProperties.length === 0) {
           continue;
@@ -3096,7 +3144,9 @@ export default function IfcWorkspace() {
     if (entityId !== selectedId || !document.entityById.has(entityId)) {
       return null;
     }
-    const worldAxis = viewerWorldDirectionToIfcPlacementDirection(rotation.axis);
+    const worldAxis = viewerWorldDirectionToIfcPlacementDirection(
+      rotation.axis,
+    );
     const worldRefDirection = viewerWorldDirectionToIfcPlacementDirection(
       rotation.refDirection,
     );
@@ -3157,11 +3207,7 @@ export default function IfcWorkspace() {
         redoDocument();
         return;
       }
-      if (
-        !commandKey &&
-        !event.shiftKey &&
-        event.key === "Delete"
-      ) {
+      if (!commandKey && !event.shiftKey && event.key === "Delete") {
         event.preventDefault();
         requestDeleteEntity(selectedId, "keyboard");
       }

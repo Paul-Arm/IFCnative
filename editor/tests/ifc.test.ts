@@ -65,10 +65,13 @@ import {
     addNativeRelationship,
     addNativeSiUnit,
     addNativeTypeAssignment,
+    applyNativeDocumentDelta,
     assignNativeBodyRepresentation,
     combineNativeBodyElements,
     createNativeSampleDocument,
+    diffNativeDocuments,
     duplicateNativePropertySet,
+    extractNativeSubsetIfc,
     getNativeBodyRepresentation,
     getNativeLengthUnitScale,
     getNativePlacement,
@@ -2591,8 +2594,14 @@ test("native cylindrical body splits into independent equal samples", async () =
   const split = splitNativeBodyElement(withMetadata, cylinder.id, 2);
   assert.ok(split);
   assert.equal(split.partIds.length, 2);
-  assert.equal(split.document.entityById.get(split.partIds[0])?.name, "Bohrkern – Teil 1/2");
-  assert.equal(split.document.entityById.get(split.partIds[1])?.name, "Bohrkern – Teil 2/2");
+  assert.equal(
+    split.document.entityById.get(split.partIds[0])?.name,
+    "Bohrkern – Teil 1/2",
+  );
+  assert.equal(
+    split.document.entityById.get(split.partIds[1])?.name,
+    "Bohrkern – Teil 2/2",
+  );
   for (const id of split.partIds) {
     const body = getNativeBodyRepresentation(split.document, id);
     assert.equal(body.profile, "cylinder");
@@ -2644,7 +2653,9 @@ test("native bodies combine into one mapped multi-body product", async () => {
     y: "0",
     z: "0",
   });
-  const first = withFirst.entities.find((entity) => entity.name === "Segment A");
+  const first = withFirst.entities.find(
+    (entity) => entity.name === "Segment A",
+  );
   assert.ok(first);
   const withSecond = addNativeBodyElement(withFirst, {
     depth: "1",
@@ -2657,7 +2668,9 @@ test("native bodies combine into one mapped multi-body product", async () => {
     y: "0",
     z: "0",
   });
-  const second = withSecond.entities.find((entity) => entity.name === "Segment B");
+  const second = withSecond.entities.find(
+    (entity) => entity.name === "Segment B",
+  );
   assert.ok(second);
   const withMetadata = addNativePropertySet(
     withSecond,
@@ -2675,10 +2688,14 @@ test("native bodies combine into one mapped multi-body product", async () => {
   assert.ok(combined);
   assert.equal(combined.document.entityById.has(first.id), false);
   assert.equal(combined.document.entityById.has(second.id), false);
-  assert.equal(combined.document.entityById.get(combined.productId)?.name, "Gemeinsames Teil");
   assert.equal(
-    combined.document.entities.filter((entity) => entity.type === "IFCMAPPEDITEM")
-      .length,
+    combined.document.entityById.get(combined.productId)?.name,
+    "Gemeinsames Teil",
+  );
+  assert.equal(
+    combined.document.entities.filter(
+      (entity) => entity.type === "IFCMAPPEDITEM",
+    ).length,
     2,
   );
   assert.ok(
@@ -4344,4 +4361,167 @@ test("rebased viewer pick converts back to the exact IFC world position (end-to-
   assert.ok(Math.abs(bodyWorld.worldX - ifcPoint.x) < 0.01);
   assert.ok(Math.abs(bodyWorld.worldY - ifcPoint.y) < 0.01);
   assert.ok(Math.abs(bodyWorld.worldZ - ifcPoint.z) < 0.01);
+});
+
+test("document deltas share unchanged entities and undo/redo cleanly", () => {
+  const sample = createNativeSampleDocument();
+  const block = sample.entities.find(
+    (entity) => entity.type === "IFCBUILTELEMENT",
+  );
+  assert.ok(block);
+  const renamed = updateNativeEntity(sample, block.id, {
+    name: "Delta Name",
+  });
+
+  // Structural Sharing: alle unveränderten Entities sind identische Referenzen.
+  for (const entity of renamed.entities) {
+    if (entity.id !== block.id) {
+      assert.equal(entity, sample.entityById.get(entity.id));
+    }
+  }
+
+  const delta = diffNativeDocuments(sample, renamed);
+  assert.equal(delta.changed.length, 1);
+  assert.equal(delta.added.length, 0);
+  assert.equal(delta.removed.length, 0);
+
+  const undone = applyNativeDocumentDelta(renamed, delta, "undo");
+  assert.equal(undone.entityById.get(block.id)?.name, block.name);
+  assert.equal(
+    serializeNativeIfcDocument(undone),
+    serializeNativeIfcDocument(sample),
+  );
+  const redone = applyNativeDocumentDelta(undone, delta, "redo");
+  assert.equal(redone.entityById.get(block.id)?.name, "Delta Name");
+  assert.equal(
+    serializeNativeIfcDocument(redone),
+    serializeNativeIfcDocument(renamed),
+  );
+
+  // Add/Remove-Richtung: neues Element rückgängig machen und wiederholen.
+  const storey = sample.entities.find(
+    (entity) => entity.type === "IFCBUILDINGSTOREY",
+  );
+  assert.ok(storey);
+  const withBody = addNativeBodyElement(sample, {
+    depth: "1",
+    height: "1",
+    name: "Delta Body",
+    parentId: storey.id,
+    type: "IFCWALL",
+    width: "1",
+    x: "0",
+    y: "0",
+    z: "0",
+  });
+  const addDelta = diffNativeDocuments(sample, withBody);
+  assert.ok(addDelta.added.length > 0);
+  const withoutBody = applyNativeDocumentDelta(withBody, addDelta, "undo");
+  assert.equal(
+    serializeNativeIfcDocument(withoutBody),
+    serializeNativeIfcDocument(sample),
+  );
+  const withBodyAgain = applyNativeDocumentDelta(withoutBody, addDelta, "redo");
+  assert.equal(
+    serializeNativeIfcDocument(withBodyAgain),
+    serializeNativeIfcDocument(withBody),
+  );
+});
+
+test("subset IFC extraction is self-contained and excludes sibling products", () => {
+  const sample = createNativeSampleDocument();
+  const storey = sample.entities.find(
+    (entity) => entity.type === "IFCBUILDINGSTOREY",
+  );
+  const block = sample.entities.find(
+    (entity) => entity.type === "IFCBUILTELEMENT",
+  );
+  assert.ok(storey);
+  assert.ok(block);
+  const withBody = addNativeBodyElement(sample, {
+    depth: "1",
+    height: "1",
+    name: "Subset Body",
+    parentId: storey.id,
+    type: "IFCWALL",
+    width: "1",
+    x: "0",
+    y: "0",
+    z: "0",
+  });
+  const wall = withBody.entities.find(
+    (entity) => entity.name === "Subset Body",
+  );
+  assert.ok(wall);
+
+  const subset = extractNativeSubsetIfc(withBody, [wall.id]);
+  assert.ok(subset);
+  const parsed = parseNativeIfcText(subset.text, "subset.ifc");
+
+  // Produkt mit erhaltener Express-Id/GlobalId plus Geometrie-Closure.
+  assert.equal(parsed.entityById.get(wall.id)?.globalId, wall.globalId);
+  assert.ok(parsed.entitiesByType.get("IFCPROJECT")?.length);
+  assert.ok(parsed.entitiesByType.get("IFCUNITASSIGNMENT")?.length);
+  assert.ok(parsed.entitiesByType.get("IFCEXTRUDEDAREASOLID")?.length);
+  assert.ok(parsed.entitiesByType.get("IFCLOCALPLACEMENT")?.length);
+  // Geschwister-Produkte des Storeys bleiben draußen …
+  assert.equal(parsed.entityById.has(block.id), false);
+  // … und die geteilte Containment-Beziehung ist aufs Subset reduziert.
+  const containment = parsed.entitiesByType.get(
+    "IFCRELCONTAINEDINSPATIALSTRUCTURE",
+  )?.[0];
+  assert.ok(containment);
+  assert.deepEqual(containment.args[4].replace(/\s/g, ""), `(#${wall.id})`);
+  // Selbstständig: keine ungelösten Referenzen im Mini-IFC.
+  assert.ok(
+    !parsed.diagnostics.some((line) => line.includes("references missing")),
+    parsed.diagnostics
+      .filter((line) => line.includes("references missing"))
+      .join("\n"),
+  );
+});
+
+test("split by plane yields a self-contained subset for the new parts", () => {
+  const sample = createNativeSampleDocument();
+  const storey = sample.entities.find(
+    (entity) => entity.type === "IFCBUILDINGSTOREY",
+  );
+  assert.ok(storey);
+  const withBody = addNativeBodyElement(sample, {
+    depth: "1",
+    height: "1",
+    name: "Subset Cut",
+    parentId: storey.id,
+    type: "IFCBUILDINGELEMENTPROXY",
+    width: "2",
+    x: "0",
+    y: "0",
+    z: "0",
+  });
+  const proxy = withBody.entities.find(
+    (entity) => entity.name === "Subset Cut",
+  );
+  assert.ok(proxy);
+  const split = splitNativeBodyByPlane(withBody, proxy.id, {
+    normal: { x: 1, y: 0, z: 0 },
+    point: { x: 0, y: 0, z: 0 },
+  });
+  assert.ok(split);
+
+  const subset = extractNativeSubsetIfc(split.document, split.partIds);
+  assert.ok(subset);
+  const parsed = parseNativeIfcText(subset.text, "subset.ifc");
+  for (const partId of split.partIds) {
+    assert.ok(parsed.entityById.has(partId));
+  }
+  // Das ersetzte Original ist aus dem Dokument entfernt und nicht im Subset.
+  assert.equal(parsed.entityById.has(proxy.id), false);
+  assert.ok(
+    !parsed.diagnostics.some((line) => line.includes("references missing")),
+    parsed.diagnostics
+      .filter((line) => line.includes("references missing"))
+      .join("\n"),
+  );
+  // Deutlich kleiner als das Gesamtdokument.
+  assert.ok(subset.entityCount < split.document.entities.length);
 });
