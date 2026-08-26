@@ -4,7 +4,17 @@
     {
       "name": "ifcnative-dev",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--prefix", "editor", "--", "--port", "5199", "--host", "127.0.0.1"],
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "editor",
+        "--",
+        "--port",
+        "5199",
+        "--host",
+        "127.0.0.1"
+      ],
       "port": 5199,
       "autoPort": false
     }

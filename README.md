@@ -4,13 +4,13 @@ Werkzeugkasten rund um das native Erstellen, Ansehen und Bearbeiten von IFC-Mode
 
 ## Apps
 
-| Ordner | App | Technologie | Beschreibung |
-| --- | --- | --- | --- |
-| [editor/](editor/README.md) | **IFCnative Editor 1.x** | React 19, Vite, Tauri 2, ThatOpen/web-ifc | Haupt-App: Desktop-IFC-Builder und -Viewer mit Mosaic-Panes, Relationship-Graph, Psets/Katalog-Bearbeitung und NSIS-Installer. |
-| [editor-2.0/](editor-2.0/README.md) | **Editor 2.0** (in Arbeit) | Tauri 2, Rust (ifc-lite), React | Nachfolger-Generation, bestehend aus zwei Teil-Apps: `app/` (Tauri-Desktop-Client) und `hub/` (IFC-Hub-Server für Projekt-/Versionsverwaltung). Planungsdokumente unter `docs/`. |
-| [native-windows/](native-windows/) | **NativeWindows** | .NET 10, Avalonia, xBIM | Nativer Windows-Desktop-Versuch: `src/` (App), `tests/` (Testrunner), `docs/` (Rewrite-Protokoll). |
-| [ifc-to-glb/](ifc-to-glb/README.md) | **ifc2glb** | .NET 10, xBIM | CLI-Konverter IFC → GLB: `src/IfcToGlb.Core` (Bibliothek), `src/IfcToGlb.Cli` (Kommandozeile), `samples/` (Testmodelle). |
-| [server/](server/README.md) | **IFC-VCS-Server** | Node.js/TypeScript | Versionskontroll-Server für IFC-Modelle (lokale Daten unter `.ifc-vcs-data/`). |
+| Ordner                              | App                        | Technologie                               | Beschreibung                                                                                                                                                                     |
+| ----------------------------------- | -------------------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [editor/](editor/README.md)         | **IFCnative Editor 1.x**   | React 19, Vite, Tauri 2, ThatOpen/web-ifc | Haupt-App: Desktop-IFC-Builder und -Viewer mit Mosaic-Panes, Relationship-Graph, Psets/Katalog-Bearbeitung und NSIS-Installer.                                                   |
+| [editor-2.0/](editor-2.0/README.md) | **Editor 2.0** (in Arbeit) | Tauri 2, Rust (ifc-lite), React           | Nachfolger-Generation, bestehend aus zwei Teil-Apps: `app/` (Tauri-Desktop-Client) und `hub/` (IFC-Hub-Server für Projekt-/Versionsverwaltung). Planungsdokumente unter `docs/`. |
+| [native-windows/](native-windows/)  | **NativeWindows**          | .NET 10, Avalonia, xBIM                   | Nativer Windows-Desktop-Versuch: `src/` (App), `tests/` (Testrunner), `docs/` (Rewrite-Protokoll).                                                                               |
+| [ifc-to-glb/](ifc-to-glb/README.md) | **ifc2glb**                | .NET 10, xBIM                             | CLI-Konverter IFC → GLB: `src/IfcToGlb.Core` (Bibliothek), `src/IfcToGlb.Cli` (Kommandozeile), `samples/` (Testmodelle).                                                         |
+| [server/](server/README.md)         | **IFC-VCS-Server**         | Node.js/TypeScript                        | Versionskontroll-Server für IFC-Modelle (lokale Daten unter `.ifc-vcs-data/`).                                                                                                   |
 
 ## Schnellstart (Haupt-App)
 

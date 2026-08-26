@@ -12,11 +12,11 @@ samples/box.ifc  minimal smoke-test model (extruded solid → OpenCascade path)
 
 ## Two conversion paths
 
-| | Direct tessellation (fast path) | xBIM/OpenCascade |
-|---|---|---|
-| Input | IFC4+ models whose body geometry is exclusively `IfcTriangulatedFaceSet` / simple `IfcPolygonalFaceSet` (typical reference-view exports) | Everything else: BReps, swept solids, booleans, mapped items, openings (`IfcRelVoidsElement`) — typical IFC2x3 design exports |
-| Engine | pure C# (Xbim.Essentials only) | native OpenCascade via `Xbim.Geometry` |
-| Platforms | **Windows + Linux** | **Windows only** — the official `Xbim.Geometry`/`Xbim.Geometry.Occt` NuGet packages contain no Linux native engines (the `-netcore` suffix refers to the TFM, not cross-platform support) |
+|           | Direct tessellation (fast path)                                                                                                          | xBIM/OpenCascade                                                                                                                                                                          |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Input     | IFC4+ models whose body geometry is exclusively `IfcTriangulatedFaceSet` / simple `IfcPolygonalFaceSet` (typical reference-view exports) | Everything else: BReps, swept solids, booleans, mapped items, openings (`IfcRelVoidsElement`) — typical IFC2x3 design exports                                                             |
+| Engine    | pure C# (Xbim.Essentials only)                                                                                                           | native OpenCascade via `Xbim.Geometry`                                                                                                                                                    |
+| Platforms | **Windows + Linux**                                                                                                                      | **Windows only** — the official `Xbim.Geometry`/`Xbim.Geometry.Occt` NuGet packages contain no Linux native engines (the `-netcore` suffix refers to the TFM, not cross-platform support) |
 
 The path is chosen automatically per file. On Linux, a model that needs
 OpenCascade fails with a clear `NotSupportedException` naming the blocking
@@ -24,11 +24,11 @@ entity type (exit code 1).
 
 Reference numbers, 130 MB IFC4 bridge model (1,749 products, 2.5M triangles):
 
-| | OpenCascade path | Fast path |
-|---|---|---|
-| Wall clock | 395 s | **8 s** |
-| Peak memory | 1.74 GB | **0.9 GB** (dominated by xBIM's in-memory IFC model) |
-| GLB size | 87 MB | **37 MB** |
+|             | OpenCascade path | Fast path                                            |
+| ----------- | ---------------- | ---------------------------------------------------- |
+| Wall clock  | 395 s            | **8 s**                                              |
+| Peak memory | 1.74 GB          | **0.9 GB** (dominated by xBIM's in-memory IFC model) |
+| GLB size    | 87 MB            | **37 MB**                                            |
 
 ## Usage
 

@@ -23,30 +23,30 @@ Der bestehende React-Viewer bleibt unangetastet; dieser Ordner ist die Planungs-
 
 ## Warum ifc-lite als Basis
 
-| Bedarf 2.0 | ifc-lite liefert |
-| --- | --- |
-| Große IFCs schnell öffnen | Rust-Parser (~1,2 GB/s Tokenizing), Streaming-Rendering: erste Dreiecke während des Parsens |
-| Rendering | WebGPU-Renderer mit Batching, Sectioning, Isolation, X-Ray, Heatmaps |
-| Editieren | Mutations-API (Psets, Mengen, Attribute, positionale STEP-Argumente, Entities anlegen/löschen) mit Undo/Redo und Overlay-Modell |
-| Batch-Edit | `BulkQueryEngine` (Mehrfach-Updates mit Preview), `CsvConnector`, `ChangeSetManager` |
-| Geometrie erzeugen | `@ifc-lite/create` + Element-Builder (`addWallToStore`, `addColumnToStore`, `addSlabToStore`, …) inkl. Platzierung/Profil/Repräsentation |
-| Prüfung | IDS 1.0 komplett (6 Facetten, Cardinality, Regex/Bounds), BCF-Export der Fehlschläge, mehrsprachige Reports (u. a. Deutsch) |
-| Diff | semantischer Model-Diff (passt zu unserem GlobalId-Versionierungskern in `src/ifc/versioning`) |
-| Server | Rust/Axum-Server: Parquet-Geometrie (15–50× kleiner als JSON), SSE-Streaming, Content-Addressable Cache |
-| Desktop | dokumentierter Tauri-v2-Pfad: native Kompilierung von `ifc-lite-core`/`ifc-lite-geometry`, `NativeBridge`/`IPlatformBridge`, Commands wie `get_geometry_from_path` |
-| Schemas | IFC2X3, IFC4, IFC4X3, IFC5/IFCX; 100 % Entity-Abdeckung IFC4/IFC4X3 |
+| Bedarf 2.0                | ifc-lite liefert                                                                                                                                                   |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Große IFCs schnell öffnen | Rust-Parser (~1,2 GB/s Tokenizing), Streaming-Rendering: erste Dreiecke während des Parsens                                                                        |
+| Rendering                 | WebGPU-Renderer mit Batching, Sectioning, Isolation, X-Ray, Heatmaps                                                                                               |
+| Editieren                 | Mutations-API (Psets, Mengen, Attribute, positionale STEP-Argumente, Entities anlegen/löschen) mit Undo/Redo und Overlay-Modell                                    |
+| Batch-Edit                | `BulkQueryEngine` (Mehrfach-Updates mit Preview), `CsvConnector`, `ChangeSetManager`                                                                               |
+| Geometrie erzeugen        | `@ifc-lite/create` + Element-Builder (`addWallToStore`, `addColumnToStore`, `addSlabToStore`, …) inkl. Platzierung/Profil/Repräsentation                           |
+| Prüfung                   | IDS 1.0 komplett (6 Facetten, Cardinality, Regex/Bounds), BCF-Export der Fehlschläge, mehrsprachige Reports (u. a. Deutsch)                                        |
+| Diff                      | semantischer Model-Diff (passt zu unserem GlobalId-Versionierungskern in `src/ifc/versioning`)                                                                     |
+| Server                    | Rust/Axum-Server: Parquet-Geometrie (15–50× kleiner als JSON), SSE-Streaming, Content-Addressable Cache                                                            |
+| Desktop                   | dokumentierter Tauri-v2-Pfad: native Kompilierung von `ifc-lite-core`/`ifc-lite-geometry`, `NativeBridge`/`IPlatformBridge`, Commands wie `get_geometry_from_path` |
+| Schemas                   | IFC2X3, IFC4, IFC4X3, IFC5/IFCX; 100 % Entity-Abdeckung IFC4/IFC4X3                                                                                                |
 
 Lizenz MPL-2.0: Nutzung/Einbettung in proprietäre Produkte zulässig; nur Änderungen an ifc-lite-Quelldateien selbst müssen unter MPL bleiben. Eigene Domänenschichten (Portal, Objektkatalog, Prüflogik) bleiben davon unberührt.
 
 ## Dokumente in diesem Ordner
 
-| Datei | Inhalt |
-| --- | --- |
-| [`01-architektur.md`](./docs/01-architektur.md) | Zielarchitektur: Tauri-Shell, Rust-Kern, React-UI, Renderer, Domänenschicht, Server-Anbindung, Projektstruktur |
-| [`02-funktionsparitaet.md`](./docs/02-funktionsparitaet.md) | Vollständige Paritätsmatrix React-Viewer 1.x → 2.0 (inkl. Lückenanalyse ifc-lite) |
-| [`03-kernfeatures.md`](./docs/03-kernfeatures.md) | Detailspezifikation der Schwerpunkt-Features + **vollständiger ifc-lite-Paketkatalog (38 Pakete) mit Verwendungsentscheidung** |
-| [`04-roadmap.md`](./docs/04-roadmap.md) | Meilensteine M0–M7 mit Abnahmekriterien |
-| [`05-risiken-entscheidungen.md`](./docs/05-risiken-entscheidungen.md) | Risiken, offene Fragen, zu verifizierende Annahmen, getroffene Entscheidungen |
+| Datei                                                                 | Inhalt                                                                                                                         |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| [`01-architektur.md`](./docs/01-architektur.md)                       | Zielarchitektur: Tauri-Shell, Rust-Kern, React-UI, Renderer, Domänenschicht, Server-Anbindung, Projektstruktur                 |
+| [`02-funktionsparitaet.md`](./docs/02-funktionsparitaet.md)           | Vollständige Paritätsmatrix React-Viewer 1.x → 2.0 (inkl. Lückenanalyse ifc-lite)                                              |
+| [`03-kernfeatures.md`](./docs/03-kernfeatures.md)                     | Detailspezifikation der Schwerpunkt-Features + **vollständiger ifc-lite-Paketkatalog (38 Pakete) mit Verwendungsentscheidung** |
+| [`04-roadmap.md`](./docs/04-roadmap.md)                               | Meilensteine M0–M7 mit Abnahmekriterien                                                                                        |
+| [`05-risiken-entscheidungen.md`](./docs/05-risiken-entscheidungen.md) | Risiken, offene Fragen, zu verifizierende Annahmen, getroffene Entscheidungen                                                  |
 
 ## Abgrenzung zu den übrigen Repo-Varianten
 
