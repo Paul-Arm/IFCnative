@@ -70,6 +70,7 @@ import {
     combineNativeBodyElements,
     createNativeSampleDocument,
     diffNativeDocuments,
+    duplicateNativeBodyElement,
     duplicateNativePropertySet,
     extractNativeSubsetIfc,
     getNativeBodyRepresentation,
@@ -4524,4 +4525,65 @@ test("split by plane yields a self-contained subset for the new parts", () => {
   );
   // Deutlich kleiner als das Gesamtdokument.
   assert.ok(subset.entityCount < split.document.entities.length);
+});
+
+test("duplicating a body shares the representation and gets its own placement", () => {
+  const sample = createNativeSampleDocument();
+  const storey = sample.entities.find(
+    (entity) => entity.type === "IFCBUILDINGSTOREY",
+  );
+  assert.ok(storey);
+  const withBody = addNativeBodyElement(sample, {
+    depth: "1",
+    height: "1",
+    name: "Original Body",
+    parentId: storey.id,
+    type: "IFCWALL",
+    width: "1",
+    x: "2",
+    y: "3",
+    z: "0",
+  });
+  const wall = withBody.entities.find(
+    (entity) => entity.name === "Original Body",
+  );
+  assert.ok(wall);
+
+  const result = duplicateNativeBodyElement(withBody, wall.id);
+  assert.ok(result);
+  const copy = result.document.entityById.get(result.productId);
+  assert.ok(copy);
+  assert.equal(copy.type, "IFCWALL");
+  assert.ok(copy.name.includes("Kopie"));
+  // Neue GlobalId, geteilte Repräsentation (gleiche Shape-Referenz).
+  assert.notEqual(copy.globalId, wall.globalId);
+  assert.equal(copy.args[6], wall.args[6]);
+  // Eigene Platzierung mit +1-m-Versatz in lokal X.
+  const originalPlacement = getNativePlacement(result.document, wall.id);
+  const copyPlacement = getNativePlacement(result.document, result.productId);
+  assert.ok(originalPlacement);
+  assert.ok(copyPlacement);
+  assert.notEqual(copyPlacement.placementId, originalPlacement.placementId);
+  assert.equal(
+    Math.round((copyPlacement.x - originalPlacement.x) * 1000) / 1000,
+    1,
+  );
+  // Containment im selben Storey übernommen.
+  assert.ok(
+    result.document.relationshipsByEntity
+      .get(result.productId)
+      ?.some(
+        (relationship) =>
+          relationship.type === "IFCRELCONTAINEDINSPATIALSTRUCTURE" &&
+          relationship.sourceIds.includes(storey.id),
+      ),
+  );
+  // Roundtrip bleibt parsebar und referenz-sauber.
+  const reparsed = parseNativeIfcText(
+    serializeNativeIfcDocument(result.document),
+    "duplicate.ifc",
+  );
+  assert.ok(
+    !reparsed.diagnostics.some((line) => line.includes("references missing")),
+  );
 });

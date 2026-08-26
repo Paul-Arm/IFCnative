@@ -13,6 +13,20 @@ export interface ViewerCoordinatePick {
   z: number;
 }
 
+/**
+ * Ziel eines Rechtsklicks im Viewer: der per Raycast getroffene Körper plus
+ * der Trefferpunkt in echten IFC-Weltkoordinaten (Viewer-Achsen, Meter).
+ */
+export interface ViewerContextMenuTarget {
+  clientX: number;
+  clientY: number;
+  documentId: string;
+  entityId: number;
+  fileName?: string;
+  globalId?: string;
+  point: { x: number; y: number; z: number };
+}
+
 export interface ThatOpenViewerModel {
   documentId: string;
   fileName: string;
@@ -40,9 +54,20 @@ export interface ThatOpenViewerProps {
   mirrorRequest?: ViewerMirrorRequest | null;
   models: ThatOpenViewerModel[];
   onLoadActiveModel?(): void;
+  /** Rotary-Menü: neuen Körper am Rechtsklick-Punkt anlegen. */
+  onAddBodyAt?(
+    profile: NativeBodyProfile,
+    target: ViewerContextMenuTarget,
+  ): void;
   onCutPlaneActiveChange?(active: boolean): void;
+  /** Rotary-Menü/Zerteilen: Schnittebenen-Achse zyklisch drehen (Y→X→Z). */
+  onCutPlaneAxisCycle?(): void;
   onCutPlaneChange?(change: ViewerCutPlaneChange): void;
   onCutPlaneModeChange?(mode: ViewerCutPlaneMode): void;
+  /** Rotary-Menü: Geometrie entfernen (withEntity=false) oder Objekt-Löschdialog öffnen. */
+  onDeleteBody?(entityId: number, withEntity: boolean): void;
+  /** Rotary-Menü: Produkt mit geteilter Repräsentation duplizieren. */
+  onDuplicateBody?(entityId: number): void;
   onLog?(line: string): void;
   onMirrorApplied?(result: ViewerMirrorResult): void;
   onMoveSelected?(
@@ -61,6 +86,8 @@ export interface ThatOpenViewerProps {
     globalId?: string,
     documentId?: string,
   ): void;
+  /** Rotary-Menü/Zerteilen: Auswahl an der aktiven Schnittebene zerteilen. */
+  onSplitSelected?(): void;
   /**
    * Ausstehende Geometrie-Änderungen (Labels) des aktiven Dokuments, die erst
    * mit "Modell neu berechnen" in das Fragments-Modell übernommen werden.

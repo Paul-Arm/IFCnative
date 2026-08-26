@@ -3787,6 +3787,95 @@ export function combineNativeBodyElements(
   return { document: combinedDocument, productId, sourceIds };
 }
 
+export interface NativeBodyDuplicateResult {
+  document: NativeIfcDocument;
+  productId: number;
+}
+
+/**
+ * Dupliziert ein Produkt mit eigener Platzierung (leicht in +X versetzt) und
+ * GETEILTER Repräsentation — das Shape wird referenziert statt kopiert, was
+ * valides IFC ist und das Dokument klein hält. Memberships (Containment,
+ * Material, Psets, Typen) werden mit übernommen.
+ */
+export function duplicateNativeBodyElement(
+  document: NativeIfcDocument,
+  entityId: number,
+): NativeBodyDuplicateResult | undefined {
+  const product = document.entityById.get(entityId);
+  const placement = getNativePlacement(document, entityId);
+  if (!product || !placement) {
+    return undefined;
+  }
+  const placementEntity = document.entityById.get(placement.placementId);
+  const axisEntity = document.entityById.get(placement.axisPlacementId);
+  if (!placementEntity || !axisEntity) {
+    return undefined;
+  }
+
+  const next = cloneDocumentEntities(document);
+  let nextId = nextEntityId(next);
+  const productId = nextId++;
+  const placementId = nextId++;
+  const axisId = nextId++;
+  const pointId = nextId++;
+  // 1 m Versatz in lokaler X-Richtung, damit die Kopie sichtbar daneben steht.
+  const offset = 1 / getNativeLengthUnitScale(document);
+  const guid = createIfcGuid(productId);
+  const name = `${product.name || product.type} (Kopie)`;
+
+  next.push(
+    {
+      args: [
+        `(${formatDecimal(placement.x + offset)},${formatDecimal(placement.y)},${formatDecimal(placement.z)})`,
+      ],
+      description: "",
+      globalId: "",
+      id: pointId,
+      name: "",
+      type: "IFCCARTESIANPOINT",
+    },
+    {
+      args: [
+        `#${pointId}`,
+        axisEntity.args[1] ?? "$",
+        axisEntity.args[2] ?? "$",
+      ],
+      description: "",
+      globalId: "",
+      id: axisId,
+      name: "",
+      type: "IFCAXIS2PLACEMENT3D",
+    },
+    {
+      args: [placementEntity.args[0] ?? "$", `#${axisId}`],
+      description: "",
+      globalId: "",
+      id: placementId,
+      name: "",
+      type: "IFCLOCALPLACEMENT",
+    },
+  );
+
+  const args = [...product.args];
+  setArg(args, 0, quote(guid));
+  setArg(args, 2, quote(name));
+  setArg(args, 5, `#${placementId}`);
+  next.push({
+    args,
+    description: product.description,
+    globalId: guid,
+    id: productId,
+    name,
+    type: product.type,
+  });
+  copyNativeProductMemberships(document, next, entityId, productId, {
+    includeQuantities: true,
+  });
+
+  return { document: rebuildNativeDocument(document, next), productId };
+}
+
 function nativeBodyFootprintArea(body: NativeBodyRepresentationSummary) {
   if (body.profile === "cylinder" && body.radius !== undefined) {
     return circleAreaStepNumber(formatDecimal(body.radius));

@@ -1,13 +1,25 @@
 import {
     Box,
+    Check,
+    Circle,
     Copy,
+    CopyPlus,
+    Cylinder,
+    Eraser,
     LocateFixed,
+    MapPin,
     Maximize,
     MousePointer2,
     Move,
+    Plus,
     RefreshCw,
+    Rotate3d,
     RotateCw,
     Slice,
+    Square,
+    Trash2,
+    Triangle,
+    X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -20,10 +32,12 @@ import {
     fragmentModelPointToScene,
     fragmentScenePointToIfcWorld,
 } from "../ifc/fragmentSceneCoordinates";
+import type { NativeBodyProfile } from "../ifc/nativeDocument";
 import { createBodyGeometry } from "./bodyGeometry";
 import type {
     ThatOpenViewerModel,
     ThatOpenViewerProps,
+    ViewerContextMenuTarget,
     ViewerCoordinatePick,
     ViewerCutPlaneChange,
     ViewerCutPlaneMode,
@@ -35,6 +49,11 @@ import type {
     ViewerRotationChange,
     ViewerTransformCommitReceipt,
 } from "./that-open-viewer.types";
+import {
+    ViewerRotaryMenu,
+    type RotaryMenuChild,
+    type RotaryMenuItem,
+} from "./viewer-rotary-menu";
 
 type ViewerRuntime = Awaited<ReturnType<typeof createThatOpenRuntime>>;
 
@@ -52,9 +71,13 @@ export default function ThatOpenViewer({
   mirrorRequest,
   models,
   onLoadActiveModel,
+  onAddBodyAt,
   onCutPlaneActiveChange,
+  onCutPlaneAxisCycle,
   onCutPlaneChange,
   onCutPlaneModeChange,
+  onDeleteBody,
+  onDuplicateBody,
   onLog,
   onMirrorApplied,
   onMoveSelected,
@@ -62,6 +85,7 @@ export default function ThatOpenViewer({
   onRotateSelected,
   onPickCoordinates,
   onSelect,
+  onSplitSelected,
   pendingViewerChanges,
 }: ThatOpenViewerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -89,6 +113,8 @@ export default function ThatOpenViewer({
   );
   const [pickerActive, setPickerActive] = useState(false);
   const [lastPick, setLastPick] = useState<ViewerCoordinatePick | null>(null);
+  const [contextTarget, setContextTarget] =
+    useState<ViewerContextMenuTarget | null>(null);
   const [copyStatus, setCopyStatus] = useState("");
   const [loadProgress, setLoadProgress] = useState<{
     fileName: string;
@@ -180,6 +206,7 @@ export default function ThatOpenViewer({
         },
         isCoordinatePickerActive: () => pickerActiveRef.current,
         onCoordinatePickerUsed: () => setPickerActive(false),
+        onContextTarget: (target) => setContextTarget(target),
         onProgress: (progress) => setLoadProgress(progress),
         onSelect: (id, source, globalId, documentId) =>
           onSelectRef.current(id, source, globalId, documentId),
@@ -423,6 +450,77 @@ export default function ThatOpenViewer({
     moveGizmoMode,
   ]);
 
+  const rotaryItems = useMemo<RotaryMenuItem[]>(
+    () => [
+      {
+        children: [
+          { icon: Square, id: "add:rectangle", label: "Quader" },
+          { icon: Cylinder, id: "add:cylinder", label: "Zylinder" },
+          { icon: Circle, id: "add:ellipse", label: "Ellipse" },
+          { icon: Triangle, id: "add:triangle", label: "Dreieck" },
+          { icon: MapPin, id: "add:marker", label: "Marker" },
+        ],
+        icon: Plus,
+        id: "add",
+        label: "Hier hinzufügen",
+      },
+      { icon: CopyPlus, id: "duplicate", label: "Duplizieren" },
+      { icon: Slice, id: "split", label: "Zerteilen" },
+      {
+        accent: "var(--destructive, #dc2626)",
+        children: [
+          {
+            description: "IFC-Objekt bleibt erhalten",
+            icon: Eraser,
+            id: "delete:geometry",
+            label: "Nur Geometrie",
+          },
+          {
+            description: "Objekt samt Kaskade löschen",
+            icon: Trash2,
+            id: "delete:entity",
+            label: "Mit IFC-Objekt",
+          },
+        ],
+        icon: Trash2,
+        id: "delete",
+        label: "Körper löschen",
+      },
+    ],
+    [],
+  );
+
+  const ADD_PROFILES: Record<string, NativeBodyProfile> = {
+    "add:cylinder": "cylinder",
+    "add:ellipse": "ellipse",
+    "add:marker": "marker",
+    "add:rectangle": "rectangle",
+    "add:triangle": "triangle",
+  };
+
+  const handleRotarySelect = (item: RotaryMenuChild) => {
+    const target = contextTarget;
+    if (!target) {
+      return;
+    }
+    const profile = ADD_PROFILES[item.id];
+    if (profile) {
+      onAddBodyAt?.(profile, target);
+    } else if (item.id === "duplicate") {
+      onDuplicateBody?.(target.entityId);
+    } else if (item.id === "split") {
+      // Schnittebene auf der (per Rechtsklick selektierten) Auswahl spawnen;
+      // bestätigt wird über die Leiste unten in der Mitte.
+      setMoveGizmoActive(false);
+      setPickerActive(false);
+      onCutPlaneActiveChange?.(true);
+    } else if (item.id === "delete:geometry") {
+      onDeleteBody?.(target.entityId, false);
+    } else if (item.id === "delete:entity") {
+      onDeleteBody?.(target.entityId, true);
+    }
+  };
+
   return (
     <div className="ifcnative-thatopen-shell">
       <div
@@ -594,6 +692,45 @@ export default function ThatOpenViewer({
             <span>W / R · Esc beendet</span>
           </div>
         ) : null}
+        {cutPlane?.active ? (
+          <div className="ifcnative-thatopen-split-bar">
+            <button
+              title="Schnittachse zyklisch drehen (Y → X → Z)"
+              type="button"
+              onClick={() => onCutPlaneAxisCycle?.()}
+            >
+              <Rotate3d aria-hidden size={14} />
+              Achse drehen
+            </button>
+            <button
+              className="primary"
+              title="Auswahl an der Schnittebene zerteilen"
+              type="button"
+              onClick={() => onSplitSelected?.()}
+            >
+              <Check aria-hidden size={14} />
+              Zerteilen
+            </button>
+            <button
+              aria-label="Zerteilen abbrechen"
+              title="Abbrechen · Esc"
+              type="button"
+              onClick={() => onCutPlaneActiveChange?.(false)}
+            >
+              <X aria-hidden size={14} />
+            </button>
+          </div>
+        ) : null}
+        {contextTarget ? (
+          <ViewerRotaryMenu
+            ariaLabel="Körper-Aktionen"
+            items={rotaryItems}
+            x={contextTarget.clientX}
+            y={contextTarget.clientY}
+            onClose={() => setContextTarget(null)}
+            onSelect={handleRotarySelect}
+          />
+        ) : null}
         {lastPick ? (
           <div className="ifcnative-thatopen-coordinate-readout">
             <span>{formatCoordinatePickLabel(lastPick)}</span>
@@ -664,6 +801,7 @@ async function createThatOpenRuntime(
     isCoordinatePickerActive(): boolean;
     onError(message: string): void;
     onCoordinatePickerUsed(): void;
+    onContextTarget(target: ViewerContextMenuTarget): void;
     onLog(line: string): void;
     onCutPlaneChange(change: ViewerCutPlaneChange): void;
     onMoveSelected(
@@ -746,6 +884,66 @@ async function createThatOpenRuntime(
   // runtime setting explicit after setup as recommended by the component API.
   grid.config.visible = true;
   grid.fade = world.camera.three instanceof THREE.PerspectiveCamera;
+  // Der InfiniteGrid-Shader wertet fract() auf ABSOLUTEN Weltkoordinaten aus
+  // — weit vom Ursprung (georeferenzierte Modelle) flackern die Linien durch
+  // float32-Rundung. Patch: Muster kamera-relativ rechnen; der Anker uCamRel
+  // wird CPU-seitig in float64 gegen die auf ein Rasterperioden-Vielfaches
+  // gesnappte Kameraposition bestimmt — das Muster bleibt exakt weltverankert,
+  // die Shader-Werte bleiben klein.
+  const gridMaterial = grid.material;
+  gridMaterial.uniforms.uCamRel = { value: new THREE.Vector2() };
+  gridMaterial.vertexShader = `
+    varying vec2 relPosition;
+    uniform float uDistance;
+    uniform vec2 uCamRel;
+    void main() {
+      vec3 pos = position.xzy * uDistance;
+      relPosition = pos.xz + uCamRel;
+      pos.xz += cameraPosition.xz;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+    }
+  `;
+  gridMaterial.fragmentShader = `
+    varying vec2 relPosition;
+    uniform float uZoom;
+    uniform float uFade;
+    uniform float uSize1;
+    uniform float uSize2;
+    uniform vec3 uColor;
+    uniform float uDistance;
+    uniform vec2 uCamRel;
+    float getGrid(float size) {
+      vec2 r = relPosition / size;
+      vec2 grid = abs(fract(r - 0.5) - 0.5) / fwidth(r);
+      float line = min(grid.x, grid.y);
+      return 1.0 - min(line, 1.0);
+    }
+    void main() {
+      float d = 1.0 - min(distance(uCamRel, relPosition) / uDistance, 1.0);
+      float g1 = getGrid(uSize1);
+      float g2 = getGrid(uSize2);
+      // Ortho camera fades the grid away when zooming out
+      float minZoom = step(0.2, uZoom);
+      float zoomFactor = pow(min(uZoom, 1.), 2.) * minZoom;
+      gl_FragColor = vec4(uColor.rgb, mix(g2, g1, g1) * pow(d, uFade));
+      gl_FragColor.a = mix(0.5 * gl_FragColor.a, gl_FragColor.a, g2) * zoomFactor;
+      if (gl_FragColor.a <= 0.0) discard;
+    }
+  `;
+  gridMaterial.needsUpdate = true;
+  const updateGridAnchor = () => {
+    const size1 = Math.abs(Number(gridMaterial.uniforms.uSize1.value)) || 1;
+    const size2 = Math.abs(Number(gridMaterial.uniforms.uSize2.value)) || 10;
+    // Vielfaches beider Rastergrößen — Verschiebung darum ist musterinvariant.
+    const period = Math.max(size1 * size2, 1);
+    const camera = world.camera.three.position;
+    (gridMaterial.uniforms.uCamRel.value as import("three").Vector2).set(
+      camera.x - Math.round(camera.x / period) * period,
+      camera.z - Math.round(camera.z / period) * period,
+    );
+  };
+  updateGridAnchor();
+  world.camera.controls.addEventListener("update", updateGridAnchor);
   const themeObserver = new MutationObserver(() => {
     world.scene.three.background = new THREE.Color(readViewerBackdrop());
     grid.config.color = readGridColor();
@@ -1341,6 +1539,72 @@ async function createThatOpenRuntime(
   canvas.addEventListener("pointerdown", trackPointerDown, { capture: true });
   canvas.addEventListener("click", selectFromPointer, { capture: true });
 
+  // Rechtsklick: Körper unter dem Zeiger raycasten, auswählen (macht dessen
+  // IFC aktiv) und das Rotary-Menü an der Zeigerposition öffnen.
+  const openContextFromPointer = async (event: MouseEvent) => {
+    if (!modelsByDocumentId.size || !world.renderer) {
+      return;
+    }
+    event.preventDefault();
+    if (moveGizmo.isDragging() || cutPlaneGizmo.isDragging()) {
+      return;
+    }
+    const mouse = new THREE.Vector2(event.clientX, event.clientY);
+    const result = await fragments.raycast({
+      camera: world.camera.three,
+      dom: canvas,
+      mouse,
+    });
+    const localId = result?.localId;
+    if (!localId || !Number.isFinite(localId)) {
+      callbacks.onLog("viewer.contextMenuMiss({ engine: 'thatopen' });");
+      return;
+    }
+    const hitModel = fragments.list.get(result.fragments.modelId);
+    const modelId = hitModel?.parentModelId ?? result.fragments.modelId;
+    const documentId = documentIdByModelId.get(modelId);
+    const loadedModel = documentId
+      ? modelsByDocumentId.get(documentId)
+      : undefined;
+    if (!documentId || !loadedModel) {
+      return;
+    }
+    const itemData = await readItemData(fragments, modelId, localId);
+    const entityId = readNumericAttribute(itemData, [
+      "expressID",
+      "ExpressID",
+      "expressId",
+      "_localId",
+      "localId",
+    ]);
+    const globalId = readStringAttribute(itemData, [
+      "GlobalId",
+      "GlobalID",
+      "globalId",
+      "guid",
+    ]);
+    const mappedEntityId = loadedModel.mirrorEntityIdByLocalId.get(localId);
+    const resolvedEntityId = mappedEntityId ?? entityId ?? localId;
+    const ifcPoint = sceneToIfcWorldPoint(loadedModel, result.point);
+    callbacks.onSelect(resolvedEntityId, "thatopen", globalId, documentId);
+    callbacks.onContextTarget({
+      clientX: event.clientX,
+      clientY: event.clientY,
+      documentId,
+      entityId: resolvedEntityId,
+      fileName: loadedModel.fileName,
+      globalId,
+      point: { x: ifcPoint.x, y: ifcPoint.y, z: ifcPoint.z },
+    });
+    callbacks.onLog(
+      `viewer.contextMenu({ file: '${loadedModel.fileName}', id: ${resolvedEntityId}, point: { x: ${formatCoordinate(ifcPoint.x)}, y: ${formatCoordinate(ifcPoint.y)}, z: ${formatCoordinate(ifcPoint.z)} } });`,
+    );
+  };
+  const handleContextMenu = (event: MouseEvent) => {
+    void openContextFromPointer(event);
+  };
+  canvas.addEventListener("contextmenu", handleContextMenu);
+
   // Serialize reloads: two quick commits would otherwise run syncModels
   // concurrently and can leave an orphaned model instance in the scene.
   let syncQueue: Promise<unknown> = Promise.resolve();
@@ -1831,6 +2095,7 @@ async function createThatOpenRuntime(
       capture: true,
     });
     canvas.removeEventListener("click", selectFromPointer, { capture: true });
+    canvas.removeEventListener("contextmenu", handleContextMenu);
     canvas.removeEventListener("webglcontextlost", handleContextLost);
     canvas.removeEventListener("webglcontextrestored", handleContextRestored);
     resizeObserver.disconnect();
@@ -1839,6 +2104,7 @@ async function createThatOpenRuntime(
       "update",
       updateFragmentsOnCamera,
     );
+    world.camera.controls.removeEventListener("update", updateGridAnchor);
     fragments.list.onItemSet.remove(handleFragmentModelSet);
     fragments.core.models.materials.list.onItemSet.remove(
       handleFragmentMaterialSet,

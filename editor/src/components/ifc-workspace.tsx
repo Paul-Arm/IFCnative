@@ -77,6 +77,7 @@ import {
     combineNativeBodyElements,
     createNativeSampleDocument,
     diffNativeDocuments,
+    duplicateNativeBodyElement,
     duplicateNativePropertySet,
     extractNativeSubsetIfc,
     findCatalogObject,
@@ -84,7 +85,6 @@ import {
     getNativeLengthUnitScale,
     getNativePlacement,
     getNativePlacementWorld,
-    getNativePlacementWorldFrame,
     getNextNativeEntityId,
     ifcPlacementPointToViewerWorldPoint,
     mergeNativePropertySetValues,
@@ -208,6 +208,7 @@ import {
 import type { RelationshipFlowClipboardNode } from "./relationship-flow.types";
 import ThatOpenViewer from "./that-open-viewer";
 import type {
+    ViewerContextMenuTarget,
     ViewerCoordinatePick,
     ViewerCutPlaneChange,
     ViewerCutPlaneMode,
@@ -1713,33 +1714,28 @@ export default function IfcWorkspace() {
     }
     const addedId = getNextNativeEntityId(document);
     const next = addNativeElement(document, parentId, type, name);
+    // Auch geometrielose Elemente per Subset spiegeln: der Erfolg räumt den
+    // Pending-Eintrag ab — kein manuelles "Modell neu berechnen" nötig.
+    const subset = extractNativeSubsetIfc(next, [addedId]);
     commitDocument(
       next,
       addedId,
       `Create ${type} '${name}' under #${parentId}`,
       `tree.addChildElement({ parentId: ${parentId}, class: '${type}', name: ${JSON.stringify(name)}, id: ${addedId} });`,
       undefined,
-      { reloadViewer: true },
+      {
+        pendingKey: `body:${addedId}`,
+        reloadViewer: true,
+        viewerMirror: subset
+          ? {
+              entityIds: [addedId],
+              kind: "reconvert-subset",
+              replacedEntityIds: [],
+              subsetIfcText: subset.text,
+            }
+          : undefined,
+      },
     );
-  };
-
-  // Geerbte Rotation der Platzierungskette (georeferenzierte/rotierte Sites)
-  // als Basis der Spiegel-Geometrie in Viewer-Weltrichtungen: Geometrie-X =
-  // IFC-X, Geometrie-Y (hoch) = IFC-Z, Geometrie-Z = -IFC-Y.
-  const nativePlacementViewerAxes = (
-    doc: NativeIfcDocument,
-    entityId: number,
-  ) => {
-    const frame = getNativePlacementWorldFrame(doc, entityId);
-    if (!frame) {
-      return undefined;
-    }
-    const yIfc = ifcPlacementPointToViewerWorldPoint(frame.yAxis, 1);
-    return {
-      x: ifcPlacementPointToViewerWorldPoint(frame.xAxis, 1),
-      y: ifcPlacementPointToViewerWorldPoint(frame.zAxis, 1),
-      z: { x: -yIfc.x, y: -yIfc.y, z: -yIfc.z },
-    };
   };
 
   // Der Viewer stellt die Szene in echten IFC-Weltkoordinaten dar (Meter,
@@ -1770,23 +1766,9 @@ export default function IfcWorkspace() {
       z: formatCoordinate(ifcPoint.z),
     });
     const createdWorld = getNativePlacementWorld(next, addedId);
-    const createdViewerPoint = createdWorld
-      ? ifcPlacementPointToViewerWorldPoint(
-          {
-            x: createdWorld.worldX,
-            y: createdWorld.worldY,
-            z: createdWorld.worldZ,
-          },
-          scale,
-        )
-      : null;
-    if (!createdViewerPoint) {
-      // Ohne Weltposition kein Live-Mirror — die Änderung bleibt als
-      // ausstehend markiert ("Modell neu berechnen").
-      logAction(
-        `builder.createBodyMirrorSkipped({ id: ${addedId}, reason: 'no-world-placement' });`,
-      );
-    }
+    // Instant-Anzeige: exakte IFC-Geometrie des neuen Körpers als Mini-IFC
+    // rekonvertieren statt einer Fragments-Näherung — kein manueller Refresh.
+    const subset = extractNativeSubsetIfc(next, [addedId]);
     commitDocument(
       next,
       addedId,
@@ -1796,20 +1778,12 @@ export default function IfcWorkspace() {
       {
         pendingKey: `body:${addedId}`,
         reloadViewer: true,
-        viewerMirror: createdViewerPoint
+        viewerMirror: subset
           ? {
-              axes: nativePlacementViewerAxes(next, addedId),
-              category: options.type,
-              depth: options.depth,
-              entityId: addedId,
-              globalId: next.entityById.get(addedId)?.globalId,
-              height: options.height,
-              kind: "create-body",
-              name: options.name,
-              position: createdViewerPoint,
-              profile: options.profile,
-              tag: options.tag,
-              width: options.width,
+              entityIds: [addedId],
+              kind: "reconvert-subset",
+              replacedEntityIds: [],
+              subsetIfcText: subset.text,
             }
           : undefined,
       },
@@ -1839,6 +1813,132 @@ export default function IfcWorkspace() {
         viewerMirror: { entityId: selectedId, kind: "remove" },
       },
     );
+  };
+
+  // Rotary-Menü: Körper löschen — nur die Geometrie (Objekt bleibt) oder
+  // über den bestehenden Bestätigungsdialog samt IFC-Objekt/Kaskade.
+  const deleteBodyForEntity = (entityId: number, withEntity: boolean) => {
+    if (!document.entityById.has(entityId)) {
+      return;
+    }
+    if (withEntity) {
+      requestDeleteEntity(entityId, "viewer");
+      return;
+    }
+    const next = removeNativeBodyRepresentation(document, entityId);
+    if (next === document) {
+      setStatusAlert({
+        message: `Objekt #${entityId} hat keine löschbare Körper-Geometrie.`,
+        tone: "danger",
+      });
+      return;
+    }
+    commitDocument(
+      next,
+      entityId,
+      `Remove geometry of #${entityId}`,
+      `viewer.rotary.removeBody({ id: ${entityId} });`,
+      undefined,
+      {
+        pendingKey: `hide:${entityId}`,
+        reloadViewer: true,
+        viewerMirror: { entityId, kind: "remove" },
+      },
+    );
+  };
+
+  // Rotary-Menü: Duplikat mit geteilter Repräsentation, sofort per
+  // partieller Rekonvertierung sichtbar.
+  const duplicateBodyForEntity = (entityId: number) => {
+    const result = duplicateNativeBodyElement(document, entityId);
+    if (!result) {
+      setStatusAlert({
+        message: `Objekt #${entityId} hat kein editierbares IFCLOCALPLACEMENT und kann nicht dupliziert werden.`,
+        tone: "danger",
+      });
+      return;
+    }
+    const subset = extractNativeSubsetIfc(result.document, [result.productId]);
+    commitDocument(
+      result.document,
+      result.productId,
+      `Duplicate #${entityId} as #${result.productId}`,
+      `viewer.rotary.duplicateBody({ sourceId: ${entityId}, id: ${result.productId} });`,
+      undefined,
+      {
+        pendingKey: `body:${result.productId}`,
+        reloadViewer: true,
+        viewerMirror: subset
+          ? {
+              entityIds: [result.productId],
+              kind: "reconvert-subset",
+              replacedEntityIds: [],
+              subsetIfcText: subset.text,
+            }
+          : undefined,
+      },
+    );
+  };
+
+  // Rotary-Menü: neuen Körper am Rechtsklick-Punkt anlegen — räumlich im
+  // Container des getroffenen Elements, platziert relativ zu dessen
+  // (georeferenzierter) Kette.
+  const addBodyAtViewerPoint = (
+    profile: NativeBodyProfile,
+    target: ViewerContextMenuTarget,
+  ) => {
+    const containment = document.relationshipsByEntity
+      .get(target.entityId)
+      ?.find(
+        (relationship) =>
+          relationship.type === "IFCRELCONTAINEDINSPATIALSTRUCTURE" &&
+          relationship.targetIds.includes(target.entityId),
+      );
+    const parentId =
+      containment?.sourceIds[0] ??
+      document.entitiesByType.get("IFCBUILDINGSTOREY")?.[0]?.id ??
+      selectedId;
+    const labels: Record<NativeBodyProfile, string> = {
+      cylinder: "Zylinder",
+      ellipse: "Ellipse",
+      marker: "Marker",
+      rectangle: "Quader",
+      triangle: "Dreieck",
+    };
+    addBodyElement({
+      depth: "1",
+      height: "1",
+      name: `${labels[profile]} ${getNextNativeEntityId(document)}`,
+      parentId,
+      placementMode: "world",
+      placementRelativeToId: target.entityId,
+      profile,
+      type: "IFCBUILDINGELEMENTPROXY",
+      width: "1",
+      x: String(target.point.x),
+      y: String(target.point.y),
+      z: String(target.point.z),
+    });
+  };
+
+  // Schnittachse zyklisch drehen (Y → X → Z); Position bleibt erhalten.
+  const cycleCutPlaneAxis = () => {
+    setViewerCutPlane((current) => {
+      const presets = [
+        { x: 0, y: 1, z: 0 },
+        { x: 1, y: 0, z: 0 },
+        { x: 0, y: 0, z: 1 },
+      ];
+      const index = presets.findIndex(
+        (preset) =>
+          Math.abs(preset.x - current.normal.x) < 0.01 &&
+          Math.abs(preset.y - current.normal.y) < 0.01 &&
+          Math.abs(preset.z - current.normal.z) < 0.01,
+      );
+      const normal = presets[(index + 1) % presets.length];
+      return { ...current, active: true, normal };
+    });
+    logAction("viewer.cutPlane.cycleAxis();");
   };
 
   const setCutPlaneActive = (active: boolean) => {
@@ -1994,17 +2094,9 @@ export default function IfcWorkspace() {
       );
       return;
     }
-    // Recreate-Rückfall des Mirrors: Weltposition des Produkts, falls das
-    // Fragments-Element keine editierbaren Meshes liefert (z. B. bislang
-    // ohne Repräsentation oder selbst per Mirror erzeugt).
-    const entity = next.entityById.get(selectedId);
-    const world = getNativePlacementWorld(next, selectedId);
-    const viewerPoint = world
-      ? ifcPlacementPointToViewerWorldPoint(
-          { x: world.worldX, y: world.worldY, z: world.worldZ },
-          getNativeLengthUnitScale(next),
-        )
-      : null;
+    // Instant-Anzeige: die neue/geänderte Repräsentation exakt als Mini-IFC
+    // rekonvertieren; das bisherige Element wird im Basismodell ausgeblendet.
+    const subset = extractNativeSubsetIfc(next, [selectedId]);
     commitDocument(
       next,
       selectedId,
@@ -2014,23 +2106,14 @@ export default function IfcWorkspace() {
       {
         pendingKey: `body:${selectedId}`,
         reloadViewer: true,
-        viewerMirror: {
-          depth: options.depth,
-          entityId: selectedId,
-          height: options.height,
-          kind: "replace-body",
-          profile: options.profile,
-          recreate: viewerPoint
-            ? {
-                axes: nativePlacementViewerAxes(next, selectedId),
-                category: entity?.type ?? "IFCBUILDINGELEMENTPROXY",
-                globalId: entity?.globalId,
-                name: entity?.name,
-                position: viewerPoint,
-              }
-            : undefined,
-          width: options.width,
-        },
+        viewerMirror: subset
+          ? {
+              entityIds: [selectedId],
+              kind: "reconvert-subset",
+              replacedEntityIds: [selectedId],
+              subsetIfcText: subset.text,
+            }
+          : undefined,
       },
     );
   };
@@ -3567,9 +3650,13 @@ export default function IfcWorkspace() {
                 (change) => change.label,
               )}
               onLog={logAction}
+              onAddBodyAt={addBodyAtViewerPoint}
               onCutPlaneActiveChange={setCutPlaneActive}
+              onCutPlaneAxisCycle={cycleCutPlaneAxis}
               onCutPlaneChange={applyViewerCutPlaneChange}
               onCutPlaneModeChange={setCutPlaneMode}
+              onDeleteBody={deleteBodyForEntity}
+              onDuplicateBody={duplicateBodyForEntity}
               onLoadActiveModel={requestActiveViewerLoad}
               onMirrorApplied={applyViewerMirrorResult}
               onMoveSelected={nudgeSelectedPlacement}
@@ -3577,6 +3664,7 @@ export default function IfcWorkspace() {
               onRecalculateModel={recalculateViewerModel}
               onRotateSelected={rotateSelectedPlacement}
               onSelect={selectEntity}
+              onSplitSelected={splitSelectedBody}
             />
           </TileContent>
         );

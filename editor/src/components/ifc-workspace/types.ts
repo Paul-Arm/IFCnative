@@ -42,6 +42,8 @@ export interface BodyElementDraft {
   name: string;
   parentId?: number;
   placementMode?: "parent" | "world";
+  /** Platzierungskette dieses Elements erben (kleine lokale Koordinaten). */
+  placementRelativeToId?: number;
   width: string;
   depth: string;
   height: string;
