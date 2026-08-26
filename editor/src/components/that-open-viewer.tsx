@@ -1261,30 +1261,94 @@ async function createThatOpenRuntime(
   );
   let cutPlaneUpdateNonce = 0;
 
-  async function setCutPlane(state: ViewerCutPlaneState | undefined) {
+  // Bounding-Box der Auswahl im Szenenraum: erst das besitzende Modell,
+  // dann Basis und übrige Subsets — je nachdem, wo die Geometrie rendert.
+  const getElementSceneBounds = async (
+    loaded: LoadedViewerModel,
+    entityId: number,
+  ) => {
+    const owning = resolveElementModel(loaded, entityId);
+    const candidates: {
+      id: number;
+      model: import("@thatopen/fragments").FragmentsModel;
+    }[] = [
+      {
+        id:
+          owning === loaded.model ? resolveLocalId(loaded, entityId) : entityId,
+        model: owning,
+      },
+    ];
+    if (owning !== loaded.model) {
+      candidates.push({
+        id: resolveLocalId(loaded, entityId),
+        model: loaded.model,
+      });
+    }
+    for (let index = loaded.subsetModels.length - 1; index >= 0; index -= 1) {
+      const model = loaded.subsetModels[index].model;
+      if (!candidates.some((candidate) => candidate.model === model)) {
+        candidates.push({ id: entityId, model });
+      }
+    }
+    for (const candidate of candidates) {
+      const box = await candidate.model
+        .getMergedBox([candidate.id])
+        .catch(() => null);
+      if (box && !box.isEmpty()) {
+        return {
+          center: fragmentModelPointToScene(
+            box.getCenter(new THREE.Vector3()),
+            candidate.model.object,
+          ),
+          size: box.getSize(new THREE.Vector3()).length(),
+        };
+      }
+    }
+    return null;
+  };
+
+  function setCutPlane(state: ViewerCutPlaneState | undefined) {
+    if (!state?.active) {
+      cutPlaneUpdateNonce += 1;
+      cutPlaneGizmo.setState({ active: false });
+      return Promise.resolve();
+    }
+    return setCutPlaneInternal(state).catch(() => undefined);
+  }
+
+  async function setCutPlaneInternal(state: ViewerCutPlaneState) {
     const updateNonce = ++cutPlaneUpdateNonce;
     const documentId = callbacks.getActiveDocumentId();
     const loaded = modelsByDocumentId.get(documentId);
-    if (!state?.active || !loaded) {
+    if (!loaded) {
       cutPlaneGizmo.setState({ active: false });
       return;
     }
     const entityId = callbacks.getSelectedId(documentId);
-    const localId = resolveLocalId(loaded, entityId);
-    const targetModel = resolveElementModel(loaded, entityId);
-    const box = await targetModel.getMergedBox([localId]).catch(() => null);
+    let bounds = await getElementSceneBounds(loaded, entityId);
     if (updateNonce !== cutPlaneUpdateNonce) {
       return;
     }
+    if (!bounds && !state.position) {
+      // Direkt nach "Hinzufügen"/Split rendert die Auswahl in einem Subset,
+      // das die laufende Rekonvertierung erst noch lädt: einmal (mit Timeout,
+      // nur lesend) auf die Lade-/Mirror-Queue warten und erneut suchen.
+      await Promise.race([
+        syncQueue.catch(() => undefined),
+        new Promise((resolve) => setTimeout(resolve, 2_500)),
+      ]);
+      if (updateNonce !== cutPlaneUpdateNonce) {
+        return;
+      }
+      bounds = await getElementSceneBounds(loaded, entityId);
+      if (updateNonce !== cutPlaneUpdateNonce) {
+        return;
+      }
+    }
+    // Ohne Geometrie-Box am sichtbaren Kamera-Ziel spawnen statt am Ursprung.
     const boxCenter =
-      box && !box.isEmpty()
-        ? fragmentModelPointToScene(
-            box.getCenter(new THREE.Vector3()),
-            targetModel.object,
-          )
-        : new THREE.Vector3();
-    const boxSize =
-      box && !box.isEmpty() ? box.getSize(new THREE.Vector3()).length() : 4;
+      bounds?.center ?? world.camera.controls.getTarget(new THREE.Vector3());
+    const boxSize = bounds?.size ?? 4;
     const position = state.position
       ? ifcWorldToScenePoint(loaded, state.position)
       : boxCenter;

@@ -1439,6 +1439,17 @@ export default function IfcWorkspace() {
     return () => window.clearTimeout(handle);
   }, [statusAlert]);
 
+  // Die gespeicherte Ebenen-Position ist an das Modell gebunden, auf dem sie
+  // gespawnt wurde — beim Wechsel der aktiven IFC deaktivieren, statt sie mit
+  // den Matrizen des neuen Modells falsch zu platzieren.
+  useEffect(() => {
+    setViewerCutPlane((current) =>
+      current.active
+        ? { ...current, active: false, mode: "translate", position: undefined }
+        : current,
+    );
+  }, [activeDocumentId]);
+
   const reportFailure = (context: string, error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
     setStatusAlert({ message: `${context}: ${message}`, tone: "danger" });
