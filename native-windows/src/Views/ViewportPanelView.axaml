@@ -1,0 +1,96 @@
+<UserControl x:Class="IFCnative.NativeWindows.Views.ViewportPanelView"
+             xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:views="using:IFCnative.NativeWindows.Views">
+  <Grid Margin="8">
+    <Border Classes="surface" ClipToBounds="True">
+      <Grid>
+        <views:ViewportPreviewControl x:Name="ViewportCanvas"
+                                      Scene="{Binding RenderScene}"
+                                      SelectedProductId="{Binding SelectedProductId}"
+                                      AntiAliasing="{Binding AntiAliasing}"
+                                      HideSpaces="{Binding HideSpaces}"
+                                      FieldOfView="{Binding FieldOfView}"
+                                      NearPlane="{Binding NearPlane}"
+                                      FarPlane="{Binding FarPlane}"
+                                      InteractionMode="{Binding InteractionMode}"
+                                      CanTransformSelection="{Binding CanTransformSelection}"
+                                      ShowFpsCounter="{Binding ShowFpsCounter}"
+                                      IsPointPickingActive="{Binding IsPointPickingActive, Mode=TwoWay}"
+                                      PointPicked="OnViewportPointPicked"
+                                      ProductPicked="OnViewportProductPicked"
+                                      ProductTransformCommitted="OnViewportProductTransformCommitted"
+                                      FpsUpdated="OnViewportFpsUpdated" />
+
+        <!-- Mode + camera toolbar -->
+        <Border HorizontalAlignment="Left"
+                VerticalAlignment="Top"
+                Margin="10"
+                Padding="3"
+                Background="#CC161A15"
+                BorderBrush="#38433B"
+                BorderThickness="1"
+                CornerRadius="6">
+          <StackPanel Orientation="Vertical" Spacing="2">
+            <ToggleButton Classes="icon"
+                          IsChecked="{Binding IsSelectMode, Mode=TwoWay}"
+                          ToolTip.Tip="Select (click objects)">
+              <PathIcon Data="M 5,1 L 5,16.5 L 9.2,12.8 L 11.8,18.6 L 14.4,17.4 L 11.8,11.7 L 17,11.2 Z" />
+            </ToggleButton>
+            <ToggleButton Classes="icon"
+                          IsChecked="{Binding IsMoveMode, Mode=TwoWay}"
+                          IsEnabled="{Binding CanTransformSelection}"
+                          ToolTip.Tip="Move selection (G)">
+              <PathIcon Data="M12,2 L15,5 H13 V11 H19 V9 L22,12 L19,15 V13 H13 V19 H15 L12,22 L9,19 H11 V13 H5 V15 L2,12 L5,9 V11 H11 V5 H9 Z" />
+            </ToggleButton>
+            <ToggleButton Classes="icon"
+                          IsChecked="{Binding IsRotateMode, Mode=TwoWay}"
+                          IsEnabled="{Binding CanTransformSelection}"
+                          ToolTip.Tip="Rotate selection (R)">
+              <PathIcon Data="M12,4 A 8,8 0 1 0 20,12 H 17.6 A 5.6,5.6 0 1 1 12,6.4 V 10 L 17.5,5 L 12,0 Z" />
+            </ToggleButton>
+            <Rectangle Height="1" Margin="4,2" Fill="#38433B" />
+            <Button Classes="icon" Click="OnViewportFit" ToolTip.Tip="Fit all (Home)">
+              <PathIcon Data="M3,3 H8 V5 H5 V8 H3 Z M16,3 H21 V8 H19 V5 H16 Z M3,16 H5 V19 H8 V21 H3 Z M19,16 H21 V21 H16 V19 H19 Z" />
+            </Button>
+            <Button Classes="icon" Click="OnViewportFrame" ToolTip.Tip="Frame selection (F)">
+              <PathIcon Data="M12,5 A 7,7 0 1 0 12.01,5 Z M12,8 A 4,4 0 1 1 11.99,8 Z M11,0 H13 V4 H11 Z M11,20 H13 V24 H11 Z M0,11 H4 V13 H0 Z M20,11 H24 V13 H20 Z" />
+            </Button>
+            <Button Classes="icon" Click="OnViewportIso" ToolTip.Tip="Isometric view">
+              <PathIcon Data="M12,1 L23,7 V17 L12,23 L1,17 V7 Z M12,3.3 L20.9,8.1 L12,12.9 L3.1,8.1 Z M2.9,9.8 L11,14.6 V20.6 L2.9,16.2 Z M21.1,9.8 V16.2 L13,20.6 V14.6 Z" />
+            </Button>
+          </StackPanel>
+        </Border>
+
+        <!-- Navigation cube -->
+        <views:ViewportNavCubeControl x:Name="NavCube"
+                                      HorizontalAlignment="Right"
+                                      VerticalAlignment="Top"
+                                      Margin="10"
+                                      Width="104"
+                                      Height="104"
+                                      YawDegrees="{Binding #ViewportCanvas.CameraYawDegrees}"
+                                      PitchDegrees="{Binding #ViewportCanvas.CameraPitchDegrees}"
+                                      ViewRequested="OnNavCubeViewRequested"
+                                      OrbitRequested="OnNavCubeOrbitRequested" />
+
+        <!-- FPS counter -->
+        <Border HorizontalAlignment="Right"
+                VerticalAlignment="Bottom"
+                Margin="10"
+                Padding="6,3"
+                Background="#DD151A14"
+                BorderBrush="#38433B"
+                BorderThickness="1"
+                CornerRadius="4"
+                IsVisible="{Binding ShowFpsCounter}">
+          <TextBlock Classes="caption"
+                     Text="{Binding FpsText}"
+                     MinWidth="190"
+                     TextAlignment="Left"
+                     TextWrapping="NoWrap" />
+        </Border>
+      </Grid>
+    </Border>
+  </Grid>
+</UserControl>

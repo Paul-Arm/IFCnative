@@ -1,0 +1,44 @@
+<UserControl x:Class="IFCnative.NativeWindows.Views.GraphPanelView"
+             xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Border Margin="10" Classes="hybridPanel">
+    <Grid RowDefinitions="Auto,Auto,*">
+      <Border Classes="hybridHeader" Padding="10,8">
+        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+          <Border Classes="hybridStepBadge">
+            <TextBlock Classes="hybridGlyphBlue" Text="2" />
+          </Border>
+          <StackPanel Grid.Column="1">
+            <TextBlock Classes="hybridTitle" Text="Lokaler Beziehungsgraph" />
+            <TextBlock Classes="hybridCaption" Text="{Binding GraphSummary}" />
+          </StackPanel>
+          <TextBlock Grid.Column="2"
+                     Classes="hybridCaption"
+                     Text="{Binding CenterMeta}"
+                     TextTrimming="CharacterEllipsis"
+                     VerticalAlignment="Center" />
+        </Grid>
+      </Border>
+
+      <Grid Grid.Row="1" Margin="10,10,10,0" ColumnDefinitions="*,96" ColumnSpacing="8">
+        <TextBox Watermark="Graph filtern"
+                 Text="{Binding FilterText}" />
+        <NumericUpDown Grid.Column="1"
+                       Minimum="1"
+                       Maximum="3"
+                       Increment="1"
+                       FormatString="Tiefe 0"
+                       Value="{Binding Depth}" />
+      </Grid>
+
+      <Border Grid.Row="2" Margin="10" Classes="graphCanvasFrame">
+        <Canvas x:Name="GraphCanvas"
+                Width="1320"
+                Height="860"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                ClipToBounds="True" />
+      </Border>
+    </Grid>
+  </Border>
+</UserControl>

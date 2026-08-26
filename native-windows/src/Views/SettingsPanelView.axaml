@@ -1,0 +1,93 @@
+<UserControl x:Class="IFCnative.NativeWindows.Views.SettingsPanelView"
+             xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <ScrollViewer>
+    <StackPanel Margin="8" Spacing="8">
+      <Border Classes="surface" Padding="10">
+        <StackPanel>
+          <TextBlock Classes="sectionTitle" Text="Settings" />
+          <TextBlock Classes="caption" Text="Configure viewport and interface preferences" />
+        </StackPanel>
+      </Border>
+
+      <TextBlock Classes="caption" Margin="2,4,0,0" Text="Anti-Aliasing Mode" />
+      <ComboBox ItemsSource="{Binding AntiAliasingOptions}"
+                SelectedItem="{Binding SelectedAntiAliasing}"
+                HorizontalAlignment="Stretch" />
+
+      <TextBlock Classes="caption" Margin="2,4,0,0" Text="Interface Zoom (Text Scale)" />
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+        <Slider Minimum="0.7"
+                Maximum="1.8"
+                Value="{Binding TextScale}"
+                SmallChange="0.05"
+                LargeChange="0.1"
+                VerticalAlignment="Center" />
+        <TextBlock Grid.Column="1"
+                   Text="{Binding TextScalePercent}"
+                   VerticalAlignment="Center"
+                   Width="48"
+                   TextAlignment="Right" />
+      </Grid>
+
+      <TextBlock Classes="caption" Margin="2,4,0,0" Text="Viewport Options" />
+      <CheckBox Content="Hide IFC Spaces (IfcSpace)"
+                IsChecked="{Binding HideSpaces}" />
+      <CheckBox Content="Show Viewport Stats"
+                IsChecked="{Binding ShowFpsCounter}" />
+
+      <TextBlock Classes="caption" Margin="2,4,0,0" Text="Field of View" />
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+        <Slider Minimum="30"
+                Maximum="110"
+                Value="{Binding FieldOfView}"
+                SmallChange="1"
+                LargeChange="5"
+                VerticalAlignment="Center" />
+        <TextBlock Grid.Column="1"
+                   Text="{Binding FieldOfView, StringFormat='{}{0:0}°'}"
+                   VerticalAlignment="Center"
+                   Width="48"
+                   TextAlignment="Right" />
+      </Grid>
+
+      <TextBlock Classes="caption" Margin="2,4,0,0" Text="Near Clipping Plane" />
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+        <Slider Minimum="0.01"
+                Maximum="10.0"
+                Value="{Binding NearPlane}"
+                SmallChange="0.01"
+                LargeChange="0.5"
+                VerticalAlignment="Center" />
+        <TextBlock Grid.Column="1"
+                   Text="{Binding NearPlane, StringFormat='{}{0:F2}m'}"
+                   VerticalAlignment="Center"
+                   Width="48"
+                   TextAlignment="Right" />
+      </Grid>
+
+      <TextBlock Classes="caption" Margin="2,4,0,0" Text="Far Clipping Plane" />
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+        <Slider Minimum="10"
+                Maximum="5000"
+                Value="{Binding FarPlane}"
+                SmallChange="10"
+                LargeChange="100"
+                VerticalAlignment="Center" />
+        <TextBlock Grid.Column="1"
+                   Text="{Binding FarPlane, StringFormat='{}{0:0}m'}"
+                   VerticalAlignment="Center"
+                   Width="48"
+                   TextAlignment="Right" />
+      </Grid>
+
+      <Border Classes="surface" Padding="10" Margin="0,16,0,0">
+        <TextBlock Classes="caption"
+                   Text="All changes are applied instantly and saved to your preferences file."
+                   TextWrapping="Wrap"
+                   HorizontalAlignment="Center"
+                   TextAlignment="Center" />
+      </Border>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

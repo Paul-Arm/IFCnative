@@ -1,0 +1,20 @@
+<UserControl x:Class="IFCnative.NativeWindows.Views.TypesPanelView"
+             xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Grid RowDefinitions="Auto,*" Margin="8" RowSpacing="8">
+    <TextBlock Classes="sectionTitle" Text="Entity Types" />
+    <ListBox Grid.Row="1"
+             Classes="compact"
+             ItemsSource="{Binding TypeCounts}"
+             SelectedItem="{Binding SelectedType}">
+      <ListBox.ItemTemplate>
+        <DataTemplate>
+          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+            <TextBlock Text="{Binding Type}" TextTrimming="CharacterEllipsis" />
+            <TextBlock Grid.Column="1" Classes="caption" Text="{Binding Count}" />
+          </Grid>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+  </Grid>
+</UserControl>

@@ -1,0 +1,30 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Large IFC models need the 64-bit address space; an x86 build OOMs on ~100MB+ files. -->
+    <PlatformTarget>x64</PlatformTarget>
+    <!-- Xbim.Geometry.Engine.dll is C++/CLI (loaded via ijwhost) and cannot run from
+         inside a single-file bundle; extract everything to disk on first launch. -->
+    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.11" />
+    <PackageReference Include="Avalonia.ReactiveUI" Version="11.3.9" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.11" />
+    <PackageReference Include="Dock.Avalonia" Version="11.3.11.4" />
+    <PackageReference Include="Dock.Avalonia.Themes.Fluent" Version="11.3.11.4" />
+    <PackageReference Include="Dock.Model.Mvvm" Version="11.3.11.4" />
+    <PackageReference Include="Silk.NET.Maths" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.OpenGL" Version="2.23.0" />
+    <PackageReference Include="Xbim.Essentials" Version="6.0.587" />
+    <PackageReference Include="Xbim.Geometry" Version="6.3.891-netcore" />
+  </ItemGroup>
+
+</Project>

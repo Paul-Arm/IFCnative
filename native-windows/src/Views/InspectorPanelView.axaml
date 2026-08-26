@@ -1,0 +1,285 @@
+<UserControl x:Class="IFCnative.NativeWindows.Views.InspectorPanelView"
+             xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Grid RowDefinitions="Auto,*" Margin="8" RowSpacing="8">
+    <Border Classes="surface" Padding="10,8">
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+        <StackPanel Spacing="5">
+          <TextBlock Classes="sectionTitle"
+                     Text="{Binding Title}"
+                     TextTrimming="CharacterEllipsis"
+                     TextWrapping="NoWrap" />
+          <StackPanel Orientation="Horizontal" Spacing="5">
+            <Border Classes="chip accent">
+              <TextBlock Text="{Binding EntityType}" />
+            </Border>
+          </StackPanel>
+        </StackPanel>
+        <Button Grid.Column="1"
+                Classes="icon"
+                VerticalAlignment="Top"
+                Command="{Binding ToggleBookmarkCommand}"
+                ToolTip.Tip="{Binding BookmarkLabel}">
+          <PathIcon Data="M12,2 L14.9,8.6 L22,9.3 L16.7,14 L18.2,21 L12,17.3 L5.8,21 L7.3,14 L2,9.3 L9.1,8.6 Z" />
+        </Button>
+      </Grid>
+    </Border>
+
+    <TabControl Grid.Row="1">
+      <TabItem Header="Info">
+        <ScrollViewer>
+          <StackPanel Margin="8" Spacing="12">
+            <Grid ColumnDefinitions="84,*" RowDefinitions="Auto,Auto" RowSpacing="4">
+              <TextBlock Classes="caption" Text="STEP id" />
+              <TextBlock Grid.Column="1" Classes="caption" Foreground="#D8DCD2" Text="{Binding EntityId}" />
+              <TextBlock Grid.Row="1" Classes="caption" Text="GlobalId" />
+              <TextBlock Grid.Row="1" Grid.Column="1"
+                         Classes="caption"
+                         Foreground="#D8DCD2"
+                         FontFamily="Cascadia Mono, Consolas, monospace"
+                         Text="{Binding GlobalId}"
+                         TextTrimming="CharacterEllipsis"
+                         TextWrapping="NoWrap" />
+            </Grid>
+
+            <StackPanel Spacing="4">
+              <TextBlock Classes="caption" Text="Spatial path" />
+              <TextBlock Text="{Binding SpatialPath}" />
+            </StackPanel>
+
+            <StackPanel Spacing="6">
+              <TextBlock Classes="caption" Text="Name" />
+              <TextBox Text="{Binding NameDraft}" />
+              <TextBlock Classes="caption" Text="Description" Margin="0,4,0,0" />
+              <TextBox Text="{Binding DescriptionDraft}" />
+              <TextBlock Classes="caption" Text="Raw STEP arguments" Margin="0,4,0,0" />
+              <TextBox MinHeight="90"
+                       AcceptsReturn="True"
+                       TextWrapping="Wrap"
+                       FontFamily="Cascadia Mono, Consolas, monospace"
+                       FontSize="{DynamicResource FontSizeCaption}"
+                       Text="{Binding RawArguments}" />
+            </StackPanel>
+            <Button Classes="primary"
+                    HorizontalAlignment="Right"
+                    Content="Save entity"
+                    Command="{Binding SaveEntityCommand}" />
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+      <TabItem Header="Placement">
+        <ScrollViewer>
+          <StackPanel Margin="8" Spacing="10">
+            <Border Classes="subtle" Padding="10">
+              <StackPanel Spacing="6">
+                <TextBlock Classes="caption" Text="Spatial parent (STEP id)" />
+                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
+                  <TextBox Text="{Binding SpatialParentId}" />
+                  <Button Grid.Column="1" Classes="ghost" Content="Save" Command="{Binding SaveSpatialParentCommand}" IsEnabled="{Binding CanEditSpatialParent}" />
+                  <Button Grid.Column="2" Classes="danger" Content="Detach" Command="{Binding DetachSpatialParentCommand}" IsEnabled="{Binding CanEditSpatialParent}" />
+                </Grid>
+              </StackPanel>
+            </Border>
+
+            <Border Classes="subtle" Padding="10">
+              <StackPanel Spacing="6">
+                <TextBlock Classes="caption" Text="Local placement" />
+                <Grid ColumnDefinitions="Auto,*,Auto,*,Auto,*" ColumnSpacing="6">
+                  <TextBlock Text="X" Classes="caption" VerticalAlignment="Center" />
+                  <TextBox Grid.Column="1" Text="{Binding PlacementX}" />
+                  <TextBlock Grid.Column="2" Text="Y" Classes="caption" VerticalAlignment="Center" />
+                  <TextBox Grid.Column="3" Text="{Binding PlacementY}" />
+                  <TextBlock Grid.Column="4" Text="Z" Classes="caption" VerticalAlignment="Center" />
+                  <TextBox Grid.Column="5" Text="{Binding PlacementZ}" />
+                </Grid>
+                <Button Classes="primary"
+                        HorizontalAlignment="Right"
+                        Content="Save placement"
+                        Command="{Binding SavePlacementCommand}"
+                        IsEnabled="{Binding CanEditPlacement}" />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+      <TabItem Header="Psets">
+        <Grid Margin="8" RowDefinitions="Auto,*" RowSpacing="8">
+          <Border Classes="subtle" Padding="8">
+            <Grid ColumnDefinitions="*,Auto">
+              <StackPanel>
+                <TextBlock Classes="sectionTitle" Text="Psets &amp; Quantities" />
+                <TextBlock Classes="caption" Text="{Binding PsetSummary}" />
+              </StackPanel>
+              <WrapPanel Grid.Column="1" VerticalAlignment="Center">
+                <Button Classes="ghost" Content="Common Pset" Command="{Binding AddCommonPsetCommand}" />
+                <Button Classes="ghost" Content="Base Qto" Command="{Binding AddBaseQtoCommand}" />
+              </WrapPanel>
+            </Grid>
+          </Border>
+
+          <ScrollViewer Grid.Row="1">
+            <ItemsControl ItemsSource="{Binding PropertySetTables}">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <StackPanel Spacing="8" />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Border Classes="surface" BorderThickness="1,1,1,1" Padding="0">
+                    <Grid RowDefinitions="Auto,*,Auto">
+                      <Border Background="#20271F" BorderBrush="#3A4035" BorderThickness="0,0,0,1" Padding="8">
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                          <Border Background="#2F7D68" Padding="7,3" CornerRadius="4" VerticalAlignment="Center">
+                            <TextBlock FontSize="{DynamicResource FontSizeCaption}"
+                                       FontWeight="SemiBold"
+                                       Text="{Binding Kind}" />
+                          </Border>
+                          <TextBlock Grid.Column="1"
+                                     FontWeight="SemiBold"
+                                     Text="{Binding Name}"
+                                     TextTrimming="CharacterEllipsis"
+                                     VerticalAlignment="Center" />
+                          <TextBlock Grid.Column="2"
+                                     Classes="caption"
+                                     Text="{Binding Meta}"
+                                     VerticalAlignment="Center" />
+                        </Grid>
+                      </Border>
+
+                      <ItemsControl Grid.Row="1" ItemsSource="{Binding Rows}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate>
+                            <Border BorderBrush="#343A30" BorderThickness="0,1,0,0" Padding="8,6">
+                              <StackPanel Spacing="4">
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                  <TextBlock Classes="caption"
+                                             Foreground="#D8DCD2"
+                                             FontWeight="SemiBold"
+                                             Text="{Binding Name}"
+                                             TextTrimming="CharacterEllipsis"
+                                             TextWrapping="NoWrap"
+                                             ToolTip.Tip="{Binding Type}"
+                                             VerticalAlignment="Center" />
+                                  <TextBlock Grid.Column="1"
+                                             FontSize="{DynamicResource FontSizeTreeMeta}"
+                                             Foreground="#788074"
+                                             Text="{Binding StepId}"
+                                             VerticalAlignment="Center" />
+                                </Grid>
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                                  <TextBox MinHeight="28"
+                                           Text="{Binding ValueDraft}"
+                                           IsEnabled="{Binding CanEdit}"
+                                           Watermark="(undefined)"
+                                           LostFocus="OnPsetValueLostFocus"
+                                           KeyDown="OnPsetValueKeyDown" />
+                                  <ComboBox Grid.Column="1"
+                                            MinHeight="28"
+                                            MinWidth="118"
+                                            FontSize="{DynamicResource FontSizeCaption}"
+                                            ItemsSource="{Binding ValueTypeOptions}"
+                                            SelectedItem="{Binding ValueTypeDraft, Mode=TwoWay}"
+                                            IsVisible="{Binding CanEditValueType}"
+                                            SelectionChanged="OnPsetTypeChanged"
+                                            ToolTip.Tip="Data type" />
+                                </Grid>
+                              </StackPanel>
+                            </Border>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+
+                      <Border Grid.Row="2"
+                              BorderBrush="#343A30"
+                              BorderThickness="0,1,0,0"
+                              Padding="8,6"
+                              IsVisible="{Binding CanAddProperty}">
+                        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
+                          <TextBox Grid.Column="0"
+                                   MinHeight="28"
+                                   Watermark="New property"
+                                   Text="{Binding NewPropertyName}" />
+                          <ComboBox Grid.Column="1"
+                                    MinHeight="28"
+                                    MinWidth="118"
+                                    FontSize="{DynamicResource FontSizeCaption}"
+                                    ItemsSource="{Binding ValueTypeOptions}"
+                                    SelectedItem="{Binding NewPropertyType, Mode=TwoWay}"
+                                    ToolTip.Tip="Data type" />
+                          <Button Grid.Column="2"
+                                  Classes="primary"
+                                  Content="Add"
+                                  Command="{Binding AddPropertyCommand}"
+                                  ToolTip.Tip="Add a new property to this set" />
+                        </Grid>
+                      </Border>
+                    </Grid>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+        </Grid>
+      </TabItem>
+
+      <TabItem Header="Relations">
+        <Grid Margin="8" RowDefinitions="*,Auto" RowSpacing="8">
+          <ListBox Classes="compact"
+                   ItemsSource="{Binding Relationships}"
+                   SelectedItem="{Binding SelectedRelationship}">
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" />
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+          <StackPanel Grid.Row="1" Spacing="6">
+            <TextBox Watermark="Relationship type" Text="{Binding RelationshipType}" />
+            <TextBox Watermark="Name" Text="{Binding RelationshipName}" />
+            <TextBox Watermark="Source ids" Text="{Binding RelationshipSourceIds}" />
+            <TextBox Watermark="Target ids" Text="{Binding RelationshipTargetIds}" />
+            <WrapPanel>
+              <Button Classes="primary" Content="Create" Command="{Binding AddRelationshipCommand}" />
+              <Button Classes="ghost" Content="Save endpoints" Command="{Binding SaveRelationshipCommand}" />
+              <Button Classes="danger" Content="Delete" Command="{Binding DeleteRelationshipCommand}" />
+            </WrapPanel>
+          </StackPanel>
+        </Grid>
+      </TabItem>
+
+      <TabItem Header="Resources">
+        <Grid Margin="8" RowDefinitions="*,Auto" RowSpacing="8">
+          <ListBox Classes="compact" ItemsSource="{Binding Resources}" />
+          <StackPanel Grid.Row="1" Spacing="6">
+            <TextBox Watermark="Resource name" Text="{Binding ResourceName}" />
+            <TextBox Watermark="Identification" Text="{Binding ResourceIdentification}" />
+            <WrapPanel>
+              <Button Classes="primary" Content="Material" Command="{Binding AddMaterialCommand}" />
+              <Button Classes="ghost" Content="Classification" Command="{Binding AddClassificationCommand}" />
+              <Button Classes="ghost" Content="Document" Command="{Binding AddDocumentCommand}" />
+              <Button Classes="ghost" Content="Library" Command="{Binding AddLibraryCommand}" />
+            </WrapPanel>
+          </StackPanel>
+        </Grid>
+      </TabItem>
+
+      <TabItem Header="Refs">
+        <ScrollViewer>
+          <StackPanel Margin="8" Spacing="10">
+            <TextBlock Classes="sectionTitle" Text="Incoming" />
+            <ItemsControl ItemsSource="{Binding IncomingReferences}" />
+            <TextBlock Classes="sectionTitle" Text="Representations" />
+            <ItemsControl ItemsSource="{Binding Representations}" />
+            <TextBlock Classes="sectionTitle" Text="Types" />
+            <ItemsControl ItemsSource="{Binding TypeAssignments}" />
+            <TextBlock Classes="sectionTitle" Text="Units" />
+            <ItemsControl ItemsSource="{Binding Units}" />
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+    </TabControl>
+  </Grid>
+</UserControl>

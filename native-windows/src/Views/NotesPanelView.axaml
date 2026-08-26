@@ -1,0 +1,12 @@
+<UserControl x:Class="IFCnative.NativeWindows.Views.NotesPanelView"
+             xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Grid RowDefinitions="Auto,*" Margin="8" RowSpacing="8">
+    <TextBlock Classes="sectionTitle" Text="Notes" />
+    <TextBox Grid.Row="1"
+             AcceptsReturn="True"
+             TextWrapping="Wrap"
+             Watermark="Model notes"
+             Text="{Binding Notes}" />
+  </Grid>
+</UserControl>

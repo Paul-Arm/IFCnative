@@ -1,0 +1,1725 @@
+using System.Collections;
+using System.Globalization;
+using System.Reflection;
+using IFCnative.NativeWindows.Models;
+using Xbim.Common;
+using Xbim.Ifc;
+using Xbim.Ifc4.Interfaces;
+using Xbim.IO.Step21;
+
+namespace IFCnative.NativeWindows.Services;
+
+/// <summary>An instantiable IFC class from the active schema's metadata.</summary>
+public sealed record IfcCreatableClass(string Name, bool IsProduct, bool IsSpatial, bool IsObjectDefinition);
+
+/// <summary>
+/// Instructions for detaching property sets from products. Computed from the
+/// document projection (which knows all defining relationships), executed
+/// mechanically inside one transaction by <see cref="XbimDocumentEditor.DetachPropertySets"/>.
+/// </summary>
+public sealed record PsetDetachPlan(
+    IReadOnlyList<(int RelationshipId, int EntityId)> Removals,
+    IReadOnlyList<int> DeleteRelationshipIds,
+    IReadOnlyList<int> DeleteSetIds,
+    IReadOnlyList<int> DeletePropertyIds);
+
+/// <summary>
+/// Everything the Builder needs to create one element. World coordinates are
+/// optional; when present the placement is computed relative to the resolved
+/// parent so the element lands at that world position.
+/// </summary>
+public sealed record IfcElementCreationRequest
+{
+    public required string TypeName { get; init; }
+
+    public string Name { get; init; } = string.Empty;
+
+    /// <summary>The current selection; 0 falls back to the first spatial root.</summary>
+    public required int AnchorEntityId { get; init; }
+
+    /// <summary>false: child of the anchor; true: same parent as the anchor.</summary>
+    public bool AsSibling { get; init; }
+
+    public bool WithGeometry { get; init; }
+
+    public string Profile { get; init; } = "rectangle";
+
+    public string Width { get; init; } = "1";
+
+    public string Depth { get; init; } = "1";
+
+    public string Height { get; init; } = "1";
+
+    public double WorldX { get; init; }
+
+    public double WorldY { get; init; }
+
+    public double WorldZ { get; init; }
+}
+
+public static class XbimDocumentEditor
+{
+    /// <summary>
+    /// All non-abstract IFC classes of the document's schema, flagged with
+    /// whether they are products (can carry placement + body geometry).
+    /// </summary>
+    public static IReadOnlyList<IfcCreatableClass> GetCreatableClasses(IfcDocument document)
+    {
+        return XbimIfcDocumentService.WithStoreAccess(document, () =>
+        {
+            var store = XbimIfcDocumentService.EnsureStore(document);
+            return (IReadOnlyList<IfcCreatableClass>)store.Metadata.Types()
+                .Select(expressType => expressType.Type)
+                .Where(type => type is { IsAbstract: false }
+                    && typeof(IPersistEntity).IsAssignableFrom(type)
+                    && type.Name.StartsWith("Ifc", StringComparison.Ordinal))
+                .Select(type => new IfcCreatableClass(
+                    type.Name,
+                    typeof(IIfcProduct).IsAssignableFrom(type),
+                    typeof(IIfcSpatialStructureElement).IsAssignableFrom(type),
+                    typeof(IIfcObjectDefinition).IsAssignableFrom(type)))
+                .OrderBy(info => info.Name, StringComparer.Ordinal)
+                .ToList();
+        });
+    }
+
+    /// <summary>
+    /// Creates a new element of any IFC class. Products get a placement (at the
+    /// requested world position) and optionally a simple extruded body; the
+    /// parent link uses the relationship type that matches both ends
+    /// (containment for elements in spatial structure, aggregation otherwise).
+    /// </summary>
+    public static IfcDocument CreateElement(IfcDocument document, IfcElementCreationRequest request)
+    {
+        var parentId = ResolveCreationParentId(document, request.AnchorEntityId, request.AsSibling);
+        return Edit(document, $"Create {request.TypeName}", store =>
+        {
+            var type = ResolveIfcEntityType(store, NormalizeIfcType(request.TypeName, "IFCBUILDINGELEMENTPROXY"));
+            var element = New(store, type);
+            var name = string.IsNullOrWhiteSpace(request.Name) ? $"New {type.Name}" : request.Name.Trim();
+            SetRootDefaults(store, element, name, string.Empty);
+
+            var parent = parentId > 0 ? GetEntity(store, parentId) : null;
+            if (element is IIfcProduct)
+            {
+                SetPropertyIfPresent(element, "ObjectPlacement", CreateLocalPlacementAtWorld(store, parent, request.WorldX, request.WorldY, request.WorldZ));
+                if (request.WithGeometry)
+                {
+                    SetPropertyIfPresent(element, "Representation", CreateBodyRepresentation(store, request.Width, request.Depth, request.Height, request.Profile));
+                }
+            }
+
+            if (parent is not null)
+            {
+                CreateParentRelationship(store, parent, element, name);
+            }
+        }, affectsGeometry: request.WithGeometry);
+    }
+
+    /// <summary>
+    /// Child mode parents at the anchor itself; sibling mode walks to the
+    /// anchor's containment/aggregation parent. No anchor: first spatial root.
+    /// Public so the Builder can filter its class list for the same parent.
+    /// </summary>
+    public static int ResolveCreationParentId(IfcDocument document, int anchorId, bool asSibling)
+    {
+        if (anchorId <= 0 || !document.EntityById.ContainsKey(anchorId))
+        {
+            return document.SpatialRoots.FirstOrDefault()?.Entity.Id ?? 0;
+        }
+
+        if (!asSibling)
+        {
+            return anchorId;
+        }
+
+        var containmentParent = FindContainment(document, anchorId)?.SourceIds.FirstOrDefault() ?? 0;
+        if (containmentParent > 0)
+        {
+            return containmentParent;
+        }
+
+        var aggregationParent = document.RelationshipsByEntity.TryGetValue(anchorId, out var relationships)
+            ? relationships.FirstOrDefault(relationship =>
+                relationship.Type.Equals("IFCRELAGGREGATES", StringComparison.OrdinalIgnoreCase)
+                && relationship.TargetIds.Contains(anchorId))?.SourceIds.FirstOrDefault() ?? 0
+            : 0;
+        return aggregationParent > 0 ? aggregationParent : anchorId;
+    }
+
+    /// <summary>
+    /// Picks the IFC-conformant parent link: spatial-in-spatial and
+    /// element-in-element aggregate, elements in a spatial structure are
+    /// contained. Non-object classes (resource layer) get no link at all.
+    /// </summary>
+    private static void CreateParentRelationship(IfcStore store, IPersistEntity parent, IPersistEntity child, string name)
+    {
+        // Element placed into a spatial structure: containment. Everything else
+        // that is still an object pair (spatial-in-spatial, element-in-element,
+        // groups/processes): aggregation. Resource-layer instances get no link.
+        if (child is IIfcProduct and not IIfcSpatialStructureElement && parent is IIfcSpatialStructureElement)
+        {
+            CreateContainment(store, parent, child, $"{ReadName(parent, "Parent")} contains {name}");
+            return;
+        }
+
+        if (child is IIfcObjectDefinition && parent is IIfcObjectDefinition)
+        {
+            var relation = New(store, ResolveSchemaType(store, "Kernel", "IfcRelAggregates"));
+            SetRootDefaults(store, relation, $"{ReadName(parent, "Parent")} aggregates {name}", string.Empty);
+            SetPropertyIfPresent(relation, "RelatingObject", parent);
+            AddToCollection(GetPropertyValue(relation, "RelatedObjects"), child);
+        }
+    }
+
+    /// <summary>
+    /// Builds a local placement whose world position equals the requested
+    /// coordinates: the parent's world pose (origin + accumulated yaw) is
+    /// subtracted so the relative chain still resolves to the picked point.
+    /// </summary>
+    private static IPersistEntity CreateLocalPlacementAtWorld(IfcStore store, IPersistEntity? parent, double worldX, double worldY, double worldZ)
+    {
+        var localX = worldX;
+        var localY = worldY;
+        var localZ = worldZ;
+        var parentPlacement = parent is null ? null : GetPropertyValue(parent, "ObjectPlacement");
+        if (parentPlacement is IPersistEntity)
+        {
+            var pose = ReadWorldPose(parentPlacement, []);
+            (localX, localY, localZ) = RotateWorldDeltaIntoParent(worldX - pose.X, worldY - pose.Y, worldZ - pose.Z, pose.Yaw);
+        }
+
+        return CreateLocalPlacement(store, parent, localX, localY, localZ);
+    }
+
+    private static (double X, double Y, double Z, double Yaw) ReadWorldPose(object? placement, HashSet<int> seen)
+    {
+        if (placement is not IPersistEntity entity || !seen.Add(entity.EntityLabel))
+        {
+            return (0, 0, 0, 0);
+        }
+
+        var parentPose = ReadWorldPose(GetPropertyValue(placement, "PlacementRelTo"), seen);
+        var relativePlacement = GetPropertyValue(placement, "RelativePlacement");
+        var coordinates = ReadCoordinateList(GetPropertyValue(GetPropertyValue(relativePlacement, "Location"), "Coordinates"));
+        var cos = Math.Cos(parentPose.Yaw);
+        var sin = Math.Sin(parentPose.Yaw);
+        return (
+            parentPose.X + coordinates[0] * cos - coordinates[1] * sin,
+            parentPose.Y + coordinates[0] * sin + coordinates[1] * cos,
+            parentPose.Z + coordinates[2],
+            NormalizeRadians(parentPose.Yaw + ReadAxisPlacementYaw(relativePlacement)));
+    }
+
+    private sealed record RelationshipEndpointProperties(
+        string? SourceProperty,
+        string? SourceCollection,
+        string? TargetProperty,
+        string? TargetCollection);
+
+    public static bool CanUpdateRelationshipEndpoints(string relationshipType)
+    {
+        return relationshipType is "IFCRELAGGREGATES" or "IFCRELNESTS"
+            or "IFCRELCONTAINEDINSPATIALSTRUCTURE" or "IFCRELREFERENCEDINSPATIALSTRUCTURE"
+            or "IFCRELDEFINESBYPROPERTIES" or "IFCRELDEFINESBYTYPE"
+            or "IFCRELASSIGNSTOGROUP" or "IFCRELASSIGNSTOPROCESS" or "IFCRELASSIGNSTOCONTROL" or "IFCRELASSIGNSTOPRODUCT"
+            or "IFCRELASSOCIATESMATERIAL" or "IFCRELASSOCIATESCLASSIFICATION" or "IFCRELASSOCIATESDOCUMENT" or "IFCRELASSOCIATESLIBRARY"
+            or "IFCRELVOIDSELEMENT" or "IFCRELFILLSELEMENT" or "IFCRELCONNECTSPORTS"
+            or "IFCRELCONNECTSPORTTOELEMENT" or "IFCRELINTERFERESELEMENTS" or "IFCRELPROJECTSELEMENT"
+            or "IFCRELCONNECTSELEMENTS";
+    }
+
+    public static IfcDocument UpdateEntity(IfcDocument document, int entityId, string name, string description)
+    {
+        return Edit(document, "Update entity", store =>
+        {
+            var entity = GetEntity(store, entityId);
+            if (entity is null)
+            {
+                return;
+            }
+
+            SetPropertyIfPresent(entity, "Name", string.IsNullOrWhiteSpace(name) ? null : name.Trim());
+            SetPropertyIfPresent(entity, "Description", string.IsNullOrWhiteSpace(description) ? null : description.Trim());
+        });
+    }
+
+    public static IfcDocument UpdatePropertyValue(IfcDocument document, int propertyValueId, string rawValue, string? valueTypeName = null)
+    {
+        return Edit(document, "Update property value", store =>
+        {
+            var property = GetEntity(store, propertyValueId);
+            if (property is null)
+            {
+                return;
+            }
+
+            if (HasProperty(property, "NominalValue"))
+            {
+                var current = GetPropertyValue(property, "NominalValue");
+                var requestedType = string.IsNullOrWhiteSpace(valueTypeName)
+                    ? null
+                    : TryResolveSchemaType(store, "MeasureResource", valueTypeName.Trim());
+                var valueType = requestedType
+                    ?? current?.GetType()
+                    ?? ResolveSchemaType(store, "MeasureResource", "IfcLabel");
+                SetProperty(property, "NominalValue", CreateMeasureValue(valueType, rawValue));
+                return;
+            }
+
+            // Physical quantities carry their value in a typed member instead of
+            // NominalValue; without this branch a Qto cell edit is a silent no-op.
+            foreach (var quantityProperty in QuantityValueProperties)
+            {
+                if (HasProperty(property, quantityProperty))
+                {
+                    SetProperty(property, quantityProperty, ParseDouble(rawValue, 0));
+                    return;
+                }
+            }
+        });
+    }
+
+    private static readonly string[] QuantityValueProperties =
+        ["LengthValue", "AreaValue", "VolumeValue", "CountValue", "WeightValue", "TimeValue"];
+
+    public static IfcDocument AddCommonPropertySet(IfcDocument document, int productId, string referenceText, string statusText)
+    {
+        return Edit(document, "Add common property set", store =>
+        {
+            var product = GetEntity(store, productId);
+            if (product is null)
+            {
+                return;
+            }
+
+            var reference = string.IsNullOrWhiteSpace(referenceText) ? ReadName(product, "Native reference") : referenceText.Trim();
+            var status = string.IsNullOrWhiteSpace(statusText) ? "New" : statusText.Trim();
+            var pset = CreatePropertySet(store, "Pset_NativeCommon", [
+                ("Reference", "IfcLabel", reference),
+                ("Status", "IfcLabel", status),
+                ("IsExternal", "IfcBoolean", "false"),
+            ]);
+            AttachPropertySet(store, product, pset, $"{ReadName(product, "Product")} common properties");
+        });
+    }
+
+    public static IfcDocument AddBaseQuantitySet(IfcDocument document, int productId, string widthText, string depthText, string heightText)
+    {
+        return Edit(document, "Add base quantities", store =>
+        {
+            var product = GetEntity(store, productId);
+            if (product is null)
+            {
+                return;
+            }
+
+            var quantitySet = New(store, ResolveSchemaType(store, "ProductExtension", "IfcElementQuantity"));
+            SetRootDefaults(store, quantitySet, "Qto_NativeBaseQuantities", "IFCnative base quantities");
+            AddToCollection(GetPropertyValue(quantitySet, "Quantities"), CreateQuantity(store, "IfcQuantityLength", "Length", heightText, "LengthValue"));
+            AddToCollection(GetPropertyValue(quantitySet, "Quantities"), CreateQuantity(store, "IfcQuantityArea", "GrossArea", widthText, "AreaValue"));
+            AddToCollection(GetPropertyValue(quantitySet, "Quantities"), CreateQuantity(store, "IfcQuantityVolume", "GrossVolume", depthText, "VolumeValue"));
+            AttachPropertySet(store, product, quantitySet, $"{ReadName(product, "Product")} base quantities");
+        });
+    }
+
+    /// <summary>
+    /// Batch-adds an empty property set with the given name to each product, in a
+    /// single transaction. Products that cannot be resolved are skipped. The
+    /// caller is responsible for filtering out products that already carry a set
+    /// of that name (see <see cref="IfcDocument.PropertySetsByEntity"/>).
+    /// </summary>
+    public static IfcDocument AddEmptyPropertySetToEntities(IfcDocument document, IReadOnlyList<int> productIds, string psetName)
+    {
+        var name = string.IsNullOrWhiteSpace(psetName) ? "Pset_IFCnative" : psetName.Trim();
+        return Edit(document, "Add property set", store =>
+        {
+            foreach (var productId in productIds)
+            {
+                var product = GetEntity(store, productId);
+                if (product is null)
+                {
+                    continue;
+                }
+
+                var pset = CreatePropertySet(store, name, []);
+                AttachPropertySet(store, product, pset, $"{ReadName(product, "Product")} {name}");
+            }
+        });
+    }
+
+    /// <summary>
+    /// Appends a single <c>IfcPropertySingleValue</c> to an existing property set.
+    /// Used by the batch editor when a selected object has the set but not yet the
+    /// edited property. Quantity sets (no <c>HasProperties</c>) are left untouched.
+    /// </summary>
+    public static IfcDocument AddPropertyToSet(IfcDocument document, int propertySetId, string propertyName, string rawValue, string valueTypeName = "IfcLabel")
+    {
+        return Edit(document, "Add property to set", store => AppendSingleValueProperty(store, propertySetId, propertyName, rawValue, valueTypeName));
+    }
+
+    /// <summary>Batch variant: appends the same property to several sets in one transaction.</summary>
+    public static IfcDocument AddPropertyToSets(IfcDocument document, IReadOnlyList<int> propertySetIds, string propertyName, string rawValue, string valueTypeName = "IfcLabel")
+    {
+        return Edit(document, "Add property to sets", store =>
+        {
+            foreach (var propertySetId in propertySetIds)
+            {
+                AppendSingleValueProperty(store, propertySetId, propertyName, rawValue, valueTypeName);
+            }
+        });
+    }
+
+    /// <summary>
+    /// Re-wraps each property's existing nominal value in a new measure type,
+    /// keeping the underlying value. Non-single-value properties are skipped.
+    /// </summary>
+    public static IfcDocument RetypeProperties(IfcDocument document, IReadOnlyList<int> propertyIds, string valueTypeName)
+    {
+        return Edit(document, "Change property type", store =>
+        {
+            var valueType = (string.IsNullOrWhiteSpace(valueTypeName)
+                ? null
+                : TryResolveSchemaType(store, "MeasureResource", valueTypeName.Trim()))
+                ?? ResolveSchemaType(store, "MeasureResource", "IfcLabel");
+            foreach (var propertyId in propertyIds)
+            {
+                var property = GetEntity(store, propertyId);
+                if (property is null || !HasProperty(property, "NominalValue"))
+                {
+                    continue;
+                }
+
+                var current = GetPropertyValue(property, "NominalValue");
+                SetProperty(property, "NominalValue", CreateMeasureValue(valueType, ReadNominalText(current)));
+            }
+        });
+    }
+
+    /// <summary>
+    /// Renames and/or retypes several properties in one transaction (batch row
+    /// edit). A null/blank name leaves the name untouched; a null/blank type
+    /// leaves the type untouched. Values are preserved.
+    /// </summary>
+    public static IfcDocument RenameAndRetypeProperties(IfcDocument document, IReadOnlyList<int> propertyIds, string? newName, string? valueTypeName)
+    {
+        return Edit(document, "Edit property row", store =>
+        {
+            var trimmedName = string.IsNullOrWhiteSpace(newName) ? null : newName.Trim();
+            var valueType = string.IsNullOrWhiteSpace(valueTypeName)
+                ? null
+                : TryResolveSchemaType(store, "MeasureResource", valueTypeName.Trim()) ?? ResolveSchemaType(store, "MeasureResource", "IfcLabel");
+
+            foreach (var propertyId in propertyIds)
+            {
+                var property = GetEntity(store, propertyId);
+                if (property is null)
+                {
+                    continue;
+                }
+
+                if (trimmedName is not null && HasProperty(property, "Name"))
+                {
+                    SetProperty(property, "Name", trimmedName);
+                }
+
+                if (valueType is not null && HasProperty(property, "NominalValue"))
+                {
+                    var current = GetPropertyValue(property, "NominalValue");
+                    SetProperty(property, "NominalValue", CreateMeasureValue(valueType, ReadNominalText(current)));
+                }
+            }
+        });
+    }
+
+    /// <summary>
+    /// Removes property values from their owning sets (batch panel delete). The
+    /// instances in <paramref name="deletableInstanceIds"/> are additionally
+    /// deleted from the model — the caller passes only instances that no other
+    /// set still references.
+    /// </summary>
+    public static IfcDocument DeleteProperties(
+        IfcDocument document,
+        IReadOnlyList<(int SetId, int PropertyId)> cells,
+        IReadOnlyList<int> deletableInstanceIds)
+    {
+        return Edit(document, "Delete properties", store =>
+        {
+            foreach (var (setId, propertyId) in cells)
+            {
+                var pset = GetEntity(store, setId);
+                var property = GetEntity(store, propertyId);
+                if (pset is null || property is null)
+                {
+                    continue;
+                }
+
+                RemoveFromCollection(GetPropertyValue(pset, "HasProperties"), property);
+                RemoveFromCollection(GetPropertyValue(pset, "Quantities"), property);
+            }
+
+            foreach (var instanceId in deletableInstanceIds)
+            {
+                var instance = GetEntity(store, instanceId);
+                if (instance is not null)
+                {
+                    store.Delete(instance);
+                }
+            }
+        });
+    }
+
+    /// <summary>
+    /// Detaches property sets from products per the caller-computed plan: each
+    /// removal takes a product out of a defining relationship; relationships,
+    /// sets and property instances that end up orphaned are deleted.
+    /// </summary>
+    public static IfcDocument DetachPropertySets(IfcDocument document, PsetDetachPlan plan)
+    {
+        return Edit(document, "Delete property set", store =>
+        {
+            foreach (var (relationshipId, entityId) in plan.Removals)
+            {
+                var relation = GetEntity(store, relationshipId);
+                var product = GetEntity(store, entityId);
+                if (relation is not null && product is not null)
+                {
+                    RemoveFromCollection(GetPropertyValue(relation, "RelatedObjects"), product);
+                }
+            }
+
+            foreach (var instanceId in plan.DeleteRelationshipIds
+                .Concat(plan.DeleteSetIds)
+                .Concat(plan.DeletePropertyIds))
+            {
+                var instance = GetEntity(store, instanceId);
+                if (instance is not null)
+                {
+                    store.Delete(instance);
+                }
+            }
+        });
+    }
+
+    private static void AppendSingleValueProperty(IfcStore store, int propertySetId, string propertyName, string rawValue, string valueTypeName)
+    {
+        var pset = GetEntity(store, propertySetId);
+        var properties = GetPropertyValue(pset, "HasProperties");
+        if (pset is null || properties is null)
+        {
+            return;
+        }
+
+        var property = New(store, ResolveSchemaType(store, "PropertyResource", "IfcPropertySingleValue"));
+        SetProperty(property, "Name", string.IsNullOrWhiteSpace(propertyName) ? "Property" : propertyName.Trim());
+        var measureType = (string.IsNullOrWhiteSpace(valueTypeName)
+            ? null
+            : TryResolveSchemaType(store, "MeasureResource", valueTypeName.Trim()))
+            ?? ResolveSchemaType(store, "MeasureResource", "IfcLabel");
+        SetProperty(property, "NominalValue", CreateMeasureValue(measureType, rawValue));
+        AddToCollection(properties, property);
+    }
+
+    public static IfcDocument UpdatePlacement(IfcDocument document, int productId, string xText, string yText, string zText)
+    {
+        return Edit(document, "Update placement", store =>
+        {
+            var product = GetEntity(store, productId);
+            var location = GetPlacementLocation(product);
+            if (location is null)
+            {
+                return;
+            }
+
+            SetCoordinateList(
+                GetPropertyValue(location, "Coordinates"),
+                ParseDouble(xText, 0),
+                ParseDouble(yText, 0),
+                ParseDouble(zText, 0));
+        }, affectsGeometry: true);
+    }
+
+    public static IfcDocument UpdatePlacementTransform(
+        IfcDocument document,
+        int productId,
+        double moveDeltaWorldX,
+        double moveDeltaWorldY,
+        double moveDeltaWorldZ,
+        double rotateZRadians)
+    {
+        if (Math.Abs(moveDeltaWorldX) < 0.0000001
+            && Math.Abs(moveDeltaWorldY) < 0.0000001
+            && Math.Abs(moveDeltaWorldZ) < 0.0000001
+            && Math.Abs(rotateZRadians) < 0.0000001)
+        {
+            return document;
+        }
+
+        return Edit(document, "Update placement transform", store =>
+        {
+            var product = GetEntity(store, productId);
+            var placement = GetPropertyValue(product, "ObjectPlacement");
+            var relativePlacement = GetPropertyValue(placement, "RelativePlacement");
+            var location = GetPropertyValue(relativePlacement, "Location");
+            if (placement is null || relativePlacement is null || location is null)
+            {
+                return;
+            }
+
+            var current = ReadCoordinateList(GetPropertyValue(location, "Coordinates"));
+            var parentPlacement = GetPropertyValue(placement, "PlacementRelTo");
+            var localDelta = RotateWorldDeltaIntoParent(moveDeltaWorldX, moveDeltaWorldY, moveDeltaWorldZ, ReadPlacementYaw(parentPlacement));
+            SetCoordinateList(
+                GetPropertyValue(location, "Coordinates"),
+                current[0] + localDelta.X,
+                current[1] + localDelta.Y,
+                current[2] + localDelta.Z);
+
+            if (Math.Abs(rotateZRadians) >= 0.0000001)
+            {
+                SetAxis2PlacementZRotation(store, relativePlacement, NormalizeRadians(ReadAxisPlacementYaw(relativePlacement) + rotateZRadians));
+            }
+        }, affectsGeometry: true);
+    }
+
+    public static IfcDocument UpdateSpatialParent(IfcDocument document, int childId, string parentIdText)
+    {
+        var parentId = ReadIds(parentIdText).FirstOrDefault();
+        var currentContainment = FindContainment(document, childId);
+        return Edit(document, "Update spatial parent", store =>
+        {
+            var child = GetEntity(store, childId);
+            var parent = GetEntity(store, parentId);
+            if (child is null || parent is null)
+            {
+                return;
+            }
+
+            if (currentContainment is not null)
+            {
+                var relation = GetEntity(store, currentContainment.Id);
+                if (relation is not null && currentContainment.TargetIds.Count == 1)
+                {
+                    SetPropertyIfPresent(relation, "RelatingStructure", parent);
+                    return;
+                }
+
+                if (relation is not null)
+                {
+                    RemoveFromCollection(GetPropertyValue(relation, "RelatedElements"), child);
+                }
+            }
+
+            CreateContainment(store, parent, child, $"{ReadName(parent, "Parent")} contains {ReadName(child, "Product")}");
+        });
+    }
+
+    public static IfcDocument RemoveFromSpatialParent(IfcDocument document, int childId)
+    {
+        var currentContainment = FindContainment(document, childId);
+        return Edit(document, "Detach spatial parent", store =>
+        {
+            var child = GetEntity(store, childId);
+            var relation = currentContainment is null ? null : GetEntity(store, currentContainment.Id);
+            if (child is null || relation is null)
+            {
+                return;
+            }
+
+            RemoveFromCollection(GetPropertyValue(relation, "RelatedElements"), child);
+            if (!AsEnumerable(GetPropertyValue(relation, "RelatedElements")).Any())
+            {
+                store.Delete(relation);
+            }
+        });
+    }
+
+    public static IfcDocument AddProduct(IfcDocument document, int parentSpatialId, string productTypeText, string nameText)
+    {
+        return Edit(document, "Create product", store =>
+        {
+            var parent = GetEntity(store, parentSpatialId);
+            if (parent is null)
+            {
+                return;
+            }
+
+            var productType = NormalizeIfcType(productTypeText, "IFCBUILDINGELEMENTPROXY");
+            var product = New(store, ResolveIfcEntityType(store, productType));
+            var name = string.IsNullOrWhiteSpace(nameText) ? "New xBIM product" : nameText.Trim();
+            SetRootDefaults(store, product, name, string.Empty);
+            SetPropertyIfPresent(product, "ObjectPlacement", CreateLocalPlacement(store, parent));
+
+            CreateContainment(store, parent, product, $"{ReadName(parent, "Parent")} contains {name}");
+        }, affectsGeometry: true);
+    }
+
+    public static IfcDocument AddProductWithBodyRepresentation(
+        IfcDocument document,
+        int parentSpatialId,
+        string productTypeText,
+        string nameText,
+        string widthText,
+        string depthText,
+        string heightText,
+        string profileText)
+    {
+        return Edit(document, "Create product with body", store =>
+        {
+            var parent = GetEntity(store, parentSpatialId);
+            if (parent is null)
+            {
+                return;
+            }
+
+            var productType = NormalizeIfcType(productTypeText, "IFCBUILDINGELEMENTPROXY");
+            var product = New(store, ResolveIfcEntityType(store, productType));
+            var name = string.IsNullOrWhiteSpace(nameText) ? "New xBIM product" : nameText.Trim();
+            SetRootDefaults(store, product, name, string.Empty);
+            SetPropertyIfPresent(product, "ObjectPlacement", CreateLocalPlacement(store, parent));
+            SetPropertyIfPresent(product, "Representation", CreateBodyRepresentation(store, widthText, depthText, heightText, profileText));
+            CreateContainment(store, parent, product, $"{ReadName(parent, "Parent")} contains {name}");
+        }, affectsGeometry: true);
+    }
+
+    public static IfcDocument AddResource(IfcDocument document, int productId, string kind, string nameText, string identificationText)
+    {
+        return Edit(document, $"Add {kind} resource", store =>
+        {
+            var product = GetEntity(store, productId);
+            if (product is null)
+            {
+                return;
+            }
+
+            var normalizedKind = string.IsNullOrWhiteSpace(kind) ? "material" : kind.Trim().ToLowerInvariant();
+            var resourceType = normalizedKind switch
+            {
+                "classification" => "IFCCLASSIFICATIONREFERENCE",
+                "document" => "IFCDOCUMENTREFERENCE",
+                "library" => "IFCLIBRARYREFERENCE",
+                _ => "IFCMATERIAL",
+            };
+            var relationshipType = normalizedKind switch
+            {
+                "classification" => "IFCRELASSOCIATESCLASSIFICATION",
+                "document" => "IFCRELASSOCIATESDOCUMENT",
+                "library" => "IFCRELASSOCIATESLIBRARY",
+                _ => "IFCRELASSOCIATESMATERIAL",
+            };
+            var resource = New(store, ResolveIfcEntityType(store, resourceType));
+            var name = string.IsNullOrWhiteSpace(nameText) ? $"xBIM {normalizedKind}" : nameText.Trim();
+            SetPropertyIfPresent(resource, "Name", name);
+            SetPropertyIfPresent(resource, "Description", name);
+            SetPropertyIfPresent(resource, "Identification", string.IsNullOrWhiteSpace(identificationText) ? null : identificationText.Trim());
+            SetPropertyIfPresent(resource, "ItemReference", string.IsNullOrWhiteSpace(identificationText) ? null : identificationText.Trim());
+            SetPropertyIfPresent(resource, "Location", string.IsNullOrWhiteSpace(identificationText) ? null : identificationText.Trim());
+
+            var relation = New(store, ResolveIfcEntityType(store, relationshipType));
+            SetRootDefaults(store, relation, $"{ReadName(product, "Product")} {normalizedKind}", string.Empty);
+            AddToCollection(GetPropertyValue(relation, "RelatedObjects"), product);
+            SetFirstAvailableProperty(relation, ["RelatingMaterial", "RelatingClassification", "RelatingDocument", "RelatingLibrary"], resource);
+        });
+    }
+
+    public static IfcDocument AssignBodyRepresentation(IfcDocument document, int productId, string widthText, string depthText, string heightText, string profileText)
+    {
+        return Edit(document, "Assign body representation", store =>
+        {
+            var product = GetEntity(store, productId);
+            if (product is null)
+            {
+                return;
+            }
+
+            SetPropertyIfPresent(product, "Representation", CreateBodyRepresentation(store, widthText, depthText, heightText, profileText));
+        }, affectsGeometry: true);
+    }
+
+    public static IfcDocument AddRelationship(IfcDocument document, string relationshipTypeText, string sourceIdsText, string targetIdsText, string nameText)
+    {
+        return Edit(document, "Add relationship", store =>
+        {
+            var relationshipType = NormalizeIfcType(relationshipTypeText, "IFCRELDEFINESBYPROPERTIES");
+            var relation = New(store, ResolveIfcEntityType(store, relationshipType));
+            SetRootDefaults(store, relation, string.IsNullOrWhiteSpace(nameText) ? relationshipType : nameText.Trim(), string.Empty);
+            var sources = ReadIds(sourceIdsText).Select(id => GetEntity(store, id)).Where(entity => entity is not null).Cast<object>().ToList();
+            var targets = ReadIds(targetIdsText).Select(id => GetEntity(store, id)).Where(entity => entity is not null).Cast<object>().ToList();
+            var map = GetEndpointPropertyMap(relationshipType);
+            if (map is not null)
+            {
+                ApplyEndpointMap(relation, map, sources, targets);
+                return;
+            }
+
+            foreach (var source in sources)
+            {
+                AddToFirstAvailableCollection(relation, ["RelatedObjects", "RelatedElements", "RelatingObjects"], source);
+                SetFirstAvailableProperty(relation, ["RelatingStructure", "RelatingObject", "RelatingElement"], source);
+            }
+
+            foreach (var target in targets)
+            {
+                AddToFirstAvailableCollection(relation, ["RelatedObjects", "RelatedElements"], target);
+                SetFirstAvailableProperty(relation, ["RelatedObject", "RelatedElement"], target);
+            }
+        });
+    }
+
+    public static IfcDocument UpdateRelationshipEndpoints(IfcDocument document, int relationshipId, string sourceIdsText, string targetIdsText)
+    {
+        return Edit(document, "Update relationship endpoints", store =>
+        {
+            var relation = GetEntity(store, relationshipId);
+            if (relation is null)
+            {
+                return;
+            }
+
+            var sources = ReadIds(sourceIdsText).Select(id => GetEntity(store, id)).Where(entity => entity is not null).Cast<object>().ToList();
+            var targets = ReadIds(targetIdsText).Select(id => GetEntity(store, id)).Where(entity => entity is not null).Cast<object>().ToList();
+            if (sources.Count == 0 && targets.Count == 0)
+            {
+                return;
+            }
+
+            var relationshipType = ToIfcType(relation);
+            var map = GetEndpointPropertyMap(relationshipType);
+            if (map is not null)
+            {
+                ApplyEndpointMap(relation, map, sources, targets);
+                return;
+            }
+
+            ReplaceFirstAvailableCollection(relation, ["RelatedObjects", "RelatedElements"], targets.Count > 0 ? targets : sources);
+            SetFirstAvailableProperty(relation, ["RelatingStructure", "RelatingObject", "RelatingElement"], sources.FirstOrDefault() ?? targets.FirstOrDefault()!);
+            SetFirstAvailableProperty(relation, ["RelatedObject", "RelatedElement"], targets.FirstOrDefault() ?? sources.FirstOrDefault()!);
+        });
+    }
+
+    public static IfcDocument DeleteRelationship(IfcDocument document, int relationshipId)
+    {
+        return Edit(document, "Delete relationship", store =>
+        {
+            var relation = GetEntity(store, relationshipId);
+            if (relation is not null)
+            {
+                store.Delete(relation);
+            }
+        });
+    }
+
+    public static IfcDocument GenerateMissingGlobalId(IfcDocument document, int entityId)
+    {
+        return Edit(document, "Generate missing GlobalId", store =>
+        {
+            var entity = GetEntity(store, entityId);
+            if (entity is not null)
+            {
+                SetPropertyIfPresent(entity, "GlobalId", StepGuidHelper.ConvertToBase64(Guid.NewGuid()));
+            }
+        });
+    }
+
+    public static IfcDocument RegenerateDuplicateGlobalIds(IfcDocument document, string diagnosticMessage)
+    {
+        var duplicateIds = ReadHashIds(diagnosticMessage).Skip(1).ToList();
+        return Edit(document, "Regenerate duplicate GlobalIds", store =>
+        {
+            foreach (var entity in duplicateIds.Select(id => GetEntity(store, id)).Where(entity => entity is not null))
+            {
+                SetPropertyIfPresent(entity!, "GlobalId", StepGuidHelper.ConvertToBase64(Guid.NewGuid()));
+            }
+        });
+    }
+
+    public static IfcDocument AssignDefaultPlacement(IfcDocument document, int productId)
+    {
+        var parentId = FindContainment(document, productId)?.SourceIds.FirstOrDefault() ?? 0;
+        return Edit(document, "Assign default placement", store =>
+        {
+            var product = GetEntity(store, productId);
+            if (product is null)
+            {
+                return;
+            }
+
+            SetPropertyIfPresent(product, "ObjectPlacement", CreateLocalPlacement(store, parentId == 0 ? null : GetEntity(store, parentId)));
+        }, affectsGeometry: true);
+    }
+
+    public static IfcDocument AssignDefaultBodyRepresentation(IfcDocument document, int productId)
+    {
+        return AssignBodyRepresentation(document, productId, "1", "1", "1", "rectangle");
+    }
+
+    public static IfcDocument KeepFirstPrimarySpatialContainment(IfcDocument document, int productId)
+    {
+        var duplicateContainments = document.RelationshipById.Values
+            .Where(relationship => relationship.Type == "IFCRELCONTAINEDINSPATIALSTRUCTURE" && relationship.TargetIds.Contains(productId))
+            .OrderBy(relationship => relationship.Id)
+            .Skip(1)
+            .Select(relationship => relationship.Id)
+            .ToList();
+        return Edit(document, "Repair spatial containment", store =>
+        {
+            var product = GetEntity(store, productId);
+            if (product is null)
+            {
+                return;
+            }
+
+            foreach (var relationshipId in duplicateContainments)
+            {
+                var relation = GetEntity(store, relationshipId);
+                if (relation is null)
+                {
+                    continue;
+                }
+
+                RemoveFromCollection(GetPropertyValue(relation, "RelatedElements"), product);
+                if (!AsEnumerable(GetPropertyValue(relation, "RelatedElements")).Any())
+                {
+                    store.Delete(relation);
+                }
+            }
+        });
+    }
+
+    public static IfcDocument RemoveRelationshipFromMissingReferenceDiagnostic(IfcDocument document, string diagnosticMessage)
+    {
+        var relationshipId = ReadHashIds(diagnosticMessage).FirstOrDefault();
+        return relationshipId == 0 ? document : DeleteRelationship(document, relationshipId);
+    }
+
+    private static IfcDocument Edit(IfcDocument document, string transactionName, Action<IfcStore> apply, bool affectsGeometry = false)
+    {
+        return XbimIfcDocumentService.WithStoreAccess(document, () =>
+        {
+            var store = XbimIfcDocumentService.EnsureStore(document);
+            using var transaction = store.BeginTransaction(transactionName);
+            apply(store);
+            transaction.Commit();
+
+            if (affectsGeometry)
+            {
+                XbimIfcDocumentService.InvalidateGeometryContext(document);
+            }
+
+            var projected = XbimIfcDocumentService.ProjectStore(store, document.FileName);
+            projected.GeometryVersion = affectsGeometry ? document.GeometryVersion + 1 : document.GeometryVersion;
+            if (!affectsGeometry && XbimIfcDocumentService.TryGetGeometryContext(document) is { } geometryContext)
+            {
+                projected.XbimGeometryContext = geometryContext;
+            }
+
+            projected.Diagnostics.Info($"xBIM transaction committed: {transactionName}.");
+            return projected;
+        });
+    }
+
+    private static IPersistEntity? GetEntity(IfcStore store, int entityId)
+    {
+        try
+        {
+            return store.Instances[entityId];
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static IPersistEntity New(IfcStore store, Type type)
+    {
+        return store.Instances.New(type);
+    }
+
+    private static IPersistEntity CreatePropertySet(IfcStore store, string name, IReadOnlyList<(string Name, string TypeName, string Value)> values)
+    {
+        var pset = New(store, ResolveSchemaType(store, "Kernel", "IfcPropertySet"));
+        SetRootDefaults(store, pset, name, "IFCnative property set");
+        var properties = GetPropertyValue(pset, "HasProperties");
+        foreach (var value in values)
+        {
+            var property = New(store, ResolveSchemaType(store, "PropertyResource", "IfcPropertySingleValue"));
+            SetProperty(property, "Name", value.Name);
+            var measureType = ResolveSchemaType(store, "MeasureResource", value.TypeName);
+            SetProperty(property, "NominalValue", CreateMeasureValue(measureType, value.Value));
+            AddToCollection(properties, property);
+        }
+
+        return pset;
+    }
+
+    private static IPersistEntity CreateQuantity(IfcStore store, string typeName, string name, string valueText, string valueProperty)
+    {
+        var quantity = New(store, ResolveSchemaType(store, "QuantityResource", typeName));
+        SetProperty(quantity, "Name", name);
+        SetProperty(quantity, valueProperty, Math.Max(0, ParseDouble(valueText, 1)));
+        return quantity;
+    }
+
+    private static void AttachPropertySet(IfcStore store, IPersistEntity product, IPersistEntity propertyDefinition, string relationName)
+    {
+        var relation = New(store, ResolveSchemaType(store, "Kernel", "IfcRelDefinesByProperties"));
+        SetRootDefaults(store, relation, relationName, string.Empty);
+        AddToCollection(GetPropertyValue(relation, "RelatedObjects"), product);
+        SetProperty(relation, "RelatingPropertyDefinition", propertyDefinition);
+    }
+
+    private static void CreateContainment(IfcStore store, IPersistEntity parent, IPersistEntity child, string name)
+    {
+        var relation = New(store, ResolveSchemaType(store, "ProductExtension", "IfcRelContainedInSpatialStructure"));
+        SetRootDefaults(store, relation, name, string.Empty);
+        AddToCollection(GetPropertyValue(relation, "RelatedElements"), child);
+        SetPropertyIfPresent(relation, "RelatingStructure", parent);
+    }
+
+    private static IPersistEntity CreateLocalPlacement(IfcStore store, IPersistEntity? parent, double x = 0, double y = 0, double z = 0)
+    {
+        var point = New(store, ResolveSchemaType(store, "GeometryResource", "IfcCartesianPoint"));
+        SetCoordinateList(GetPropertyValue(point, "Coordinates"), x, y, z);
+
+        var axisPlacement = New(store, ResolveSchemaType(store, "GeometryResource", "IfcAxis2Placement3D"));
+        SetProperty(axisPlacement, "Location", point);
+
+        var localPlacement = New(store, ResolveSchemaType(store, "GeometricConstraintResource", "IfcLocalPlacement"));
+        SetProperty(localPlacement, "RelativePlacement", axisPlacement);
+        var parentPlacement = parent is null ? null : GetPropertyValue(parent, "ObjectPlacement");
+        if (parentPlacement is IPersistEntity placement)
+        {
+            SetPropertyIfPresent(localPlacement, "PlacementRelTo", placement);
+        }
+
+        return localPlacement;
+    }
+
+    private static IPersistEntity CreateBodyRepresentation(IfcStore store, string widthText, string depthText, string heightText, string profileText)
+    {
+        var context = FindOrCreateGeometricRepresentationContext(store);
+        var profile = CreateProfile(store, widthText, depthText, profileText);
+        var solid = New(store, ResolveIfcEntityType(store, "IFCEXTRUDEDAREASOLID"));
+        SetProperty(solid, "SweptArea", profile);
+        SetPropertyIfPresent(solid, "Position", CreateAxis2Placement3D(store, 0, 0, 0));
+        SetProperty(solid, "ExtrudedDirection", CreateDirection(store, 0, 0, 1));
+        SetProperty(solid, "Depth", Math.Max(0.01, ParseDouble(heightText, 1)));
+
+        var shape = New(store, ResolveIfcEntityType(store, "IFCSHAPEREPRESENTATION"));
+        SetPropertyIfPresent(shape, "ContextOfItems", context);
+        SetPropertyIfPresent(shape, "RepresentationIdentifier", "Body");
+        SetPropertyIfPresent(shape, "RepresentationType", "SweptSolid");
+        AddToCollection(GetPropertyValue(shape, "Items"), solid);
+
+        var definitionShape = New(store, ResolveIfcEntityType(store, "IFCPRODUCTDEFINITIONSHAPE"));
+        SetPropertyIfPresent(definitionShape, "Name", "xBIM body");
+        AddToCollection(GetPropertyValue(definitionShape, "Representations"), shape);
+        return definitionShape;
+    }
+
+    private static IPersistEntity FindOrCreateGeometricRepresentationContext(IfcStore store)
+    {
+        var existing = store.Instances
+            .OfType<IPersistEntity>()
+            .Where(instance => ToIfcType(instance) == "IFCGEOMETRICREPRESENTATIONCONTEXT")
+            .FirstOrDefault(instance => (GetPropertyValue(instance, "ContextType")?.ToString() ?? string.Empty)
+                .Contains("Model", StringComparison.OrdinalIgnoreCase));
+        if (existing is not null)
+        {
+            return existing;
+        }
+
+        var context = New(store, ResolveIfcEntityType(store, "IFCGEOMETRICREPRESENTATIONCONTEXT"));
+        SetPropertyIfPresent(context, "ContextIdentifier", "Body");
+        SetPropertyIfPresent(context, "ContextType", "Model");
+        SetPropertyIfPresent(context, "CoordinateSpaceDimension", 3);
+        SetPropertyIfPresent(context, "Precision", 0.00001);
+        SetPropertyIfPresent(context, "WorldCoordinateSystem", CreateAxis2Placement3D(store, 0, 0, 0));
+        return context;
+    }
+
+    private static IPersistEntity CreateProfile(IfcStore store, string widthText, string depthText, string profileText)
+    {
+        var profile = profileText.Trim().Equals("cylinder", StringComparison.OrdinalIgnoreCase)
+            ? New(store, ResolveIfcEntityType(store, "IFCCIRCLEPROFILEDEF"))
+            : New(store, ResolveIfcEntityType(store, "IFCRECTANGLEPROFILEDEF"));
+        SetEnumPropertyIfPresent(profile, "ProfileType", "AREA");
+        SetPropertyIfPresent(profile, "ProfileName", profileText.Trim().Equals("cylinder", StringComparison.OrdinalIgnoreCase) ? "xBIM circle" : "xBIM rectangle");
+        SetPropertyIfPresent(profile, "Position", CreateAxis2Placement2D(store, 0, 0));
+
+        if (ToIfcType(profile) == "IFCCIRCLEPROFILEDEF")
+        {
+            var radius = Math.Max(0.01, ParseDouble(widthText, 1)) / 2;
+            SetPropertyIfPresent(profile, "Radius", radius);
+        }
+        else
+        {
+            SetPropertyIfPresent(profile, "XDim", Math.Max(0.01, ParseDouble(widthText, 1)));
+            SetPropertyIfPresent(profile, "YDim", Math.Max(0.01, ParseDouble(depthText, 1)));
+        }
+
+        return profile;
+    }
+
+    private static IPersistEntity CreateAxis2Placement3D(IfcStore store, double x, double y, double z)
+    {
+        var axisPlacement = New(store, ResolveSchemaType(store, "GeometryResource", "IfcAxis2Placement3D"));
+        SetProperty(axisPlacement, "Location", CreateCartesianPoint(store, x, y, z));
+        return axisPlacement;
+    }
+
+    private static IPersistEntity CreateAxis2Placement2D(IfcStore store, double x, double y)
+    {
+        var axisPlacement = New(store, ResolveSchemaType(store, "GeometryResource", "IfcAxis2Placement2D"));
+        SetProperty(axisPlacement, "Location", CreateCartesianPoint(store, x, y));
+        return axisPlacement;
+    }
+
+    private static IPersistEntity CreateCartesianPoint(IfcStore store, params double[] coordinates)
+    {
+        var point = New(store, ResolveSchemaType(store, "GeometryResource", "IfcCartesianPoint"));
+        SetCoordinateList(GetPropertyValue(point, "Coordinates"), coordinates);
+        return point;
+    }
+
+    private static IPersistEntity CreateDirection(IfcStore store, params double[] ratios)
+    {
+        var direction = New(store, ResolveSchemaType(store, "GeometryResource", "IfcDirection"));
+        SetCoordinateList(GetPropertyValue(direction, "DirectionRatios"), ratios);
+        return direction;
+    }
+
+    private static IPersistEntity? GetPlacementLocation(IPersistEntity? product)
+    {
+        var placement = GetPropertyValue(product, "ObjectPlacement");
+        var relativePlacement = GetPropertyValue(placement, "RelativePlacement");
+        return GetPropertyValue(relativePlacement, "Location") as IPersistEntity;
+    }
+
+    private static (double X, double Y, double Z) RotateWorldDeltaIntoParent(double x, double y, double z, double parentYawRadians)
+    {
+        if (Math.Abs(parentYawRadians) < 0.0000001)
+        {
+            return (x, y, z);
+        }
+
+        var inverseYaw = -parentYawRadians;
+        var cos = Math.Cos(inverseYaw);
+        var sin = Math.Sin(inverseYaw);
+        return (x * cos - y * sin, x * sin + y * cos, z);
+    }
+
+    private static double ReadPlacementYaw(object? placement)
+    {
+        var yaw = 0d;
+        var current = placement;
+        var seen = new HashSet<int>();
+        while (current is not null)
+        {
+            if (current is IPersistEntity entity && !seen.Add(entity.EntityLabel))
+            {
+                break;
+            }
+
+            yaw += ReadAxisPlacementYaw(GetPropertyValue(current, "RelativePlacement"));
+            current = GetPropertyValue(current, "PlacementRelTo");
+        }
+
+        return NormalizeRadians(yaw);
+    }
+
+    private static double ReadAxisPlacementYaw(object? axisPlacement)
+    {
+        var refDirection = GetPropertyValue(axisPlacement, "RefDirection");
+        var ratios = ReadCoordinateList(GetPropertyValue(refDirection, "DirectionRatios"));
+        var length = Math.Sqrt(ratios[0] * ratios[0] + ratios[1] * ratios[1]);
+        return length < 0.0000001
+            ? 0d
+            : Math.Atan2(ratios[1], ratios[0]);
+    }
+
+    private static void SetAxis2PlacementZRotation(IfcStore store, object axisPlacement, double yawRadians)
+    {
+        var axis = GetPropertyValue(axisPlacement, "Axis");
+        if (axis is not null)
+        {
+            SetCoordinateList(GetPropertyValue(axis, "DirectionRatios"), 0, 0, 1);
+        }
+        else
+        {
+            SetPropertyIfPresent(axisPlacement, "Axis", CreateDirection(store, 0, 0, 1));
+        }
+
+        var refDirection = GetPropertyValue(axisPlacement, "RefDirection");
+        var x = Math.Cos(yawRadians);
+        var y = Math.Sin(yawRadians);
+        if (refDirection is not null)
+        {
+            SetCoordinateList(GetPropertyValue(refDirection, "DirectionRatios"), x, y, 0);
+        }
+        else
+        {
+            SetPropertyIfPresent(axisPlacement, "RefDirection", CreateDirection(store, x, y, 0));
+        }
+    }
+
+    private static double[] ReadCoordinateList(object? coordinates)
+    {
+        var values = AsEnumerable(coordinates)
+            .Select(value => ParseDouble(value?.ToString() ?? string.Empty, 0))
+            .Take(3)
+            .ToList();
+        while (values.Count < 3)
+        {
+            values.Add(0);
+        }
+
+        return values.ToArray();
+    }
+
+    private static double NormalizeRadians(double radians)
+    {
+        var normalized = radians % (Math.PI * 2d);
+        return normalized <= -Math.PI
+            ? normalized + Math.PI * 2d
+            : normalized > Math.PI
+                ? normalized - Math.PI * 2d
+                : normalized;
+    }
+
+    private static Type ResolveIfcEntityType(IfcStore store, string ifcType)
+    {
+        var className = ToPascalIfcName(ifcType);
+        foreach (var section in new[] { "SharedBldgElements", "ProductExtension", "Kernel", "PropertyResource", "QuantityResource", "GeometricConstraintResource", "GeometryResource", "RepresentationResource", "MaterialResource", "ExternalReferenceResource", "ActorResource", "ConstraintResource", "ApprovalResource", "ConstructionMgmtDomain" })
+        {
+            var type = TryResolveSchemaType(store, section, className);
+            if (type is not null)
+            {
+                return type;
+            }
+        }
+
+        var normalizedStem = NormalizeIfcType(ifcType, "IFCBUILDINGELEMENTPROXY")[3..];
+        var schemaPrefix = GetSchemaPrefix(store);
+        var scanned = AppDomain.CurrentDomain.GetAssemblies()
+            .Where(assembly => assembly.GetName().Name?.Equals(schemaPrefix, StringComparison.OrdinalIgnoreCase) == true)
+            .SelectMany(GetLoadableTypes)
+            .FirstOrDefault(type => type.Name.StartsWith("Ifc", StringComparison.Ordinal)
+                && string.Equals(type.Name[3..].ToUpperInvariant(), normalizedStem, StringComparison.OrdinalIgnoreCase));
+        if (scanned is not null)
+        {
+            return scanned;
+        }
+
+        throw new InvalidOperationException($"xBIM schema type not found for {ifcType}.");
+    }
+
+    private static Type ResolveSchemaType(IfcStore store, string section, string typeName)
+    {
+        return TryResolveSchemaType(store, section, typeName)
+            ?? throw new InvalidOperationException($"xBIM schema type not found: {section}.{typeName}.");
+    }
+
+    private static Type? TryResolveSchemaType(IfcStore store, string section, string typeName)
+    {
+        var prefix = GetSchemaPrefix(store);
+        var assembly = prefix[(prefix.LastIndexOf('.') + 1)..];
+        return Type.GetType($"{prefix}.{section}.{typeName}, {prefix}")
+            ?? Type.GetType($"{prefix}.{section}.{typeName}, {assembly}");
+    }
+
+    private static string GetSchemaPrefix(IfcStore store)
+    {
+        return store.SchemaVersion switch
+        {
+            Xbim.Common.Step21.XbimSchemaVersion.Ifc2X3 => "Xbim.Ifc2x3",
+            Xbim.Common.Step21.XbimSchemaVersion.Ifc4x3 => "Xbim.Ifc4x3",
+            _ => "Xbim.Ifc4",
+        };
+    }
+
+    private static IEnumerable<Type> GetLoadableTypes(System.Reflection.Assembly assembly)
+    {
+        try
+        {
+            return assembly.GetTypes();
+        }
+        catch (System.Reflection.ReflectionTypeLoadException exception)
+        {
+            return exception.Types.Where(type => type is not null)!;
+        }
+    }
+
+    private static void SetRootDefaults(IfcStore store, object entity, string name, string description)
+    {
+        SetPropertyIfPresent(entity, "GlobalId", StepGuidHelper.ConvertToBase64(Guid.NewGuid()));
+        SetPropertyIfPresent(entity, "Name", string.IsNullOrWhiteSpace(name) ? null : name);
+        SetPropertyIfPresent(entity, "Description", string.IsNullOrWhiteSpace(description) ? null : description);
+    }
+
+    private static void SetFirstAvailableProperty(object entity, IReadOnlyList<string> propertyNames, object value)
+    {
+        foreach (var propertyName in propertyNames)
+        {
+            if (SetPropertyIfPresent(entity, propertyName, value))
+            {
+                return;
+            }
+        }
+    }
+
+    private static bool SetEnumPropertyIfPresent(object entity, string propertyName, string value)
+    {
+        var property = FindProperty(entity.GetType(), propertyName);
+        if (property is null)
+        {
+            return false;
+        }
+
+        var targetType = Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
+        if (!targetType.IsEnum)
+        {
+            SetProperty(entity, propertyName, value);
+            return true;
+        }
+
+        property.SetValue(entity, Enum.Parse(targetType, value, ignoreCase: true));
+        return true;
+    }
+
+    private static void AddToFirstAvailableCollection(object entity, IReadOnlyList<string> propertyNames, object value)
+    {
+        foreach (var propertyName in propertyNames)
+        {
+            var collection = GetPropertyValue(entity, propertyName);
+            if (AddToCollection(collection, value))
+            {
+                return;
+            }
+        }
+    }
+
+    private static bool SetPropertyIfPresent(object entity, string propertyName, object? value)
+    {
+        if (!HasProperty(entity, propertyName))
+        {
+            return false;
+        }
+
+        SetProperty(entity, propertyName, value);
+        return true;
+    }
+
+    private static void SetProperty(object entity, string propertyName, object? value)
+    {
+        var property = FindProperty(entity.GetType(), propertyName)
+            ?? throw new InvalidOperationException($"{entity.GetType().Name}.{propertyName} was not found.");
+        property.SetValue(entity, ConvertForProperty(property.PropertyType, value));
+    }
+
+    private static bool HasProperty(object entity, string propertyName)
+    {
+        return FindProperty(entity.GetType(), propertyName) is not null;
+    }
+
+    private static object? GetPropertyValue(object? entity, string propertyName)
+    {
+        return entity is null ? null : FindProperty(entity.GetType(), propertyName)?.GetValue(entity);
+    }
+
+    private static PropertyInfo? FindProperty(Type type, string propertyName)
+    {
+        return type.GetProperty(propertyName)
+            ?? type.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .FirstOrDefault(property => property.GetIndexParameters().Length == 0
+                    && property.Name.EndsWith($".{propertyName}", StringComparison.Ordinal));
+    }
+
+    private static object? ConvertForProperty(Type propertyType, object? value)
+    {
+        if (value is null)
+        {
+            return null;
+        }
+
+        var targetType = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
+        if (targetType.IsInstanceOfType(value))
+        {
+            return value;
+        }
+
+        if (typeof(IPersistEntity).IsAssignableFrom(targetType) && value is IPersistEntity)
+        {
+            return value;
+        }
+
+        if (targetType == typeof(string))
+        {
+            return value.ToString();
+        }
+
+        if (targetType == typeof(double))
+        {
+            return value is double number ? number : ParseDouble(value.ToString() ?? string.Empty, 0);
+        }
+
+        if (targetType == typeof(bool))
+        {
+            return value is bool boolean ? boolean : ParseBoolean(value.ToString() ?? string.Empty);
+        }
+
+        if (targetType == typeof(int))
+        {
+            return value is int integer ? integer : (int)ParseDouble(value.ToString() ?? string.Empty, 0);
+        }
+
+        if (targetType.IsEnum)
+        {
+            return Enum.Parse(targetType, value.ToString() ?? string.Empty, ignoreCase: true);
+        }
+
+        var measureText = value is double measureNumber
+            ? measureNumber.ToString("R", CultureInfo.InvariantCulture)
+            : value.ToString() ?? string.Empty;
+        return CreateMeasureValue(targetType, measureText);
+    }
+
+    private static object CreateMeasureValue(Type type, string rawValue)
+    {
+        var text = UnwrapStepValue(rawValue);
+        var name = type.Name;
+
+        if (name.Contains("Boolean", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Logical", StringComparison.OrdinalIgnoreCase))
+        {
+            // Explicit object[]: a bare bool argument would bind to the
+            // CreateInstance(Type, nonPublic) overload and always yield false.
+            return Activator.CreateInstance(type, [(object)ParseBoolean(text)])!;
+        }
+
+        // Numeric/measure value types only accept a numeric constructor argument —
+        // an unparseable value (e.g. a label retyped to IfcInteger) must fall back
+        // to a number, never the string constructor (which would throw).
+        if (name.Contains("Integer", StringComparison.OrdinalIgnoreCase))
+        {
+            var integer = int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedInt)
+                ? parsedInt
+                : TryParseNumber(text, out var parsedDouble)
+                    ? (int)parsedDouble
+                    : 0;
+            return Activator.CreateInstance(type, integer)!;
+        }
+
+        if (name.Contains("Real", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Measure", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Number", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Length", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Area", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Volume", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Count", StringComparison.OrdinalIgnoreCase))
+        {
+            var number = TryParseNumber(text, out var parsed) ? parsed : 0d;
+            return Activator.CreateInstance(type, number)!;
+        }
+
+        return Activator.CreateInstance(type, text)!;
+    }
+
+    private static bool AddToCollection(object? collection, object value)
+    {
+        if (collection is null)
+        {
+            return false;
+        }
+
+        var add = collection.GetType().GetMethod("Add", [value.GetType()])
+            ?? collection.GetType().GetMethods().FirstOrDefault(method => method.Name == "Add" && method.GetParameters().Length == 1);
+        if (add is null)
+        {
+            return false;
+        }
+
+        add.Invoke(collection, [value]);
+        return true;
+    }
+
+    private static bool RemoveFromCollection(object? collection, object value)
+    {
+        if (collection is null)
+        {
+            return false;
+        }
+
+        var remove = collection.GetType().GetMethod("Remove", [value.GetType()])
+            ?? collection.GetType().GetMethods().FirstOrDefault(method => method.Name == "Remove" && method.GetParameters().Length == 1);
+        if (remove is null)
+        {
+            return false;
+        }
+
+        remove.Invoke(collection, [value]);
+        return true;
+    }
+
+    private static void ReplaceFirstAvailableCollection(object entity, IReadOnlyList<string> propertyNames, IReadOnlyList<object> values)
+    {
+        foreach (var propertyName in propertyNames)
+        {
+            var collection = GetPropertyValue(entity, propertyName);
+            if (collection is null)
+            {
+                continue;
+            }
+
+            ClearCollection(collection);
+            foreach (var value in values)
+            {
+                AddToCollection(collection, value);
+            }
+
+            return;
+        }
+    }
+
+    private static void ApplyEndpointMap(
+        object relation,
+        RelationshipEndpointProperties map,
+        IReadOnlyList<object> sources,
+        IReadOnlyList<object> targets)
+    {
+        if (map.SourceCollection is not null)
+        {
+            ReplaceCollection(relation, map.SourceCollection, sources);
+        }
+        else if (map.SourceProperty is not null && sources.FirstOrDefault() is { } source)
+        {
+            SetPropertyIfPresent(relation, map.SourceProperty, source);
+        }
+
+        if (map.TargetCollection is not null)
+        {
+            ReplaceCollection(relation, map.TargetCollection, targets);
+        }
+        else if (map.TargetProperty is not null && targets.FirstOrDefault() is { } target)
+        {
+            SetPropertyIfPresent(relation, map.TargetProperty, target);
+        }
+    }
+
+    private static void ReplaceCollection(object entity, string propertyName, IReadOnlyList<object> values)
+    {
+        var collection = GetPropertyValue(entity, propertyName);
+        if (collection is null)
+        {
+            return;
+        }
+
+        ClearCollection(collection);
+        foreach (var value in values)
+        {
+            AddToCollection(collection, value);
+        }
+    }
+
+    private static RelationshipEndpointProperties? GetEndpointPropertyMap(string relationshipType)
+    {
+        return relationshipType switch
+        {
+            "IFCRELAGGREGATES" or "IFCRELNESTS" => new("RelatingObject", null, null, "RelatedObjects"),
+            "IFCRELCONTAINEDINSPATIALSTRUCTURE" or "IFCRELREFERENCEDINSPATIALSTRUCTURE" => new("RelatingStructure", null, null, "RelatedElements"),
+            "IFCRELDEFINESBYPROPERTIES" => new("RelatingPropertyDefinition", null, null, "RelatedObjects"),
+            "IFCRELDEFINESBYTYPE" => new("RelatingType", null, null, "RelatedObjects"),
+            "IFCRELASSOCIATESMATERIAL" => new("RelatingMaterial", null, null, "RelatedObjects"),
+            "IFCRELASSOCIATESCLASSIFICATION" => new("RelatingClassification", null, null, "RelatedObjects"),
+            "IFCRELASSOCIATESDOCUMENT" => new("RelatingDocument", null, null, "RelatedObjects"),
+            "IFCRELASSOCIATESLIBRARY" => new("RelatingLibrary", null, null, "RelatedObjects"),
+            "IFCRELASSIGNSTOGROUP" => new("RelatingGroup", null, null, "RelatedObjects"),
+            "IFCRELASSIGNSTOPROCESS" => new("RelatingProcess", null, null, "RelatedObjects"),
+            "IFCRELASSIGNSTOCONTROL" => new("RelatingControl", null, null, "RelatedObjects"),
+            "IFCRELASSIGNSTOPRODUCT" => new("RelatingProduct", null, null, "RelatedObjects"),
+            "IFCRELVOIDSELEMENT" => new("RelatingBuildingElement", null, "RelatedOpeningElement", null),
+            "IFCRELFILLSELEMENT" => new("RelatingOpeningElement", null, "RelatedBuildingElement", null),
+            "IFCRELCONNECTSELEMENTS" => new("RelatingElement", null, "RelatedElement", null),
+            "IFCRELCONNECTSPORTS" => new("RelatingPort", null, "RelatedPort", null),
+            "IFCRELCONNECTSPORTTOELEMENT" => new("RelatingPort", null, "RelatedElement", null),
+            "IFCRELINTERFERESELEMENTS" => new("RelatingElement", null, "RelatedElement", null),
+            "IFCRELPROJECTSELEMENT" => new("RelatingElement", null, "RelatedFeatureElement", null),
+            _ => null,
+        };
+    }
+
+    private static string ToIfcType(IPersistEntity instance)
+    {
+        var typeName = instance.GetType().Name;
+        return typeName.StartsWith("Ifc", StringComparison.OrdinalIgnoreCase)
+            ? $"IFC{typeName[3..].ToUpperInvariant()}"
+            : typeName.ToUpperInvariant();
+    }
+
+    private static void ClearCollection(object collection)
+    {
+        var clear = collection.GetType().GetMethod("Clear", Type.EmptyTypes);
+        if (clear is not null)
+        {
+            clear.Invoke(collection, []);
+            return;
+        }
+
+        foreach (var value in AsEnumerable(collection).ToList())
+        {
+            RemoveFromCollection(collection, value);
+        }
+    }
+
+    private static IEnumerable<object> AsEnumerable(object? collection)
+    {
+        return collection is IEnumerable enumerable
+            ? enumerable.Cast<object>()
+            : [];
+    }
+
+    private static void SetCoordinateList(object? coordinates, params double[] values)
+    {
+        if (coordinates is null)
+        {
+            return;
+        }
+
+        coordinates.GetType().GetMethod("Clear", Type.EmptyTypes)?.Invoke(coordinates, []);
+        foreach (var value in values)
+        {
+            var add = coordinates.GetType().GetMethod("Add", [typeof(double)])
+                ?? coordinates.GetType().GetMethods().FirstOrDefault(method => method.Name == "Add" && method.GetParameters().Length == 1);
+            if (add is null)
+            {
+                continue;
+            }
+
+            var parameterType = add.GetParameters()[0].ParameterType;
+            add.Invoke(coordinates, [ConvertForProperty(parameterType, value)]);
+        }
+    }
+
+    private static string ReadName(object entity, string fallback)
+    {
+        return GetPropertyValue(entity, "Name")?.ToString() ?? fallback;
+    }
+
+    private static IEnumerable<int> ReadIds(string text)
+    {
+        foreach (var match in System.Text.RegularExpressions.Regex.Matches(text, @"#?(?<id>\d+)").Cast<System.Text.RegularExpressions.Match>())
+        {
+            if (int.TryParse(match.Groups["id"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id))
+            {
+                yield return id;
+            }
+        }
+    }
+
+    private static IEnumerable<int> ReadHashIds(string text)
+    {
+        foreach (var match in System.Text.RegularExpressions.Regex.Matches(text, @"#(?<id>\d+)").Cast<System.Text.RegularExpressions.Match>())
+        {
+            if (int.TryParse(match.Groups["id"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id))
+            {
+                yield return id;
+            }
+        }
+    }
+
+    private static IfcRelationship? FindContainment(IfcDocument document, int childId)
+    {
+        return document.RelationshipsByEntity.TryGetValue(childId, out var relationships)
+            ? relationships.FirstOrDefault(relationship =>
+                relationship.Type.Equals("IFCRELCONTAINEDINSPATIALSTRUCTURE", StringComparison.OrdinalIgnoreCase)
+                && relationship.TargetIds.Contains(childId))
+            : null;
+    }
+
+    private static string NormalizeIfcType(string text, string fallback)
+    {
+        var value = string.IsNullOrWhiteSpace(text) ? fallback : text.Trim();
+        return value.StartsWith("IFC", StringComparison.OrdinalIgnoreCase)
+            ? value.ToUpperInvariant()
+            : $"IFC{value.ToUpperInvariant()}";
+    }
+
+    private static string ToPascalIfcName(string ifcType)
+    {
+        var stem = NormalizeIfcType(ifcType, "IFCBUILDINGELEMENTPROXY")[3..].ToLowerInvariant();
+        return "Ifc" + string.Concat(stem.Split('_', StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => CultureInfo.InvariantCulture.TextInfo.ToTitleCase(part)));
+    }
+
+    private static string UnwrapStepValue(string value)
+    {
+        var text = value.Trim();
+        var wrapped = System.Text.RegularExpressions.Regex.Match(text, @"^[A-Z0-9_]+\((?<inner>.*)\)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (wrapped.Success)
+        {
+            text = wrapped.Groups["inner"].Value.Trim();
+        }
+
+        if (text.Length >= 2 && text[0] == '\'' && text[^1] == '\'')
+        {
+            text = text[1..^1].Replace("''", "'", StringComparison.Ordinal);
+        }
+
+        return text.Trim('.');
+    }
+
+    private static bool ParseBoolean(string value)
+    {
+        var text = value.Trim().Trim('.');
+        return text.Equals("true", StringComparison.OrdinalIgnoreCase)
+            || text.Equals("t", StringComparison.OrdinalIgnoreCase)
+            || text.Equals("1", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static double ParseDouble(string value, double fallback)
+    {
+        return TryParseNumber(value, out var parsed) ? parsed : fallback;
+    }
+
+    /// <summary>
+    /// IFC is dot-decimal, but UI input arrives in the user's locale — accept
+    /// invariant first, then comma-decimal ("1,5" / "1.234,5").
+    /// </summary>
+    private static bool TryParseNumber(string value, out double result)
+    {
+        var text = UnwrapStepValue(value);
+        if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out result))
+        {
+            return true;
+        }
+
+        if (text.Contains(','))
+        {
+            var normalized = text.Replace(".", string.Empty, StringComparison.Ordinal).Replace(',', '.');
+            return double.TryParse(normalized, NumberStyles.Float, CultureInfo.InvariantCulture, out result);
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Renders an existing nominal value as text that round-trips through
+    /// <see cref="CreateMeasureValue"/> — doubles must not pass through the
+    /// culture-sensitive ToString (a German "1,5" would parse back as 0).
+    /// </summary>
+    private static string ReadNominalText(object? value)
+    {
+        if (value is IExpressValueType express)
+        {
+            value = express.Value;
+        }
+
+        return value switch
+        {
+            null => string.Empty,
+            double number => number.ToString("G15", CultureInfo.InvariantCulture),
+            bool boolean => boolean ? "true" : "false",
+            _ => value.ToString() ?? string.Empty,
+        };
+    }
+}

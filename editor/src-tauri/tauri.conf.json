@@ -1,0 +1,41 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "IFCnative",
+  "version": "1.4.11",
+  "identifier": "com.mkp.ifcnative.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:5173",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["../build/icon.ico"],
+    "fileAssociations": [
+      {
+        "ext": ["ifc"],
+        "name": "IFC-Modell",
+        "description": "Industry Foundation Classes (IFC)-Modell",
+        "role": "Editor",
+        "mimeType": "application/x-step"
+      }
+    ],
+    "windows": {
+      "nsis": {
+        "installerIcon": "../build/icon.ico",
+        "languages": ["German", "English"],
+        "displayLanguageSelector": true,
+        "installMode": "currentUser",
+        "installerHooks": "../build/nsis-hooks.nsh"
+      }
+    }
+  }
+}

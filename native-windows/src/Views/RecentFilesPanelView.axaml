@@ -1,0 +1,20 @@
+<UserControl x:Class="IFCnative.NativeWindows.Views.RecentFilesPanelView"
+             xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Grid RowDefinitions="Auto,*" Margin="8" RowSpacing="8">
+    <TextBlock Classes="sectionTitle" Text="Recent" />
+    <ListBox Grid.Row="1"
+             Classes="compact"
+             ItemsSource="{Binding Entries}"
+             SelectedItem="{Binding SelectedEntry}">
+      <ListBox.ItemTemplate>
+        <DataTemplate>
+          <StackPanel>
+            <TextBlock Text="{Binding FileName}" TextTrimming="CharacterEllipsis" />
+            <TextBlock Classes="caption" Text="{Binding Path}" TextTrimming="CharacterEllipsis" />
+          </StackPanel>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+  </Grid>
+</UserControl>
