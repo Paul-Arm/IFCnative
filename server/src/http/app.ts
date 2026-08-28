@@ -58,6 +58,32 @@ function publicUser(user: User) {
   return { id: user.id, email: user.email, name: user.name };
 }
 
+/**
+ * Normalisiert einen Ordnerpfad: Segmente trimmen, leere entfernen,
+ * mit "/" verbinden. "" ist die Wurzel. null bei ungültigen Segmenten.
+ */
+function normalizeFolderPath(input: string): string | null {
+  const segments = input
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0);
+  if (segments.length > 10) {
+    return null;
+  }
+  for (const segment of segments) {
+    if (segment.length > 64 || segment === "." || segment === "..") {
+      return null;
+    }
+    const hasForbiddenChar = [...segment].some(
+      (ch) => ch === "<" || ch === ">" || ch === "\\" || ch.charCodeAt(0) < 32,
+    );
+    if (hasForbiddenChar) {
+      return null;
+    }
+  }
+  return segments.join("/");
+}
+
 export function buildApp(deps: AppDeps): FastifyInstance {
   const { repo, store, jwtSecret } = deps;
   const commits = new CommitService(repo, store);
@@ -173,6 +199,29 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       }
     }
     return users;
+  }
+
+  /**
+   * Alle Ordner eines Projekts: explizit angelegte plus implizite aus den
+   * `folder`-Pfaden der Modelle — jeweils inklusive aller Eltern-Pfade.
+   */
+  async function collectFolders(projectId: string): Promise<string[]> {
+    const set = new Set<string>();
+    const addWithAncestors = (path: string) => {
+      let current = path;
+      while (current) {
+        set.add(current);
+        const idx = current.lastIndexOf("/");
+        current = idx === -1 ? "" : current.slice(0, idx);
+      }
+    };
+    for (const path of await repo.listFolders(projectId)) {
+      addWithAncestors(path);
+    }
+    for (const model of await repo.listModels(projectId)) {
+      addWithAncestors(model.folder);
+    }
+    return [...set].sort();
   }
 
   /** Commit + `author: {id, email, name} | null` for UI display. */
@@ -296,7 +345,51 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { ...m, user: memberUser ? publicUser(memberUser) : null };
       }),
       role: member?.role ?? null,
+      folders: await collectFolders(project.id),
     });
+  });
+
+  // ---- folders ---------------------------------------------------------
+
+  app.post(`${api}/projects/:slug/folders`, async (request, reply) => {
+    const { slug } = request.params as { slug: string };
+    const project = await resolveProject(slug, reply);
+    if (!project) return reply;
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    if (!(await requireMember(project, user, reply, "write"))) return reply;
+    const body = (request.body ?? {}) as { path?: string };
+    const path = body.path === undefined ? null : normalizeFolderPath(body.path);
+    if (!path) {
+      return reply.code(400).send({ error: "Valid folder path required" });
+    }
+    await repo.addFolder(project.id, path);
+    return reply.code(201).send({ folder: path });
+  });
+
+  app.delete(`${api}/projects/:slug/folders`, async (request, reply) => {
+    const { slug } = request.params as { slug: string };
+    const project = await resolveProject(slug, reply);
+    if (!project) return reply;
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    if (!(await requireMember(project, user, reply, "write"))) return reply;
+    const query = request.query as { path?: string };
+    const path = query.path === undefined ? null : normalizeFolderPath(query.path);
+    if (!path) {
+      return reply.code(400).send({ error: "Valid folder path required" });
+    }
+    const models = await repo.listModels(project.id);
+    const occupied = models.some(
+      (model) => model.folder === path || model.folder.startsWith(`${path}/`),
+    );
+    if (occupied) {
+      return reply
+        .code(409)
+        .send({ error: "Folder is not empty (contains models)" });
+    }
+    await repo.removeFolder(project.id, path);
+    return reply.code(204).send();
   });
 
   // Add a member or change their role (upsert by email).
@@ -408,9 +501,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       name?: string;
       slug?: string;
       visibility?: "private" | "public";
+      folder?: string;
     };
     if (!body.name) {
       return reply.code(400).send({ error: "name required" });
+    }
+    const folder = normalizeFolderPath(body.folder ?? "");
+    if (folder === null) {
+      return reply.code(400).send({ error: "Invalid folder path" });
     }
     const modelSlug = slugify(body.slug ?? body.name);
     if (!modelSlug) {
@@ -425,6 +523,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       name: body.name,
       visibility: body.visibility ?? "private",
       defaultBranch: "main",
+      folder,
     });
     return reply.code(201).send({ model });
   });
@@ -481,6 +580,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       name?: string;
       visibility?: "private" | "public";
       defaultBranch?: string;
+      folder?: string;
     };
     if (body.visibility && !["private", "public"].includes(body.visibility)) {
       return reply.code(400).send({ error: "Invalid visibility" });
@@ -490,10 +590,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return reply.code(400).send({ error: "Branch does not exist" });
       }
     }
+    let folder: string | undefined;
+    if (body.folder !== undefined) {
+      const normalized = normalizeFolderPath(body.folder);
+      if (normalized === null) {
+        return reply.code(400).send({ error: "Invalid folder path" });
+      }
+      folder = normalized;
+    }
     const updated = await repo.updateModel(model.id, {
       name: body.name,
       visibility: body.visibility,
       defaultBranch: body.defaultBranch,
+      folder,
     });
     return reply.send({ model: updated });
   });

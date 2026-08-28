@@ -30,6 +30,7 @@ test("JsonFileRepository: catalog survives a restart", async () => {
     name: "Tower",
     visibility: "private",
     defaultBranch: "main",
+    folder: "",
   });
   const branch = await repo.createBranch({
     modelId: model.id,

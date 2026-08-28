@@ -38,7 +38,15 @@ create table if not exists models (
   visibility text not null,
   default_branch text not null,
   created_at text not null,
+  folder text not null default '',
   unique (project_id, slug)
+);
+alter table models add column if not exists folder text not null default '';
+
+create table if not exists project_folders (
+  project_id uuid not null references projects(id),
+  path text not null,
+  primary key (project_id, path)
 );
 
 create table if not exists branches (

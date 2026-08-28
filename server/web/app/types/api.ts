@@ -50,6 +50,8 @@ export interface Model {
   visibility: "private" | "public";
   defaultBranch: string;
   createdAt: string;
+  /** Ordnerpfad im Projekt ("" = Wurzel), Segmente mit "/" getrennt. */
+  folder: string;
   branchCount?: number;
   head?: Commit | null;
 }

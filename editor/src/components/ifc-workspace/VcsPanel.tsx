@@ -394,7 +394,7 @@ export function VcsPanel({
               label="Modell"
               options={models.map((model) => ({
                 value: model.slug,
-                label: model.name,
+                label: model.folder ? `${model.folder}/${model.name}` : model.name,
                 detail:
                   model.visibility === "public" ? "öffentlich" : "privat",
               }))}

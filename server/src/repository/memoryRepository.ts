@@ -36,6 +36,8 @@ export class MemoryRepository implements Repository {
   /** per-commit manifest: ordered (globalId, entityHash) references. */
   protected commitEntities = new Map<string, { globalId: string; hash: string }[]>();
   protected diffCache = new Map<string, GuidDiffSummary>();
+  /** explizit angelegte Ordner je Projekt. */
+  protected folders = new Map<string, Set<string>>();
 
   private now(): string {
     // Tests need determinism-free timestamps; ISO string is fine here.
@@ -141,13 +143,21 @@ export class MemoryRepository implements Repository {
 
   async updateModel(
     modelId: string,
-    patch: Partial<Pick<Model, "name" | "visibility" | "defaultBranch">>,
+    patch: Partial<
+      Pick<Model, "name" | "visibility" | "defaultBranch" | "folder">
+    >,
   ): Promise<Model | null> {
     const model = this.models.get(modelId);
     if (!model) {
       return null;
     }
-    Object.assign(model, patch);
+    // Nur gesetzte Felder übernehmen — `{name: undefined}` darf den
+    // bestehenden Wert nicht auslöschen.
+    for (const [key, value] of Object.entries(patch)) {
+      if (value !== undefined) {
+        (model as unknown as Record<string, unknown>)[key] = value;
+      }
+    }
     return model;
   }
 
@@ -181,8 +191,34 @@ export class MemoryRepository implements Repository {
       blobKeys.push(...(await this.deleteModel(model.id)));
     }
     this.members = this.members.filter((m) => m.projectId !== projectId);
+    this.folders.delete(projectId);
     this.projects.delete(projectId);
     return blobKeys;
+  }
+
+  async listFolders(projectId: string): Promise<string[]> {
+    return [...(this.folders.get(projectId) ?? [])].sort();
+  }
+
+  async addFolder(projectId: string, path: string): Promise<void> {
+    let set = this.folders.get(projectId);
+    if (!set) {
+      set = new Set();
+      this.folders.set(projectId, set);
+    }
+    set.add(path);
+  }
+
+  async removeFolder(projectId: string, path: string): Promise<void> {
+    const set = this.folders.get(projectId);
+    if (!set) {
+      return;
+    }
+    for (const entry of [...set]) {
+      if (entry === path || entry.startsWith(`${path}/`)) {
+        set.delete(entry);
+      }
+    }
   }
 
   async createBranch(input: Omit<Branch, "id">): Promise<Branch> {

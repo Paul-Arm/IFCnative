@@ -42,6 +42,7 @@ async function setup() {
     name: "M",
     visibility: "private",
     defaultBranch: "main",
+    folder: "",
   });
   return { db, repo, service, user, project, model };
 }

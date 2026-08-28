@@ -430,6 +430,143 @@ button.link {
   flex-wrap: wrap;
 }
 
+/* ---- GitHub-artige Unterstreichungs-Tabs ------------------------------ */
+
+.gh-tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 1rem;
+  overflow-x: auto;
+}
+
+.gh-tabs button {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  padding: 0.55rem 0.9rem;
+  font-weight: 400;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.gh-tabs button:hover {
+  filter: none;
+  background: var(--surface-2);
+  border-radius: 6px 6px 0 0;
+}
+
+.gh-tabs button.active {
+  border-bottom-color: #fd8c73;
+  font-weight: 600;
+}
+
+.gh-tabs button svg {
+  color: var(--text-muted);
+}
+
+.gh-tabs .counter {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 0.45rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+/* ---- Datei-Browser (GitHub-artig) ------------------------------------- */
+
+.fb-toolbar {
+  gap: 0.5rem;
+}
+
+.fb-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  font-size: 0.95rem;
+}
+
+.fb-breadcrumb a {
+  color: var(--accent);
+}
+
+.fb-breadcrumb a.current {
+  color: var(--text);
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.fb-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.fb-row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.fb-row:last-child {
+  border-bottom: none;
+}
+
+.fb-row:hover {
+  background: var(--surface-2);
+  text-decoration: none;
+}
+
+.fb-icon {
+  display: inline-flex;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.fb-icon.folder {
+  color: #54aeff;
+}
+
+.fb-name {
+  min-width: 0;
+  flex: 0 1 auto;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+a.fb-name:hover {
+  text-decoration: underline;
+}
+
+.fb-commit {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fb-meta {
+  margin-left: auto;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.fb-action {
+  flex-shrink: 0;
+}
+
 .tabs button {
   border: 1px solid transparent;
   background: none;

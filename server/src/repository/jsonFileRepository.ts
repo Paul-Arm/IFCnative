@@ -16,6 +16,8 @@ interface CatalogFile {
   entityObjects: [string, { type: string; name: string; payload: string }][];
   commitEntities: [string, { globalId: string; hash: string }[]][];
   diffCache: [string, GuidDiffSummary][];
+  /** explizit angelegte Ordner je Projekt (seit Ordner-Feature; optional). */
+  folders?: [string, string[]][];
 }
 
 /**
@@ -55,12 +57,21 @@ export class JsonFileRepository extends MemoryRepository {
     this.users = new Map(parsed.users.map((user) => [user.id, user]));
     this.projects = new Map(parsed.projects.map((p) => [p.id, p]));
     this.members = parsed.members;
-    this.models = new Map(parsed.models.map((m) => [m.id, m]));
+    // Kataloge von vor dem Ordner-Feature haben kein `folder`-Feld an Modellen.
+    this.models = new Map(
+      parsed.models.map((m) => [m.id, { ...m, folder: m.folder ?? "" }]),
+    );
     this.branches = new Map(parsed.branches.map((b) => [b.id, b]));
     this.commits = new Map(parsed.commits.map((c) => [c.id, c]));
     this.entityObjects = new Map(parsed.entityObjects);
     this.commitEntities = new Map(parsed.commitEntities);
     this.diffCache = new Map(parsed.diffCache);
+    this.folders = new Map(
+      (parsed.folders ?? []).map(([projectId, paths]) => [
+        projectId,
+        new Set(paths),
+      ]),
+    );
   }
 
   private snapshot(): CatalogFile {
@@ -75,6 +86,10 @@ export class JsonFileRepository extends MemoryRepository {
       entityObjects: [...this.entityObjects.entries()],
       commitEntities: [...this.commitEntities.entries()],
       diffCache: [...this.diffCache.entries()],
+      folders: [...this.folders.entries()].map(([projectId, paths]) => [
+        projectId,
+        [...paths],
+      ]),
     };
   }
 
@@ -190,7 +205,9 @@ export class JsonFileRepository extends MemoryRepository {
 
   override async updateModel(
     modelId: string,
-    patch: Partial<Pick<Model, "name" | "visibility" | "defaultBranch">>,
+    patch: Partial<
+      Pick<Model, "name" | "visibility" | "defaultBranch" | "folder">
+    >,
   ): Promise<Model | null> {
     const model = await super.updateModel(modelId, patch);
     if (model) {
@@ -209,5 +226,15 @@ export class JsonFileRepository extends MemoryRepository {
     const blobKeys = await super.deleteProject(projectId);
     this.scheduleSave();
     return blobKeys;
+  }
+
+  override async addFolder(projectId: string, path: string): Promise<void> {
+    await super.addFolder(projectId, path);
+    this.scheduleSave();
+  }
+
+  override async removeFolder(projectId: string, path: string): Promise<void> {
+    await super.removeFolder(projectId, path);
+    this.scheduleSave();
   }
 }

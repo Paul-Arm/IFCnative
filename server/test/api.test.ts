@@ -399,6 +399,95 @@ test("model settings + deletion; project deletion is owner-only", async () => {
   await app.close();
 });
 
+test("folders: create, place model, move, guarded delete", async () => {
+  const app = await makeApp();
+  const token = await register(app);
+  await app.inject({
+    method: "POST",
+    url: "/api/projects",
+    headers: auth(token),
+    payload: { name: "Acme", slug: "acme" },
+  });
+
+  // Ordner explizit anlegen (mit Unterordner).
+  const created = await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/folders",
+    headers: auth(token),
+    payload: { path: " Hochbau / EG " },
+  });
+  assert.equal(created.statusCode, 201);
+  assert.equal(JSON.parse(created.body).folder, "Hochbau/EG");
+
+  // Modell direkt in einem Ordner anlegen.
+  const model = await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/models",
+    headers: auth(token),
+    payload: { name: "Tower", slug: "tower", folder: "Hochbau" },
+  });
+  assert.equal(model.statusCode, 201);
+  assert.equal(JSON.parse(model.body).model.folder, "Hochbau");
+
+  // Projekt liefert explizite + implizite Ordner inkl. Eltern.
+  const detail = await app.inject({
+    method: "GET",
+    url: "/api/projects/acme",
+    headers: auth(token),
+  });
+  assert.deepEqual(JSON.parse(detail.body).folders, ["Hochbau", "Hochbau/EG"]);
+
+  // Modell verschieben (nur folder patchen — Name bleibt erhalten).
+  const moved = await app.inject({
+    method: "PATCH",
+    url: "/api/projects/acme/models/tower",
+    headers: auth(token),
+    payload: { folder: "Hochbau/EG" },
+  });
+  assert.equal(moved.statusCode, 200);
+  assert.equal(JSON.parse(moved.body).model.folder, "Hochbau/EG");
+  assert.equal(JSON.parse(moved.body).model.name, "Tower");
+
+  // Ordner mit Modellen darunter lässt sich nicht löschen …
+  const blocked = await app.inject({
+    method: "DELETE",
+    url: "/api/projects/acme/folders?path=Hochbau",
+    headers: auth(token),
+  });
+  assert.equal(blocked.statusCode, 409);
+
+  // … nach dem Verschieben in die Wurzel schon.
+  await app.inject({
+    method: "PATCH",
+    url: "/api/projects/acme/models/tower",
+    headers: auth(token),
+    payload: { folder: "" },
+  });
+  const removed = await app.inject({
+    method: "DELETE",
+    url: "/api/projects/acme/folders?path=Hochbau",
+    headers: auth(token),
+  });
+  assert.equal(removed.statusCode, 204);
+  const after = await app.inject({
+    method: "GET",
+    url: "/api/projects/acme",
+    headers: auth(token),
+  });
+  assert.deepEqual(JSON.parse(after.body).folders, []);
+
+  // Ungültige Pfade werden abgelehnt.
+  const bad = await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/folders",
+    headers: auth(token),
+    payload: { path: "a/../b" },
+  });
+  assert.equal(bad.statusCode, 400);
+
+  await app.close();
+});
+
 test("health reports version and storage mode", async () => {
   const app = await makeApp();
   const res = await app.inject({ method: "GET", url: "/api/health" });

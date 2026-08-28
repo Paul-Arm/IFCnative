@@ -13,8 +13,10 @@ damit exakt einig, was „geändert“ bedeutet.
 
 ## Was er kann
 
-- **Projekte / Modelle / Branches / Commits** — Teams versionieren IFC-Modelle
-  gemeinsam; Rollen: `owner`, `maintainer`, `contributor`, `viewer`.
+- **Projekte / Ordner / Modelle / Branches / Commits** — Teams versionieren
+  IFC-Modelle gemeinsam; Rollen: `owner`, `maintainer`, `contributor`,
+  `viewer`. Modelle lassen sich in **Ordnern** sortieren (GitHub-artiger
+  Datei-Browser in der Web-UI, verschachtelbar).
 - **Semantische Commits** — jede hochgeladene IFC wird in Entities zerlegt;
   jede gerootete Entity (echte 22-Zeichen-GUID) wird versionsstabil gehasht
   (Express-Ids raus, Referenzen auf GUIDs umgeschrieben, GUID-lose
@@ -96,13 +98,15 @@ Auth: `Authorization: Bearer <JWT>` aus `/api/auth/login`. Fehler kommen als
 | POST | `/api/auth/register`, `/api/auth/login` | → `{ token, user }` |
 | GET | `/api/me` | aktueller Benutzer |
 | GET/POST | `/api/projects` | meine Projekte (mit Rolle) / anlegen `{name, slug?}` |
-| GET | `/api/projects/:slug` | Projekt + Mitglieder (mit Benutzerdaten) |
+| GET | `/api/projects/:slug` | Projekt + Mitglieder (mit Benutzerdaten) + `folders` |
+| POST | `/api/projects/:slug/folders` | Ordner anlegen `{path}` (write) |
+| DELETE | `/api/projects/:slug/folders?path=` | leeren Ordner löschen (409 wenn Modelle darin) |
 | DELETE | `/api/projects/:slug` | Projekt löschen (nur Owner; inkl. Blobs) |
 | POST | `/api/projects/:slug/members` | Mitglied hinzufügen/Rolle ändern `{email, role}` (admin) |
 | DELETE | `/api/projects/:slug/members/:userId` | Mitglied entfernen (admin; Owner geschützt) |
-| GET/POST | `/api/projects/:slug/models` | Modelle (mit Head-Commit) / anlegen `{name, visibility?}` |
+| GET/POST | `/api/projects/:slug/models` | Modelle (mit Head-Commit) / anlegen `{name, visibility?, folder?}` |
 | GET | `/api/projects/:slug/models/:model` | Modell + Branches (mit Heads) |
-| PATCH | `/api/projects/:slug/models/:model` | Einstellungen `{name?, visibility?, defaultBranch?}` (admin) |
+| PATCH | `/api/projects/:slug/models/:model` | Einstellungen `{name?, visibility?, defaultBranch?, folder?}` (admin) |
 | DELETE | `/api/projects/:slug/models/:model` | Modell löschen (admin; inkl. Blobs) |
 | POST | `/api/projects/:slug/models/:model/branches` | Branch anlegen `{name, from?}` — startet am Head von `from` |
 | POST | `…/commits?branch=&message=` | IFC hochladen (raw Body **oder** Multipart `file` + Felder `message`/`branch`) → `{commit, diff}` |

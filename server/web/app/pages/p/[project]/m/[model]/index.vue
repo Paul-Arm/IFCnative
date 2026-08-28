@@ -21,10 +21,23 @@ const { data: modelData, refresh: refreshModel } = await useAsyncData(
   () => api<{ model: Model; branches: Branch[] }>(base),
 );
 const { data: projectData } = await useAsyncData(`project-role-${slug}`, () =>
-  api<{ project: Project; members: Member[]; role: Role | null }>(
-    `/projects/${slug}`,
-  ),
+  api<{
+    project: Project;
+    members: Member[];
+    role: Role | null;
+    folders: string[];
+  }>(`/projects/${slug}`),
 );
+
+const folderCrumbs = computed(() => {
+  const folder = modelData.value?.model.folder ?? "";
+  if (!folder) return [];
+  const segments = folder.split("/");
+  return segments.map((segment, index) => ({
+    label: segment,
+    path: segments.slice(0, index + 1).join("/"),
+  }));
+});
 const isAdmin = computed(
   () =>
     projectData.value?.role === "owner" ||
@@ -132,10 +145,18 @@ async function createBranch(): Promise<void> {
 
 const settingsError = ref<string | null>(null);
 const settingsNotice = ref<string | null>(null);
+const folderDraft = ref<string | null>(null);
+
+watchEffect(() => {
+  if (folderDraft.value === null && modelData.value) {
+    folderDraft.value = modelData.value.model.folder ?? "";
+  }
+});
 
 async function patchModel(patch: {
   visibility?: "private" | "public";
   defaultBranch?: string;
+  folder?: string;
 }): Promise<void> {
   settingsError.value = null;
   settingsNotice.value = null;
@@ -194,6 +215,12 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
       <NuxtLink to="/">Projekte</NuxtLink>
       <span>/</span>
       <NuxtLink :to="`/p/${slug}`">{{ slug }}</NuxtLink>
+      <template v-for="crumb in folderCrumbs" :key="crumb.path">
+        <span>/</span>
+        <NuxtLink :to="{ path: `/p/${slug}`, query: { path: crumb.path } }">
+          {{ crumb.label }}
+        </NuxtLink>
+      </template>
       <span>/</span>
       <strong>{{ modelData.model.name }}</strong>
       <span
@@ -385,6 +412,33 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
                 {{ branch.name }}
               </option>
             </select>
+          </div>
+          <div>
+            <label for="settings-folder">Ordner ("" = Wurzel)</label>
+            <div class="form-inline" style="align-items: center">
+              <input
+                id="settings-folder"
+                v-model="folderDraft"
+                type="text"
+                list="project-folders"
+                placeholder="z.B. Hochbau/EG"
+                style="max-width: 260px"
+              />
+              <datalist id="project-folders">
+                <option
+                  v-for="folder in projectData?.folders ?? []"
+                  :key="folder"
+                  :value="folder"
+                />
+              </datalist>
+              <button
+                class="shrink"
+                :disabled="folderDraft === (modelData.model.folder ?? '')"
+                @click="patchModel({ folder: folderDraft ?? '' })"
+              >
+                Verschieben
+              </button>
+            </div>
           </div>
           <div class="shrink" style="margin-left: auto">
             <button class="danger" @click="deleteModel">Modell löschen</button>

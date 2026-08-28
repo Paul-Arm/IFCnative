@@ -59,6 +59,8 @@ export interface Model {
   visibility: Visibility;
   defaultBranch: string;
   createdAt: string;
+  /** Ordnerpfad im Projekt, Segmente mit "/" getrennt; "" = Wurzel. */
+  folder: string;
 }
 
 export interface Branch {
@@ -106,7 +108,9 @@ export interface Repository {
   listModels(projectId: string): Promise<Model[]>;
   updateModel(
     modelId: string,
-    patch: Partial<Pick<Model, "name" | "visibility" | "defaultBranch">>,
+    patch: Partial<
+      Pick<Model, "name" | "visibility" | "defaultBranch" | "folder">
+    >,
   ): Promise<Model | null>;
   /**
    * Delete a model with its branches, commits, manifests and cached diffs.
@@ -117,6 +121,12 @@ export interface Repository {
 
   /** Delete a project with members and all its models; returns all blob keys. */
   deleteProject(projectId: string): Promise<string[]>;
+
+  // Folders (explizit angelegte, ggf. leere Ordner; Modelle können daneben
+  // implizit Ordner über ihr `folder`-Feld definieren)
+  listFolders(projectId: string): Promise<string[]>;
+  addFolder(projectId: string, path: string): Promise<void>;
+  removeFolder(projectId: string, path: string): Promise<void>;
 
   // Branches
   createBranch(input: Omit<Branch, "id">): Promise<Branch>;

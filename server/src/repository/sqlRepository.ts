@@ -48,6 +48,7 @@ interface ModelRow {
   visibility: Visibility;
   default_branch: string;
   created_at: string;
+  folder: string;
 }
 interface BranchRow {
   id: string;
@@ -99,6 +100,7 @@ function toModel(row: ModelRow): Model {
     visibility: row.visibility,
     defaultBranch: row.default_branch,
     createdAt: row.created_at,
+    folder: row.folder ?? "",
   };
 }
 function toBranch(row: BranchRow): Branch {
@@ -254,8 +256,8 @@ export class SqlRepository implements Repository {
   async createModel(input: Omit<Model, "id" | "createdAt">): Promise<Model> {
     const model: Model = { ...input, id: randomUUID(), createdAt: this.now() };
     await this.sql.query(
-      `insert into models (id, project_id, slug, name, visibility, default_branch, created_at)
-       values ($1, $2, $3, $4, $5, $6, $7)`,
+      `insert into models (id, project_id, slug, name, visibility, default_branch, created_at, folder)
+       values ($1, $2, $3, $4, $5, $6, $7, $8)`,
       [
         model.id,
         model.projectId,
@@ -264,6 +266,7 @@ export class SqlRepository implements Repository {
         model.visibility,
         model.defaultBranch,
         model.createdAt,
+        model.folder,
       ],
     );
     return model;
@@ -287,16 +290,25 @@ export class SqlRepository implements Repository {
 
   async updateModel(
     modelId: string,
-    patch: Partial<Pick<Model, "name" | "visibility" | "defaultBranch">>,
+    patch: Partial<
+      Pick<Model, "name" | "visibility" | "defaultBranch" | "folder">
+    >,
   ): Promise<Model | null> {
     const { rows } = await this.sql.query<ModelRow>(
       `update models set
          name = coalesce($2, name),
          visibility = coalesce($3, visibility),
-         default_branch = coalesce($4, default_branch)
+         default_branch = coalesce($4, default_branch),
+         folder = coalesce($5, folder)
        where id = $1
        returning *`,
-      [modelId, patch.name ?? null, patch.visibility ?? null, patch.defaultBranch ?? null],
+      [
+        modelId,
+        patch.name ?? null,
+        patch.visibility ?? null,
+        patch.defaultBranch ?? null,
+        patch.folder ?? null,
+      ],
     );
     return rows[0] ? toModel(rows[0]) : null;
   }
@@ -333,8 +345,38 @@ export class SqlRepository implements Repository {
     await this.sql.query(`delete from project_members where project_id = $1`, [
       projectId,
     ]);
+    await this.sql.query(`delete from project_folders where project_id = $1`, [
+      projectId,
+    ]);
     await this.sql.query(`delete from projects where id = $1`, [projectId]);
     return blobKeys;
+  }
+
+  // ---- folders ---------------------------------------------------------
+
+  async listFolders(projectId: string): Promise<string[]> {
+    const { rows } = await this.sql.query<{ path: string }>(
+      `select path from project_folders where project_id = $1 order by path`,
+      [projectId],
+    );
+    return rows.map((row) => row.path);
+  }
+
+  async addFolder(projectId: string, path: string): Promise<void> {
+    await this.sql.query(
+      `insert into project_folders (project_id, path)
+       values ($1, $2)
+       on conflict (project_id, path) do nothing`,
+      [projectId, path],
+    );
+  }
+
+  async removeFolder(projectId: string, path: string): Promise<void> {
+    await this.sql.query(
+      `delete from project_folders
+       where project_id = $1 and (path = $2 or path like $3)`,
+      [projectId, path, `${path.replace(/[%_\\]/g, "\\$&")}/%`],
+    );
   }
 
   // ---- branches --------------------------------------------------------

@@ -59,6 +59,8 @@ export interface VcsModel {
   visibility: "private" | "public";
   defaultBranch: string;
   createdAt: string;
+  /** Ordnerpfad im Projekt ("" = Wurzel). */
+  folder?: string;
   branchCount?: number;
   head?: VcsCommit | null;
 }
