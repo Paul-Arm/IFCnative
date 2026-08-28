@@ -40,9 +40,27 @@ const { data: projectData } = await useAsyncData(`project-role-${slug}`, () =>
 const { data: modelsData } = await useAsyncData(`models-${slug}`, () =>
   api<{ models: Model[] }>(`/projects/${slug}/models`),
 );
-const { data: labelsData } = await useAsyncData(`labels-${slug}`, () =>
-  api<{ labels: Label[] }>(`/projects/${slug}/labels`),
+const { data: labelsData, refresh: refreshLabels } = await useAsyncData(
+  `labels-${slug}`,
+  () => api<{ labels: Label[] }>(`/projects/${slug}/labels`),
 );
+
+async function createProjectLabel(
+  name: string,
+  color: string,
+): Promise<Label | null> {
+  try {
+    const { label } = await api<{ label: Label }>(`/projects/${slug}/labels`, {
+      method: "POST",
+      body: { name, color },
+    });
+    await refreshLabels();
+    return label;
+  } catch (e) {
+    error.value = apiErrorMessage(e);
+    return null;
+  }
+}
 
 const issue = computed(() => issueData.value?.issue ?? null);
 const comments = computed(() => issueData.value?.comments ?? []);
@@ -141,13 +159,6 @@ function idsWithToggle(current: string[], id: string, on: boolean): string[] {
     set.delete(id);
   }
   return [...set];
-}
-
-function labelTextColor(hex: string): string {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return 0.299 * r + 0.587 * g + 0.114 * b > 150 ? "#1f2328" : "#ffffff";
 }
 
 const dateFmt = new Intl.DateTimeFormat("de-DE", {
@@ -359,40 +370,13 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
 
         <section class="issue-side-section">
           <h4>Labels</h4>
-          <p v-if="!issue.labels.length && !canEdit" class="muted small">
-            Keine
-          </p>
-          <label
-            v-for="label in labelsData?.labels ?? []"
-            :key="label.id"
-            class="pv-item"
-            :class="{
-              'side-hidden':
-                !canEdit && !issue.labels.some((l) => l.id === label.id),
-            }"
-          >
-            <input
-              v-if="canEdit"
-              type="checkbox"
-              :checked="issue.labels.some((l) => l.id === label.id)"
-              @change="
-                patchIssue({
-                  labelIds: idsWithToggle(
-                    issue.labels.map((l) => l.id),
-                    label.id,
-                    ($event.target as HTMLInputElement).checked,
-                  ),
-                })
-              "
-            />
-            <span
-              class="label-chip"
-              :style="{
-                backgroundColor: label.color,
-                color: labelTextColor(label.color),
-              }"
-            >{{ label.name }}</span>
-          </label>
+          <LabelPicker
+            :labels="labelsData?.labels ?? []"
+            :selected-ids="issue.labels.map((l) => l.id)"
+            :editable="canEdit"
+            :create-label="hasWriteRole ? createProjectLabel : undefined"
+            @update="(ids) => patchIssue({ labelIds: ids })"
+          />
         </section>
       </aside>
     </div>

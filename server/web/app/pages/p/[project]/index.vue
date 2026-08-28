@@ -479,20 +479,21 @@ async function createIssue(): Promise<void> {
   }
 }
 
-const newLabelName = ref("");
-const newLabelColor = ref("#d73a4a");
-
-async function createLabelInline(): Promise<void> {
+async function createProjectLabel(
+  name: string,
+  color: string,
+): Promise<Label | null> {
   issueError.value = null;
   try {
-    await api(`/projects/${slug}/labels`, {
+    const { label } = await api<{ label: Label }>(`/projects/${slug}/labels`, {
       method: "POST",
-      body: { name: newLabelName.value, color: newLabelColor.value },
+      body: { name, color },
     });
-    newLabelName.value = "";
     await refreshLabels();
+    return label;
   } catch (e) {
     issueError.value = apiErrorMessage(e);
+    return null;
   }
 }
 
@@ -1056,41 +1057,18 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
               </div>
               <div class="issue-picker">
                 <label>Labels</label>
-                <label
-                  v-for="label in labelsData?.labels ?? []"
-                  :key="label.id"
-                  class="pv-item"
-                >
-                  <input
-                    type="checkbox"
-                    :checked="issueLabels.has(label.id)"
-                    @change="
-                      toggleSet(
-                        issueLabels,
-                        label.id,
-                        ($event.target as HTMLInputElement).checked,
-                      )
-                    "
-                  />
-                  <span
-                    class="label-chip"
-                    :style="{
-                      backgroundColor: label.color,
-                      color: labelTextColor(label.color),
-                    }"
-                  >{{ label.name }}</span>
-                </label>
-                <div v-if="canWrite" class="issue-new-label">
-                  <input
-                    v-model="newLabelName"
-                    type="text"
-                    placeholder="Neues Label"
-                  />
-                  <input v-model="newLabelColor" type="color" />
-                  <button type="button" class="link" @click="createLabelInline">
-                    <PhPlus :size="14" aria-hidden="true" />
-                  </button>
-                </div>
+                <LabelPicker
+                  :labels="labelsData?.labels ?? []"
+                  :selected-ids="[...issueLabels]"
+                  editable
+                  :create-label="canWrite ? createProjectLabel : undefined"
+                  @update="
+                    (ids) => {
+                      issueLabels.clear();
+                      for (const id of ids) issueLabels.add(id);
+                    }
+                  "
+                />
               </div>
             </div>
             <button class="primary" type="submit" :disabled="issueBusy">
