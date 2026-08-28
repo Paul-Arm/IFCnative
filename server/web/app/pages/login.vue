@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import { PhCodesandboxLogo } from "@phosphor-icons/vue";
-
 import type { ApiUser } from "~/types/api";
 
 definePageMeta({ layout: false });
@@ -49,8 +47,8 @@ async function submit(): Promise<void> {
   <div class="login-page">
     <div class="card login-card">
       <div class="card-body">
-        <div style="text-align: center; color: var(--accent)">
-          <PhCodesandboxLogo :size="40" weight="fill" aria-hidden="true" />
+        <div style="display: flex; justify-content: center">
+          <HubLogo :size="44" node-fill="var(--surface)" />
         </div>
         <h1 style="text-align: center">IFC Hub</h1>
         <p class="muted small" style="text-align: center; margin-top: -0.25rem">

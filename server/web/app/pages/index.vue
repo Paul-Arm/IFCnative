@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import { PhCodesandboxLogo } from "@phosphor-icons/vue";
-
 import type { Project } from "~/types/api";
 
 const { api } = useApi();
@@ -72,7 +70,7 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" });
             alt=""
           />
           <span v-else class="proj-thumb placeholder" aria-hidden="true">
-            <PhCodesandboxLogo :size="22" />
+            <HubLogo :size="24" node-fill="var(--surface-2)" />
           </span>
           <div class="list-item-main">
             <NuxtLink :to="`/p/${project.slug}`" style="font-weight: 600">
