@@ -1,20 +1,16 @@
 import { randomUUID } from "node:crypto";
 
 import {
-  parseNativeIfcText,
-  type NativeIfcDocument,
-} from "../../../src/ifc/nativeDocument";
-import {
   buildVersionManifest,
+  diffEntityFields,
   diffManifests,
+  parseNativeIfcText,
+  type EntityFieldDiff,
   type GuidDiffSummary,
+  type NativeIfcDocument,
   type VersionManifest,
   type VersionManifestEntry,
-} from "../../../src/ifc/versioning/entityDiffByGuid";
-import {
-  diffEntityFields,
-  type EntityFieldDiff,
-} from "../../../src/ifc/versioning/entityFieldDiff";
+} from "../ifc";
 import type { ObjectStore } from "../storage/objectStore";
 import type { Commit, Model, Repository } from "../repository/types";
 

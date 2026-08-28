@@ -19,11 +19,15 @@ async function makeApp() {
   return app;
 }
 
-async function register(app: Awaited<ReturnType<typeof makeApp>>) {
+async function register(
+  app: Awaited<ReturnType<typeof makeApp>>,
+  email = "user@example.com",
+  name = "User",
+) {
   const res = await app.inject({
     method: "POST",
-    url: "/auth/register",
-    payload: { email: "user@example.com", name: "User", password: "pw123456" },
+    url: "/api/auth/register",
+    payload: { email, name, password: "pw123456" },
   });
   assert.equal(res.statusCode, 201);
   return JSON.parse(res.body).token as string;
@@ -38,10 +42,11 @@ async function commitIfc(
   token: string,
   ifcText: string,
   message: string,
+  branch = "main",
 ) {
   return app.inject({
     method: "POST",
-    url: `/projects/acme/models/tower/commits?branch=main&message=${encodeURIComponent(message)}`,
+    url: `/api/projects/acme/models/tower/commits?branch=${encodeURIComponent(branch)}&message=${encodeURIComponent(message)}`,
     headers: { ...auth(token), "content-type": "application/x-step" },
     payload: ifcText,
   });
@@ -53,7 +58,7 @@ test("end-to-end: register, project, model, two commits, diff, download", async 
 
   const proj = await app.inject({
     method: "POST",
-    url: "/projects",
+    url: "/api/projects",
     headers: auth(token),
     payload: { name: "Acme", slug: "acme" },
   });
@@ -61,7 +66,7 @@ test("end-to-end: register, project, model, two commits, diff, download", async 
 
   const model = await app.inject({
     method: "POST",
-    url: "/projects/acme/models",
+    url: "/api/projects/acme/models",
     headers: auth(token),
     payload: { name: "Tower", slug: "tower", visibility: "public" },
   });
@@ -76,17 +81,21 @@ test("end-to-end: register, project, model, two commits, diff, download", async 
   assert.equal(c2.statusCode, 201);
   const c2Body = JSON.parse(c2.body);
   assert.equal(c2Body.diff.modified.length, 1);
+  // Commits carry their author for UI display.
+  assert.equal(c2Body.commit.author.email, "user@example.com");
 
   const history = await app.inject({
     method: "GET",
-    url: "/projects/acme/models/tower/commits?branch=main",
+    url: "/api/projects/acme/models/tower/commits?branch=main",
     headers: auth(token),
   });
-  assert.equal(JSON.parse(history.body).commits.length, 2);
+  const commits = JSON.parse(history.body).commits;
+  assert.equal(commits.length, 2);
+  assert.equal(commits[0].author.name, "User");
 
   const diff = await app.inject({
     method: "GET",
-    url: `/projects/acme/models/tower/diff?from=${c1Body.commit.id}&to=${c2Body.commit.id}`,
+    url: `/api/projects/acme/models/tower/diff?from=${c1Body.commit.id}&to=${c2Body.commit.id}`,
     headers: auth(token),
   });
   assert.equal(diff.statusCode, 200);
@@ -94,7 +103,7 @@ test("end-to-end: register, project, model, two commits, diff, download", async 
 
   const file = await app.inject({
     method: "GET",
-    url: `/projects/acme/models/tower/commits/${c2Body.commit.id}/file`,
+    url: `/api/projects/acme/models/tower/commits/${c2Body.commit.id}/file`,
     headers: auth(token),
   });
   assert.equal(file.statusCode, 200);
@@ -105,7 +114,7 @@ test("end-to-end: register, project, model, two commits, diff, download", async 
 
 test("unauthenticated requests are rejected", async () => {
   const app = await makeApp();
-  const res = await app.inject({ method: "GET", url: "/projects" });
+  const res = await app.inject({ method: "GET", url: "/api/projects" });
   assert.equal(res.statusCode, 401);
   await app.close();
 });
@@ -115,13 +124,13 @@ test("public models are browsable without authentication", async () => {
   const token = await register(app);
   await app.inject({
     method: "POST",
-    url: "/projects",
+    url: "/api/projects",
     headers: auth(token),
     payload: { name: "Acme", slug: "acme" },
   });
   await app.inject({
     method: "POST",
-    url: "/projects/acme/models",
+    url: "/api/projects/acme/models",
     headers: auth(token),
     payload: { name: "Tower", slug: "tower", visibility: "public" },
   });
@@ -130,17 +139,191 @@ test("public models are browsable without authentication", async () => {
   // No Authorization header — a client-less visitor.
   const models = await app.inject({
     method: "GET",
-    url: "/projects/acme/models",
+    url: "/api/projects/acme/models",
   });
   assert.equal(models.statusCode, 200);
   assert.equal(JSON.parse(models.body).models.length, 1);
 
   const history = await app.inject({
     method: "GET",
-    url: "/projects/acme/models/tower/commits",
+    url: "/api/projects/acme/models/tower/commits",
   });
   assert.equal(history.statusCode, 200);
   assert.equal(JSON.parse(history.body).commits.length, 1);
 
+  await app.close();
+});
+
+test("branches: create from default head, commit on branch diffs against it", async () => {
+  const app = await makeApp();
+  const token = await register(app);
+  await app.inject({
+    method: "POST",
+    url: "/api/projects",
+    headers: auth(token),
+    payload: { name: "Acme", slug: "acme" },
+  });
+  await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/models",
+    headers: auth(token),
+    payload: { name: "Tower", slug: "tower" },
+  });
+  const c1 = await commitIfc(app, token, ifcModel(), "init");
+  assert.equal(c1.statusCode, 201);
+
+  const created = await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/models/tower/branches",
+    headers: auth(token),
+    payload: { name: "variante-a" },
+  });
+  assert.equal(created.statusCode, 201);
+  const branch = JSON.parse(created.body).branch;
+  assert.equal(branch.headCommitId, JSON.parse(c1.body).commit.id);
+
+  // A commit on the new branch diffs against the inherited head, not empty.
+  const c2 = await commitIfc(
+    app,
+    token,
+    ifcModel({ height: "3200." }),
+    "variante",
+    "variante-a",
+  );
+  assert.equal(c2.statusCode, 201);
+  const c2Body = JSON.parse(c2.body);
+  assert.equal(c2Body.diff.modified.length, 1);
+  assert.equal(c2Body.diff.added.length, 0);
+  assert.equal(c2Body.commit.parentCommitId, JSON.parse(c1.body).commit.id);
+
+  // Duplicate branch name is rejected.
+  const dup = await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/models/tower/branches",
+    headers: auth(token),
+    payload: { name: "variante-a" },
+  });
+  assert.equal(dup.statusCode, 409);
+
+  await app.close();
+});
+
+test("members: admin can add, change role, and remove; owner is protected", async () => {
+  const app = await makeApp();
+  const owner = await register(app, "owner@example.com", "Owner");
+  const other = await register(app, "other@example.com", "Other");
+  await app.inject({
+    method: "POST",
+    url: "/api/projects",
+    headers: auth(owner),
+    payload: { name: "Acme", slug: "acme" },
+  });
+
+  const added = await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/members",
+    headers: auth(owner),
+    payload: { email: "other@example.com", role: "viewer" },
+  });
+  assert.equal(added.statusCode, 201);
+  assert.equal(JSON.parse(added.body).member.user.email, "other@example.com");
+
+  // A viewer must not manage members.
+  const denied = await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/members",
+    headers: auth(other),
+    payload: { email: "owner@example.com", role: "viewer" },
+  });
+  assert.equal(denied.statusCode, 403);
+
+  // Members (with user info) appear in the project detail.
+  const detail = await app.inject({
+    method: "GET",
+    url: "/api/projects/acme",
+    headers: auth(owner),
+  });
+  const members = JSON.parse(detail.body).members;
+  assert.equal(members.length, 2);
+  assert.ok(members.every((m: { user: unknown }) => m.user !== null));
+
+  const otherId = members.find(
+    (m: { user: { email: string } }) => m.user.email === "other@example.com",
+  ).userId;
+  const removed = await app.inject({
+    method: "DELETE",
+    url: `/api/projects/acme/members/${otherId}`,
+    headers: auth(owner),
+  });
+  assert.equal(removed.statusCode, 204);
+
+  // The owner cannot be removed.
+  const ownerId = members.find(
+    (m: { role: string }) => m.role === "owner",
+  ).userId;
+  const rejected = await app.inject({
+    method: "DELETE",
+    url: `/api/projects/acme/members/${ownerId}`,
+    headers: auth(owner),
+  });
+  assert.equal(rejected.statusCode, 400);
+
+  await app.close();
+});
+
+test("multipart upload with message and branch fields", async () => {
+  const app = await makeApp();
+  const token = await register(app);
+  await app.inject({
+    method: "POST",
+    url: "/api/projects",
+    headers: auth(token),
+    payload: { name: "Acme", slug: "acme" },
+  });
+  await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/models",
+    headers: auth(token),
+    payload: { name: "Tower", slug: "tower" },
+  });
+
+  const boundary = "----ifcvcs-test-boundary";
+  const body = [
+    `--${boundary}`,
+    `Content-Disposition: form-data; name="message"`,
+    "",
+    "Erster Stand",
+    `--${boundary}`,
+    `Content-Disposition: form-data; name="file"; filename="tower.ifc"`,
+    "Content-Type: application/x-step",
+    "",
+    ifcModel(),
+    `--${boundary}--`,
+    "",
+  ].join("\r\n");
+
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/models/tower/commits",
+    headers: {
+      ...auth(token),
+      "content-type": `multipart/form-data; boundary=${boundary}`,
+    },
+    payload: body,
+  });
+  assert.equal(res.statusCode, 201);
+  assert.equal(JSON.parse(res.body).commit.message, "Erster Stand");
+
+  await app.close();
+});
+
+test("health reports version and storage mode", async () => {
+  const app = await makeApp();
+  const res = await app.inject({ method: "GET", url: "/api/health" });
+  assert.equal(res.statusCode, 200);
+  const body = JSON.parse(res.body);
+  assert.equal(body.status, "ok");
+  assert.equal(body.storage, "filesystem");
+  assert.ok(body.version);
   await app.close();
 });

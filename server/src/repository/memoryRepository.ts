@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type {
   GuidDiffSummary,
   VersionManifestEntry,
-} from "../../../src/ifc/versioning/entityDiffByGuid";
+} from "../ifc";
 import type {
   Branch,
   Commit,
@@ -112,6 +112,12 @@ export class MemoryRepository implements Repository {
 
   async listMembers(projectId: string): Promise<Member[]> {
     return this.members.filter((m) => m.projectId === projectId);
+  }
+
+  async removeMember(projectId: string, userId: string): Promise<void> {
+    this.members = this.members.filter(
+      (m) => !(m.projectId === projectId && m.userId === userId),
+    );
   }
 
   async createModel(input: Omit<Model, "id" | "createdAt">): Promise<Model> {

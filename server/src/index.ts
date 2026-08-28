@@ -38,7 +38,12 @@ async function main(): Promise<void> {
     repo = new MemoryRepository();
   }
 
-  const app = buildApp({ repo, store, jwtSecret: config.jwtSecret });
+  const app = buildApp({
+    repo,
+    store,
+    jwtSecret: config.jwtSecret,
+    storageMode: config.storage,
+  });
 
   await app.listen({ port: config.port, host: config.host });
   console.log(

@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { parseNativeIfcText } from "../../src/ifc/nativeDocument";
-import { diffEntityFields } from "../../src/ifc/versioning/entityFieldDiff";
+import { parseNativeIfcText } from "../src/ifc";
+import { diffEntityFields } from "../src/ifc";
 import { buildApp } from "../src/http/app";
 import { MemoryRepository } from "../src/repository/memoryRepository";
 import { FilesystemObjectStore } from "../src/storage/filesystemObjectStore";
@@ -65,7 +65,7 @@ test("HTTP: /diff/entity returns the field-level change", async () => {
   const app = await makeApp();
   const reg = await app.inject({
     method: "POST",
-    url: "/auth/register",
+    url: "/api/auth/register",
     payload: { email: "u@e.c", name: "U", password: "pw123456" },
   });
   const token = JSON.parse(reg.body).token as string;
@@ -73,13 +73,13 @@ test("HTTP: /diff/entity returns the field-level change", async () => {
 
   await app.inject({
     method: "POST",
-    url: "/projects",
+    url: "/api/projects",
     headers: auth,
     payload: { name: "Acme", slug: "acme" },
   });
   await app.inject({
     method: "POST",
-    url: "/projects/acme/models",
+    url: "/api/projects/acme/models",
     headers: auth,
     payload: { name: "Tower", slug: "tower", visibility: "public" },
   });
@@ -87,7 +87,7 @@ test("HTTP: /diff/entity returns the field-level change", async () => {
   const commit = (text: string, message: string) =>
     app.inject({
       method: "POST",
-      url: `/projects/acme/models/tower/commits?branch=main&message=${message}`,
+      url: `/api/projects/acme/models/tower/commits?branch=main&message=${message}`,
       headers: { ...auth, "content-type": "application/x-step" },
       payload: text,
     });
@@ -98,7 +98,7 @@ test("HTTP: /diff/entity returns the field-level change", async () => {
   const res = await app.inject({
     method: "GET",
     url:
-      `/projects/acme/models/tower/diff/entity?from=${c1.commit.id}` +
+      `/api/projects/acme/models/tower/diff/entity?from=${c1.commit.id}` +
       `&to=${c2.commit.id}&globalId=${PSET}`,
   });
   assert.equal(res.statusCode, 200);
@@ -110,7 +110,7 @@ test("HTTP: /diff/entity returns the field-level change", async () => {
 
   const bad = await app.inject({
     method: "GET",
-    url: `/projects/acme/models/tower/diff/entity?from=${c1.commit.id}&to=${c2.commit.id}`,
+    url: `/api/projects/acme/models/tower/diff/entity?from=${c1.commit.id}&to=${c2.commit.id}`,
   });
   assert.equal(bad.statusCode, 400);
 

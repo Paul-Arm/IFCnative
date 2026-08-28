@@ -10,7 +10,7 @@
 import type {
   GuidDiffSummary,
   VersionManifestEntry,
-} from "../../../src/ifc/versioning/entityDiffByGuid";
+} from "../ifc";
 
 export type Role = "owner" | "maintainer" | "contributor" | "viewer";
 
@@ -19,6 +19,12 @@ export const WRITE_ROLES: ReadonlySet<Role> = new Set<Role>([
   "owner",
   "maintainer",
   "contributor",
+]);
+
+/** Roles permitted to manage members and project settings. */
+export const ADMIN_ROLES: ReadonlySet<Role> = new Set<Role>([
+  "owner",
+  "maintainer",
 ]);
 
 export interface User {
@@ -92,6 +98,7 @@ export interface Repository {
   addMember(member: Member): Promise<Member>;
   getMember(projectId: string, userId: string): Promise<Member | null>;
   listMembers(projectId: string): Promise<Member[]>;
+  removeMember(projectId: string, userId: string): Promise<void>;
 
   // Models
   createModel(input: Omit<Model, "id" | "createdAt">): Promise<Model>;

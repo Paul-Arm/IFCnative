@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type {
   GuidDiffSummary,
   VersionManifestEntry,
-} from "../../../src/ifc/versioning/entityDiffByGuid";
+} from "../ifc";
 import { schemaStatements } from "./sql/schema";
 import type { SqlClient } from "./sql/sqlClient";
 import type {
@@ -240,6 +240,13 @@ export class SqlRepository implements Repository {
       userId: r.user_id,
       role: r.role,
     }));
+  }
+
+  async removeMember(projectId: string, userId: string): Promise<void> {
+    await this.sql.query(
+      `delete from project_members where project_id = $1 and user_id = $2`,
+      [projectId, userId],
+    );
   }
 
   // ---- models ----------------------------------------------------------
