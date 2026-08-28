@@ -25,17 +25,17 @@ interface EntityObject {
  * should provide a Postgres / Azure SQL implementation of `Repository`.
  */
 export class MemoryRepository implements Repository {
-  private users = new Map<string, User>();
-  private projects = new Map<string, Project>();
-  private members: Member[] = [];
-  private models = new Map<string, Model>();
-  private branches = new Map<string, Branch>();
-  private commits = new Map<string, Commit>();
+  protected users = new Map<string, User>();
+  protected projects = new Map<string, Project>();
+  protected members: Member[] = [];
+  protected models = new Map<string, Model>();
+  protected branches = new Map<string, Branch>();
+  protected commits = new Map<string, Commit>();
   /** content-addressable entity payloads, deduped across all commits. */
-  private entityObjects = new Map<string, EntityObject>();
+  protected entityObjects = new Map<string, EntityObject>();
   /** per-commit manifest: ordered (globalId, entityHash) references. */
-  private commitEntities = new Map<string, { globalId: string; hash: string }[]>();
-  private diffCache = new Map<string, GuidDiffSummary>();
+  protected commitEntities = new Map<string, { globalId: string; hash: string }[]>();
+  protected diffCache = new Map<string, GuidDiffSummary>();
 
   private now(): string {
     // Tests need determinism-free timestamps; ISO string is fine here.
