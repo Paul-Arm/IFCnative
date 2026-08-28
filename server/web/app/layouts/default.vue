@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { PhBuildings, PhSignOut } from "@phosphor-icons/vue";
+import { PhCodesandboxLogo, PhSignOut } from "@phosphor-icons/vue";
 
 const { user, token, logout } = useAuth();
 </script>
@@ -9,7 +9,7 @@ const { user, token, logout } = useAuth();
     <header v-if="token" class="topbar">
       <div class="topbar-inner">
         <NuxtLink to="/" class="brand">
-          <PhBuildings :size="18" weight="fill" aria-hidden="true" />
+          <PhCodesandboxLogo :size="20" weight="fill" aria-hidden="true" />
           IFC Hub
         </NuxtLink>
         <span class="topbar-spacer" />

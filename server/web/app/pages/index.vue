@@ -1,10 +1,36 @@
 <script setup lang="ts">
+import { PhCodesandboxLogo } from "@phosphor-icons/vue";
+
 import type { Project } from "~/types/api";
 
 const { api } = useApi();
+const { token } = useAuth();
 
 const { data, refresh } = await useAsyncData("projects", () =>
   api<{ projects: Project[] }>("/projects"),
+);
+
+// Projektbilder (Szenen-Screenshots) mit Auth laden -> Object-URLs.
+const thumbs = reactive(new Map<string, string>());
+watch(
+  data,
+  async () => {
+    for (const project of data.value?.projects ?? []) {
+      if (!project.hasImage || thumbs.has(project.id)) continue;
+      try {
+        const blob = await $fetch<Blob>(`/api/projects/${project.slug}/image`, {
+          responseType: "blob",
+          headers: token.value
+            ? { authorization: `Bearer ${token.value}` }
+            : {},
+        });
+        thumbs.set(project.id, URL.createObjectURL(blob));
+      } catch {
+        // Ohne Bild einfach den Platzhalter zeigen.
+      }
+    }
+  },
+  { immediate: true },
 );
 
 const newName = ref("");
@@ -35,6 +61,15 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" });
     <div class="card">
       <ul v-if="data?.projects.length" class="list">
         <li v-for="project in data.projects" :key="project.id" class="list-item">
+          <img
+            v-if="thumbs.get(project.id)"
+            :src="thumbs.get(project.id)"
+            class="proj-thumb"
+            alt=""
+          />
+          <span v-else class="proj-thumb placeholder" aria-hidden="true">
+            <PhCodesandboxLogo :size="22" />
+          </span>
           <div class="list-item-main">
             <NuxtLink :to="`/p/${project.slug}`" style="font-weight: 600">
               {{ project.name }}

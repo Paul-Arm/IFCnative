@@ -90,6 +90,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   const commits = new CommitService(repo, store);
   const fragmentsService = new FragmentsService(store);
 
+  /** Vorschaubild eines Projekts (aus der 3D-Szene der Web-UI). */
+  const projectImageKey = (projectId: string) => `projects/${projectId}/image.png`;
+
   /** Blob + zugehörigen Fragments-Cache löschen (best effort). */
   function deleteBlobsWithFragments(blobKeys: string[]): Promise<unknown> {
     return Promise.allSettled(
@@ -130,6 +133,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.addContentTypeParser(
     ["text/plain", "application/octet-stream", "application/x-step", "text/markdown"],
     { parseAs: "string" },
+    (_req, body, done) => done(null, body),
+  );
+  // PNG-Uploads (Projektbild) als Buffer.
+  app.addContentTypeParser(
+    "image/png",
+    { parseAs: "buffer" },
     (_req, body, done) => done(null, body),
   );
 
@@ -309,7 +318,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       projects.map(async (project) => {
         const member = await repo.getMember(project.id, user.id);
         const models = await repo.listModels(project.id);
-        return { ...project, role: member?.role ?? null, modelCount: models.length };
+        return {
+          ...project,
+          role: member?.role ?? null,
+          modelCount: models.length,
+          hasImage: await store.exists(projectImageKey(project.id)),
+        };
       }),
     );
     return reply.send({ projects: enriched });
@@ -359,6 +373,43 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       role: member?.role ?? null,
       folders: await collectFolders(project.id),
     });
+  });
+
+  // ---- Projektbild (Screenshot aus der 3D-Szene) -----------------------
+
+  app.put(`${api}/projects/:slug/image`, async (request, reply) => {
+    const { slug } = request.params as { slug: string };
+    const project = await resolveProject(slug, reply);
+    if (!project) return reply;
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    if (!(await requireMember(project, user, reply, "write"))) return reply;
+    const body = request.body;
+    if (!Buffer.isBuffer(body) || body.length === 0) {
+      return reply.code(400).send({ error: "PNG body (image/png) required" });
+    }
+    if (body.length > 5 * 1024 * 1024) {
+      return reply.code(400).send({ error: "Image too large (max 5 MB)" });
+    }
+    await store.put(projectImageKey(project.id), body, "image/png");
+    return reply.code(204).send();
+  });
+
+  app.get(`${api}/projects/:slug/image`, async (request, reply) => {
+    const { slug } = request.params as { slug: string };
+    const project = await resolveProject(slug, reply);
+    if (!project) return reply;
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    if (!(await requireMember(project, user, reply, "read"))) return reply;
+    const key = projectImageKey(project.id);
+    if (!(await store.exists(key))) {
+      return reply.code(404).send({ error: "No project image" });
+    }
+    return reply
+      .header("content-type", "image/png")
+      .header("cache-control", "private, max-age=60")
+      .send(await store.get(key));
   });
 
   // ---- folders ---------------------------------------------------------
@@ -658,6 +709,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     }
     const blobKeys = await repo.deleteProject(project.id);
     await deleteBlobsWithFragments(blobKeys);
+    await store.delete(projectImageKey(project.id)).catch(() => undefined);
     return reply.code(204).send();
   });
 

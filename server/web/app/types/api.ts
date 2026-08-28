@@ -16,6 +16,8 @@ export interface Project {
   createdAt: string;
   role?: Role | null;
   modelCount?: number;
+  /** Ob ein Projektbild (Szenen-Screenshot) hinterlegt ist. */
+  hasImage?: boolean;
 }
 
 export interface Member {

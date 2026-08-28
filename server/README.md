@@ -116,6 +116,7 @@ Auth: `Authorization: Bearer <JWT>` aus `/api/auth/login`. Fehler kommen als
 | POST | `/api/projects/:slug/folders` | Ordner anlegen `{path}` (write) |
 | DELETE | `/api/projects/:slug/folders?path=` | leeren Ordner löschen (409 wenn Modelle darin) |
 | DELETE | `/api/projects/:slug` | Projekt löschen (nur Owner; inkl. Blobs) |
+| PUT/GET | `/api/projects/:slug/image` | Projektbild (PNG, z. B. Szenen-Screenshot aus dem 3D-Tab) setzen (write) / abrufen (Mitglied) |
 | POST | `/api/projects/:slug/members` | Mitglied hinzufügen/Rolle ändern `{email, role}` (admin) |
 | DELETE | `/api/projects/:slug/members/:userId` | Mitglied entfernen (admin; Owner geschützt) |
 | GET/POST | `/api/projects/:slug/models` | Modelle (mit Head-Commit) / anlegen `{name, visibility?, folder?, kind?}` (`ifc`\|`md`) |

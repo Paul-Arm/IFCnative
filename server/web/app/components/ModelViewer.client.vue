@@ -20,11 +20,16 @@ let dispose: (() => void) | null = null;
 const { token } = useAuth();
 
 interface LoadedModel {
+  modelId: string;
   object: { visible: boolean };
+  getLocalIds(): Promise<number[]>;
 }
 
 const loaded = new Map<string, LoadedModel>();
 let requestUpdate: (() => void) | null = null;
+let fitToItems: ((items?: Record<string, Set<number>>) => Promise<void>) | null =
+  null;
+let renderNow: (() => HTMLCanvasElement | null) | null = null;
 
 function setVisible(key: string, visible: boolean): void {
   const model = loaded.get(key);
@@ -34,7 +39,25 @@ function setVisible(key: string, visible: boolean): void {
   }
 }
 
-defineExpose({ setVisible });
+/** Kamera auf ein einzelnes Modell fahren. */
+async function focusModel(key: string): Promise<void> {
+  const model = loaded.get(key);
+  if (!model || !fitToItems) return;
+  try {
+    const ids = await model.getLocalIds();
+    await fitToItems({ [model.modelId]: new Set(ids) });
+  } catch {
+    await fitToItems().catch(() => undefined);
+  }
+}
+
+/** Aktuelle Szene als PNG-DataURL (rendert explizit einen Frame). */
+function captureImage(): string | null {
+  const canvas = renderNow?.();
+  return canvas ? canvas.toDataURL("image/png") : null;
+}
+
+defineExpose({ setVisible, focusModel, captureImage });
 
 onMounted(async () => {
   try {
@@ -76,6 +99,14 @@ onMounted(async () => {
       primarySize: 1,
       secondarySize: 10,
     });
+
+    fitToItems = (items) => world.camera.fitToItems(items);
+    renderNow = () => {
+      const renderer = world.renderer;
+      if (!renderer) return null;
+      renderer.three.render(world.scene.three, world.camera.three);
+      return renderer.three.domElement;
+    };
 
     const fragments = components.get(OBC.FragmentsManager);
     // Der Worker liegt versionsgleich in public/ (sync-fragments-worker.mjs).

@@ -2,7 +2,12 @@
 import {
   PhArrowElbowLeftUp,
   PhBookOpen,
+  PhCaretDown,
+  PhCaretRight,
+  PhCrosshairSimple,
   PhCubeTransparent,
+  PhDownloadSimple,
+  PhImage,
   PhCube,
   PhFileMd,
   PhFolder,
@@ -272,6 +277,8 @@ const viewerSources = computed(() =>
 );
 const projectViewer = ref<{
   setVisible: (key: string, visible: boolean) => void;
+  focusModel: (key: string) => Promise<void>;
+  captureImage: () => string | null;
 } | null>(null);
 const hiddenModels = reactive(new Set<string>());
 
@@ -282,6 +289,121 @@ function toggleViewerModel(modelId: string, visible: boolean): void {
     hiddenModels.add(modelId);
   }
   projectViewer.value?.setVisible(modelId, visible);
+}
+
+// Sidebar als Ordner-Baum
+interface TreeRow {
+  kind: "folder" | "model";
+  depth: number;
+  path?: string;
+  name?: string;
+  state?: "all" | "some" | "none";
+  model?: Model;
+}
+
+const collapsedFolders = reactive(new Set<string>());
+
+function viewerModelsUnder(path: string): Model[] {
+  return viewerModels.value.filter((model) => {
+    const folder = model.folder ?? "";
+    return folder === path || folder.startsWith(`${path}/`);
+  });
+}
+
+const treeRows = computed<TreeRow[]>(() => {
+  const rows: TreeRow[] = [];
+  const walk = (path: string, depth: number) => {
+    const prefix = path ? `${path}/` : "";
+    const subNames = [
+      ...new Set(
+        viewerModels.value
+          .map((model) => model.folder ?? "")
+          .filter((folder) => folder.startsWith(prefix) && folder !== path)
+          .map((folder) => folder.slice(prefix.length).split("/")[0]!),
+      ),
+    ].sort();
+    for (const name of subNames) {
+      const subPath = prefix + name;
+      const loadable = viewerModelsUnder(subPath).filter((model) => model.head);
+      const visible = loadable.filter(
+        (model) => !hiddenModels.has(model.id),
+      ).length;
+      rows.push({
+        kind: "folder",
+        depth,
+        path: subPath,
+        name,
+        state:
+          !loadable.length || visible === 0
+            ? "none"
+            : visible === loadable.length
+              ? "all"
+              : "some",
+      });
+      if (!collapsedFolders.has(subPath)) {
+        walk(subPath, depth + 1);
+      }
+    }
+    for (const model of viewerModels.value.filter(
+      (m) => (m.folder ?? "") === path,
+    )) {
+      rows.push({ kind: "model", depth, model });
+    }
+  };
+  walk("", 0);
+  return rows;
+});
+
+function toggleCollapsed(path: string): void {
+  if (collapsedFolders.has(path)) {
+    collapsedFolders.delete(path);
+  } else {
+    collapsedFolders.add(path);
+  }
+}
+
+function toggleFolder(path: string, visible: boolean): void {
+  for (const model of viewerModelsUnder(path)) {
+    if (model.head) {
+      toggleViewerModel(model.id, visible);
+    }
+  }
+}
+
+// Szene als Bild sichern / als Projektbild setzen
+const imageBusy = ref(false);
+const imageNotice = ref<string | null>(null);
+
+async function saveProjectImage(): Promise<void> {
+  const dataUrl = projectViewer.value?.captureImage();
+  if (!dataUrl) return;
+  imageBusy.value = true;
+  imageNotice.value = null;
+  try {
+    const blob = await (await fetch(dataUrl)).blob();
+    await $fetch(`/api/projects/${slug}/image`, {
+      method: "PUT",
+      body: blob,
+      headers: {
+        "content-type": "image/png",
+        ...(token.value ? { authorization: `Bearer ${token.value}` } : {}),
+      },
+    });
+    imageNotice.value = "Projektbild gespeichert.";
+  } catch (e) {
+    imageNotice.value = apiErrorMessage(e);
+  } finally {
+    imageBusy.value = false;
+  }
+}
+
+function downloadSceneImage(): void {
+  const dataUrl = projectViewer.value?.captureImage();
+  if (!dataUrl) return;
+  const a = document.createElement("a");
+  a.href = dataUrl;
+  a.download = `${slug}-szene.png`;
+  a.click();
 }
 
 // ---- Mitglieder --------------------------------------------------------
@@ -632,30 +754,94 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
         </div>
         <div v-if="viewerSources.length" class="pv-wrap">
           <div class="pv-side">
-            <label
-              v-for="model in viewerModels"
-              :key="model.id"
-              class="pv-item"
-              :class="{ disabled: !model.head }"
-            >
-              <input
-                type="checkbox"
-                :disabled="!model.head"
-                :checked="!!model.head && !hiddenModels.has(model.id)"
-                @change="
-                  toggleViewerModel(
-                    model.id,
-                    ($event.target as HTMLInputElement).checked,
-                  )
-                "
-              />
-              <span class="pv-label">
-                {{ model.folder ? `${model.folder}/` : "" }}{{ model.name }}
-                <span v-if="!model.head" class="muted small">
-                  (keine Commits)</span
+            <div class="pv-tree">
+              <template
+                v-for="row in treeRows"
+                :key="row.kind + (row.path ?? row.model?.id ?? '')"
+              >
+                <div
+                  v-if="row.kind === 'folder'"
+                  class="pv-item pv-folder"
+                  :style="{ paddingLeft: `${row.depth * 0.9 + 0.3}rem` }"
                 >
-              </span>
-            </label>
+                  <button
+                    class="pv-caret"
+                    type="button"
+                    @click="toggleCollapsed(row.path!)"
+                  >
+                    <PhCaretRight
+                      v-if="collapsedFolders.has(row.path!)"
+                      :size="12"
+                    />
+                    <PhCaretDown v-else :size="12" />
+                  </button>
+                  <input
+                    type="checkbox"
+                    :checked="row.state === 'all'"
+                    :indeterminate="row.state === 'some'"
+                    @change="
+                      toggleFolder(
+                        row.path!,
+                        ($event.target as HTMLInputElement).checked,
+                      )
+                    "
+                  />
+                  <PhFolder :size="14" weight="fill" class="pv-foldericon" />
+                  <span class="pv-label">{{ row.name }}</span>
+                </div>
+                <label
+                  v-else
+                  class="pv-item"
+                  :class="{ disabled: !row.model!.head }"
+                  :style="{ paddingLeft: `${row.depth * 0.9 + 1.35}rem` }"
+                >
+                  <input
+                    type="checkbox"
+                    :disabled="!row.model!.head"
+                    :checked="
+                      !!row.model!.head && !hiddenModels.has(row.model!.id)
+                    "
+                    @change="
+                      toggleViewerModel(
+                        row.model!.id,
+                        ($event.target as HTMLInputElement).checked,
+                      )
+                    "
+                  />
+                  <span class="pv-label">
+                    {{ row.model!.name }}
+                    <span v-if="!row.model!.head" class="muted small">
+                      (keine Commits)</span
+                    >
+                  </span>
+                  <button
+                    v-if="row.model!.head"
+                    class="pv-focus"
+                    type="button"
+                    title="Kamera auf dieses Modell"
+                    @click.prevent.stop="projectViewer?.focusModel(row.model!.id)"
+                  >
+                    <PhCrosshairSimple :size="14" />
+                  </button>
+                </label>
+              </template>
+            </div>
+            <div v-if="imageNotice" class="pv-notice muted small">
+              {{ imageNotice }}
+            </div>
+            <div class="pv-actions">
+              <button :disabled="imageBusy" @click="saveProjectImage">
+                <PhImage :size="14" aria-hidden="true" />
+                Als Projektbild
+              </button>
+              <button
+                class="link"
+                title="Szene als PNG herunterladen"
+                @click="downloadSceneImage"
+              >
+                <PhDownloadSimple :size="16" aria-hidden="true" />
+              </button>
+            </div>
           </div>
           <div class="pv-main">
             <ModelViewer ref="projectViewer" :sources="viewerSources" />
