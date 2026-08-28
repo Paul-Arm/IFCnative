@@ -68,7 +68,7 @@ const tab = computed<Tab>(() => {
   if (value === "commits" || value === "einstellungen") return value;
   if (value === "inhalt" && isMd.value) return "inhalt";
   if (value === "3d" && !isMd.value) return "3d";
-  return isMd.value ? "inhalt" : "commits";
+  return isMd.value ? "inhalt" : "3d";
 });
 
 function goTab(nextTab: Tab): void {
@@ -424,11 +424,6 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
         <PhBookOpen :size="16" aria-hidden="true" />
         Inhalt
       </button>
-      <button :class="{ active: tab === 'commits' }" @click="goTab('commits')">
-        <PhGitCommit :size="16" aria-hidden="true" />
-        Commits
-        <span class="counter">{{ commitsData?.commits.length ?? 0 }}</span>
-      </button>
       <button
         v-if="!isMd"
         :class="{ active: tab === '3d' }"
@@ -436,6 +431,11 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
       >
         <PhCubeTransparent :size="16" aria-hidden="true" />
         3D
+      </button>
+      <button :class="{ active: tab === 'commits' }" @click="goTab('commits')">
+        <PhGitCommit :size="16" aria-hidden="true" />
+        Commits
+        <span class="counter">{{ commitsData?.commits.length ?? 0 }}</span>
       </button>
       <button
         v-if="isAdmin"

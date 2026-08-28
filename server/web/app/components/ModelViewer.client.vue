@@ -40,6 +40,7 @@ onMounted(async () => {
       antialias: true,
       alpha: true,
     });
+    world.renderer.showLogo = false;
     world.camera = new OBC.SimpleCamera(components);
     components.init();
 
