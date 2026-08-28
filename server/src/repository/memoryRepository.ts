@@ -93,6 +93,28 @@ export class MemoryRepository implements Repository {
     return null;
   }
 
+  async listPublicProjects(): Promise<Project[]> {
+    return [...this.projects.values()].filter(
+      (project) => project.visibility === "public",
+    );
+  }
+
+  async updateProject(
+    projectId: string,
+    patch: Partial<Pick<Project, "name" | "visibility">>,
+  ): Promise<Project | null> {
+    const project = this.projects.get(projectId);
+    if (!project) {
+      return null;
+    }
+    for (const [key, value] of Object.entries(patch)) {
+      if (value !== undefined) {
+        (project as unknown as Record<string, unknown>)[key] = value;
+      }
+    }
+    return project;
+  }
+
   async listProjectsForUser(userId: string): Promise<Project[]> {
     const ids = new Set(
       this.members.filter((m) => m.userId === userId).map((m) => m.projectId),

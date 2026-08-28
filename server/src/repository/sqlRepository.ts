@@ -40,6 +40,7 @@ interface ProjectRow {
   name: string;
   owner_id: string;
   created_at: string;
+  visibility: Visibility;
 }
 interface MemberRow {
   project_id: string;
@@ -96,6 +97,7 @@ function toProject(row: ProjectRow): Project {
     name: row.name,
     ownerId: row.owner_id,
     createdAt: row.created_at,
+    visibility: row.visibility ?? "public",
   };
 }
 function toModel(row: ModelRow): Model {
@@ -194,9 +196,16 @@ export class SqlRepository implements Repository {
       createdAt: this.now(),
     };
     await this.sql.query(
-      `insert into projects (id, slug, name, owner_id, created_at)
-       values ($1, $2, $3, $4, $5)`,
-      [project.id, project.slug, project.name, project.ownerId, project.createdAt],
+      `insert into projects (id, slug, name, owner_id, created_at, visibility)
+       values ($1, $2, $3, $4, $5, $6)`,
+      [
+        project.id,
+        project.slug,
+        project.name,
+        project.ownerId,
+        project.createdAt,
+        project.visibility,
+      ],
     );
     return project;
   }
@@ -218,6 +227,28 @@ export class SqlRepository implements Repository {
       [userId],
     );
     return rows.map(toProject);
+  }
+
+  async listPublicProjects(): Promise<Project[]> {
+    const { rows } = await this.sql.query<ProjectRow>(
+      `select * from projects where visibility = 'public' order by created_at desc`,
+    );
+    return rows.map(toProject);
+  }
+
+  async updateProject(
+    projectId: string,
+    patch: Partial<Pick<Project, "name" | "visibility">>,
+  ): Promise<Project | null> {
+    const { rows } = await this.sql.query<ProjectRow>(
+      `update projects set
+         name = coalesce($2, name),
+         visibility = coalesce($3, visibility)
+       where id = $1
+       returning *`,
+      [projectId, patch.name ?? null, patch.visibility ?? null],
+    );
+    return rows[0] ? toProject(rows[0]) : null;
   }
 
   async addMember(member: Member): Promise<Member> {

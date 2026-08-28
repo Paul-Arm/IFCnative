@@ -14,6 +14,7 @@ export interface Project {
   name: string;
   ownerId: string;
   createdAt: string;
+  visibility: "private" | "public";
   role?: Role | null;
   modelCount?: number;
   /** Ob ein Projektbild (Szenen-Screenshot) hinterlegt ist. */

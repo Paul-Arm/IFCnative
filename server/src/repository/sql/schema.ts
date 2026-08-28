@@ -20,8 +20,10 @@ create table if not exists projects (
   slug text unique not null,
   name text not null,
   owner_id uuid not null references users(id),
-  created_at text not null
+  created_at text not null,
+  visibility text not null default 'public'
 );
+alter table projects add column if not exists visibility text not null default 'public';
 
 create table if not exists project_members (
   project_id uuid not null references projects(id),

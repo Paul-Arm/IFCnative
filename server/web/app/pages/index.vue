@@ -34,6 +34,7 @@ watch(
 );
 
 const newName = ref("");
+const newVisibility = ref<"private" | "public">("public");
 const error = ref<string | null>(null);
 const busy = ref(false);
 
@@ -41,7 +42,10 @@ async function createProject(): Promise<void> {
   error.value = null;
   busy.value = true;
   try {
-    await api("/projects", { method: "POST", body: { name: newName.value } });
+    await api("/projects", {
+      method: "POST",
+      body: { name: newName.value, visibility: newVisibility.value },
+    });
     newName.value = "";
     await refresh();
   } catch (e) {
@@ -80,6 +84,12 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" });
             </div>
           </div>
           <span class="badge">{{ project.modelCount ?? 0 }} Modelle</span>
+          <span
+            class="badge"
+            :class="project.visibility === 'public' ? 'success' : ''"
+          >
+            {{ project.visibility === "public" ? "öffentlich" : "privat" }}
+          </span>
           <span v-if="project.role" class="badge accent">{{ project.role }}</span>
         </li>
       </ul>
@@ -102,6 +112,13 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" });
               required
               placeholder="z.B. Bürogebäude Nord"
             />
+          </div>
+          <div class="shrink">
+            <label for="project-visibility">Sichtbarkeit</label>
+            <select id="project-visibility" v-model="newVisibility">
+              <option value="public">öffentlich (alle angemeldeten)</option>
+              <option value="private">privat (nur Mitglieder)</option>
+            </select>
           </div>
           <div class="shrink">
             <button class="primary" type="submit" :disabled="busy">Anlegen</button>

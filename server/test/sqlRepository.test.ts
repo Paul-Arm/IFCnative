@@ -34,6 +34,7 @@ async function setup() {
     slug: "p",
     name: "P",
     ownerId: user.id,
+    visibility: "public",
   });
   await repo.addMember({ projectId: project.id, userId: user.id, role: "owner" });
   const model = await repo.createModel({

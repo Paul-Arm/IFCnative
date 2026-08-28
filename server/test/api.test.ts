@@ -769,6 +769,98 @@ test("issue comments: create, list in detail, delete permissions", async () => {
   await app.close();
 });
 
+test("project visibility: new projects are public for all users by default", async () => {
+  const app = await makeApp();
+  const owner = await register(app, "owner@example.com", "Owner");
+  const other = await register(app, "other@example.com", "Other");
+  await app.inject({
+    method: "POST",
+    url: "/api/projects",
+    headers: auth(owner),
+    payload: { name: "Acme", slug: "acme" },
+  });
+  await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/models",
+    headers: auth(owner),
+    payload: { name: "Tower", slug: "tower" },
+  });
+
+  // Nicht-Mitglied sieht das Projekt in der Liste (ohne Rolle) …
+  const list = JSON.parse(
+    (
+      await app.inject({
+        method: "GET",
+        url: "/api/projects",
+        headers: auth(other),
+      })
+    ).body,
+  );
+  assert.equal(list.projects.length, 1);
+  assert.equal(list.projects[0].visibility, "public");
+  assert.equal(list.projects[0].role, null);
+
+  // … kann Detail und (auch private) Modelle lesen …
+  const detail = await app.inject({
+    method: "GET",
+    url: "/api/projects/acme",
+    headers: auth(other),
+  });
+  assert.equal(detail.statusCode, 200);
+  const models = JSON.parse(
+    (
+      await app.inject({
+        method: "GET",
+        url: "/api/projects/acme/models",
+        headers: auth(other),
+      })
+    ).body,
+  );
+  assert.equal(models.models.length, 1);
+  const issues = await app.inject({
+    method: "GET",
+    url: "/api/projects/acme/issues",
+    headers: auth(other),
+  });
+  assert.equal(issues.statusCode, 200);
+
+  // … aber nicht schreiben.
+  const denied = await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/models",
+    headers: auth(other),
+    payload: { name: "Fremd" },
+  });
+  assert.equal(denied.statusCode, 403);
+
+  // Auf privat stellen (admin) — dann ist es fuer Nicht-Mitglieder weg.
+  const patched = await app.inject({
+    method: "PATCH",
+    url: "/api/projects/acme",
+    headers: auth(owner),
+    payload: { visibility: "private" },
+  });
+  assert.equal(JSON.parse(patched.body).project.visibility, "private");
+  const hidden = await app.inject({
+    method: "GET",
+    url: "/api/projects/acme",
+    headers: auth(other),
+  });
+  assert.equal(hidden.statusCode, 404);
+  const listAfter = JSON.parse(
+    (
+      await app.inject({
+        method: "GET",
+        url: "/api/projects",
+        headers: auth(other),
+      })
+    ).body,
+  );
+  assert.equal(listAfter.projects.length, 0);
+
+  await app.close();
+});
+
 test("health reports version and storage mode", async () => {
   const app = await makeApp();
   const res = await app.inject({ method: "GET", url: "/api/health" });

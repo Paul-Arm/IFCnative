@@ -44,8 +44,11 @@ damit exakt einig, was „geändert“ bedeutet.
   Markdown-Beschreibung und Kommentar-Thread, offen/geschlossen, zuordenbar
   an Benutzer, 0..n Modelle und farbige Labels (Tab „Issues“ in der Web-UI;
   Detailseite im GitHub-Layout mit Meta-Sidebar rechts).
-- **Öffentliche Modelle** — `visibility: public` ist ohne Anmeldung les- und
-  diffbar (Portal-Zugriff ohne Client).
+- **Sichtbarkeit** — Projekte sind per Default **öffentlich**: jeder
+  angemeldete Benutzer sieht sie lesend (implizite viewer-Rolle), schreiben
+  können nur Mitglieder; pro Projekt umschaltbar auf privat (nur Mitglieder).
+  Einzelne Modelle mit `visibility: public` sind zusätzlich ganz ohne
+  Anmeldung les- und diffbar (Portal-Zugriff ohne Client).
 
 ## Zwei Speicher-Modi
 
@@ -115,8 +118,8 @@ Auth: `Authorization: Bearer <JWT>` aus `/api/auth/login`. Fehler kommen als
 | GET | `/api/health` | `{status, version, storage}` |
 | POST | `/api/auth/register`, `/api/auth/login` | → `{ token, user }` |
 | GET | `/api/me` | aktueller Benutzer |
-| GET/POST | `/api/projects` | meine Projekte (mit Rolle) / anlegen `{name, slug?}` |
-| GET | `/api/projects/:slug` | Projekt + Mitglieder (mit Benutzerdaten) + `folders` |
+| GET/POST | `/api/projects` | eigene + öffentliche Projekte (mit Rolle) / anlegen `{name, slug?, visibility?}` (Default: public) |
+| GET/PATCH | `/api/projects/:slug` | Projekt + Mitglieder + `folders` (private nur für Mitglieder) / Einstellungen `{name?, visibility?}` (admin) |
 | POST | `/api/projects/:slug/folders` | Ordner anlegen `{path}` (write) |
 | DELETE | `/api/projects/:slug/folders?path=` | leeren Ordner löschen (409 wenn Modelle darin) |
 | DELETE | `/api/projects/:slug` | Projekt löschen (nur Owner; inkl. Blobs) |

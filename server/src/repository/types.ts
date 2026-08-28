@@ -41,6 +41,11 @@ export interface Project {
   name: string;
   ownerId: string;
   createdAt: string;
+  /**
+   * "public" (Standard): jeder ANGEMELDETE Benutzer sieht das Projekt
+   * lesend (implizite viewer-Rolle). "private": nur Mitglieder.
+   */
+  visibility: Visibility;
 }
 
 export interface Member {
@@ -142,6 +147,11 @@ export interface Repository {
   createProject(input: Omit<Project, "id" | "createdAt">): Promise<Project>;
   getProjectBySlug(slug: string): Promise<Project | null>;
   listProjectsForUser(userId: string): Promise<Project[]>;
+  listPublicProjects(): Promise<Project[]>;
+  updateProject(
+    projectId: string,
+    patch: Partial<Pick<Project, "name" | "visibility">>,
+  ): Promise<Project | null>;
   addMember(member: Member): Promise<Member>;
   getMember(projectId: string, userId: string): Promise<Member | null>;
   listMembers(projectId: string): Promise<Member[]>;

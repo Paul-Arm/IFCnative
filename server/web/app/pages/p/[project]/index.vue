@@ -559,6 +559,25 @@ const roles: Role[] = ["owner", "maintainer", "contributor", "viewer"];
 // ---- Projekt löschen ---------------------------------------------------
 
 const deleteError = ref<string | null>(null);
+const settingsError = ref<string | null>(null);
+const settingsNotice = ref<string | null>(null);
+
+async function patchProject(
+  visibility: "private" | "public",
+): Promise<void> {
+  settingsError.value = null;
+  settingsNotice.value = null;
+  try {
+    await api(`/projects/${slug}`, {
+      method: "PATCH",
+      body: { visibility },
+    });
+    settingsNotice.value = "Gespeichert.";
+    await refreshProject();
+  } catch (e) {
+    settingsError.value = apiErrorMessage(e);
+  }
+}
 
 async function deleteProject(): Promise<void> {
   const project = projectData.value?.project;
@@ -1193,6 +1212,34 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
 
     <!-- ================= Tab: Einstellungen ================= -->
     <template v-else>
+      <div v-if="isAdmin" class="card">
+        <div class="card-header"><h2>Allgemein</h2></div>
+        <div class="card-body">
+          <div v-if="settingsError" class="alert error">{{ settingsError }}</div>
+          <div v-if="settingsNotice" class="alert success">{{ settingsNotice }}</div>
+          <div class="form-inline">
+            <div class="shrink">
+              <label for="project-visibility">Sichtbarkeit</label>
+              <select
+                id="project-visibility"
+                style="width: auto"
+                :value="projectData.project.visibility"
+                @change="
+                  patchProject(
+                    ($event.target as HTMLSelectElement).value as
+                      | 'private'
+                      | 'public',
+                  )
+                "
+              >
+                <option value="public">öffentlich (alle angemeldeten Benutzer)</option>
+                <option value="private">privat (nur Mitglieder)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div v-if="isOwner" class="card" style="border-color: var(--danger)">
         <div class="card-header">
           <h2 style="color: var(--danger)">Gefahrenzone</h2>

@@ -22,6 +22,7 @@ test("SQLite: Katalog-Roundtrip inkl. Ordner, Diff-Cache und Neustart", async ()
     slug: "acme",
     name: "Acme",
     ownerId: user.id,
+    visibility: "public",
   });
   await repo.addMember({ projectId: project.id, userId: user.id, role: "owner" });
   await repo.addFolder(project.id, "Hochbau/EG");
@@ -99,6 +100,7 @@ test("SQLite: Issues + Labels + Zuordnungen", async () => {
     slug: "p",
     name: "P",
     ownerId: user.id,
+    visibility: "public",
   });
   const model = await repo.createModel({
     projectId: project.id,

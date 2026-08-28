@@ -195,7 +195,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       reply.code(401).send({ error: "Authentication required" });
       return null;
     }
-    const member = await repo.getMember(project.id, user.id);
+    let member = await repo.getMember(project.id, user.id);
+    // Öffentliche Projekte: jeder angemeldete Benutzer ist implizit viewer.
+    if (!member && access === "read" && project.visibility === "public") {
+      member = { projectId: project.id, userId: user.id, role: "viewer" };
+    }
     if (!member) {
       reply.code(403).send({ error: "Not a project member" });
       return null;
@@ -315,7 +319,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.get(`${api}/projects`, async (request, reply) => {
     const user = await requireUser(request, reply);
     if (!user) return reply;
-    const projects = await repo.listProjectsForUser(user.id);
+    // Eigene Projekte plus alle oeffentlichen (fuer Nicht-Mitglieder lesbar).
+    const mine = await repo.listProjectsForUser(user.id);
+    const seen = new Set(mine.map((project) => project.id));
+    const projects = [
+      ...mine,
+      ...(await repo.listPublicProjects()).filter(
+        (project) => !seen.has(project.id),
+      ),
+    ];
     const enriched = await Promise.all(
       projects.map(async (project) => {
         const member = await repo.getMember(project.id, user.id);
@@ -334,9 +346,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.post(`${api}/projects`, async (request, reply) => {
     const user = await requireUser(request, reply);
     if (!user) return reply;
-    const body = (request.body ?? {}) as { name?: string; slug?: string };
+    const body = (request.body ?? {}) as {
+      name?: string;
+      slug?: string;
+      visibility?: "private" | "public";
+    };
     if (!body.name) {
       return reply.code(400).send({ error: "name required" });
+    }
+    if (body.visibility && !["private", "public"].includes(body.visibility)) {
+      return reply.code(400).send({ error: "Invalid visibility" });
     }
     const slug = slugify(body.slug ?? body.name);
     if (!slug) {
@@ -349,6 +368,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       slug,
       name: body.name,
       ownerId: user.id,
+      // Neu angelegte Projekte sind fuer alle angemeldeten Benutzer sichtbar.
+      visibility: body.visibility ?? "public",
     });
     await repo.addMember({
       projectId: project.id,
@@ -362,8 +383,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const { slug } = request.params as { slug: string };
     const project = await resolveProject(slug, reply);
     if (!project) return reply;
-    const user = await optionalUser(request);
-    const member = user ? await repo.getMember(project.id, user.id) : null;
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    const member = await repo.getMember(project.id, user.id);
+    // Private Projekte existieren fuer Nicht-Mitglieder nicht (wie GitHub).
+    if (project.visibility === "private" && !member) {
+      return reply.code(404).send({ error: "Project not found" });
+    }
     const members = await repo.listMembers(project.id);
     const users = await usersById(members.map((m) => m.userId));
     return reply.send({
@@ -834,7 +860,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   }
 
   /**
-   * Read access to a model: members always; everyone if it's public.
+   * Read access to a model: public models for everyone (auch anonym);
+   * sonst Mitglieder — oder jeder Angemeldete, wenn das PROJEKT public ist.
    * Sends the error response and returns false when access is denied.
    */
   async function canReadModel(
@@ -845,6 +872,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   ): Promise<boolean> {
     if (modelVisibility === "public") return true;
     const user = await optionalUser(request);
+    if (user && project.visibility === "public") return true;
     const member = user ? await repo.getMember(project.id, user.id) : null;
     if (!member) {
       reply.code(403).send({ error: "Private model" });
@@ -860,7 +888,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const user = await optionalUser(request);
     const member = user ? await repo.getMember(project.id, user.id) : null;
     const models = await repo.listModels(project.id);
-    const visible = member ? models : models.filter((m) => m.visibility === "public");
+    const readAll =
+      Boolean(member) || (user !== null && project.visibility === "public");
+    const visible = readAll
+      ? models
+      : models.filter((m) => m.visibility === "public");
     const enriched = await Promise.all(
       visible.map(async (model) => {
         const branches = await repo.listBranches(model.id);
@@ -1016,6 +1048,31 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   });
 
   // Projekt löschen — nur der Owner.
+  // Projekt-Einstellungen (Name, Sichtbarkeit) — admin.
+  app.patch(`${api}/projects/:slug`, async (request, reply) => {
+    const { slug } = request.params as { slug: string };
+    const project = await resolveProject(slug, reply);
+    if (!project) return reply;
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    if (!(await requireMember(project, user, reply, "admin"))) return reply;
+    const body = (request.body ?? {}) as {
+      name?: string;
+      visibility?: "private" | "public";
+    };
+    if (body.visibility && !["private", "public"].includes(body.visibility)) {
+      return reply.code(400).send({ error: "Invalid visibility" });
+    }
+    if (body.name !== undefined && !body.name.trim()) {
+      return reply.code(400).send({ error: "Name must not be empty" });
+    }
+    const updated = await repo.updateProject(project.id, {
+      name: body.name?.trim(),
+      visibility: body.visibility,
+    });
+    return reply.send({ project: updated });
+  });
+
   app.delete(`${api}/projects/:slug`, async (request, reply) => {
     const { slug } = request.params as { slug: string };
     const project = await resolveProject(slug, reply);
