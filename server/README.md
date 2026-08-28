@@ -41,8 +41,9 @@ damit exakt einig, was „geändert“ bedeutet.
   versionsgleich aus dem Paket synchronisiert
   (`web/scripts/sync-fragments-worker.mjs`).
 - **Issues** — wie bei GitHub: pro Projekt nummerierte Issues mit
-  Markdown-Beschreibung, offen/geschlossen, zuordenbar an Benutzer,
-  0..n Modelle und farbige Labels (Tab „Issues“ in der Web-UI).
+  Markdown-Beschreibung und Kommentar-Thread, offen/geschlossen, zuordenbar
+  an Benutzer, 0..n Modelle und farbige Labels (Tab „Issues“ in der Web-UI;
+  Detailseite im GitHub-Layout mit Meta-Sidebar rechts).
 - **Öffentliche Modelle** — `visibility: public` ist ohne Anmeldung les- und
   diffbar (Portal-Zugriff ohne Client).
 
