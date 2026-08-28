@@ -629,7 +629,13 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
       <ModelViewer
         v-if="headCommit"
         :key="headCommit.id"
-        :src="`/api${base}/commits/${headCommit.id}/fragments`"
+        :sources="[
+          {
+            key: headCommit.id,
+            src: `/api${base}/commits/${headCommit.id}/fragments`,
+            label: modelData.model.name,
+          },
+        ]"
       />
       <div v-else class="empty">
         Noch keine Commits auf diesem Branch — erst einen Stand committen.

@@ -1,8 +1,16 @@
 <script setup lang="ts">
-// 3D-Vorschau eines Commits: lädt die ThatOpen-Fragments vom Server
-// (der beim ersten Abruf konvertiert und cached) und rendert sie mit dem
-// ThatOpen-Viewer (@thatopen/components: SimpleScene/-Renderer/-Camera).
-const props = defineProps<{ src: string }>();
+// 3D-Vorschau: lädt ThatOpen-Fragments vom Server (der beim ersten Abruf
+// konvertiert und cached) und rendert sie mit dem ThatOpen-Viewer.
+// Mehrere Quellen landen in EINER Szene (FragmentsManager koordiniert
+// georeferenzierte Modelle relativ zum ersten geladenen Modell).
+export interface ViewerSource {
+  /** stabile Id (Modell- oder Commit-Id) — wird zur Fragments-modelId. */
+  key: string;
+  src: string;
+  label?: string;
+}
+
+const props = defineProps<{ sources: ViewerSource[] }>();
 
 const container = ref<HTMLDivElement | null>(null);
 const status = ref<"laden" | "fertig" | "fehler">("laden");
@@ -11,16 +19,25 @@ let dispose: (() => void) | null = null;
 
 const { token } = useAuth();
 
+interface LoadedModel {
+  object: { visible: boolean };
+}
+
+const loaded = new Map<string, LoadedModel>();
+let requestUpdate: (() => void) | null = null;
+
+function setVisible(key: string, visible: boolean): void {
+  const model = loaded.get(key);
+  if (model) {
+    model.object.visible = visible;
+    requestUpdate?.();
+  }
+}
+
+defineExpose({ setVisible });
+
 onMounted(async () => {
   try {
-    statusText.value =
-      "Lade Fragments … (der erste Aufruf konvertiert die IFC auf dem Server)";
-    const buffer = await $fetch<ArrayBuffer>(props.src, {
-      responseType: "arrayBuffer",
-      headers: token.value ? { authorization: `Bearer ${token.value}` } : {},
-    });
-
-    statusText.value = "Baue Szene auf …";
     const THREE = await import("three");
     const OBC = await import("@thatopen/components");
 
@@ -63,6 +80,8 @@ onMounted(async () => {
     const fragments = components.get(OBC.FragmentsManager);
     // Der Worker liegt versionsgleich in public/ (sync-fragments-worker.mjs).
     fragments.init("/fragments/worker.mjs");
+    fragments.core.settings.autoCoordinate = true;
+    requestUpdate = () => void fragments.core.update(true).catch(() => undefined);
     world.camera.controls.addEventListener("update", () => {
       void fragments.core.update().catch(() => undefined);
     });
@@ -72,7 +91,28 @@ onMounted(async () => {
       void fragments.core.update(true).catch(() => undefined);
     });
 
-    await fragments.core.load(buffer, { modelId: props.src });
+    const errors: string[] = [];
+    let index = 0;
+    for (const source of props.sources) {
+      index += 1;
+      statusText.value =
+        props.sources.length === 1
+          ? "Lade Fragments … (der erste Aufruf konvertiert die IFC auf dem Server)"
+          : `Lade ${source.label ?? "Modell"} (${index}/${props.sources.length}) …`;
+      try {
+        const buffer = await $fetch<ArrayBuffer>(source.src, {
+          responseType: "arrayBuffer",
+          headers: token.value
+            ? { authorization: `Bearer ${token.value}` }
+            : {},
+        });
+        const model = await fragments.core.load(buffer, { modelId: source.key });
+        loaded.set(source.key, model as unknown as LoadedModel);
+      } catch (error) {
+        errors.push(`${source.label ?? source.key}: ${apiErrorMessage(error)}`);
+      }
+    }
+
     await fragments.core.update(true);
     try {
       await world.camera.fitToItems();
@@ -81,7 +121,15 @@ onMounted(async () => {
     }
 
     dispose = () => components.dispose();
-    status.value = "fertig";
+    if (loaded.size === 0 && errors.length) {
+      status.value = "fehler";
+      statusText.value = errors.join(" · ");
+    } else {
+      if (errors.length) {
+        console.warn("3D-Vorschau: Modelle übersprungen:", errors);
+      }
+      status.value = "fertig";
+    }
   } catch (error) {
     status.value = "fehler";
     statusText.value = apiErrorMessage(error);

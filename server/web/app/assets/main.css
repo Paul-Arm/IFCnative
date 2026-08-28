@@ -862,6 +862,79 @@ details.menu > summary::-webkit-details-marker {
   color: var(--danger);
 }
 
+/* ---- Projekt-3D (mehrere Modelle in einer Szene) ---------------------- */
+
+.pv-wrap {
+  display: flex;
+  height: min(70vh, 640px);
+}
+
+.pv-side {
+  width: 240px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.pv-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.3rem 0.45rem;
+  border-radius: 6px;
+  font-weight: 400;
+  font-size: 0.85rem;
+  cursor: pointer;
+  margin-bottom: 0;
+}
+
+.pv-item:hover {
+  background: var(--surface-2);
+}
+
+.pv-item.disabled {
+  cursor: default;
+  color: var(--text-muted);
+}
+
+.pv-item input[type="checkbox"] {
+  width: auto;
+  margin-top: 0.15rem;
+}
+
+.pv-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.pv-main {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}
+
+.pv-main .viewer-wrap {
+  height: 100%;
+  border-radius: 0 0 calc(var(--radius) - 1px) 0;
+}
+
+@media (max-width: 720px) {
+  .pv-wrap {
+    flex-direction: column;
+  }
+
+  .pv-side {
+    width: auto;
+    max-height: 160px;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+}
+
 /* ---- gerendertes Markdown (README etc.) ------------------------------- */
 
 .markdown-body {

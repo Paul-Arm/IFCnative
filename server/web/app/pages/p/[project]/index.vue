@@ -2,6 +2,7 @@
 import {
   PhArrowElbowLeftUp,
   PhBookOpen,
+  PhCubeTransparent,
   PhCube,
   PhFileMd,
   PhFolder,
@@ -46,10 +47,10 @@ const isOwner = computed(() => projectData.value?.role === "owner");
 
 // ---- Tabs + aktueller Ordnerpfad --------------------------------------
 
-type Tab = "modelle" | "mitglieder" | "einstellungen";
+type Tab = "modelle" | "3d" | "mitglieder" | "einstellungen";
 const tab = computed<Tab>(() => {
   const value = route.query.tab;
-  return value === "mitglieder" || value === "einstellungen"
+  return value === "3d" || value === "mitglieder" || value === "einstellungen"
     ? value
     : "modelle";
 });
@@ -253,6 +254,36 @@ watch(
   { immediate: true },
 );
 
+// ---- Projekt-3D: alle IFC-Modelle in einer Szene -----------------------
+
+const viewerModels = computed(() =>
+  (modelsData.value?.models ?? []).filter(
+    (model) => model.kind !== "md",
+  ),
+);
+const viewerSources = computed(() =>
+  viewerModels.value
+    .filter((model) => model.head)
+    .map((model) => ({
+      key: model.id,
+      src: `/api/projects/${slug}/models/${model.slug}/commits/${model.head!.id}/fragments`,
+      label: model.folder ? `${model.folder}/${model.name}` : model.name,
+    })),
+);
+const projectViewer = ref<{
+  setVisible: (key: string, visible: boolean) => void;
+} | null>(null);
+const hiddenModels = reactive(new Set<string>());
+
+function toggleViewerModel(modelId: string, visible: boolean): void {
+  if (visible) {
+    hiddenModels.delete(modelId);
+  } else {
+    hiddenModels.add(modelId);
+  }
+  projectViewer.value?.setVisible(modelId, visible);
+}
+
 // ---- Mitglieder --------------------------------------------------------
 
 const memberEmail = ref("");
@@ -347,6 +378,11 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
         <PhFolders :size="16" aria-hidden="true" />
         Modelle
         <span class="counter">{{ modelsData?.models.length ?? 0 }}</span>
+      </button>
+      <button :class="{ active: tab === '3d' }" @click="goTo('3d')">
+        <PhCubeTransparent :size="16" aria-hidden="true" />
+        3D
+        <span class="counter">{{ viewerSources.length }}</span>
       </button>
       <button :class="{ active: tab === 'mitglieder' }" @click="goTo('mitglieder')">
         <PhUsers :size="16" aria-hidden="true" />
@@ -582,6 +618,52 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
           >Historie & Bearbeiten</NuxtLink>
         </div>
         <div class="card-body markdown-body" v-html="readmeHtml"></div>
+      </div>
+    </template>
+
+    <!-- ================= Tab: 3D (alle Modelle in einer Szene) ========= -->
+    <template v-else-if="tab === '3d'">
+      <div class="card">
+        <div class="card-header">
+          <strong>3D — alle Modelle</strong>
+          <span class="muted small">
+            Head-Commits der Standard-Branches, gemeinsame Szene
+          </span>
+        </div>
+        <div v-if="viewerSources.length" class="pv-wrap">
+          <div class="pv-side">
+            <label
+              v-for="model in viewerModels"
+              :key="model.id"
+              class="pv-item"
+              :class="{ disabled: !model.head }"
+            >
+              <input
+                type="checkbox"
+                :disabled="!model.head"
+                :checked="!!model.head && !hiddenModels.has(model.id)"
+                @change="
+                  toggleViewerModel(
+                    model.id,
+                    ($event.target as HTMLInputElement).checked,
+                  )
+                "
+              />
+              <span class="pv-label">
+                {{ model.folder ? `${model.folder}/` : "" }}{{ model.name }}
+                <span v-if="!model.head" class="muted small">
+                  (keine Commits)</span
+                >
+              </span>
+            </label>
+          </div>
+          <div class="pv-main">
+            <ModelViewer ref="projectViewer" :sources="viewerSources" />
+          </div>
+        </div>
+        <div v-else class="empty">
+          Noch keine IFC-Modelle mit Commits in diesem Projekt.
+        </div>
       </div>
     </template>
 
