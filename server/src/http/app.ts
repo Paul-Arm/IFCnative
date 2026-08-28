@@ -58,7 +58,12 @@ function slugify(value: string): string {
 }
 
 function publicUser(user: User) {
-  return { id: user.id, email: user.email, name: user.name };
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    isAdmin: user.isAdmin,
+  };
 }
 
 /**
@@ -195,6 +200,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       reply.code(401).send({ error: "Authentication required" });
       return null;
     }
+    // Globale Admins haben Owner-Rechte auf allen Projekten.
+    if (user.isAdmin) {
+      return { projectId: project.id, userId: user.id, role: "owner" };
+    }
     let member = await repo.getMember(project.id, user.id);
     // Öffentliche Projekte: jeder angemeldete Benutzer ist implizit viewer.
     if (!member && access === "read" && project.visibility === "public") {
@@ -293,6 +302,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       email: body.email,
       name: body.name ?? body.email,
       passwordHash: hashPassword(body.password),
+      isAdmin: false,
     });
     const token = app.jwt.sign({ sub: user.id, email: user.email });
     return reply.code(201).send({ token, user: publicUser(user) });
@@ -314,20 +324,141 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return reply.send({ user: publicUser(user) });
   });
 
+  // ---- Benutzerverwaltung (nur globale Admins) -------------------------
+
+  async function requireAdmin(
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ): Promise<User | null> {
+    const user = await requireUser(request, reply);
+    if (!user) return null;
+    if (!user.isAdmin) {
+      reply.code(403).send({ error: "Admin required" });
+      return null;
+    }
+    return user;
+  }
+
+  app.get(`${api}/admin/users`, async (request, reply) => {
+    const admin = await requireAdmin(request, reply);
+    if (!admin) return reply;
+    const users = await repo.listUsers();
+    return reply.send({
+      users: users.map((user) => ({
+        ...publicUser(user),
+        createdAt: user.createdAt,
+      })),
+    });
+  });
+
+  app.post(`${api}/admin/users`, async (request, reply) => {
+    const admin = await requireAdmin(request, reply);
+    if (!admin) return reply;
+    const body = (request.body ?? {}) as {
+      email?: string;
+      name?: string;
+      password?: string;
+      isAdmin?: boolean;
+    };
+    if (!body.email || !body.password) {
+      return reply.code(400).send({ error: "email and password required" });
+    }
+    if (body.password.length < 8) {
+      return reply
+        .code(400)
+        .send({ error: "password must be at least 8 characters" });
+    }
+    if (await repo.getUserByEmail(body.email)) {
+      return reply.code(409).send({ error: "Email already registered" });
+    }
+    const user = await repo.createUser({
+      email: body.email,
+      name: body.name?.trim() || body.email,
+      passwordHash: hashPassword(body.password),
+      isAdmin: Boolean(body.isAdmin),
+    });
+    return reply
+      .code(201)
+      .send({ user: { ...publicUser(user), createdAt: user.createdAt } });
+  });
+
+  app.patch(`${api}/admin/users/:userId`, async (request, reply) => {
+    const admin = await requireAdmin(request, reply);
+    if (!admin) return reply;
+    const { userId } = request.params as { userId: string };
+    const target = await repo.getUserById(userId);
+    if (!target) {
+      return reply.code(404).send({ error: "User not found" });
+    }
+    const body = (request.body ?? {}) as {
+      name?: string;
+      isAdmin?: boolean;
+      password?: string;
+    };
+    // Selbst-Aussperrung verhindern: eigenen Admin-Status nicht entziehen.
+    if (body.isAdmin === false && target.id === admin.id) {
+      return reply
+        .code(400)
+        .send({ error: "Cannot remove your own admin status" });
+    }
+    if (body.password !== undefined && body.password.length < 8) {
+      return reply
+        .code(400)
+        .send({ error: "password must be at least 8 characters" });
+    }
+    const updated = await repo.updateUser(userId, {
+      name: body.name?.trim() || undefined,
+      isAdmin: body.isAdmin,
+      passwordHash:
+        body.password !== undefined ? hashPassword(body.password) : undefined,
+    });
+    return reply.send({
+      user: updated
+        ? { ...publicUser(updated), createdAt: updated.createdAt }
+        : null,
+    });
+  });
+
+  app.delete(`${api}/admin/users/:userId`, async (request, reply) => {
+    const admin = await requireAdmin(request, reply);
+    if (!admin) return reply;
+    const { userId } = request.params as { userId: string };
+    if (userId === admin.id) {
+      return reply.code(400).send({ error: "Cannot delete yourself" });
+    }
+    const target = await repo.getUserById(userId);
+    if (!target) {
+      return reply.code(404).send({ error: "User not found" });
+    }
+    if (await repo.userHasContent(userId)) {
+      return reply.code(409).send({
+        error:
+          "User has authored content (commits/issues/comments) and cannot be deleted",
+      });
+    }
+    await repo.deleteUser(userId);
+    return reply.code(204).send();
+  });
+
   // ---- projects --------------------------------------------------------
 
   app.get(`${api}/projects`, async (request, reply) => {
     const user = await requireUser(request, reply);
     if (!user) return reply;
-    // Eigene Projekte plus alle oeffentlichen (fuer Nicht-Mitglieder lesbar).
-    const mine = await repo.listProjectsForUser(user.id);
-    const seen = new Set(mine.map((project) => project.id));
-    const projects = [
-      ...mine,
-      ...(await repo.listPublicProjects()).filter(
-        (project) => !seen.has(project.id),
-      ),
-    ];
+    // Eigene Projekte plus alle oeffentlichen; globale Admins sehen alles.
+    let projects;
+    if (user.isAdmin) {
+      projects = await repo.listAllProjects();
+    } else {
+      const mine = await repo.listProjectsForUser(user.id);
+      const seen = new Set(mine.map((project) => project.id));
+      projects = [
+        ...mine,
+        ...(await repo.listPublicProjects()).filter(
+          (project) => !seen.has(project.id),
+        ),
+      ];
+    }
     const enriched = await Promise.all(
       projects.map(async (project) => {
         const member = await repo.getMember(project.id, user.id);
@@ -387,7 +518,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (!user) return reply;
     const member = await repo.getMember(project.id, user.id);
     // Private Projekte existieren fuer Nicht-Mitglieder nicht (wie GitHub).
-    if (project.visibility === "private" && !member) {
+    if (project.visibility === "private" && !member && !user.isAdmin) {
       return reply.code(404).send({ error: "Project not found" });
     }
     const members = await repo.listMembers(project.id);
@@ -872,6 +1003,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   ): Promise<boolean> {
     if (modelVisibility === "public") return true;
     const user = await optionalUser(request);
+    if (user?.isAdmin) return true;
     if (user && project.visibility === "public") return true;
     const member = user ? await repo.getMember(project.id, user.id) : null;
     if (!member) {

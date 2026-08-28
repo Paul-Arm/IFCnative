@@ -72,6 +72,48 @@ export class MemoryRepository implements Repository {
     return this.users.get(id) ?? null;
   }
 
+  async listUsers(): Promise<User[]> {
+    return [...this.users.values()].sort((a, b) =>
+      a.createdAt.localeCompare(b.createdAt),
+    );
+  }
+
+  async updateUser(
+    userId: string,
+    patch: Partial<Pick<User, "name" | "isAdmin" | "passwordHash">>,
+  ): Promise<User | null> {
+    const user = this.users.get(userId);
+    if (!user) {
+      return null;
+    }
+    for (const [key, value] of Object.entries(patch)) {
+      if (value !== undefined) {
+        (user as unknown as Record<string, unknown>)[key] = value;
+      }
+    }
+    return user;
+  }
+
+  async userHasContent(userId: string): Promise<boolean> {
+    return (
+      [...this.commits.values()].some((c) => c.authorId === userId) ||
+      [...this.issues.values()].some((i) => i.authorId === userId) ||
+      [...this.issueComments.values()].some((c) => c.authorId === userId)
+    );
+  }
+
+  async deleteUser(userId: string): Promise<void> {
+    for (const links of this.issueLinks.values()) {
+      links.assigneeIds = links.assigneeIds.filter((id) => id !== userId);
+    }
+    this.members = this.members.filter((m) => m.userId !== userId);
+    this.users.delete(userId);
+  }
+
+  async listAllProjects(): Promise<Project[]> {
+    return [...this.projects.values()];
+  }
+
   async createProject(
     input: Omit<Project, "id" | "createdAt">,
   ): Promise<Project> {

@@ -33,6 +33,7 @@ interface UserRow {
   name: string;
   password_hash: string;
   created_at: string;
+  is_admin: number;
 }
 interface ProjectRow {
   id: string;
@@ -88,6 +89,7 @@ function toUser(row: UserRow): User {
     name: row.name,
     passwordHash: row.password_hash,
     createdAt: row.created_at,
+    isAdmin: Boolean(row.is_admin),
   };
 }
 function toProject(row: ProjectRow): Project {
@@ -162,9 +164,16 @@ export class SqlRepository implements Repository {
   async createUser(input: Omit<User, "id" | "createdAt">): Promise<User> {
     const user: User = { ...input, id: randomUUID(), createdAt: this.now() };
     await this.sql.query(
-      `insert into users (id, email, name, password_hash, created_at)
-       values ($1, $2, $3, $4, $5)`,
-      [user.id, user.email, user.name, user.passwordHash, user.createdAt],
+      `insert into users (id, email, name, password_hash, created_at, is_admin)
+       values ($1, $2, $3, $4, $5, $6)`,
+      [
+        user.id,
+        user.email,
+        user.name,
+        user.passwordHash,
+        user.createdAt,
+        user.isAdmin ? 1 : 0,
+      ],
     );
     return user;
   }
@@ -183,6 +192,64 @@ export class SqlRepository implements Repository {
       [id],
     );
     return rows[0] ? toUser(rows[0]) : null;
+  }
+
+  async listUsers(): Promise<User[]> {
+    const { rows } = await this.sql.query<UserRow>(
+      `select * from users order by created_at`,
+    );
+    return rows.map(toUser);
+  }
+
+  async updateUser(
+    userId: string,
+    patch: Partial<Pick<User, "name" | "isAdmin" | "passwordHash">>,
+  ): Promise<User | null> {
+    const { rows } = await this.sql.query<UserRow>(
+      `update users set
+         name = coalesce($2, name),
+         is_admin = coalesce($3, is_admin),
+         password_hash = coalesce($4, password_hash)
+       where id = $1
+       returning *`,
+      [
+        userId,
+        patch.name ?? null,
+        patch.isAdmin === undefined ? null : patch.isAdmin ? 1 : 0,
+        patch.passwordHash ?? null,
+      ],
+    );
+    return rows[0] ? toUser(rows[0]) : null;
+  }
+
+  async userHasContent(userId: string): Promise<boolean> {
+    for (const table of ["commits", "issues", "issue_comments"]) {
+      const { rows } = await this.sql.query<{ id: string }>(
+        `select id from ${table} where author_id = $1 limit 1`,
+        [userId],
+      );
+      if (rows.length) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  async deleteUser(userId: string): Promise<void> {
+    await this.sql.query(`delete from issue_assignees where user_id = $1`, [
+      userId,
+    ]);
+    await this.sql.query(`delete from project_members where user_id = $1`, [
+      userId,
+    ]);
+    await this.sql.query(`delete from users where id = $1`, [userId]);
+  }
+
+  async listAllProjects(): Promise<Project[]> {
+    const { rows } = await this.sql.query<ProjectRow>(
+      `select * from projects order by created_at desc`,
+    );
+    return rows.map(toProject);
   }
 
   // ---- projects + membership ------------------------------------------

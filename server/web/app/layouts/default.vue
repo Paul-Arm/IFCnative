@@ -1,7 +1,21 @@
 <script setup lang="ts">
-import { PhSignOut } from "@phosphor-icons/vue";
+import { PhSignOut, PhUsersThree } from "@phosphor-icons/vue";
 
-const { user, token, logout } = useAuth();
+const { user, token, logout, setSession } = useAuth();
+const { api } = useApi();
+
+// user-Objekt beim Laden auffrischen (z. B. neu gesetzter Admin-Status).
+onMounted(async () => {
+  if (!token.value) return;
+  try {
+    const me = await api<{ user: typeof user.value }>("/me");
+    if (me.user) {
+      setSession(token.value, me.user);
+    }
+  } catch {
+    // 401 wird bereits von useApi behandelt.
+  }
+});
 </script>
 
 <template>
@@ -13,6 +27,10 @@ const { user, token, logout } = useAuth();
           IFC Hub
         </NuxtLink>
         <span class="topbar-spacer" />
+        <NuxtLink v-if="user?.isAdmin" to="/admin" class="link small">
+          <PhUsersThree :size="15" aria-hidden="true" style="vertical-align: -3px" />
+          Verwaltung
+        </NuxtLink>
         <span v-if="user" class="muted small">{{ user.name }}</span>
         <button class="link" @click="logout">
           <PhSignOut :size="14" aria-hidden="true" />

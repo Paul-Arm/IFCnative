@@ -33,6 +33,8 @@ export interface User {
   name: string;
   passwordHash: string;
   createdAt: string;
+  /** Globaler Admin: voller Zugriff auf alle Projekte + Benutzerverwaltung. */
+  isAdmin: boolean;
 }
 
 export interface Project {
@@ -142,6 +144,16 @@ export interface Repository {
   createUser(input: Omit<User, "id" | "createdAt">): Promise<User>;
   getUserByEmail(email: string): Promise<User | null>;
   getUserById(id: string): Promise<User | null>;
+  listUsers(): Promise<User[]>;
+  updateUser(
+    userId: string,
+    patch: Partial<Pick<User, "name" | "isAdmin" | "passwordHash">>,
+  ): Promise<User | null>;
+  /** Löscht den Benutzer samt Mitgliedschaften/Zuweisungen. */
+  deleteUser(userId: string): Promise<void>;
+  /** Hat der Benutzer Inhalte verfasst (Commits, Issues, Kommentare)? */
+  userHasContent(userId: string): Promise<boolean>;
+  listAllProjects(): Promise<Project[]>;
 
   // Projects + membership
   createProject(input: Omit<Project, "id" | "createdAt">): Promise<Project>;

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+import { hashPassword } from "../src/auth/passwords";
 import { buildApp } from "../src/http/app";
 import { MemoryRepository } from "../src/repository/memoryRepository";
 import { FilesystemObjectStore } from "../src/storage/filesystemObjectStore";
@@ -857,6 +858,121 @@ test("project visibility: new projects are public for all users by default", asy
     ).body,
   );
   assert.equal(listAfter.projects.length, 0);
+
+  await app.close();
+});
+
+test("global admin: full project access + user management", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "ifc-vcs-admin-"));
+  const repo = new MemoryRepository();
+  const app = buildApp({
+    repo,
+    store: new FilesystemObjectStore(dir),
+    jwtSecret: "test-secret",
+  });
+  const owner = await register(app, "owner@example.com", "Owner");
+
+  // Privates Projekt eines anderen Benutzers.
+  await app.inject({
+    method: "POST",
+    url: "/api/projects",
+    headers: auth(owner),
+    payload: { name: "Geheim", slug: "geheim", visibility: "private" },
+  });
+
+  // Admin direkt im Repo anlegen (wie der Server-Bootstrap) + einloggen.
+  await repo.createUser({
+    email: "admin@ifc-hub.local",
+    name: "Admin",
+    passwordHash: hashPassword("adminpass123"),
+    isAdmin: true,
+  });
+  const adminLogin = await app.inject({
+    method: "POST",
+    url: "/api/auth/login",
+    payload: { email: "admin@ifc-hub.local", password: "adminpass123" },
+  });
+  const admin = JSON.parse(adminLogin.body).token as string;
+  assert.equal(JSON.parse(adminLogin.body).user.isAdmin, true);
+
+  // Admin sieht auch das private Fremdprojekt und darf darin schreiben.
+  const list = JSON.parse(
+    (await app.inject({ method: "GET", url: "/api/projects", headers: auth(admin) }))
+      .body,
+  );
+  assert.ok(list.projects.some((p: { slug: string }) => p.slug === "geheim"));
+  const write = await app.inject({
+    method: "POST",
+    url: "/api/projects/geheim/models",
+    headers: auth(admin),
+    payload: { name: "AdminModell" },
+  });
+  assert.equal(write.statusCode, 201);
+
+  // Benutzerverwaltung: Liste, anlegen, befoerdern, loeschen.
+  const users = JSON.parse(
+    (
+      await app.inject({
+        method: "GET",
+        url: "/api/admin/users",
+        headers: auth(admin),
+      })
+    ).body,
+  ).users;
+  assert.equal(users.length, 2);
+
+  const deniedForOwner = await app.inject({
+    method: "GET",
+    url: "/api/admin/users",
+    headers: auth(owner),
+  });
+  assert.equal(deniedForOwner.statusCode, 403);
+
+  const created = JSON.parse(
+    (
+      await app.inject({
+        method: "POST",
+        url: "/api/admin/users",
+        headers: auth(admin),
+        payload: { email: "neu@example.com", name: "Neu", password: "pw123456" },
+      })
+    ).body,
+  ).user;
+  assert.equal(created.isAdmin, false);
+
+  const promoted = JSON.parse(
+    (
+      await app.inject({
+        method: "PATCH",
+        url: `/api/admin/users/${created.id}`,
+        headers: auth(admin),
+        payload: { isAdmin: true },
+      })
+    ).body,
+  ).user;
+  assert.equal(promoted.isAdmin, true);
+
+  // Eigenen Admin-Status entziehen ist verboten.
+  const adminId = users.find(
+    (u: { email: string }) => u.email === "admin@ifc-hub.local",
+  ).id;
+  const selfDemote = await app.inject({
+    method: "PATCH",
+    url: `/api/admin/users/${adminId}`,
+    headers: auth(admin),
+    payload: { isAdmin: false },
+  });
+  assert.equal(selfDemote.statusCode, 400);
+
+  // Loeschen: Benutzer ohne Inhalte geht, der Owner (hat Projekt/Commit-
+  // Inhalte? Owner hat keine Commits, aber Projekt gehoert ihm — Inhalte-
+  // Pruefung greift nur bei Commits/Issues/Kommentaren) — Neu loeschen:
+  const deleted = await app.inject({
+    method: "DELETE",
+    url: `/api/admin/users/${created.id}`,
+    headers: auth(admin),
+  });
+  assert.equal(deleted.statusCode, 204);
 
   await app.close();
 });

@@ -18,6 +18,7 @@ async function setup() {
     email: "a@b.c",
     name: "A",
     passwordHash: "x",
+    isAdmin: false,
   });
   const project = await repo.createProject({
     slug: "p",

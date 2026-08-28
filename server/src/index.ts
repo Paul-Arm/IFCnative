@@ -1,5 +1,6 @@
 import { join } from "node:path";
 
+import { hashPassword } from "./auth/passwords";
 import { loadConfig } from "./config";
 import { buildApp } from "./http/app";
 import { createPgClient } from "./repository/sql/pgClient";
@@ -43,6 +44,25 @@ async function main(): Promise<void> {
     );
     await sqliteRepo.migrate();
     repo = sqliteRepo;
+  }
+
+  // Fest verdrahtetes Admin-Konto sicherstellen (ADMIN_EMAIL/ADMIN_PASSWORD).
+  // Existiert es schon, bleibt das Passwort unangetastet — nur der
+  // Admin-Status wird gesetzt.
+  const existingAdmin = await repo.getUserByEmail(config.adminEmail);
+  if (!existingAdmin) {
+    await repo.createUser({
+      email: config.adminEmail,
+      name: "Admin",
+      passwordHash: hashPassword(config.adminPassword),
+      isAdmin: true,
+    });
+    console.log(
+      `Admin-Konto angelegt: ${config.adminEmail} (Passwort per ADMIN_PASSWORD aendern!)`,
+    );
+  } else if (!existingAdmin.isAdmin) {
+    await repo.updateUser(existingAdmin.id, { isAdmin: true });
+    console.log(`Admin-Status gesetzt fuer ${config.adminEmail}`);
   }
 
   const app = buildApp({

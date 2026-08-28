@@ -7,6 +7,9 @@ export interface ServerConfig {
   azureConnectionString: string | undefined;
   azureContainer: string;
   databaseUrl: string | undefined;
+  /** Fest verdrahtetes Admin-Konto, wird beim Start sichergestellt. */
+  adminEmail: string;
+  adminPassword: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
@@ -24,5 +27,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     azureConnectionString: env.AZURE_STORAGE_CONNECTION_STRING,
     azureContainer: env.AZURE_STORAGE_CONTAINER ?? "ifc-versions",
     databaseUrl: env.DATABASE_URL,
+    adminEmail: env.ADMIN_EMAIL ?? "admin@ifc-hub.local",
+    adminPassword: env.ADMIN_PASSWORD ?? "ifc-hub-admin",
   };
 }

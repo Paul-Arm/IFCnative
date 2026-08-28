@@ -17,6 +17,7 @@ test("SQLite: Katalog-Roundtrip inkl. Ordner, Diff-Cache und Neustart", async ()
     email: "a@b.c",
     name: "A",
     passwordHash: "x:y",
+    isAdmin: false,
   });
   const project = await repo.createProject({
     slug: "acme",
@@ -95,6 +96,7 @@ test("SQLite: Issues + Labels + Zuordnungen", async () => {
     email: "a@b.c",
     name: "A",
     passwordHash: "x",
+    isAdmin: false,
   });
   const project = await repo.createProject({
     slug: "p",

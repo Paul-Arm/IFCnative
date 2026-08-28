@@ -12,8 +12,10 @@ create table if not exists users (
   email text unique not null,
   name text not null,
   password_hash text not null,
-  created_at text not null
+  created_at text not null,
+  is_admin int not null default 0
 );
+alter table users add column if not exists is_admin int not null default 0;
 
 create table if not exists projects (
   id uuid primary key,

@@ -44,6 +44,12 @@ damit exakt einig, was „geändert“ bedeutet.
   Markdown-Beschreibung und Kommentar-Thread, offen/geschlossen, zuordenbar
   an Benutzer, 0..n Modelle und farbige Labels (Tab „Issues“ in der Web-UI;
   Detailseite im GitHub-Layout mit Meta-Sidebar rechts).
+- **Globale Admins** — das fest verdrahtete Admin-Konto (`ADMIN_EMAIL`,
+  Default `admin@ifc-hub.local`; `ADMIN_PASSWORD`, Default `ifc-hub-admin` —
+  in Produktion setzen!) wird beim Start angelegt bzw. markiert. Admins haben
+  Owner-Rechte auf allen Projekten (auch privaten) und eine kleine
+  Benutzerverwaltung unter „Verwaltung“ (anlegen, Admin-Status, Passwort
+  setzen, löschen — sofern der Benutzer keine Inhalte verfasst hat).
 - **Sichtbarkeit** — Projekte sind per Default **öffentlich**: jeder
   angemeldete Benutzer sieht sie lesend (implizite viewer-Rolle), schreiben
   können nur Mitglieder; pro Projekt umschaltbar auf privat (nur Mitglieder).
@@ -83,7 +89,8 @@ JWT_SECRET="..." NODE_ENV=production npm start
 Konfiguration (`src/config.ts`): `PORT` (8787), `HOST`, `JWT_SECRET`,
 `STORAGE` (`filesystem`|`azure`), `DATA_DIR`,
 `AZURE_STORAGE_CONNECTION_STRING`, `AZURE_STORAGE_CONTAINER`,
-`DATABASE_URL` (Postgres; ohne = SQLite unter `DATA_DIR`).
+`DATABASE_URL` (Postgres; ohne = SQLite unter `DATA_DIR`), `ADMIN_EMAIL`,
+`ADMIN_PASSWORD` (fest verdrahtetes Admin-Konto).
 
 > **Hinweis:** Der lokale Modus ist ohne weitere Konfiguration persistent
 > (SQLite-Katalog + Blobs unter `DATA_DIR`; kein natives Modul nötig,
@@ -117,7 +124,9 @@ Auth: `Authorization: Bearer <JWT>` aus `/api/auth/login`. Fehler kommen als
 | --- | --- | --- |
 | GET | `/api/health` | `{status, version, storage}` |
 | POST | `/api/auth/register`, `/api/auth/login` | → `{ token, user }` |
-| GET | `/api/me` | aktueller Benutzer |
+| GET | `/api/me` | aktueller Benutzer (inkl. `isAdmin`) |
+| GET/POST | `/api/admin/users` | Benutzer auflisten / anlegen `{email, password, name?, isAdmin?}` (nur Admin) |
+| PATCH/DELETE | `/api/admin/users/:id` | Name/Admin-Status/Passwort ändern bzw. löschen (nur Admin; Selbst-Aussperrung und Löschen mit Inhalten blockiert) |
 | GET/POST | `/api/projects` | eigene + öffentliche Projekte (mit Rolle) / anlegen `{name, slug?, visibility?}` (Default: public) |
 | GET/PATCH | `/api/projects/:slug` | Projekt + Mitglieder + `folders` (private nur für Mitglieder) / Einstellungen `{name?, visibility?}` (admin) |
 | POST | `/api/projects/:slug/folders` | Ordner anlegen `{path}` (write) |

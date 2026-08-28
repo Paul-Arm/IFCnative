@@ -6,6 +6,11 @@ export interface ApiUser {
   id: string;
   email: string;
   name: string;
+  isAdmin?: boolean;
+}
+
+export interface AdminUser extends ApiUser {
+  createdAt: string;
 }
 
 export interface Project {
