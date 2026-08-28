@@ -117,6 +117,14 @@ export interface Issue {
   updatedAt: string;
 }
 
+export interface IssueComment {
+  id: string;
+  issueId: string;
+  authorId: string;
+  body: string;
+  createdAt: string;
+}
+
 /** Zuordnungen eines Issues: Bearbeiter, Modelle, Labels (jeweils 0..n). */
 export interface IssueLinks {
   assigneeIds: string[];
@@ -182,6 +190,14 @@ export interface Repository {
   /** Ersetzt die jeweils übergebenen Zuordnungs-Mengen komplett. */
   setIssueLinks(issueId: string, links: Partial<IssueLinks>): Promise<void>;
   getIssueLinks(issueIds: string[]): Promise<Map<string, IssueLinks>>;
+
+  // Issue-Kommentare
+  createIssueComment(
+    input: Omit<IssueComment, "id" | "createdAt">,
+  ): Promise<IssueComment>;
+  listIssueComments(issueId: string): Promise<IssueComment[]>;
+  getIssueComment(commentId: string): Promise<IssueComment | null>;
+  deleteIssueComment(commentId: string): Promise<void>;
 
   // Branches
   createBranch(input: Omit<Branch, "id">): Promise<Branch>;

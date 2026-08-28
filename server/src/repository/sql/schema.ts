@@ -138,6 +138,15 @@ create table if not exists issue_label_links (
   label_id uuid not null references labels(id),
   primary key (issue_id, label_id)
 );
+
+create table if not exists issue_comments (
+  id uuid primary key,
+  issue_id uuid not null references issues(id),
+  author_id uuid not null references users(id),
+  body text not null,
+  created_at text not null
+);
+create index if not exists issue_comments_issue_idx on issue_comments(issue_id);
 `;
 
 export function schemaStatements(): string[] {

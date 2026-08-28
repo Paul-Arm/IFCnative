@@ -122,7 +122,8 @@ Auth: `Authorization: Bearer <JWT>` aus `/api/auth/login`. Fehler kommen als
 | PUT/GET | `/api/projects/:slug/image` | Projektbild (PNG, z. B. Szenen-Screenshot aus dem 3D-Tab) setzen (write) / abrufen (Mitglied) |
 | GET/POST | `/api/projects/:slug/labels` | Labels auflisten / anlegen `{name, color}` (write) |
 | GET/POST | `/api/projects/:slug/issues` | Issues (`?state=open\|closed`, mit Zählern) / eröffnen `{title, body?, assigneeIds?, modelIds?, labelIds?}` (jedes Mitglied) |
-| GET/PATCH | `/api/projects/:slug/issues/:number` | Issue-Detail / ändern (Titel, Body, State, Zuordnungen — Autor oder write-Rolle) |
+| GET/PATCH | `/api/projects/:slug/issues/:number` | Issue-Detail (inkl. `comments`) / ändern (Titel, Body, State, Zuordnungen — Autor oder write-Rolle) |
+| POST/DELETE | `/api/projects/:slug/issues/:number/comments(/:id)` | kommentieren (jedes Mitglied) / löschen (Autor oder write-Rolle) |
 | POST | `/api/projects/:slug/members` | Mitglied hinzufügen/Rolle ändern `{email, role}` (admin) |
 | DELETE | `/api/projects/:slug/members/:userId` | Mitglied entfernen (admin; Owner geschützt) |
 | GET/POST | `/api/projects/:slug/models` | Modelle (mit Head-Commit) / anlegen `{name, visibility?, folder?, kind?}` (`ifc`\|`md`) |

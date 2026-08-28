@@ -562,6 +562,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return reply.code(201).send({ issue: enriched });
   });
 
+  /** Kommentare eines Issues mit Autor-Objekt für die UI. */
+  async function enrichComments(issueId: string) {
+    const comments = await repo.listIssueComments(issueId);
+    const users = await usersById(comments.map((comment) => comment.authorId));
+    return comments.map((comment) => {
+      const author = users.get(comment.authorId);
+      return { ...comment, author: author ? publicUser(author) : null };
+    });
+  }
+
   app.get(`${api}/projects/:slug/issues/:number`, async (request, reply) => {
     const { slug, number } = request.params as { slug: string; number: string };
     const project = await resolveProject(slug, reply);
@@ -574,8 +584,76 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       return reply.code(404).send({ error: "Issue not found" });
     }
     const [enriched] = await enrichIssues(project.id, [issue]);
-    return reply.send({ issue: enriched });
+    return reply.send({
+      issue: enriched,
+      comments: await enrichComments(issue.id),
+    });
   });
+
+  // Kommentieren darf jedes Mitglied — wie bei GitHub, auch auf geschlossenen.
+  app.post(
+    `${api}/projects/:slug/issues/:number/comments`,
+    async (request, reply) => {
+      const { slug, number } = request.params as {
+        slug: string;
+        number: string;
+      };
+      const project = await resolveProject(slug, reply);
+      if (!project) return reply;
+      const user = await requireUser(request, reply);
+      if (!user) return reply;
+      if (!(await requireMember(project, user, reply, "read"))) return reply;
+      const issue = await repo.getIssue(project.id, Number(number));
+      if (!issue) {
+        return reply.code(404).send({ error: "Issue not found" });
+      }
+      const body = (request.body ?? {}) as { body?: string };
+      const text = body.body?.trim();
+      if (!text || text.length > 20_000) {
+        return reply
+          .code(400)
+          .send({ error: "Comment body required (max 20000)" });
+      }
+      const comment = await repo.createIssueComment({
+        issueId: issue.id,
+        authorId: user.id,
+        body: text,
+      });
+      // Aktivität am Issue sichtbar machen (updatedAt).
+      await repo.updateIssue(issue.id, {});
+      return reply
+        .code(201)
+        .send({ comment: { ...comment, author: publicUser(user) } });
+    },
+  );
+
+  app.delete(
+    `${api}/projects/:slug/issues/:number/comments/:commentId`,
+    async (request, reply) => {
+      const { slug, number, commentId } = request.params as {
+        slug: string;
+        number: string;
+        commentId: string;
+      };
+      const project = await resolveProject(slug, reply);
+      if (!project) return reply;
+      const user = await requireUser(request, reply);
+      if (!user) return reply;
+      const member = await requireMember(project, user, reply, "read");
+      if (!member) return reply;
+      const issue = await repo.getIssue(project.id, Number(number));
+      const comment = await repo.getIssueComment(commentId);
+      if (!issue || !comment || comment.issueId !== issue.id) {
+        return reply.code(404).send({ error: "Comment not found" });
+      }
+      // Löschen darf der Kommentar-Autor oder jedes Mitglied mit Schreibrecht.
+      if (comment.authorId !== user.id && !WRITE_ROLES.has(member.role)) {
+        return reply.code(403).send({ error: "Insufficient role" });
+      }
+      await repo.deleteIssueComment(commentId);
+      return reply.code(204).send();
+    },
+  );
 
   app.patch(`${api}/projects/:slug/issues/:number`, async (request, reply) => {
     const { slug, number } = request.params as { slug: string; number: string };

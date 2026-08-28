@@ -685,6 +685,90 @@ test("issues: labels, create with links, filter, patch, permissions", async () =
   await app.close();
 });
 
+test("issue comments: create, list in detail, delete permissions", async () => {
+  const app = await makeApp();
+  const owner = await register(app, "owner@example.com", "Owner");
+  const viewer = await register(app, "viewer@example.com", "Viewer");
+  await app.inject({
+    method: "POST",
+    url: "/api/projects",
+    headers: auth(owner),
+    payload: { name: "Acme", slug: "acme" },
+  });
+  await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/members",
+    headers: auth(owner),
+    payload: { email: "viewer@example.com", role: "viewer" },
+  });
+  await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/issues",
+    headers: auth(owner),
+    payload: { title: "Thema" },
+  });
+
+  // Kommentieren darf auch der viewer.
+  const created = await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/issues/1/comments",
+    headers: auth(viewer),
+    payload: { body: "Sehe ich **auch** so." },
+  });
+  assert.equal(created.statusCode, 201);
+  const comment = JSON.parse(created.body).comment;
+  assert.equal(comment.author.email, "viewer@example.com");
+
+  const ownerComment = JSON.parse(
+    (
+      await app.inject({
+        method: "POST",
+        url: "/api/projects/acme/issues/1/comments",
+        headers: auth(owner),
+        payload: { body: "Antwort." },
+      })
+    ).body,
+  ).comment;
+
+  // Detail liefert die Kommentare chronologisch mit Autor.
+  const detail = JSON.parse(
+    (
+      await app.inject({
+        method: "GET",
+        url: "/api/projects/acme/issues/1",
+        headers: auth(owner),
+      })
+    ).body,
+  );
+  assert.equal(detail.comments.length, 2);
+  assert.equal(detail.comments[0].author.name, "Viewer");
+
+  // Leerer Kommentar wird abgelehnt.
+  const empty = await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/issues/1/comments",
+    headers: auth(owner),
+    payload: { body: "   " },
+  });
+  assert.equal(empty.statusCode, 400);
+
+  // Der viewer darf fremde Kommentare nicht löschen, eigene schon.
+  const deniedDelete = await app.inject({
+    method: "DELETE",
+    url: `/api/projects/acme/issues/1/comments/${ownerComment.id}`,
+    headers: auth(viewer),
+  });
+  assert.equal(deniedDelete.statusCode, 403);
+  const ownDelete = await app.inject({
+    method: "DELETE",
+    url: `/api/projects/acme/issues/1/comments/${comment.id}`,
+    headers: auth(viewer),
+  });
+  assert.equal(ownDelete.statusCode, 204);
+
+  await app.close();
+});
+
 test("health reports version and storage mode", async () => {
   const app = await makeApp();
   const res = await app.inject({ method: "GET", url: "/api/health" });

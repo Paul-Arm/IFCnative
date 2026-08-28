@@ -8,6 +8,7 @@ import type {
   Branch,
   Commit,
   Issue,
+  IssueComment,
   IssueLinks,
   Label,
   Member,
@@ -44,6 +45,7 @@ export class MemoryRepository implements Repository {
   protected labels = new Map<string, Label>();
   protected issues = new Map<string, Issue>();
   protected issueLinks = new Map<string, IssueLinks>();
+  protected issueComments = new Map<string, IssueComment>();
 
   private now(): string {
     // Tests need determinism-free timestamps; ISO string is fine here.
@@ -205,6 +207,11 @@ export class MemoryRepository implements Repository {
       if (issue.projectId === projectId) {
         this.issues.delete(issue.id);
         this.issueLinks.delete(issue.id);
+        for (const comment of [...this.issueComments.values()]) {
+          if (comment.issueId === issue.id) {
+            this.issueComments.delete(comment.id);
+          }
+        }
       }
     }
     for (const label of [...this.labels.values()]) {
@@ -312,6 +319,32 @@ export class MemoryRepository implements Repository {
       });
     }
     return map;
+  }
+
+  async createIssueComment(
+    input: Omit<IssueComment, "id" | "createdAt">,
+  ): Promise<IssueComment> {
+    const comment: IssueComment = {
+      ...input,
+      id: randomUUID(),
+      createdAt: this.now(),
+    };
+    this.issueComments.set(comment.id, comment);
+    return comment;
+  }
+
+  async listIssueComments(issueId: string): Promise<IssueComment[]> {
+    return [...this.issueComments.values()]
+      .filter((comment) => comment.issueId === issueId)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  async getIssueComment(commentId: string): Promise<IssueComment | null> {
+    return this.issueComments.get(commentId) ?? null;
+  }
+
+  async deleteIssueComment(commentId: string): Promise<void> {
+    this.issueComments.delete(commentId);
   }
 
   async listFolders(projectId: string): Promise<string[]> {

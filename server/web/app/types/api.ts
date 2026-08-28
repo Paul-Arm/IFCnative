@@ -101,6 +101,15 @@ export interface Issue {
   labels: Label[];
 }
 
+export interface IssueComment {
+  id: string;
+  issueId: string;
+  authorId: string;
+  body: string;
+  createdAt: string;
+  author: ApiUser | null;
+}
+
 export type GuidChangeStatus = "added" | "removed" | "modified";
 
 export interface GuidDiffEntry {

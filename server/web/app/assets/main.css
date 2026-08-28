@@ -997,14 +997,133 @@ details.menu > summary::-webkit-details-marker {
   cursor: pointer;
 }
 
-.issue-sidebar-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+/* ---- Issue-Detailseite (GitHub-Layout) --------------------------------- */
+
+.issue-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.issue-title {
+  font-size: 1.5rem;
+  font-weight: 400;
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.issue-title .muted {
+  font-weight: 300;
+}
+
+.issue-title-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin: 0.5rem 0 1rem;
+  padding-bottom: 0.9rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.issue-state-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 999px;
+  padding: 0.25rem 0.8rem;
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: #ffffff;
+}
+
+.issue-state-badge.open {
+  background: var(--success);
+}
+
+.issue-state-badge.closed {
+  background: #8250df;
+}
+
+.issue-layout {
+  display: flex;
+  gap: 1.5rem;
+  align-items: flex-start;
+}
+
+.issue-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.comment-card .comment-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+
+.comment-delete {
+  opacity: 0.6;
+}
+
+.comment-delete:hover {
+  opacity: 1;
+}
+
+.issue-side {
+  width: 250px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
   gap: 1rem;
 }
 
-.issue-sidebar-grid .card {
-  margin-bottom: 0;
+.issue-side-section {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.issue-side-section:last-child {
+  border-bottom: none;
+}
+
+.issue-side-section h4 {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin: 0 0 0.4rem;
+}
+
+.issue-side-section .pv-item {
+  padding-left: 0;
+}
+
+.issue-side-section .label-chip {
+  margin-left: 0;
+}
+
+.side-hidden {
+  display: none;
+}
+
+@media (max-width: 860px) {
+  .issue-layout {
+    flex-direction: column;
+  }
+
+  .issue-side {
+    width: 100%;
+  }
 }
 
 /* ---- Projekt-Vorschaubild --------------------------------------------- */

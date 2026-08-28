@@ -10,6 +10,7 @@ import type {
   Branch,
   Commit,
   Issue,
+  IssueComment,
   IssueLinks,
   IssueState,
   Label,
@@ -353,7 +354,12 @@ export class SqlRepository implements Repository {
     for (const model of await this.listModels(projectId)) {
       blobKeys.push(...(await this.deleteModel(model.id)));
     }
-    for (const junction of ["issue_assignees", "issue_models", "issue_label_links"]) {
+    for (const junction of [
+      "issue_assignees",
+      "issue_models",
+      "issue_label_links",
+      "issue_comments",
+    ]) {
       await this.sql.query(
         `delete from ${junction} where issue_id in
            (select id from issues where project_id = $1)`,
@@ -542,6 +548,65 @@ export class SqlRepository implements Repository {
       }
     }
     return map;
+  }
+
+  private toIssueComment(row: {
+    id: string;
+    issue_id: string;
+    author_id: string;
+    body: string;
+    created_at: string;
+  }): IssueComment {
+    return {
+      id: row.id,
+      issueId: row.issue_id,
+      authorId: row.author_id,
+      body: row.body,
+      createdAt: row.created_at,
+    };
+  }
+
+  async createIssueComment(
+    input: Omit<IssueComment, "id" | "createdAt">,
+  ): Promise<IssueComment> {
+    const comment: IssueComment = {
+      ...input,
+      id: randomUUID(),
+      createdAt: this.now(),
+    };
+    await this.sql.query(
+      `insert into issue_comments (id, issue_id, author_id, body, created_at)
+       values ($1, $2, $3, $4, $5)`,
+      [
+        comment.id,
+        comment.issueId,
+        comment.authorId,
+        comment.body,
+        comment.createdAt,
+      ],
+    );
+    return comment;
+  }
+
+  async listIssueComments(issueId: string): Promise<IssueComment[]> {
+    const { rows } = await this.sql.query<
+      Parameters<SqlRepository["toIssueComment"]>[0]
+    >(
+      `select * from issue_comments where issue_id = $1 order by created_at`,
+      [issueId],
+    );
+    return rows.map((row) => this.toIssueComment(row));
+  }
+
+  async getIssueComment(commentId: string): Promise<IssueComment | null> {
+    const { rows } = await this.sql.query<
+      Parameters<SqlRepository["toIssueComment"]>[0]
+    >(`select * from issue_comments where id = $1`, [commentId]);
+    return rows[0] ? this.toIssueComment(rows[0]) : null;
+  }
+
+  async deleteIssueComment(commentId: string): Promise<void> {
+    await this.sql.query(`delete from issue_comments where id = $1`, [commentId]);
   }
 
   // ---- folders ---------------------------------------------------------
