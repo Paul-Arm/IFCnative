@@ -1,47 +1,54 @@
-# IFC Version Control Server
+# IFC-Ablage — Versionskontroll-Server
 
-A GitHub-style collaboration backend for IFC building models with **semantic,
-GlobalId-keyed diffs** (not git line diffs). Built on the existing TypeScript IFC
-layer in `../src/ifc` — it reuses `parseNativeIfcText` and the GlobalId diff in
-`../src/ifc/versioning`.
+Die zentrale Ablage für IFC-Modelle: **Projekte, Benutzer, Modelle und
+Versionierung mit Commits + Nachricht** — wie GitHub, aber mit **semantischen,
+GlobalId-basierten Diffs** statt Zeilen-Diffs. Bedienung über die eingebaute
+**Web-UI** und eine **REST-API** (Client-Integration z. B. im Editor über das
+Panel „IFC-Ablage“).
 
-## What it does
+Der Server nutzt den STEP-Parser und den GlobalId-Diff des Editors
+(`editor/src/ifc`, Brücke in `src/ifc/index.ts`) — Editor und Server sind sich
+damit exakt einig, was „geändert“ bedeutet.
 
-- **Projects / models / branches / commits** — teams version IFC models together.
-- **Semantic commits** — each uploaded IFC is decomposed into entities, every
-  rooted entity (real 22-char IFC GUID) is content-hashed in a version-stable way
-  (express ids excluded, references rewritten to GUIDs, GUID-less support
-  geometry/placements/property values folded into their owning entity). A commit
-  is a manifest `{globalId -> hash}`; its `manifestHash` is the content-address.
-- **Semantic diff** — comparing two commits is a set diff over manifests:
-  `added / removed / modified` by GlobalId. Re-exporting a file (which renumbers
-  STEP ids) produces an *empty* diff.
-- **Client-less access** — models marked `public` are browsable and diffable
-  without authentication, for the web portal and third-party tools.
+## Was er kann
 
-## Storage
+- **Projekte / Modelle / Branches / Commits** — Teams versionieren IFC-Modelle
+  gemeinsam; Rollen: `owner`, `maintainer`, `contributor`, `viewer`.
+- **Semantische Commits** — jede hochgeladene IFC wird in Entities zerlegt;
+  jede gerootete Entity (echte 22-Zeichen-GUID) wird versionsstabil gehasht
+  (Express-Ids raus, Referenzen auf GUIDs umgeschrieben, GUID-lose
+  Hilfsgeometrie in die tragende Entity gefaltet). Ein Commit ist ein Manifest
+  `{globalId -> hash}`; dessen `manifestHash` ist die Content-Adresse.
+- **Semantischer Diff** — Vergleich zweier Commits ist ein Mengen-Diff über
+  Manifeste: `added / removed / modified` je GlobalId. Ein Re-Export (der nur
+  STEP-Ids neu nummeriert) ergibt einen *leeren* Diff. Pro geänderter Entity
+  gibt es Feld-Detail (welches Attribut/Pset-Feld, alt → neu).
+- **Öffentliche Modelle** — `visibility: public` ist ohne Anmeldung les- und
+  diffbar (Portal-Zugriff ohne Client).
 
-- **Object store** (raw IFC blobs): Azure Blob Storage in production
-  (`STORAGE=azure`), filesystem for local dev/tests. See `src/storage/`.
-- **Metadata + manifests** (projects, commits, members, the deduped entity
-  store, diff cache): Postgres via `SqlRepository` when `DATABASE_URL` is set,
-  otherwise the non-persistent `MemoryRepository`. Schema in
-  `src/repository/sql/schema.ts`; the same SQL is exercised in tests via PGlite.
-  - **Entity dedup**: each commit's manifest is `{globalId -> entityHash}` in
-    `commit_entities`; the canonical entity payloads live once in
-    `entity_objects` (shared across commits), so a commit touching 10 of 50k
-    entities stores ~10 new payloads, not 50k.
-  - **Diff cache**: computed diffs are stored in `diffs_cache`; since commits
-    are immutable the cache never goes stale.
+## Zwei Speicher-Modi
 
-## Run
+| Modus | Objekt-Store (IFC-Blobs) | Metadaten (Projekte, Commits, Manifeste) |
+| --- | --- | --- |
+| **lokal** (Standard) | Dateisystem `DATA_DIR` (`./.ifc-vcs-data`) | In-Memory, oder Postgres wenn `DATABASE_URL` gesetzt |
+| **azure** (`STORAGE=azure`) | Azure Blob Storage | Postgres (`DATABASE_URL`) |
+
+Die Metadaten-Schicht dedupliziert Entity-Payloads über Commits hinweg
+(`entity_objects`), Diffs werden gecacht (`diffs_cache`; Commits sind
+unveränderlich, der Cache veraltet also nie). Schema in
+`src/repository/sql/schema.ts`, in Tests via PGlite ausgeführt.
+
+## Starten
 
 ```bash
 cd server
 npm install
-# local dev (filesystem store):
-npm run dev
-# production with Azure Blob + Postgres:
+npm run dev            # http://localhost:8787 — Web-UI + API, lokaler Modus
+```
+
+Produktion mit Azure Blob + Postgres:
+
+```bash
 STORAGE=azure \
 AZURE_STORAGE_CONNECTION_STRING="..." \
 AZURE_STORAGE_CONTAINER="ifc-versions" \
@@ -49,34 +56,80 @@ DATABASE_URL="postgres://user:pass@host:5432/ifcvcs" \
 JWT_SECRET="..." NODE_ENV=production npm start
 ```
 
-Config (`src/config.ts`): `PORT` (8787), `HOST`, `JWT_SECRET`, `STORAGE`
-(`filesystem`|`azure`), `DATA_DIR`, `AZURE_STORAGE_CONNECTION_STRING`,
-`AZURE_STORAGE_CONTAINER`, `DATABASE_URL` (Postgres; in-memory if unset).
+Konfiguration (`src/config.ts`): `PORT` (8787), `HOST`, `JWT_SECRET`,
+`STORAGE` (`filesystem`|`azure`), `DATA_DIR`,
+`AZURE_STORAGE_CONNECTION_STRING`, `AZURE_STORAGE_CONTAINER`,
+`DATABASE_URL` (Postgres; ohne = In-Memory, nicht persistent!).
 
-## API (MVP)
+> **Hinweis:** Für persistente Metadaten im lokalen Modus `DATABASE_URL`
+> setzen. Ohne Postgres überleben Projekte/Commits keinen Neustart — die
+> IFC-Blobs liegen zwar auf Platte, aber der Katalog dazu nicht.
 
-| Method | Path | Notes |
+## Web-UI (`web/`, Nuxt)
+
+Single-Page-App: Login/Registrierung, Projekte (+ Mitgliederverwaltung),
+Modelle, Commit-Historie je Branch, IFC-Upload mit Commit-Nachricht,
+Commit-Detail mit semantischem Diff (wählbare Vergleichsbasis, Feld-Detail
+pro Entity), .ifc-Download.
+
+- Der Fastify-Server liefert die gebaute SPA aus `public/` mit aus — **ein
+  Prozess für UI + API**. Der Build ist eingecheckt; `npm run dev` reicht.
+- UI neu bauen nach Änderungen in `web/`:
+
+```bash
+npm run build:web      # = npm --prefix web run generate + Sync nach public/
+```
+
+- UI-Entwicklung mit Hot-Reload: `cd web && npm install && npm run dev`
+  (Port 3000, proxied `/api` auf 8787).
+
+## REST-API (`/api`, JSON)
+
+Auth: `Authorization: Bearer <JWT>` aus `/api/auth/login`. Fehler kommen als
+`{ "error": "…" }`.
+
+| Methode | Pfad | Bemerkung |
 | --- | --- | --- |
-| POST | `/auth/register`, `/auth/login` | returns `{ token, user }` |
-| GET | `/me` | current user |
-| GET/POST | `/projects` | list mine / create |
-| GET | `/projects/:slug` | project + members |
-| POST | `/projects/:slug/members` | add member `{ email, role }` |
-| GET/POST | `/projects/:slug/models` | list / create `{ name, visibility }` |
-| GET | `/projects/:slug/models/:model` | model + branches |
-| POST | `/projects/:slug/models/:model/commits?branch=&message=` | upload IFC (raw body or multipart `file`) → `{ commit, diff }` |
-| GET | `/projects/:slug/models/:model/commits?branch=` | history |
-| GET | `/projects/:slug/models/:model/commits/:id` | commit metadata |
-| GET | `/projects/:slug/models/:model/commits/:id/file` | download raw IFC |
-| GET | `/projects/:slug/models/:model/diff?from=&to=` | semantic diff |
+| GET | `/api/health` | `{status, version, storage}` |
+| POST | `/api/auth/register`, `/api/auth/login` | → `{ token, user }` |
+| GET | `/api/me` | aktueller Benutzer |
+| GET/POST | `/api/projects` | meine Projekte (mit Rolle) / anlegen `{name, slug?}` |
+| GET | `/api/projects/:slug` | Projekt + Mitglieder (mit Benutzerdaten) |
+| POST | `/api/projects/:slug/members` | Mitglied hinzufügen/Rolle ändern `{email, role}` (admin) |
+| DELETE | `/api/projects/:slug/members/:userId` | Mitglied entfernen (admin; Owner geschützt) |
+| GET/POST | `/api/projects/:slug/models` | Modelle (mit Head-Commit) / anlegen `{name, visibility?}` |
+| GET | `/api/projects/:slug/models/:model` | Modell + Branches (mit Heads) |
+| POST | `/api/projects/:slug/models/:model/branches` | Branch anlegen `{name, from?}` — startet am Head von `from` |
+| POST | `…/commits?branch=&message=` | IFC hochladen (raw Body **oder** Multipart `file` + Felder `message`/`branch`) → `{commit, diff}` |
+| GET | `…/commits?branch=` | Historie (Commits mit Autor) |
+| GET | `…/commits/:id` | Commit-Metadaten |
+| GET | `…/commits/:id/file` | Roh-IFC herunterladen (byte-identisch) |
+| GET | `…/diff?from=&to=` | semantischer Diff zweier Commits |
+| GET | `…/diff/entity?from=&to=&globalId=` | Feld-Detail einer geänderten Entity |
+
+CORS ist offen (Bearer-Auth, keine Cookies) — Editor (Vite/Tauri) und
+Nuxt-Dev-Server können direkt zugreifen.
+
+## Editor-Integration
+
+Im Editor (`editor/`) gibt es das Mosaic-Panel **„IFC-Ablage“** (über das
+Fenster-Menü): anmelden, Projekt/Modell/Branch wählen, Versionsstände als
+neuen Tab öffnen, aktuellen Stand mit Commit-Nachricht committen (inkl.
+Diff-Zusammenfassung als Antwort). Client-Code in `editor/src/vcs/`
+(`client.ts`, `types.ts`); unter Tauri läuft HTTP über das Tauri-Plugin
+(Host-Freigabe in `src-tauri/capabilities/default.json`).
 
 ## Tests
 
 ```bash
-npm test   # service + HTTP (fastify.inject), no DB or Azure needed
+npm test               # Service-, HTTP- (fastify.inject) und SQL-Ebene (PGlite)
+npm run typecheck      # tsc --noEmit
 ```
 
-## Not yet (later phases)
+## Noch offen (bewusst später)
 
-Branches UI / three-way merge with per-entity conflict detection, public REST
-docs (Swagger), client SDK, and React-client diff integration.
+- Drei-Wege-Merge mit Konflikt-Erkennung auf Entity-Ebene; Merge-UI.
+- Löschen/Umbenennen von Projekten und Modellen (API + UI).
+- Tags/Releases; geschützte Branches.
+- OpenAPI/Swagger-Doku; Pagination für sehr lange Historien.
+- Web-UI: 3D-Vorschau eines Commits.

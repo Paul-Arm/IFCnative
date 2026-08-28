@@ -6,6 +6,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "server", "run", "start"],
       "port": 8787
+    },
+    {
+      "name": "editor",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "editor", "run", "start"],
+      "port": 5173
     }
   ]
 }

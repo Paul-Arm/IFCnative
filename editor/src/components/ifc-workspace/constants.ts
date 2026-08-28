@@ -20,6 +20,7 @@ export const MOSAIC_VIEW_IDS: MosaicViewId[] = [
   "notes",
   "portal",
   "portal-settings",
+  "vcs",
 ];
 
 // Der Diagnostik-Assistent und der Körper-Builder sind bewusst NICHT im
@@ -192,6 +193,7 @@ export const MOSAIC_TITLES: Record<MosaicViewId, string> = {
   "resource-references": "Klassifikation & Dokumente",
   "resource-controls": "Freigaben & Constraints",
   structure: "Struktur",
+  vcs: "IFC-Ablage",
   viewer: "3D-Viewer",
 };
 

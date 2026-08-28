@@ -8,6 +8,12 @@ import {
 } from "@/portal/types";
 
 import {
+    createDefaultVcsSettings,
+    type VcsAuth,
+    type VcsSettings,
+} from "@/vcs/types";
+
+import {
     BUILT_IN_WORKSPACES,
     DEFAULT_WORKSPACE_ID,
     MOSAIC_VIEW_IDS,
@@ -16,6 +22,7 @@ import {
 import type { MosaicViewId } from "./types";
 
 export { createDefaultPortalSettings } from "@/portal/types";
+export { createDefaultVcsSettings } from "@/vcs/types";
 
 export interface RecentIfcFileEntry {
   documentId?: string;
@@ -227,6 +234,60 @@ export function savePortalTokens(tokens: PortalTokens | null) {
     return;
   }
   writeJson(PORTAL_TOKENS_STORAGE_KEY, tokens);
+}
+
+const VCS_SETTINGS_STORAGE_KEY = "ifcnative:vcs-settings:v1";
+const VCS_AUTH_STORAGE_KEY = "ifcnative:vcs-auth:v1";
+
+export function loadVcsSettings(): VcsSettings {
+  const defaults = createDefaultVcsSettings();
+  const parsed = readJson<unknown>(VCS_SETTINGS_STORAGE_KEY, null);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return defaults;
+  }
+  const candidate = parsed as Record<string, unknown>;
+  return {
+    baseUrl: readStringOr(candidate.baseUrl, defaults.baseUrl),
+  };
+}
+
+export function saveVcsSettings(settings: VcsSettings) {
+  writeJson(VCS_SETTINGS_STORAGE_KEY, settings);
+}
+
+export function loadVcsAuth(): VcsAuth | null {
+  const parsed = readJson<unknown>(VCS_AUTH_STORAGE_KEY, null);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+  const candidate = parsed as Partial<VcsAuth>;
+  const user = candidate.user;
+  if (
+    typeof candidate.token !== "string" ||
+    !candidate.token ||
+    !user ||
+    typeof user !== "object" ||
+    typeof user.id !== "string" ||
+    typeof user.email !== "string"
+  ) {
+    return null;
+  }
+  return {
+    token: candidate.token,
+    user: {
+      id: user.id,
+      email: user.email,
+      name: typeof user.name === "string" ? user.name : user.email,
+    },
+  };
+}
+
+export function saveVcsAuth(auth: VcsAuth | null) {
+  if (!auth) {
+    removeLocalStorage(VCS_AUTH_STORAGE_KEY);
+    return;
+  }
+  writeJson(VCS_AUTH_STORAGE_KEY, auth);
 }
 
 export function loadRecentIfcFiles(): RecentIfcFileEntry[] {

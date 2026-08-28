@@ -23,7 +23,8 @@ export type MosaicViewId =
   | "recent"
   | "notes"
   | "portal"
-  | "portal-settings";
+  | "portal-settings"
+  | "vcs";
 
 export interface Point {
   x: number;

@@ -175,6 +175,7 @@ import {
 } from "./ifc-workspace/InspectorPanel";
 import { CheckPanel } from "./ifc-workspace/CheckPanel";
 import { PortalPanel } from "./ifc-workspace/PortalPanel";
+import { VcsPanel } from "./ifc-workspace/VcsPanel";
 import { PortalSettingsPanel } from "./ifc-workspace/PortalSettingsPanel";
 import { PsetBatchPanel } from "./ifc-workspace/PsetBatchPanel";
 import { StructurePanel } from "./ifc-workspace/StructurePanel";
@@ -199,6 +200,8 @@ import {
     loadPortalSettings,
     loadPortalTokens,
     loadRecentIfcFiles,
+    loadVcsAuth,
+    loadVcsSettings,
     mergeRecentIfcFile,
     resolveWorkspace,
     saveActiveWorkspaceId,
@@ -207,6 +210,8 @@ import {
     savePortalSettings,
     savePortalTokens,
     saveRecentIfcFiles,
+    saveVcsAuth,
+    saveVcsSettings,
     type RecentIfcFileEntry,
 } from "./ifc-workspace/workspaceStorage";
 import type { RelationshipFlowClipboardNode } from "./relationship-flow.types";
@@ -458,6 +463,8 @@ export default function IfcWorkspace() {
   const [notes, setNotes] = useState(loadNotes);
   const [portalSettings, setPortalSettings] = useState(loadPortalSettings);
   const [portalTokens, setPortalTokens] = useState(loadPortalTokens);
+  const [vcsSettings, setVcsSettings] = useState(loadVcsSettings);
+  const [vcsAuth, setVcsAuth] = useState(loadVcsAuth);
   const [coordinateClipboard, setCoordinateClipboard] =
     useState<CoordinateClipboard | null>(null);
   const [groupManagerEntityId, setGroupManagerEntityId] = useState<
@@ -1674,6 +1681,38 @@ export default function IfcWorkspace() {
     }
   };
 
+  // Aktueller Stand als IFC-Text für die IFC-Ablage (gleiche Cache-Regel wie
+  // exportIfc: frisch serialisieren nur, wenn der Text-Cache veraltet ist).
+  const getVcsIfcText = (): string => {
+    const serializedNow = documentTextDirty
+      ? serializeNativeIfcDocument(document)
+      : null;
+    return serializedNow ?? (documentText || serializeNativeIfcDocument(document));
+  };
+
+  // Ein Versionsstand aus der IFC-Ablage wird als ZUSÄTZLICHER Tab geöffnet
+  // (wie "Hinzufügen"), damit der aktuelle Arbeitsstand erhalten bleibt.
+  const openIfcTextFromVcs = async (text: string, fileName: string) => {
+    setLoadingIfcName(fileName);
+    try {
+      const file = new File([text], fileName, { type: "application/x-step" });
+      const parsed = await parseNativeIfcFileInWorker(file, fileName);
+      const session = createWorkspaceDocumentSession(parsed.document, {
+        bytes: parsed.bytes,
+        file,
+        text,
+      });
+      startTransition(() => {
+        setDocumentSessions((current) => [...current, session]);
+        setActiveDocumentId(session.id);
+      });
+      rememberRecentIfc(session, "added", file);
+      logAction(`ui.vcs.open({ file: '${fileName}' });`);
+    } finally {
+      setLoadingIfcName("");
+    }
+  };
+
   // Erfolgsmeldungen verschwinden von selbst; Fehler bleiben stehen, bis sie
   // gelesen und weggeklickt wurden.
   useEffect(() => {
@@ -1725,6 +1764,14 @@ export default function IfcWorkspace() {
   useEffect(() => {
     savePortalTokens(portalTokens);
   }, [portalTokens]);
+
+  useEffect(() => {
+    saveVcsSettings(vcsSettings);
+  }, [vcsSettings]);
+
+  useEffect(() => {
+    saveVcsAuth(vcsAuth);
+  }, [vcsAuth]);
 
   // Portal-Importe laufen asynchron (Netz-Roundtrip) und übernehmen ihr
   // Ergebnis gegen den zum Anwendungszeitpunkt aktuellen Stand statt gegen
@@ -4104,6 +4151,21 @@ export default function IfcWorkspace() {
             <PortalSettingsPanel
               settings={portalSettings}
               onSettingsChange={setPortalSettings}
+            />
+          </TileContent>
+        );
+      case "vcs":
+        return (
+          <TileContent>
+            <VcsPanel
+              auth={vcsAuth}
+              documentFileName={activeSession ? document.fileName : null}
+              getIfcText={getVcsIfcText}
+              hasDocument={Boolean(activeSession)}
+              settings={vcsSettings}
+              onAuthChange={setVcsAuth}
+              onLoadIfc={openIfcTextFromVcs}
+              onSettingsChange={setVcsSettings}
             />
           </TileContent>
         );
