@@ -31,6 +31,15 @@ damit exakt einig, was „geändert“ bedeutet.
   statt Objekt-Diff dient der Inhalts-Hash der Identisch-Erkennung. Eine
   `README.md` wird in der Web-UI wie bei GitHub unter der Dateiliste des
   jeweiligen Ordners gerendert (marked + DOMPurify).
+- **3D-Vorschau** — die Web-UI rendert jeden IFC-Stand mit dem
+  ThatOpen-Viewer (`@thatopen/components` + Fragments). Die IFC wird beim
+  ersten Abruf **serverseitig** zu Fragments konvertiert
+  (`src/domain/fragmentsService.ts`, web-ifc-WASM in Node) und das Ergebnis
+  im Object Store neben der IFC gecacht (`….frag`) — Commits sind
+  unveränderlich, der Cache veraltet nie; gleichzeitige Erst-Abrufe teilen
+  sich einen Konvertierungslauf. Der Fragments-Worker der Web-UI wird
+  versionsgleich aus dem Paket synchronisiert
+  (`web/scripts/sync-fragments-worker.mjs`).
 - **Öffentliche Modelle** — `visibility: public` ist ohne Anmeldung les- und
   diffbar (Portal-Zugriff ohne Client).
 
@@ -118,6 +127,7 @@ Auth: `Authorization: Bearer <JWT>` aus `/api/auth/login`. Fehler kommen als
 | GET | `…/commits?branch=` | Historie (Commits mit Autor) |
 | GET | `…/commits/:id` | Commit-Metadaten |
 | GET | `…/commits/:id/file` | Roh-IFC herunterladen (byte-identisch) |
+| GET | `…/commits/:id/fragments` | ThatOpen-Fragments für die 3D-Vorschau (erster Abruf konvertiert + cached; immutable-Cache-Header) |
 | GET | `…/diff?from=&to=` | semantischer Diff zweier Commits |
 | GET | `…/diff/entity?from=&to=&globalId=` | Feld-Detail einer geänderten Entity |
 
@@ -146,4 +156,4 @@ npm run typecheck      # tsc --noEmit
 - Umbenennen von Projekten; Branches löschen.
 - Tags/Releases; geschützte Branches.
 - OpenAPI/Swagger-Doku; Pagination für sehr lange Historien.
-- Web-UI: 3D-Vorschau eines Commits.
+- 3D-Vorschau für beliebige (nicht nur Head-)Commits; visueller 3D-Diff.

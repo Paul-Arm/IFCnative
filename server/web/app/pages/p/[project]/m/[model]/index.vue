@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   PhBookOpen,
+  PhCubeTransparent,
   PhGear,
   PhGitBranch,
   PhGitCommit,
@@ -61,11 +62,12 @@ const folderCrumbs = computed(() => {
 
 // ---- Tabs --------------------------------------------------------------
 
-type Tab = "inhalt" | "commits" | "einstellungen";
+type Tab = "inhalt" | "commits" | "3d" | "einstellungen";
 const tab = computed<Tab>(() => {
   const value = route.query.tab;
   if (value === "commits" || value === "einstellungen") return value;
-  if (value === "inhalt") return "inhalt";
+  if (value === "inhalt" && isMd.value) return "inhalt";
+  if (value === "3d" && !isMd.value) return "3d";
   return isMd.value ? "inhalt" : "commits";
 });
 
@@ -428,6 +430,14 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
         <span class="counter">{{ commitsData?.commits.length ?? 0 }}</span>
       </button>
       <button
+        v-if="!isMd"
+        :class="{ active: tab === '3d' }"
+        @click="goTab('3d')"
+      >
+        <PhCubeTransparent :size="16" aria-hidden="true" />
+        3D
+      </button>
+      <button
         v-if="isAdmin"
         :class="{ active: tab === 'einstellungen' }"
         @click="goTab('einstellungen')"
@@ -603,6 +613,26 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
       </div>
       <div v-else class="empty">
         Noch keine Commits auf diesem Branch.
+      </div>
+    </div>
+
+    <!-- ================= Tab: 3D-Vorschau ================= -->
+    <div v-else-if="tab === '3d'" class="card">
+      <div class="card-header">
+        <strong>3D-Vorschau</strong>
+        <span v-if="selectedBranch" class="badge">{{ selectedBranch }}</span>
+        <span v-if="headCommit" class="commit-id">
+          {{ headCommit.message || "(ohne Nachricht)" }} ·
+          {{ headCommit.id.slice(0, 8) }}
+        </span>
+      </div>
+      <ModelViewer
+        v-if="headCommit"
+        :key="headCommit.id"
+        :src="`/api${base}/commits/${headCommit.id}/fragments`"
+      />
+      <div v-else class="empty">
+        Noch keine Commits auf diesem Branch — erst einen Stand committen.
       </div>
     </div>
 

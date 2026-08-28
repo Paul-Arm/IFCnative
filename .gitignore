@@ -39,3 +39,6 @@ server/.ifc-vcs-data/
 *.tsbuildinfo
 
 20250820_openSIM_BIM_Objektkatalog-BWD-V001_MKP_a_V.xlsx
+
+# Fragments-Worker wird aus dem Paket synchronisiert (scripts/sync-fragments-worker.mjs)
+server/web/public/fragments/

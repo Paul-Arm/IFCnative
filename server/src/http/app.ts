@@ -9,6 +9,7 @@ import fastifyStatic from "@fastify/static";
 
 import { hashPassword, verifyPassword } from "../auth/passwords";
 import { CommitService } from "../domain/commitService";
+import { FragmentsService } from "../domain/fragmentsService";
 import type { ObjectStore } from "../storage/objectStore";
 import {
   ADMIN_ROLES,
@@ -87,6 +88,17 @@ function normalizeFolderPath(input: string): string | null {
 export function buildApp(deps: AppDeps): FastifyInstance {
   const { repo, store, jwtSecret } = deps;
   const commits = new CommitService(repo, store);
+  const fragmentsService = new FragmentsService(store);
+
+  /** Blob + zugehörigen Fragments-Cache löschen (best effort). */
+  function deleteBlobsWithFragments(blobKeys: string[]): Promise<unknown> {
+    return Promise.allSettled(
+      blobKeys.flatMap((key) => [
+        store.delete(key),
+        store.delete(FragmentsService.fragKey(key)),
+      ]),
+    );
+  }
 
   const app = Fastify({ logger: false, bodyLimit: 512 * 1024 * 1024 });
 
@@ -626,7 +638,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (!user) return reply;
     if (!(await requireMember(project, user, reply, "admin"))) return reply;
     const blobKeys = await repo.deleteModel(model.id);
-    await Promise.allSettled(blobKeys.map((key) => store.delete(key)));
+    await deleteBlobsWithFragments(blobKeys);
     return reply.code(204).send();
   });
 
@@ -645,7 +657,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         .send({ error: "Only the project owner can delete it" });
     }
     const blobKeys = await repo.deleteProject(project.id);
-    await Promise.allSettled(blobKeys.map((key) => store.delete(key)));
+    await deleteBlobsWithFragments(blobKeys);
     return reply.code(204).send();
   });
 
@@ -827,6 +839,44 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           `attachment; filename="${modelSlug}-${commitId}.${isMd ? "md" : "ifc"}"`,
         )
         .send(buffer);
+    },
+  );
+
+  // ThatOpen-Fragments für die 3D-Vorschau: beim ersten Abruf wird die IFC
+  // serverseitig konvertiert und das Ergebnis im Object Store gecacht.
+  app.get(
+    `${api}/projects/:slug/models/:model/commits/:commitId/fragments`,
+    async (request, reply) => {
+      const { slug, model: modelSlug, commitId } = request.params as {
+        slug: string;
+        model: string;
+        commitId: string;
+      };
+      const resolved = await resolveModel(slug, modelSlug, reply);
+      if (!resolved) return reply;
+      const { project, model } = resolved;
+      if (!(await canReadModel(request, reply, project, model.visibility))) return reply;
+      if (model.kind === "md") {
+        return reply.code(400).send({ error: "Markdown files have no 3D preview" });
+      }
+      const commit = await repo.getCommit(commitId);
+      if (!commit || commit.modelId !== model.id) {
+        return reply.code(404).send({ error: "Commit not found" });
+      }
+      try {
+        const buffer = await fragmentsService.getFragments(commit);
+        return reply
+          .header("content-type", "application/octet-stream")
+          // Commits sind unveränderlich — der Browser darf hart cachen.
+          .header("cache-control", "private, max-age=31536000, immutable")
+          .send(buffer);
+      } catch (error) {
+        return reply.code(500).send({
+          error: `IFC-zu-Fragments-Konvertierung fehlgeschlagen: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        });
+      }
     },
   );
 

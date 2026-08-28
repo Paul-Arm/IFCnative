@@ -7,16 +7,20 @@
   "scripts": {
     "dev": "nuxt dev",
     "build": "nuxt build",
-    "generate": "nuxt generate",
-    "postinstall": "nuxt prepare",
+    "generate": "node scripts/sync-fragments-worker.mjs && nuxt generate",
+    "postinstall": "nuxt prepare && node scripts/sync-fragments-worker.mjs",
     "typecheck": "nuxt typecheck"
   },
   "dependencies": {
     "@phosphor-icons/vue": "^2.2.1",
+    "@thatopen/components": "~3.4.6",
+    "@thatopen/fragments": "~3.4.5",
     "dompurify": "^3.4.14",
     "marked": "^18.0.11",
     "nuxt": "^4.2.2",
-    "vue": "^3.5.0"
+    "three": "^0.184.0",
+    "vue": "^3.5.0",
+    "web-ifc": "^0.0.77"
   },
   "allowScripts": {
     "esbuild@0.28.2": true
