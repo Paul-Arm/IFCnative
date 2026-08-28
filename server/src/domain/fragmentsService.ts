@@ -18,8 +18,19 @@ export class FragmentsService {
 
   private readonly inflight = new Map<string, Promise<Buffer>>();
 
+  /**
+   * Format-Generation des Caches: v2 = mit allen Attributen/Relationen
+   * (Psets für die Info-Anzeige im Viewer). Bei Format-Änderungen hochzählen
+   * — alte Einträge werden einfach neu konvertiert.
+   */
   static fragKey(blobKey: string): string {
-    return `${blobKey.replace(/\.ifc$/i, "")}.frag`;
+    return `${blobKey.replace(/\.ifc$/i, "")}.v2.frag`;
+  }
+
+  /** Alle Cache-Generationen zu einem Blob (fürs Aufräumen beim Löschen). */
+  static allFragKeys(blobKey: string): string[] {
+    const base = blobKey.replace(/\.ifc$/i, "");
+    return [`${base}.frag`, `${base}.v2.frag`];
   }
 
   async getFragments(commit: Commit): Promise<Buffer> {
@@ -57,6 +68,10 @@ export class FragmentsService {
       // Editor-Konvertierungs-Worker).
       COORDINATE_TO_ORIGIN: true,
     };
+    // Attribute + Relationen (Psets etc.) in die Fragments aufnehmen —
+    // Grundlage für die Klick-Info-Anzeige im Viewer (getItemsData).
+    importer.addAllAttributes();
+    importer.addAllRelations();
     const bytes = await importer.process({ bytes: new Uint8Array(ifc) });
     const buffer = Buffer.from(bytes);
     await this.store.put(key, buffer, "application/octet-stream");

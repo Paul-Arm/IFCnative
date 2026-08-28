@@ -93,12 +93,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   /** Vorschaubild eines Projekts (aus der 3D-Szene der Web-UI). */
   const projectImageKey = (projectId: string) => `projects/${projectId}/image.png`;
 
-  /** Blob + zugehörigen Fragments-Cache löschen (best effort). */
+  /** Blob + zugehörige Fragments-Caches (alle Generationen) löschen. */
   function deleteBlobsWithFragments(blobKeys: string[]): Promise<unknown> {
     return Promise.allSettled(
       blobKeys.flatMap((key) => [
         store.delete(key),
-        store.delete(FragmentsService.fragKey(key)),
+        ...FragmentsService.allFragKeys(key).map((frag) => store.delete(frag)),
       ]),
     );
   }

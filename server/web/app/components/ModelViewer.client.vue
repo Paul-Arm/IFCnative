@@ -31,6 +31,50 @@ let fitToItems: ((items?: Record<string, Set<number>>) => Promise<void>) | null 
   null;
 let renderNow: (() => HTMLCanvasElement | null) | null = null;
 
+// ---- Auswahl + Info-Anzeige (Klick auf ein Element) --------------------
+
+interface SelectionProp {
+  key: string;
+  value: string;
+}
+
+interface SelectionPset {
+  name: string;
+  props: SelectionProp[];
+}
+
+interface SelectionInfo {
+  modelLabel: string;
+  category: string;
+  name: string;
+  globalId: string;
+  localId: number;
+  attributes: SelectionProp[];
+  psets: SelectionPset[];
+}
+
+const selection = ref<SelectionInfo | null>(null);
+const selectionBusy = ref(false);
+let clearSelection: (() => Promise<void>) | null = null;
+
+async function closeSelection(): Promise<void> {
+  selection.value = null;
+  await clearSelection?.();
+}
+
+/** {value: …}-Attributobjekt der Fragments-ItemsData in Text umwandeln. */
+function attrValue(raw: unknown): string | null {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw !== "object") return String(raw);
+  const value = (raw as { value?: unknown }).value;
+  if (value === null || value === undefined || Array.isArray(value)) {
+    return null;
+  }
+  if (typeof value === "object") return null;
+  const text = String(value).trim();
+  return text.length ? text : null;
+}
+
 function setVisible(key: string, visible: boolean): void {
   const model = loaded.get(key);
   if (model) {
@@ -122,6 +166,121 @@ onMounted(async () => {
       void fragments.core.update(true).catch(() => undefined);
     });
 
+    // ---- Klick-Selektion: raycast -> highlight -> getItemsData ---------
+    const FRAGS = await import("@thatopen/fragments");
+    const selectionMaterial = {
+      color: new THREE.Color(0xffb703),
+      customId: "ifc-hub-selection",
+      opacity: 0.95,
+      renderedFaces: FRAGS.RenderedFaces.TWO,
+      transparent: false,
+    };
+    clearSelection = async () => {
+      await fragments.resetHighlight().catch(() => undefined);
+      await fragments.core.update(true).catch(() => undefined);
+    };
+    const labelByKey = new Map(
+      props.sources.map((source) => [source.key, source.label ?? source.key]),
+    );
+
+    let pointerDownAt: { x: number; y: number } | null = null;
+    element.addEventListener("pointerdown", (event) => {
+      pointerDownAt = { x: event.clientX, y: event.clientY };
+    });
+    element.addEventListener("click", (event) => {
+      // Orbit-Drags nicht als Klick werten.
+      if (
+        pointerDownAt &&
+        Math.hypot(
+          event.clientX - pointerDownAt.x,
+          event.clientY - pointerDownAt.y,
+        ) > 4
+      ) {
+        return;
+      }
+      void (async () => {
+        selectionBusy.value = true;
+        try {
+          const canvas = world.renderer?.three.domElement;
+          if (!canvas) return;
+          const result = await fragments.raycast({
+            camera: world.camera.three,
+            dom: canvas,
+            mouse: new THREE.Vector2(event.clientX, event.clientY),
+          });
+          const localId = result?.localId;
+          if (!localId || !Number.isFinite(localId)) {
+            await closeSelection();
+            return;
+          }
+          const modelId = result.fragments.modelId;
+          await fragments.resetHighlight().catch(() => undefined);
+          await fragments
+            .highlight(selectionMaterial, { [modelId]: new Set([localId]) })
+            .catch(() => undefined);
+          await fragments.core.update(true).catch(() => undefined);
+
+          const model = fragments.list.get(modelId);
+          if (!model) return;
+          const [data] = await model.getItemsData([localId], {
+            attributesDefault: true,
+            relations: {
+              IsDefinedBy: { attributes: true, relations: true },
+            },
+          });
+          const record = (data ?? {}) as Record<string, unknown>;
+
+          const attributes: SelectionProp[] = [];
+          for (const [key, raw] of Object.entries(record)) {
+            if (key.startsWith("_") || key === "GlobalId") continue;
+            const value = attrValue(raw);
+            if (value !== null) {
+              attributes.push({ key, value });
+            }
+          }
+
+          const psets: SelectionPset[] = [];
+          const isDefinedBy = record.IsDefinedBy;
+          if (Array.isArray(isDefinedBy)) {
+            for (const rawPset of isDefinedBy) {
+              const pset = rawPset as Record<string, unknown>;
+              const props: SelectionProp[] = [];
+              const hasProperties = pset.HasProperties;
+              if (Array.isArray(hasProperties)) {
+                for (const rawProp of hasProperties) {
+                  const prop = rawProp as Record<string, unknown>;
+                  const key = attrValue(prop.Name);
+                  const value = attrValue(prop.NominalValue);
+                  if (key && value !== null) {
+                    props.push({ key, value });
+                  }
+                }
+              }
+              const name = attrValue(pset.Name);
+              if (name && props.length) {
+                psets.push({ name, props });
+              }
+            }
+          }
+
+          selection.value = {
+            modelLabel: labelByKey.get(modelId) ?? modelId,
+            category: attrValue(record._category) ?? "Element",
+            name: attrValue(record.Name) ?? "(ohne Name)",
+            globalId:
+              attrValue(record._guid) ?? attrValue(record.GlobalId) ?? "",
+            localId,
+            attributes,
+            psets,
+          };
+        } catch {
+          // Auswahl darf den Viewer nie zum Absturz bringen.
+        } finally {
+          selectionBusy.value = false;
+        }
+      })();
+    });
+
     const errors: string[] = [];
     let index = 0;
     for (const source of props.sources) {
@@ -181,6 +340,49 @@ onBeforeUnmount(() => {
       :class="{ error: status === 'fehler' }"
     >
       {{ statusText }}
+    </div>
+
+    <!-- Info-Panel zum angeklickten Element -->
+    <aside v-if="selection" class="viewer-info">
+      <header class="viewer-info-head">
+        <span class="badge accent">{{ selection.category }}</span>
+        <span class="topbar-spacer" />
+        <button class="link" title="Schließen" @click="closeSelection">✕</button>
+      </header>
+      <div class="viewer-info-body">
+        <div class="viewer-info-name">{{ selection.name }}</div>
+        <div class="muted small mono">{{ selection.globalId }}</div>
+        <div class="muted small">{{ selection.modelLabel }}</div>
+
+        <table v-if="selection.attributes.length" class="viewer-info-table">
+          <tbody>
+            <tr v-for="attr in selection.attributes" :key="attr.key">
+              <td class="muted">{{ attr.key }}</td>
+              <td>{{ attr.value }}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <details
+          v-for="pset in selection.psets"
+          :key="pset.name"
+          class="viewer-info-pset"
+          open
+        >
+          <summary>{{ pset.name }}</summary>
+          <table class="viewer-info-table">
+            <tbody>
+              <tr v-for="prop in pset.props" :key="prop.key">
+                <td class="muted">{{ prop.key }}</td>
+                <td>{{ prop.value }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </details>
+      </div>
+    </aside>
+    <div v-else-if="selectionBusy" class="viewer-info viewer-info-loading muted small">
+      Lade Element-Infos …
     </div>
   </div>
 </template>
