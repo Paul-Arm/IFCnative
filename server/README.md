@@ -1,10 +1,11 @@
-# IFC-Ablage — Versionskontroll-Server
+# IFC Hub — Versionskontroll-Server
 
 Die zentrale Ablage für IFC-Modelle: **Projekte, Benutzer, Modelle und
 Versionierung mit Commits + Nachricht** — wie GitHub, aber mit **semantischen,
 GlobalId-basierten Diffs** statt Zeilen-Diffs. Bedienung über die eingebaute
 **Web-UI** und eine **REST-API** (Client-Integration z. B. im Editor über das
-Panel „IFC-Ablage“).
+Panel „IFC Hub“). Ein Projekt kann beliebig viele Modelle (= IFC-Dateien)
+enthalten, jedes mit eigener Historie und eigenen Branches.
 
 Der Server nutzt den STEP-Parser und den GlobalId-Diff des Editors
 (`editor/src/ifc`, Brücke in `src/ifc/index.ts`) — Editor und Server sind sich
@@ -30,7 +31,7 @@ damit exakt einig, was „geändert“ bedeutet.
 
 | Modus | Objekt-Store (IFC-Blobs) | Metadaten (Projekte, Commits, Manifeste) |
 | --- | --- | --- |
-| **lokal** (Standard) | Dateisystem `DATA_DIR` (`./.ifc-vcs-data`) | In-Memory, oder Postgres wenn `DATABASE_URL` gesetzt |
+| **lokal** (Standard) | Dateisystem `DATA_DIR` (`./.ifc-vcs-data`) | JSON-Katalogdatei `DATA_DIR/catalog.json` (atomar geschrieben), oder Postgres wenn `DATABASE_URL` gesetzt |
 | **azure** (`STORAGE=azure`) | Azure Blob Storage | Postgres (`DATABASE_URL`) |
 
 Die Metadaten-Schicht dedupliziert Entity-Payloads über Commits hinweg
@@ -59,11 +60,12 @@ JWT_SECRET="..." NODE_ENV=production npm start
 Konfiguration (`src/config.ts`): `PORT` (8787), `HOST`, `JWT_SECRET`,
 `STORAGE` (`filesystem`|`azure`), `DATA_DIR`,
 `AZURE_STORAGE_CONNECTION_STRING`, `AZURE_STORAGE_CONTAINER`,
-`DATABASE_URL` (Postgres; ohne = In-Memory, nicht persistent!).
+`DATABASE_URL` (Postgres; ohne = JSON-Katalogdatei unter `DATA_DIR`).
 
-> **Hinweis:** Für persistente Metadaten im lokalen Modus `DATABASE_URL`
-> setzen. Ohne Postgres überleben Projekte/Commits keinen Neustart — die
-> IFC-Blobs liegen zwar auf Platte, aber der Katalog dazu nicht.
+> **Hinweis:** Der lokale Modus ist ohne weitere Konfiguration persistent
+> (Katalog + Blobs unter `DATA_DIR`). Postgres ist der richtige Modus für
+> Team-Betrieb mit vielen großen Modellen — der JSON-Katalog lädt beim Start
+> komplett in den Speicher.
 
 ## Web-UI (`web/`, Nuxt)
 
@@ -115,7 +117,7 @@ Nuxt-Dev-Server können direkt zugreifen.
 
 ## Editor-Integration
 
-Im Editor (`editor/`) gibt es das Mosaic-Panel **„IFC-Ablage“** (über das
+Im Editor (`editor/`) gibt es das Mosaic-Panel **„IFC Hub“** (über das
 Fenster-Menü): anmelden, Projekt/Modell/Branch wählen, Versionsstände als
 neuen Tab öffnen, aktuellen Stand mit Commit-Nachricht committen (inkl.
 Diff-Zusammenfassung als Antwort). Client-Code in `editor/src/vcs/`

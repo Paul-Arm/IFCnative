@@ -1,7 +1,7 @@
 import type { ApiUser } from "~/types/api";
 
-const TOKEN_KEY = "ifc-ablage:token";
-const USER_KEY = "ifc-ablage:user";
+const TOKEN_KEY = "ifc-hub:token";
+const USER_KEY = "ifc-hub:user";
 
 function readStored<T>(key: string, parse: (raw: string) => T): T | null {
   if (!import.meta.client) return null;

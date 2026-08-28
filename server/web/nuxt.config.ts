@@ -10,7 +10,7 @@ export default defineNuxtConfig({
   telemetry: false,
   app: {
     head: {
-      title: "IFC Ablage",
+      title: "IFC Hub",
       htmlAttrs: { lang: "de" },
       meta: [{ name: "viewport", content: "width=device-width, initial-scale=1" }],
       link: [

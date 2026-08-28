@@ -193,7 +193,7 @@ export const MOSAIC_TITLES: Record<MosaicViewId, string> = {
   "resource-references": "Klassifikation & Dokumente",
   "resource-controls": "Freigaben & Constraints",
   structure: "Struktur",
-  vcs: "IFC-Ablage",
+  vcs: "IFC Hub",
   viewer: "3D-Viewer",
 };
 

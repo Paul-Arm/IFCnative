@@ -10,7 +10,7 @@ Werkzeugkasten rund um das native Erstellen, Ansehen und Bearbeiten von IFC-Mode
 | [editor-2.0/](editor-2.0/README.md) | **Editor 2.0** (in Arbeit) | Tauri 2, Rust (ifc-lite), React           | Nachfolger-Generation, bestehend aus zwei Teil-Apps: `app/` (Tauri-Desktop-Client) und `hub/` (IFC-Hub-Server für Projekt-/Versionsverwaltung). Planungsdokumente unter `docs/`. |
 | [native-windows/](native-windows/)  | **NativeWindows**          | .NET 10, Avalonia, xBIM                   | Nativer Windows-Desktop-Versuch: `src/` (App), `tests/` (Testrunner), `docs/` (Rewrite-Protokoll).                                                                               |
 | [ifc-to-glb/](ifc-to-glb/README.md) | **ifc2glb**                | .NET 10, xBIM                             | CLI-Konverter IFC → GLB: `src/IfcToGlb.Core` (Bibliothek), `src/IfcToGlb.Cli` (Kommandozeile), `samples/` (Testmodelle).                                                         |
-| [server/](server/README.md)         | **IFC-Ablage (Server)**    | Node.js/TypeScript, Fastify, Nuxt         | Zentrale IFC-Ablage: Projekte, Benutzer, Versionierung mit Commits + Nachricht und semantischem Diff. Web-UI + REST-API; Speicher lokal (`.ifc-vcs-data/`) oder Azure Blob. Editor-Anbindung über das Panel „IFC-Ablage“. |
+| [server/](server/README.md)         | **IFC Hub (Server)**    | Node.js/TypeScript, Fastify, Nuxt         | Zentrale IFC-Ablage: Projekte, Benutzer, Versionierung mit Commits + Nachricht und semantischem Diff. Web-UI + REST-API; Speicher lokal (`.ifc-vcs-data/`) oder Azure Blob. Editor-Anbindung über das Panel „IFC Hub“. |
 
 ## Schnellstart (Haupt-App)
 

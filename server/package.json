@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "IFC version control server: semantic, GlobalId-keyed versioning for IFC models.",
+  "description": "IFC Hub: central IFC storage with projects, users, and GlobalId-keyed semantic versioning.",
   "engines": {
     "node": ">=22.13.0"
   },

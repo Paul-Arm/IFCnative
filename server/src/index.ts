@@ -52,7 +52,7 @@ async function main(): Promise<void> {
 
   await app.listen({ port: config.port, host: config.host });
   console.log(
-    `IFC VCS server listening on http://${config.host}:${config.port} (storage: ${config.storage})`,
+    `IFC Hub listening on http://${config.host}:${config.port} (storage: ${config.storage})`,
   );
 }
 

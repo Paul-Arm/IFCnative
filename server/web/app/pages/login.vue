@@ -47,7 +47,7 @@ async function submit(): Promise<void> {
   <div class="login-page">
     <div class="card login-card">
       <div class="card-body">
-        <h1 style="text-align: center">IFC Ablage</h1>
+        <h1 style="text-align: center">IFC Hub</h1>
         <p class="muted small" style="text-align: center; margin-top: -0.25rem">
           Zentrale Ablage und Versionierung für IFC-Modelle
         </p>

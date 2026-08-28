@@ -291,7 +291,7 @@ export function VcsPanel({
     return (
       <PanelShell scroll>
         <PanelHeader
-          title="IFC-Ablage"
+          title="IFC Hub"
           eyebrow="Server"
           description="Zentrale Ablage mit Projekten, Versionsständen und Commits."
         />
@@ -352,7 +352,7 @@ export function VcsPanel({
   return (
     <PanelShell scroll>
       <PanelHeader
-        title="IFC-Ablage"
+        title="IFC Hub"
         eyebrow="Server"
         description="Zentrale Ablage mit Projekten, Versionsständen und Commits."
         meta={<Badge tone="info">{auth.user.name}</Badge>}

@@ -164,12 +164,20 @@ async function deleteProject(): Promise<void> {
           </span>
         </li>
       </ul>
-      <div v-else class="empty">Noch keine Modelle in diesem Projekt.</div>
+      <div v-else class="empty">
+        Noch keine Modelle in diesem Projekt. Jedes Modell ist eine IFC-Datei
+        mit eigener Versionshistorie — ein Projekt kann beliebig viele davon
+        enthalten.
+      </div>
     </div>
 
     <div v-if="canWrite" class="card">
       <div class="card-header"><h2>Neues Modell</h2></div>
       <div class="card-body">
+        <p class="muted small" style="margin-top: 0">
+          Ein Modell ist eine IFC-Datei mit eigener Versionshistorie und
+          eigenen Branches (z.&nbsp;B. Architektur, Tragwerk, TGA).
+        </p>
         <div v-if="modelError" class="alert error">{{ modelError }}</div>
         <form class="form-inline" @submit.prevent="createModel">
           <div>
