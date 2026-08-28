@@ -2,11 +2,10 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "editor",
+      "name": "ifc-vcs-server",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--prefix", "editor"],
-      "port": 5173,
-      "autoPort": true
+      "runtimeArgs": ["--prefix", "server", "run", "start"],
+      "port": 8787
     }
   ]
 }

@@ -28,6 +28,11 @@ yarn-error.*
 
 # IFC version control server local data
 .ifc-vcs-data/
+
+# Nuxt (server/web)
+.nuxt/
+.output/
+.data/
 server/.ifc-vcs-data/
 
 # typescript
