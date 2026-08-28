@@ -389,6 +389,20 @@ button.link {
   font-weight: 400;
 }
 
+/* Phosphor-Icons in Buttons/Links sauber neben dem Text ausrichten. */
+button > svg,
+.btn > svg,
+summary.btn > svg {
+  vertical-align: -3px;
+  margin-right: 0.3rem;
+}
+
+/* Flex-Container mit gap brauchen keinen zusätzlichen Icon-Abstand. */
+.gh-tabs button > svg,
+.menu-item > svg {
+  margin-right: 0;
+}
+
 /* ---- alerts ----------------------------------------------------------- */
 
 .alert {
@@ -519,6 +533,8 @@ button.link {
 
 .fb-row:last-child {
   border-bottom: none;
+  /* Hover-Fläche darf die runden Karten-Ecken nicht eckig überdecken. */
+  border-radius: 0 0 calc(var(--radius) - 1px) calc(var(--radius) - 1px);
 }
 
 .fb-row:hover {

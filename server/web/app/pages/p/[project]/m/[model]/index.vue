@@ -1,4 +1,13 @@
 <script setup lang="ts">
+import {
+  PhBookOpen,
+  PhGear,
+  PhGitBranch,
+  PhGitCommit,
+  PhPencilSimple,
+  PhUploadSimple,
+} from "@phosphor-icons/vue";
+
 import type {
   Branch,
   Commit,
@@ -410,11 +419,11 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
         :class="{ active: tab === 'inhalt' }"
         @click="goTab('inhalt')"
       >
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 1.75A.75.75 0 0 1 .75 1h4.253c1.227 0 2.317.59 3 1.501A3.743 3.743 0 0 1 11.006 1h4.245a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-.75.75h-4.507a2.25 2.25 0 0 0-1.591.659l-.622.621a.75.75 0 0 1-1.06 0l-.622-.621A2.25 2.25 0 0 0 5.258 13H.75a.75.75 0 0 1-.75-.75Zm7.251 10.324.004-5.073-.002-2.253A2.25 2.25 0 0 0 5.003 2.5H1.5v9h3.757a3.75 3.75 0 0 1 1.994.574ZM8.755 4.75l-.004 7.322a3.752 3.752 0 0 1 1.992-.572H14.5v-9h-3.495a2.25 2.25 0 0 0-2.25 2.25Z"/></svg>
+        <PhBookOpen :size="16" aria-hidden="true" />
         Inhalt
       </button>
       <button :class="{ active: tab === 'commits' }" @click="goTab('commits')">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M11.93 8.5a4.002 4.002 0 0 1-7.86 0H.75a.75.75 0 0 1 0-1.5h3.32a4.002 4.002 0 0 1 7.86 0h3.32a.75.75 0 0 1 0 1.5Zm-1.43-.75a2.5 2.5 0 1 0-5 0 2.5 2.5 0 0 0 5 0Z"/></svg>
+        <PhGitCommit :size="16" aria-hidden="true" />
         Commits
         <span class="counter">{{ commitsData?.commits.length ?? 0 }}</span>
       </button>
@@ -423,7 +432,7 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
         :class="{ active: tab === 'einstellungen' }"
         @click="goTab('einstellungen')"
       >
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M9.25 12a.75.75 0 0 1 .75-.75h5.25a.75.75 0 0 1 0 1.5H10a.75.75 0 0 1-.75-.75ZM.75 11.25h4.562a2.251 2.251 0 0 1 4.376 0H15.25a.75.75 0 0 1 0 1.5H9.688a2.251 2.251 0 0 1-4.376 0H.75a.75.75 0 0 1 0-1.5Zm6 .75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0ZM.75 3.25h5.562a2.251 2.251 0 0 1 4.376 0h4.562a.75.75 0 0 1 0 1.5h-4.562a2.251 2.251 0 0 1-4.376 0H.75a.75.75 0 0 1 0-1.5ZM8.5 4a.75.75 0 1 0-1.5 0 .75.75 0 0 0 1.5 0Z"/></svg>
+        <PhGear :size="16" aria-hidden="true" />
         Einstellungen
       </button>
     </nav>
@@ -448,7 +457,10 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
         <strong>{{ modelData.model.name }}</strong>
         <span v-if="selectedBranch" class="badge">{{ selectedBranch }}</span>
         <span class="topbar-spacer" />
-        <button v-if="!editing && canWrite" @click="startEdit">Bearbeiten</button>
+        <button v-if="!editing && canWrite" @click="startEdit">
+          <PhPencilSimple :size="14" aria-hidden="true" />
+          Bearbeiten
+        </button>
       </div>
       <template v-if="!editing">
         <div
@@ -514,8 +526,12 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
         </div>
         <span class="topbar-spacer" />
         <template v-if="canWrite">
-          <button @click="openBranchModal">Neuer Branch</button>
+          <button @click="openBranchModal">
+            <PhGitBranch :size="14" aria-hidden="true" />
+            Neuer Branch
+          </button>
           <button v-if="!isMd" class="primary" @click="openCommitModal">
+            <PhUploadSimple :size="14" aria-hidden="true" />
             Neuen Stand committen
           </button>
           <button
