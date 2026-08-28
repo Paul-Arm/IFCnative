@@ -1,0 +1,63 @@
+name: IFC-Ablage Server
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["master"]
+    paths:
+      - "server/**"
+      - "editor/src/ifc/**"
+      - ".github/workflows/server.yml"
+  pull_request:
+    paths:
+      - "server/**"
+      - "editor/src/ifc/**"
+      - ".github/workflows/server.yml"
+
+jobs:
+  tests:
+    name: Tests + Typprüfung
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Abhängigkeiten installieren
+        run: npm ci
+
+      - name: Typprüfung
+        run: npm run typecheck
+
+      # Deckt Service-, HTTP- (fastify.inject), SQL- (PGlite) und
+      # JSON-Persistenz-Ebene ab; kein externer Dienst nötig.
+      - name: Tests
+        run: npm test
+
+  web-build:
+    name: Web-UI baut
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server/web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/web/package-lock.json
+
+      - name: Abhängigkeiten installieren
+        run: npm ci
+
+      - name: SPA generieren
+        run: npm run generate
