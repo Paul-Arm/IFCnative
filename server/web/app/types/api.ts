@@ -68,6 +68,39 @@ export interface Branch {
   head?: Commit | null;
 }
 
+export interface Label {
+  id: string;
+  projectId: string;
+  name: string;
+  color: string;
+}
+
+export type IssueState = "open" | "closed";
+
+export interface IssueModelRef {
+  id: string;
+  slug: string;
+  name: string;
+  folder: string;
+  kind: "ifc" | "md";
+}
+
+export interface Issue {
+  id: string;
+  projectId: string;
+  number: number;
+  title: string;
+  body: string;
+  state: IssueState;
+  authorId: string;
+  createdAt: string;
+  updatedAt: string;
+  author: ApiUser | null;
+  assignees: ApiUser[];
+  models: IssueModelRef[];
+  labels: Label[];
+}
+
 export type GuidChangeStatus = "added" | "removed" | "modified";
 
 export interface GuidDiffEntry {

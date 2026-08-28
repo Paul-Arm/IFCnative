@@ -94,6 +94,36 @@ export interface Commit {
   modified: number;
 }
 
+export interface Label {
+  id: string;
+  projectId: string;
+  name: string;
+  /** Hex-Farbe wie "#d73a4a". */
+  color: string;
+}
+
+export type IssueState = "open" | "closed";
+
+export interface Issue {
+  id: string;
+  projectId: string;
+  /** Laufende Nummer je Projekt (wie GitHub "#12"). */
+  number: number;
+  title: string;
+  body: string;
+  state: IssueState;
+  authorId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Zuordnungen eines Issues: Bearbeiter, Modelle, Labels (jeweils 0..n). */
+export interface IssueLinks {
+  assigneeIds: string[];
+  modelIds: string[];
+  labelIds: string[];
+}
+
 export interface Repository {
   // Users
   createUser(input: Omit<User, "id" | "createdAt">): Promise<User>;
@@ -134,6 +164,24 @@ export interface Repository {
   listFolders(projectId: string): Promise<string[]>;
   addFolder(projectId: string, path: string): Promise<void>;
   removeFolder(projectId: string, path: string): Promise<void>;
+
+  // Labels
+  createLabel(input: Omit<Label, "id">): Promise<Label>;
+  listLabels(projectId: string): Promise<Label[]>;
+
+  // Issues
+  createIssue(
+    input: Omit<Issue, "id" | "number" | "createdAt" | "updatedAt">,
+  ): Promise<Issue>;
+  getIssue(projectId: string, number: number): Promise<Issue | null>;
+  listIssues(projectId: string): Promise<Issue[]>;
+  updateIssue(
+    issueId: string,
+    patch: Partial<Pick<Issue, "title" | "body" | "state">>,
+  ): Promise<Issue | null>;
+  /** Ersetzt die jeweils übergebenen Zuordnungs-Mengen komplett. */
+  setIssueLinks(issueId: string, links: Partial<IssueLinks>): Promise<void>;
+  getIssueLinks(issueIds: string[]): Promise<Map<string, IssueLinks>>;
 
   // Branches
   createBranch(input: Omit<Branch, "id">): Promise<Branch>;

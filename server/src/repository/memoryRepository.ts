@@ -7,6 +7,9 @@ import type {
 import type {
   Branch,
   Commit,
+  Issue,
+  IssueLinks,
+  Label,
   Member,
   Model,
   Project,
@@ -38,6 +41,9 @@ export class MemoryRepository implements Repository {
   protected diffCache = new Map<string, GuidDiffSummary>();
   /** explizit angelegte Ordner je Projekt. */
   protected folders = new Map<string, Set<string>>();
+  protected labels = new Map<string, Label>();
+  protected issues = new Map<string, Issue>();
+  protected issueLinks = new Map<string, IssueLinks>();
 
   private now(): string {
     // Tests need determinism-free timestamps; ISO string is fine here.
@@ -162,6 +168,9 @@ export class MemoryRepository implements Repository {
   }
 
   async deleteModel(modelId: string): Promise<string[]> {
+    for (const links of this.issueLinks.values()) {
+      links.modelIds = links.modelIds.filter((id) => id !== modelId);
+    }
     const commits = [...this.commits.values()].filter(
       (c) => c.modelId === modelId,
     );
@@ -192,8 +201,117 @@ export class MemoryRepository implements Repository {
     }
     this.members = this.members.filter((m) => m.projectId !== projectId);
     this.folders.delete(projectId);
+    for (const issue of [...this.issues.values()]) {
+      if (issue.projectId === projectId) {
+        this.issues.delete(issue.id);
+        this.issueLinks.delete(issue.id);
+      }
+    }
+    for (const label of [...this.labels.values()]) {
+      if (label.projectId === projectId) {
+        this.labels.delete(label.id);
+      }
+    }
     this.projects.delete(projectId);
     return blobKeys;
+  }
+
+  // ---- labels + issues -------------------------------------------------
+
+  async createLabel(input: Omit<Label, "id">): Promise<Label> {
+    const label: Label = { ...input, id: randomUUID() };
+    this.labels.set(label.id, label);
+    return label;
+  }
+
+  async listLabels(projectId: string): Promise<Label[]> {
+    return [...this.labels.values()]
+      .filter((label) => label.projectId === projectId)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async createIssue(
+    input: Omit<Issue, "id" | "number" | "createdAt" | "updatedAt">,
+  ): Promise<Issue> {
+    const nextNumber =
+      Math.max(
+        0,
+        ...[...this.issues.values()]
+          .filter((issue) => issue.projectId === input.projectId)
+          .map((issue) => issue.number),
+      ) + 1;
+    const now = this.now();
+    const issue: Issue = {
+      ...input,
+      id: randomUUID(),
+      number: nextNumber,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.issues.set(issue.id, issue);
+    return issue;
+  }
+
+  async getIssue(projectId: string, number: number): Promise<Issue | null> {
+    return (
+      [...this.issues.values()].find(
+        (issue) => issue.projectId === projectId && issue.number === number,
+      ) ?? null
+    );
+  }
+
+  async listIssues(projectId: string): Promise<Issue[]> {
+    return [...this.issues.values()]
+      .filter((issue) => issue.projectId === projectId)
+      .sort((a, b) => b.number - a.number);
+  }
+
+  async updateIssue(
+    issueId: string,
+    patch: Partial<Pick<Issue, "title" | "body" | "state">>,
+  ): Promise<Issue | null> {
+    const issue = this.issues.get(issueId);
+    if (!issue) {
+      return null;
+    }
+    for (const [key, value] of Object.entries(patch)) {
+      if (value !== undefined) {
+        (issue as unknown as Record<string, unknown>)[key] = value;
+      }
+    }
+    issue.updatedAt = this.now();
+    return issue;
+  }
+
+  async setIssueLinks(
+    issueId: string,
+    links: Partial<IssueLinks>,
+  ): Promise<void> {
+    const current = this.issueLinks.get(issueId) ?? {
+      assigneeIds: [],
+      modelIds: [],
+      labelIds: [],
+    };
+    this.issueLinks.set(issueId, {
+      assigneeIds: links.assigneeIds
+        ? [...new Set(links.assigneeIds)]
+        : current.assigneeIds,
+      modelIds: links.modelIds ? [...new Set(links.modelIds)] : current.modelIds,
+      labelIds: links.labelIds ? [...new Set(links.labelIds)] : current.labelIds,
+    });
+  }
+
+  async getIssueLinks(issueIds: string[]): Promise<Map<string, IssueLinks>> {
+    const map = new Map<string, IssueLinks>();
+    for (const id of issueIds) {
+      const links = this.issueLinks.get(id);
+      map.set(id, {
+        assigneeIds: [...(links?.assigneeIds ?? [])],
+        modelIds: [...(links?.modelIds ?? [])],
+        labelIds: [...(links?.labelIds ?? [])],
+      });
+    }
+    return map;
   }
 
   async listFolders(projectId: string): Promise<string[]> {

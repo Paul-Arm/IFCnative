@@ -925,6 +925,88 @@ details.menu > summary::-webkit-details-marker {
   padding: 0.5rem 0.7rem;
 }
 
+/* ---- Issues ------------------------------------------------------------ */
+
+.issue-state {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.issue-state.open {
+  color: var(--success);
+}
+
+.issue-state.closed {
+  color: #a371f7;
+}
+
+.label-chip {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 0.05rem 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  margin-left: 0.35rem;
+  vertical-align: 1px;
+  white-space: nowrap;
+}
+
+.issue-pickers {
+  display: flex;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.9rem;
+}
+
+.issue-picker {
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.issue-picker > label:first-child {
+  margin-bottom: 0.25rem;
+}
+
+.issue-picker .pv-item {
+  padding-left: 0;
+}
+
+.issue-picker .label-chip {
+  margin-left: 0;
+}
+
+.issue-new-label {
+  display: flex;
+  gap: 0.3rem;
+  align-items: center;
+  margin-top: 0.35rem;
+}
+
+.issue-new-label input[type="text"] {
+  width: 130px;
+  padding: 0.25rem 0.45rem;
+  font-size: 0.82rem;
+}
+
+.issue-new-label input[type="color"] {
+  width: 34px;
+  height: 28px;
+  padding: 2px;
+  cursor: pointer;
+}
+
+.issue-sidebar-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.issue-sidebar-grid .card {
+  margin-bottom: 0;
+}
+
 /* ---- Projekt-Vorschaubild --------------------------------------------- */
 
 .proj-thumb {

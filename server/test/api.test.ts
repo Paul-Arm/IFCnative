@@ -557,6 +557,134 @@ test("markdown files: create, commit without STEP check, identical detection, do
   await app.close();
 });
 
+test("issues: labels, create with links, filter, patch, permissions", async () => {
+  const app = await makeApp();
+  const owner = await register(app, "owner@example.com", "Owner");
+  const viewer = await register(app, "viewer@example.com", "Viewer");
+  await app.inject({
+    method: "POST",
+    url: "/api/projects",
+    headers: auth(owner),
+    payload: { name: "Acme", slug: "acme" },
+  });
+  await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/members",
+    headers: auth(owner),
+    payload: { email: "viewer@example.com", role: "viewer" },
+  });
+  const model = JSON.parse(
+    (
+      await app.inject({
+        method: "POST",
+        url: "/api/projects/acme/models",
+        headers: auth(owner),
+        payload: { name: "Tower", slug: "tower" },
+      })
+    ).body,
+  ).model;
+
+  // Label anlegen (write noetig — viewer darf nicht).
+  const deniedLabel = await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/labels",
+    headers: auth(viewer),
+    payload: { name: "bug", color: "#d73a4a" },
+  });
+  assert.equal(deniedLabel.statusCode, 403);
+  const label = JSON.parse(
+    (
+      await app.inject({
+        method: "POST",
+        url: "/api/projects/acme/labels",
+        headers: auth(owner),
+        payload: { name: "bug", color: "#d73a4a" },
+      })
+    ).body,
+  ).label;
+
+  // Issue eroeffnen darf auch der viewer; Zuordnungen an User/Modell/Label.
+  const ownerId = JSON.parse(
+    (await app.inject({ method: "GET", url: "/api/me", headers: auth(owner) }))
+      .body,
+  ).user.id;
+  const created = await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/issues",
+    headers: auth(viewer),
+    payload: {
+      title: "Wand kollidiert mit Decke",
+      body: "Siehe **Achse 3**.",
+      assigneeIds: [ownerId],
+      modelIds: [model.id],
+      labelIds: [label.id],
+    },
+  });
+  assert.equal(created.statusCode, 201);
+  const issue = JSON.parse(created.body).issue;
+  assert.equal(issue.number, 1);
+  assert.equal(issue.assignees[0].email, "owner@example.com");
+  assert.equal(issue.models[0].slug, "tower");
+  assert.equal(issue.labels[0].name, "bug");
+
+  // Ungueltige Zuordnung wird abgelehnt.
+  const bad = await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/issues",
+    headers: auth(owner),
+    payload: { title: "x", modelIds: ["nicht-da"] },
+  });
+  assert.equal(bad.statusCode, 400);
+
+  // Filter + Zaehler.
+  await app.inject({
+    method: "PATCH",
+    url: "/api/projects/acme/issues/1",
+    headers: auth(owner),
+    payload: { state: "closed" },
+  });
+  const listed = JSON.parse(
+    (
+      await app.inject({
+        method: "GET",
+        url: "/api/projects/acme/issues?state=open",
+        headers: auth(owner),
+      })
+    ).body,
+  );
+  assert.equal(listed.issues.length, 0);
+  assert.equal(listed.openCount, 0);
+  assert.equal(listed.closedCount, 1);
+
+  // Der viewer (Autor) darf sein eigenes Issue aendern, fremde nicht.
+  const own = await app.inject({
+    method: "PATCH",
+    url: "/api/projects/acme/issues/1",
+    headers: auth(viewer),
+    payload: { state: "open" },
+  });
+  assert.equal(own.statusCode, 200);
+  const foreign = JSON.parse(
+    (
+      await app.inject({
+        method: "POST",
+        url: "/api/projects/acme/issues",
+        headers: auth(owner),
+        payload: { title: "Owner-Issue" },
+      })
+    ).body,
+  ).issue;
+  const deniedPatch = await app.inject({
+    method: "PATCH",
+    url: `/api/projects/acme/issues/${foreign.number}`,
+    headers: auth(viewer),
+    payload: { state: "closed" },
+  });
+  assert.equal(deniedPatch.statusCode, 403);
+
+  await app.close();
+});
+
 test("health reports version and storage mode", async () => {
   const app = await makeApp();
   const res = await app.inject({ method: "GET", url: "/api/health" });

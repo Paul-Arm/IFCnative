@@ -2,8 +2,8 @@ import { join } from "node:path";
 
 import { loadConfig } from "./config";
 import { buildApp } from "./http/app";
-import { JsonFileRepository } from "./repository/jsonFileRepository";
 import { createPgClient } from "./repository/sql/pgClient";
+import { SqliteClient } from "./repository/sql/sqliteClient";
 import { SqlRepository } from "./repository/sqlRepository";
 import type { Repository } from "./repository/types";
 import { AzureBlobObjectStore } from "./storage/azureBlobObjectStore";
@@ -30,17 +30,19 @@ async function main(): Promise<void> {
     store = new FilesystemObjectStore(config.dataDir);
   }
 
-  // Postgres when DATABASE_URL is set; otherwise a JSON catalog file under
-  // DATA_DIR so the local mode survives restarts (blobs live next to it).
+  // Postgres when DATABASE_URL is set; otherwise SQLite (node:sqlite) under
+  // DATA_DIR — the blobs live next to it in the filesystem object store.
   let repo: Repository;
   if (config.databaseUrl) {
     const sqlRepo = new SqlRepository(createPgClient(config.databaseUrl));
     await sqlRepo.migrate();
     repo = sqlRepo;
   } else {
-    const fileRepo = new JsonFileRepository(join(config.dataDir, "catalog.json"));
-    await fileRepo.init();
-    repo = fileRepo;
+    const sqliteRepo = new SqlRepository(
+      new SqliteClient(join(config.dataDir, "catalog.sqlite")),
+    );
+    await sqliteRepo.migrate();
+    repo = sqliteRepo;
   }
 
   const app = buildApp({

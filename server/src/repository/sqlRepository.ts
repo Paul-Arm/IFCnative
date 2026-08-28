@@ -9,6 +9,10 @@ import type { SqlClient } from "./sql/sqlClient";
 import type {
   Branch,
   Commit,
+  Issue,
+  IssueLinks,
+  IssueState,
+  Label,
   Member,
   Model,
   ModelKind,
@@ -322,6 +326,9 @@ export class SqlRepository implements Repository {
       `select id, blob_key from commits where model_id = $1`,
       [modelId],
     );
+    await this.sql.query(`delete from issue_models where model_id = $1`, [
+      modelId,
+    ]);
     // FK-sichere Reihenfolge; entity_objects bleiben (content-addressed,
     // über Commits/Modelle geteilt).
     await this.sql.query(
@@ -346,6 +353,15 @@ export class SqlRepository implements Repository {
     for (const model of await this.listModels(projectId)) {
       blobKeys.push(...(await this.deleteModel(model.id)));
     }
+    for (const junction of ["issue_assignees", "issue_models", "issue_label_links"]) {
+      await this.sql.query(
+        `delete from ${junction} where issue_id in
+           (select id from issues where project_id = $1)`,
+        [projectId],
+      );
+    }
+    await this.sql.query(`delete from issues where project_id = $1`, [projectId]);
+    await this.sql.query(`delete from labels where project_id = $1`, [projectId]);
     await this.sql.query(`delete from project_members where project_id = $1`, [
       projectId,
     ]);
@@ -354,6 +370,178 @@ export class SqlRepository implements Repository {
     ]);
     await this.sql.query(`delete from projects where id = $1`, [projectId]);
     return blobKeys;
+  }
+
+  // ---- labels + issues -------------------------------------------------
+
+  async createLabel(input: Omit<Label, "id">): Promise<Label> {
+    const label: Label = { ...input, id: randomUUID() };
+    await this.sql.query(
+      `insert into labels (id, project_id, name, color) values ($1, $2, $3, $4)`,
+      [label.id, label.projectId, label.name, label.color],
+    );
+    return label;
+  }
+
+  async listLabels(projectId: string): Promise<Label[]> {
+    const { rows } = await this.sql.query<{
+      id: string;
+      project_id: string;
+      name: string;
+      color: string;
+    }>(`select * from labels where project_id = $1 order by name`, [projectId]);
+    return rows.map((r) => ({
+      id: r.id,
+      projectId: r.project_id,
+      name: r.name,
+      color: r.color,
+    }));
+  }
+
+  private toIssue(row: {
+    id: string;
+    project_id: string;
+    number: number;
+    title: string;
+    body: string;
+    state: IssueState;
+    author_id: string;
+    created_at: string;
+    updated_at: string;
+  }): Issue {
+    return {
+      id: row.id,
+      projectId: row.project_id,
+      number: Number(row.number),
+      title: row.title,
+      body: row.body,
+      state: row.state,
+      authorId: row.author_id,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  async createIssue(
+    input: Omit<Issue, "id" | "number" | "createdAt" | "updatedAt">,
+  ): Promise<Issue> {
+    const { rows } = await this.sql.query<{ next: number }>(
+      `select coalesce(max(number), 0) + 1 as next from issues where project_id = $1`,
+      [input.projectId],
+    );
+    const now = this.now();
+    const issue: Issue = {
+      ...input,
+      id: randomUUID(),
+      number: Number(rows[0]?.next ?? 1),
+      createdAt: now,
+      updatedAt: now,
+    };
+    await this.sql.query(
+      `insert into issues (id, project_id, number, title, body, state, author_id, created_at, updated_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        issue.id,
+        issue.projectId,
+        issue.number,
+        issue.title,
+        issue.body,
+        issue.state,
+        issue.authorId,
+        issue.createdAt,
+        issue.updatedAt,
+      ],
+    );
+    return issue;
+  }
+
+  async getIssue(projectId: string, number: number): Promise<Issue | null> {
+    const { rows } = await this.sql.query<Parameters<SqlRepository["toIssue"]>[0]>(
+      `select * from issues where project_id = $1 and number = $2`,
+      [projectId, number],
+    );
+    return rows[0] ? this.toIssue(rows[0]) : null;
+  }
+
+  async listIssues(projectId: string): Promise<Issue[]> {
+    const { rows } = await this.sql.query<Parameters<SqlRepository["toIssue"]>[0]>(
+      `select * from issues where project_id = $1 order by number desc`,
+      [projectId],
+    );
+    return rows.map((row) => this.toIssue(row));
+  }
+
+  async updateIssue(
+    issueId: string,
+    patch: Partial<Pick<Issue, "title" | "body" | "state">>,
+  ): Promise<Issue | null> {
+    const { rows } = await this.sql.query<Parameters<SqlRepository["toIssue"]>[0]>(
+      `update issues set
+         title = coalesce($2, title),
+         body = coalesce($3, body),
+         state = coalesce($4, state),
+         updated_at = $5
+       where id = $1
+       returning *`,
+      [
+        issueId,
+        patch.title ?? null,
+        patch.body ?? null,
+        patch.state ?? null,
+        this.now(),
+      ],
+    );
+    return rows[0] ? this.toIssue(rows[0]) : null;
+  }
+
+  async setIssueLinks(
+    issueId: string,
+    links: Partial<IssueLinks>,
+  ): Promise<void> {
+    const tables: [keyof IssueLinks, string, string][] = [
+      ["assigneeIds", "issue_assignees", "user_id"],
+      ["modelIds", "issue_models", "model_id"],
+      ["labelIds", "issue_label_links", "label_id"],
+    ];
+    for (const [key, table, column] of tables) {
+      const ids = links[key];
+      if (ids === undefined) continue;
+      await this.sql.query(`delete from ${table} where issue_id = $1`, [issueId]);
+      for (const id of new Set(ids)) {
+        await this.sql.query(
+          `insert into ${table} (issue_id, ${column}) values ($1, $2)`,
+          [issueId, id],
+        );
+      }
+    }
+  }
+
+  async getIssueLinks(issueIds: string[]): Promise<Map<string, IssueLinks>> {
+    const map = new Map<string, IssueLinks>();
+    if (!issueIds.length) return map;
+    for (const id of issueIds) {
+      map.set(id, { assigneeIds: [], modelIds: [], labelIds: [] });
+    }
+    const placeholders = issueIds.map((_, i) => `$${i + 1}`).join(", ");
+    const tables: [keyof IssueLinks, string, string][] = [
+      ["assigneeIds", "issue_assignees", "user_id"],
+      ["modelIds", "issue_models", "model_id"],
+      ["labelIds", "issue_label_links", "label_id"],
+    ];
+    for (const [key, table, column] of tables) {
+      const { rows } = await this.sql.query<{
+        issue_id: string;
+        linked: string;
+      }>(
+        `select issue_id, ${column} as linked from ${table}
+         where issue_id in (${placeholders})`,
+        issueIds,
+      );
+      for (const row of rows) {
+        map.get(row.issue_id)?.[key].push(row.linked);
+      }
+    }
+    return map;
   }
 
   // ---- folders ---------------------------------------------------------
@@ -540,11 +728,18 @@ export class SqlRepository implements Repository {
     fromCommitId: string,
     toCommitId: string,
   ): Promise<GuidDiffSummary | null> {
-    const { rows } = await this.sql.query<{ summary: GuidDiffSummary }>(
+    const { rows } = await this.sql.query<{ summary: GuidDiffSummary | string }>(
       `select summary from diffs_cache where from_commit = $1 and to_commit = $2`,
       [fromCommitId, toCommitId],
     );
-    return rows[0] ? rows[0].summary : null;
+    if (!rows[0]) {
+      return null;
+    }
+    // pg parst jsonb selbst; SQLite liefert den TEXT zurück.
+    const summary = rows[0].summary;
+    return typeof summary === "string"
+      ? (JSON.parse(summary) as GuidDiffSummary)
+      : summary;
   }
 
   async saveCachedDiff(

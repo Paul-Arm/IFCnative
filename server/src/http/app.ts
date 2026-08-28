@@ -14,6 +14,8 @@ import type { ObjectStore } from "../storage/objectStore";
 import {
   ADMIN_ROLES,
   type Commit,
+  type Issue,
+  type IssueLinks,
   type Member,
   type Project,
   type Repository,
@@ -373,6 +375,248 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       role: member?.role ?? null,
       folders: await collectFolders(project.id),
     });
+  });
+
+  // ---- Labels + Issues (wie GitHub) ------------------------------------
+
+  const LABEL_COLOR = /^#[0-9a-fA-F]{6}$/;
+
+  app.get(`${api}/projects/:slug/labels`, async (request, reply) => {
+    const { slug } = request.params as { slug: string };
+    const project = await resolveProject(slug, reply);
+    if (!project) return reply;
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    if (!(await requireMember(project, user, reply, "read"))) return reply;
+    return reply.send({ labels: await repo.listLabels(project.id) });
+  });
+
+  app.post(`${api}/projects/:slug/labels`, async (request, reply) => {
+    const { slug } = request.params as { slug: string };
+    const project = await resolveProject(slug, reply);
+    if (!project) return reply;
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    if (!(await requireMember(project, user, reply, "write"))) return reply;
+    const body = (request.body ?? {}) as { name?: string; color?: string };
+    const name = body.name?.trim();
+    if (!name || name.length > 40) {
+      return reply.code(400).send({ error: "Label name required (max 40)" });
+    }
+    if (!body.color || !LABEL_COLOR.test(body.color)) {
+      return reply.code(400).send({ error: "Color required (#rrggbb)" });
+    }
+    const existing = await repo.listLabels(project.id);
+    if (existing.some((label) => label.name.toLowerCase() === name.toLowerCase())) {
+      return reply.code(409).send({ error: "Label name taken" });
+    }
+    const label = await repo.createLabel({
+      projectId: project.id,
+      name,
+      color: body.color,
+    });
+    return reply.code(201).send({ label });
+  });
+
+  /** Issues mit Autor/Assignees/Modellen/Labels für die UI anreichern. */
+  async function enrichIssues(projectId: string, issues: Issue[]) {
+    const links = await repo.getIssueLinks(issues.map((issue) => issue.id));
+    const labelById = new Map(
+      (await repo.listLabels(projectId)).map((label) => [label.id, label]),
+    );
+    const modelById = new Map(
+      (await repo.listModels(projectId)).map((model) => [model.id, model]),
+    );
+    const userIds = new Set<string>();
+    for (const issue of issues) {
+      userIds.add(issue.authorId);
+      for (const id of links.get(issue.id)?.assigneeIds ?? []) {
+        userIds.add(id);
+      }
+    }
+    const users = await usersById(userIds);
+    return issues.map((issue) => {
+      const link = links.get(issue.id);
+      const author = users.get(issue.authorId);
+      return {
+        ...issue,
+        author: author ? publicUser(author) : null,
+        assignees: (link?.assigneeIds ?? [])
+          .map((id) => users.get(id))
+          .filter((entry): entry is User => Boolean(entry))
+          .map(publicUser),
+        models: (link?.modelIds ?? [])
+          .map((id) => modelById.get(id))
+          .filter((entry) => entry !== undefined)
+          .map((model) => ({
+            id: model.id,
+            slug: model.slug,
+            name: model.name,
+            folder: model.folder,
+            kind: model.kind,
+          })),
+        labels: (link?.labelIds ?? [])
+          .map((id) => labelById.get(id))
+          .filter((entry) => entry !== undefined),
+      };
+    });
+  }
+
+  /**
+   * Zuordnungs-Ids aus dem Request validieren: Assignees müssen Mitglieder
+   * sein, Modelle und Labels zum Projekt gehören. Gibt null zurück, wenn die
+   * Antwort schon gesendet wurde.
+   */
+  async function validateIssueLinks(
+    project: Project,
+    body: {
+      assigneeIds?: string[];
+      modelIds?: string[];
+      labelIds?: string[];
+    },
+    reply: FastifyReply,
+  ): Promise<Partial<IssueLinks> | null> {
+    const links: Partial<IssueLinks> = {};
+    if (body.assigneeIds !== undefined) {
+      for (const id of body.assigneeIds) {
+        if (!(await repo.getMember(project.id, id))) {
+          reply.code(400).send({ error: "Assignee is not a project member" });
+          return null;
+        }
+      }
+      links.assigneeIds = body.assigneeIds;
+    }
+    if (body.modelIds !== undefined) {
+      const known = new Set(
+        (await repo.listModels(project.id)).map((model) => model.id),
+      );
+      if (body.modelIds.some((id) => !known.has(id))) {
+        reply.code(400).send({ error: "Unknown model id" });
+        return null;
+      }
+      links.modelIds = body.modelIds;
+    }
+    if (body.labelIds !== undefined) {
+      const known = new Set(
+        (await repo.listLabels(project.id)).map((label) => label.id),
+      );
+      if (body.labelIds.some((id) => !known.has(id))) {
+        reply.code(400).send({ error: "Unknown label id" });
+        return null;
+      }
+      links.labelIds = body.labelIds;
+    }
+    return links;
+  }
+
+  app.get(`${api}/projects/:slug/issues`, async (request, reply) => {
+    const { slug } = request.params as { slug: string };
+    const project = await resolveProject(slug, reply);
+    if (!project) return reply;
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    if (!(await requireMember(project, user, reply, "read"))) return reply;
+    const query = request.query as { state?: string };
+    const all = await repo.listIssues(project.id);
+    const filtered =
+      query.state === "open" || query.state === "closed"
+        ? all.filter((issue) => issue.state === query.state)
+        : all;
+    return reply.send({
+      issues: await enrichIssues(project.id, filtered),
+      openCount: all.filter((issue) => issue.state === "open").length,
+      closedCount: all.filter((issue) => issue.state === "closed").length,
+    });
+  });
+
+  // Issues eröffnen darf jedes Mitglied (auch viewer) — wie bei GitHub.
+  app.post(`${api}/projects/:slug/issues`, async (request, reply) => {
+    const { slug } = request.params as { slug: string };
+    const project = await resolveProject(slug, reply);
+    if (!project) return reply;
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    if (!(await requireMember(project, user, reply, "read"))) return reply;
+    const body = (request.body ?? {}) as {
+      title?: string;
+      body?: string;
+      assigneeIds?: string[];
+      modelIds?: string[];
+      labelIds?: string[];
+    };
+    const title = body.title?.trim();
+    if (!title || title.length > 200) {
+      return reply.code(400).send({ error: "Title required (max 200)" });
+    }
+    const links = await validateIssueLinks(project, body, reply);
+    if (!links) return reply;
+    const issue = await repo.createIssue({
+      projectId: project.id,
+      title,
+      body: body.body ?? "",
+      state: "open",
+      authorId: user.id,
+    });
+    await repo.setIssueLinks(issue.id, links);
+    const [enriched] = await enrichIssues(project.id, [issue]);
+    return reply.code(201).send({ issue: enriched });
+  });
+
+  app.get(`${api}/projects/:slug/issues/:number`, async (request, reply) => {
+    const { slug, number } = request.params as { slug: string; number: string };
+    const project = await resolveProject(slug, reply);
+    if (!project) return reply;
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    if (!(await requireMember(project, user, reply, "read"))) return reply;
+    const issue = await repo.getIssue(project.id, Number(number));
+    if (!issue) {
+      return reply.code(404).send({ error: "Issue not found" });
+    }
+    const [enriched] = await enrichIssues(project.id, [issue]);
+    return reply.send({ issue: enriched });
+  });
+
+  app.patch(`${api}/projects/:slug/issues/:number`, async (request, reply) => {
+    const { slug, number } = request.params as { slug: string; number: string };
+    const project = await resolveProject(slug, reply);
+    if (!project) return reply;
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    const member = await requireMember(project, user, reply, "read");
+    if (!member) return reply;
+    const issue = await repo.getIssue(project.id, Number(number));
+    if (!issue) {
+      return reply.code(404).send({ error: "Issue not found" });
+    }
+    // Ändern darf der Autor oder jedes Mitglied mit Schreibrecht.
+    if (issue.authorId !== user.id && !WRITE_ROLES.has(member.role)) {
+      return reply.code(403).send({ error: "Insufficient role" });
+    }
+    const body = (request.body ?? {}) as {
+      title?: string;
+      body?: string;
+      state?: string;
+      assigneeIds?: string[];
+      modelIds?: string[];
+      labelIds?: string[];
+    };
+    if (body.state && !["open", "closed"].includes(body.state)) {
+      return reply.code(400).send({ error: "Invalid state" });
+    }
+    if (body.title !== undefined && !body.title.trim()) {
+      return reply.code(400).send({ error: "Title must not be empty" });
+    }
+    const links = await validateIssueLinks(project, body, reply);
+    if (!links) return reply;
+    const updated = await repo.updateIssue(issue.id, {
+      title: body.title?.trim(),
+      body: body.body,
+      state: body.state as "open" | "closed" | undefined,
+    });
+    await repo.setIssueLinks(issue.id, links);
+    const [enriched] = await enrichIssues(project.id, [updated ?? issue]);
+    return reply.send({ issue: enriched });
   });
 
   // ---- Projektbild (Screenshot aus der 3D-Szene) -----------------------

@@ -40,6 +40,9 @@ damit exakt einig, was „geändert“ bedeutet.
   sich einen Konvertierungslauf. Der Fragments-Worker der Web-UI wird
   versionsgleich aus dem Paket synchronisiert
   (`web/scripts/sync-fragments-worker.mjs`).
+- **Issues** — wie bei GitHub: pro Projekt nummerierte Issues mit
+  Markdown-Beschreibung, offen/geschlossen, zuordenbar an Benutzer,
+  0..n Modelle und farbige Labels (Tab „Issues“ in der Web-UI).
 - **Öffentliche Modelle** — `visibility: public` ist ohne Anmeldung les- und
   diffbar (Portal-Zugriff ohne Client).
 
@@ -47,7 +50,7 @@ damit exakt einig, was „geändert“ bedeutet.
 
 | Modus | Objekt-Store (IFC-Blobs) | Metadaten (Projekte, Commits, Manifeste) |
 | --- | --- | --- |
-| **lokal** (Standard) | Dateisystem `DATA_DIR` (`./.ifc-vcs-data`) | JSON-Katalogdatei `DATA_DIR/catalog.json` (atomar geschrieben), oder Postgres wenn `DATABASE_URL` gesetzt |
+| **lokal** (Standard) | Dateisystem `DATA_DIR` (`./.ifc-vcs-data`) | SQLite `DATA_DIR/catalog.sqlite` (node:sqlite, WAL), oder Postgres wenn `DATABASE_URL` gesetzt |
 | **azure** (`STORAGE=azure`) | Azure Blob Storage | Postgres (`DATABASE_URL`) |
 
 Die Metadaten-Schicht dedupliziert Entity-Payloads über Commits hinweg
@@ -76,12 +79,12 @@ JWT_SECRET="..." NODE_ENV=production npm start
 Konfiguration (`src/config.ts`): `PORT` (8787), `HOST`, `JWT_SECRET`,
 `STORAGE` (`filesystem`|`azure`), `DATA_DIR`,
 `AZURE_STORAGE_CONNECTION_STRING`, `AZURE_STORAGE_CONTAINER`,
-`DATABASE_URL` (Postgres; ohne = JSON-Katalogdatei unter `DATA_DIR`).
+`DATABASE_URL` (Postgres; ohne = SQLite unter `DATA_DIR`).
 
 > **Hinweis:** Der lokale Modus ist ohne weitere Konfiguration persistent
-> (Katalog + Blobs unter `DATA_DIR`). Postgres ist der richtige Modus für
-> Team-Betrieb mit vielen großen Modellen — der JSON-Katalog lädt beim Start
-> komplett in den Speicher.
+> (SQLite-Katalog + Blobs unter `DATA_DIR`; kein natives Modul nötig,
+> node:sqlite ist eingebaut). Beide Modi laufen über dieselbe SqlRepository
+> mit identischem Schema.
 
 ## Web-UI (`web/`, Nuxt)
 
@@ -117,6 +120,9 @@ Auth: `Authorization: Bearer <JWT>` aus `/api/auth/login`. Fehler kommen als
 | DELETE | `/api/projects/:slug/folders?path=` | leeren Ordner löschen (409 wenn Modelle darin) |
 | DELETE | `/api/projects/:slug` | Projekt löschen (nur Owner; inkl. Blobs) |
 | PUT/GET | `/api/projects/:slug/image` | Projektbild (PNG, z. B. Szenen-Screenshot aus dem 3D-Tab) setzen (write) / abrufen (Mitglied) |
+| GET/POST | `/api/projects/:slug/labels` | Labels auflisten / anlegen `{name, color}` (write) |
+| GET/POST | `/api/projects/:slug/issues` | Issues (`?state=open\|closed`, mit Zählern) / eröffnen `{title, body?, assigneeIds?, modelIds?, labelIds?}` (jedes Mitglied) |
+| GET/PATCH | `/api/projects/:slug/issues/:number` | Issue-Detail / ändern (Titel, Body, State, Zuordnungen — Autor oder write-Rolle) |
 | POST | `/api/projects/:slug/members` | Mitglied hinzufügen/Rolle ändern `{email, role}` (admin) |
 | DELETE | `/api/projects/:slug/members/:userId` | Mitglied entfernen (admin; Owner geschützt) |
 | GET/POST | `/api/projects/:slug/models` | Modelle (mit Head-Commit) / anlegen `{name, visibility?, folder?, kind?}` (`ifc`\|`md`) |

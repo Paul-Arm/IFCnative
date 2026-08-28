@@ -4,6 +4,7 @@ import {
   PhBookOpen,
   PhCaretDown,
   PhCaretRight,
+  PhCheckCircle,
   PhCrosshairSimple,
   PhCubeTransparent,
   PhDownloadSimple,
@@ -14,10 +15,12 @@ import {
   PhFolderPlus,
   PhFolders,
   PhGear,
+  PhPlus,
+  PhRecord,
   PhUsers,
 } from "@phosphor-icons/vue";
 
-import type { Member, Model, Project, Role } from "~/types/api";
+import type { Issue, Label, Member, Model, Project, Role } from "~/types/api";
 
 const route = useRoute();
 const router = useRouter();
@@ -52,10 +55,13 @@ const isOwner = computed(() => projectData.value?.role === "owner");
 
 // ---- Tabs + aktueller Ordnerpfad --------------------------------------
 
-type Tab = "modelle" | "3d" | "mitglieder" | "einstellungen";
+type Tab = "modelle" | "3d" | "issues" | "mitglieder" | "einstellungen";
 const tab = computed<Tab>(() => {
   const value = route.query.tab;
-  return value === "3d" || value === "mitglieder" || value === "einstellungen"
+  return value === "3d" ||
+    value === "issues" ||
+    value === "mitglieder" ||
+    value === "einstellungen"
     ? value
     : "modelle";
 });
@@ -406,6 +412,98 @@ function downloadSceneImage(): void {
   a.click();
 }
 
+// ---- Issues ------------------------------------------------------------
+
+const { data: issuesData, refresh: refreshIssues } = await useAsyncData(
+  `issues-${slug}`,
+  () =>
+    api<{ issues: Issue[]; openCount: number; closedCount: number }>(
+      `/projects/${slug}/issues`,
+    ),
+);
+const { data: labelsData, refresh: refreshLabels } = await useAsyncData(
+  `labels-${slug}`,
+  () => api<{ labels: Label[] }>(`/projects/${slug}/labels`),
+);
+
+const issueFilter = ref<"open" | "closed">("open");
+const filteredIssues = computed(() =>
+  (issuesData.value?.issues ?? []).filter(
+    (issue) => issue.state === issueFilter.value,
+  ),
+);
+
+const showIssueForm = ref(false);
+const issueTitle = ref("");
+const issueBody = ref("");
+const issueAssignees = reactive(new Set<string>());
+const issueModels = reactive(new Set<string>());
+const issueLabels = reactive(new Set<string>());
+const issueBusy = ref(false);
+const issueError = ref<string | null>(null);
+
+function toggleSet(set: Set<string>, id: string, on: boolean): void {
+  if (on) {
+    set.add(id);
+  } else {
+    set.delete(id);
+  }
+}
+
+async function createIssue(): Promise<void> {
+  issueError.value = null;
+  issueBusy.value = true;
+  try {
+    await api(`/projects/${slug}/issues`, {
+      method: "POST",
+      body: {
+        title: issueTitle.value,
+        body: issueBody.value,
+        assigneeIds: [...issueAssignees],
+        modelIds: [...issueModels],
+        labelIds: [...issueLabels],
+      },
+    });
+    issueTitle.value = "";
+    issueBody.value = "";
+    issueAssignees.clear();
+    issueModels.clear();
+    issueLabels.clear();
+    showIssueForm.value = false;
+    issueFilter.value = "open";
+    await refreshIssues();
+  } catch (e) {
+    issueError.value = apiErrorMessage(e);
+  } finally {
+    issueBusy.value = false;
+  }
+}
+
+const newLabelName = ref("");
+const newLabelColor = ref("#d73a4a");
+
+async function createLabelInline(): Promise<void> {
+  issueError.value = null;
+  try {
+    await api(`/projects/${slug}/labels`, {
+      method: "POST",
+      body: { name: newLabelName.value, color: newLabelColor.value },
+    });
+    newLabelName.value = "";
+    await refreshLabels();
+  } catch (e) {
+    issueError.value = apiErrorMessage(e);
+  }
+}
+
+/** Lesbare Textfarbe (schwarz/weiss) fuer eine Label-Hintergrundfarbe. */
+function labelTextColor(hex: string): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return 0.299 * r + 0.587 * g + 0.114 * b > 150 ? "#1f2328" : "#ffffff";
+}
+
 // ---- Mitglieder --------------------------------------------------------
 
 const memberEmail = ref("");
@@ -505,6 +603,11 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
         <PhCubeTransparent :size="16" aria-hidden="true" />
         3D
         <span class="counter">{{ viewerSources.length }}</span>
+      </button>
+      <button :class="{ active: tab === 'issues' }" @click="goTo('issues')">
+        <PhRecord :size="16" aria-hidden="true" />
+        Issues
+        <span class="counter">{{ issuesData?.openCount ?? 0 }}</span>
       </button>
       <button :class="{ active: tab === 'mitglieder' }" @click="goTo('mitglieder')">
         <PhUsers :size="16" aria-hidden="true" />
@@ -849,6 +952,195 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
         </div>
         <div v-else class="empty">
           Noch keine IFC-Modelle mit Commits in diesem Projekt.
+        </div>
+      </div>
+    </template>
+
+    <!-- ================= Tab: Issues ================= -->
+    <template v-else-if="tab === 'issues'">
+      <div v-if="issueError" class="alert error">{{ issueError }}</div>
+      <div class="card">
+        <div class="card-header">
+          <div class="tabs">
+            <button
+              :class="{ active: issueFilter === 'open' }"
+              @click="issueFilter = 'open'"
+            >
+              <PhRecord :size="14" aria-hidden="true" />
+              {{ issuesData?.openCount ?? 0 }} Offen
+            </button>
+            <button
+              :class="{ active: issueFilter === 'closed' }"
+              @click="issueFilter = 'closed'"
+            >
+              <PhCheckCircle :size="14" aria-hidden="true" />
+              {{ issuesData?.closedCount ?? 0 }} Geschlossen
+            </button>
+          </div>
+          <span class="topbar-spacer" />
+          <button class="primary" @click="showIssueForm = !showIssueForm">
+            <PhPlus :size="14" aria-hidden="true" />
+            Neues Issue
+          </button>
+        </div>
+
+        <div
+          v-if="showIssueForm"
+          class="card-body"
+          style="border-bottom: 1px solid var(--border)"
+        >
+          <form @submit.prevent="createIssue">
+            <div class="form-row">
+              <label for="issue-title">Titel</label>
+              <input
+                id="issue-title"
+                v-model="issueTitle"
+                type="text"
+                required
+                placeholder="Kurz und praezise"
+              />
+            </div>
+            <div class="form-row">
+              <label for="issue-body">Beschreibung (Markdown)</label>
+              <textarea
+                id="issue-body"
+                v-model="issueBody"
+                rows="5"
+                placeholder="Was ist das Problem?"
+              ></textarea>
+            </div>
+            <div class="issue-pickers">
+              <div class="issue-picker">
+                <label>Zugewiesen an</label>
+                <label
+                  v-for="member in projectData.members"
+                  :key="member.userId"
+                  class="pv-item"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="issueAssignees.has(member.userId)"
+                    @change="
+                      toggleSet(
+                        issueAssignees,
+                        member.userId,
+                        ($event.target as HTMLInputElement).checked,
+                      )
+                    "
+                  />
+                  <span class="pv-label">{{ member.user?.name ?? member.userId }}</span>
+                </label>
+              </div>
+              <div class="issue-picker">
+                <label>Modelle</label>
+                <label
+                  v-for="model in modelsData?.models ?? []"
+                  :key="model.id"
+                  class="pv-item"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="issueModels.has(model.id)"
+                    @change="
+                      toggleSet(
+                        issueModels,
+                        model.id,
+                        ($event.target as HTMLInputElement).checked,
+                      )
+                    "
+                  />
+                  <span class="pv-label">
+                    {{ model.folder ? `${model.folder}/` : "" }}{{ model.name }}
+                  </span>
+                </label>
+              </div>
+              <div class="issue-picker">
+                <label>Labels</label>
+                <label
+                  v-for="label in labelsData?.labels ?? []"
+                  :key="label.id"
+                  class="pv-item"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="issueLabels.has(label.id)"
+                    @change="
+                      toggleSet(
+                        issueLabels,
+                        label.id,
+                        ($event.target as HTMLInputElement).checked,
+                      )
+                    "
+                  />
+                  <span
+                    class="label-chip"
+                    :style="{
+                      backgroundColor: label.color,
+                      color: labelTextColor(label.color),
+                    }"
+                  >{{ label.name }}</span>
+                </label>
+                <div v-if="canWrite" class="issue-new-label">
+                  <input
+                    v-model="newLabelName"
+                    type="text"
+                    placeholder="Neues Label"
+                  />
+                  <input v-model="newLabelColor" type="color" />
+                  <button type="button" class="link" @click="createLabelInline">
+                    <PhPlus :size="14" aria-hidden="true" />
+                  </button>
+                </div>
+              </div>
+            </div>
+            <button class="primary" type="submit" :disabled="issueBusy">
+              Issue erstellen
+            </button>
+          </form>
+        </div>
+
+        <ul v-if="filteredIssues.length" class="list">
+          <li
+            v-for="issue in filteredIssues"
+            :key="issue.id"
+            class="list-item"
+          >
+            <span class="issue-state" :class="issue.state">
+              <PhRecord v-if="issue.state === 'open'" :size="18" />
+              <PhCheckCircle v-else :size="18" weight="fill" />
+            </span>
+            <div class="list-item-main">
+              <NuxtLink
+                :to="`/p/${slug}/i/${issue.number}`"
+                style="font-weight: 600"
+              >
+                {{ issue.title }}
+              </NuxtLink>
+              <span
+                v-for="label in issue.labels"
+                :key="label.id"
+                class="label-chip"
+                :style="{
+                  backgroundColor: label.color,
+                  color: labelTextColor(label.color),
+                }"
+              >{{ label.name }}</span>
+              <div class="muted small">
+                #{{ issue.number }} · {{ issue.author?.name ?? "?" }} ·
+                {{ dateFmt.format(new Date(issue.createdAt)) }}
+                <template v-if="issue.models.length">
+                  · {{ issue.models.map((m) => m.name).join(", ") }}
+                </template>
+              </div>
+            </div>
+            <span v-if="issue.assignees.length" class="muted small">
+              &rarr; {{ issue.assignees.map((a) => a.name).join(", ") }}
+            </span>
+          </li>
+        </ul>
+        <div v-else class="empty">
+          Keine {{ issueFilter === "open" ? "offenen" : "geschlossenen" }}
+          Issues.
         </div>
       </div>
     </template>
