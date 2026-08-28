@@ -511,13 +511,13 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
             "
           >
             <span class="fb-icon" aria-hidden="true">
-              <PhArrowElbowLeftUp :size="16" />
+              <PhArrowElbowLeftUp :size="18" />
             </span>
             <span class="fb-name">..</span>
           </a>
           <div v-for="folder in childFolders" :key="folder.path" class="fb-row">
             <span class="fb-icon folder" aria-hidden="true">
-              <PhFolder :size="16" weight="fill" />
+              <PhFolder :size="18" weight="fill" />
             </span>
             <a
               href="#"
@@ -539,8 +539,8 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
           </div>
           <div v-for="model in modelsInPath" :key="model.id" class="fb-row">
             <span class="fb-icon" aria-hidden="true">
-              <PhFileMd v-if="model.kind === 'md'" :size="16" />
-              <PhCube v-else :size="16" />
+              <PhFileMd v-if="model.kind === 'md'" :size="18" />
+              <PhCube v-else :size="18" />
             </span>
             <NuxtLink :to="`/p/${slug}/m/${model.slug}`" class="fb-name">
               {{ model.name }}
@@ -557,7 +557,8 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
             >öffentlich</span>
             <span class="fb-meta muted small">
               <template v-if="model.head">
-                {{ dateFmt.format(new Date(model.head.createdAt)) }}
+                <strong class="fb-author">{{ model.head.author?.name ?? "?" }}</strong>
+                · {{ dateFmt.format(new Date(model.head.createdAt)) }}
               </template>
             </span>
           </div>

@@ -525,10 +525,20 @@ summary.btn > svg {
   display: flex;
   align-items: center;
   gap: 0.65rem;
-  padding: 0.5rem 1rem;
+  padding: 0.6rem 1rem;
   border-bottom: 1px solid var(--border);
   color: var(--text);
   text-decoration: none;
+  font-size: 0.95rem;
+}
+
+.fb-row .small {
+  font-size: 0.85rem;
+}
+
+.fb-author {
+  font-weight: 600;
+  color: var(--text);
 }
 
 .fb-row:last-child {
