@@ -83,6 +83,68 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
   timeStyle: "short",
 });
 
+// ---- Gruppierung: Typ -> Name -> Entities -----------------------------
+
+interface NameGroup {
+  name: string;
+  entries: GuidDiffEntry[];
+}
+
+interface TypeGroup {
+  type: string;
+  count: number;
+  names: NameGroup[];
+}
+
+function groupEntries(entries: GuidDiffEntry[]): TypeGroup[] {
+  const byType = new Map<string, GuidDiffEntry[]>();
+  for (const entry of entries) {
+    let list = byType.get(entry.type);
+    if (!list) {
+      list = [];
+      byType.set(entry.type, list);
+    }
+    list.push(entry);
+  }
+  return [...byType.entries()]
+    .map(([type, list]) => {
+      const byName = new Map<string, GuidDiffEntry[]>();
+      for (const entry of list) {
+        const key = entry.name || "(ohne Name)";
+        let nameList = byName.get(key);
+        if (!nameList) {
+          nameList = [];
+          byName.set(key, nameList);
+        }
+        nameList.push(entry);
+      }
+      return {
+        type,
+        count: list.length,
+        names: [...byName.entries()]
+          .map(([name, nameEntries]) => ({ name, entries: nameEntries }))
+          .sort(
+            (a, b) =>
+              b.entries.length - a.entries.length || a.name.localeCompare(b.name),
+          ),
+      };
+    })
+    .sort((a, b) => b.count - a.count || a.type.localeCompare(b.type));
+}
+
+const filterText = ref("");
+const filterActive = computed(() => filterText.value.trim().length > 0);
+
+function matchesFilter(entry: GuidDiffEntry): boolean {
+  const query = filterText.value.trim().toLowerCase();
+  if (!query) return true;
+  return (
+    entry.type.toLowerCase().includes(query) ||
+    entry.name.toLowerCase().includes(query) ||
+    entry.globalId.toLowerCase().includes(query)
+  );
+}
+
 const sections = computed(() => {
   const diff = diffData.value?.diff;
   if (!diff) return [];
@@ -90,7 +152,17 @@ const sections = computed(() => {
     { key: "added", label: "Neu", entries: diff.added, cls: "status-added" },
     { key: "modified", label: "Geändert", entries: diff.modified, cls: "status-modified" },
     { key: "removed", label: "Entfernt", entries: diff.removed, cls: "status-removed" },
-  ].filter((section) => section.entries.length > 0);
+  ]
+    .map((section) => {
+      const filtered = section.entries.filter(matchesFilter);
+      return {
+        ...section,
+        total: section.entries.length,
+        filteredCount: filtered.length,
+        groups: groupEntries(filtered),
+      };
+    })
+    .filter((section) => section.total > 0);
 });
 </script>
 
@@ -135,6 +207,12 @@ const sections = computed(() => {
       <div class="card-header">
         <h2>Änderungen</h2>
         <span class="topbar-spacer" />
+        <input
+          v-model="filterText"
+          type="search"
+          placeholder="Filtern: Typ, Name oder GUID …"
+          style="width: 240px"
+        />
         <label for="diff-base" class="muted small" style="margin: 0">
           Vergleichsbasis:
         </label>
@@ -175,73 +253,110 @@ const sections = computed(() => {
         <div v-for="section in sections" :key="section.key">
           <div class="card-header">
             <h3 :class="section.cls" style="margin: 0">
-              {{ section.label }} ({{ section.entries.length }})
+              {{ section.label }}
+              <span v-if="filterActive" class="muted">
+                ({{ section.filteredCount }} von {{ section.total }})
+              </span>
+              <template v-else>({{ section.total }})</template>
             </h3>
           </div>
-          <ul class="list">
-            <li
-              v-for="entry in section.entries"
-              :key="entry.globalId"
-              class="list-item"
-              style="display: block"
-            >
-              <template v-if="section.key === 'modified'">
+          <div v-if="!section.groups.length" class="empty">
+            Keine Treffer für den Filter.
+          </div>
+          <details
+            v-for="group in section.groups"
+            :key="group.type"
+            class="tree-group"
+            :open="filterActive ? true : undefined"
+          >
+            <summary>
+              <strong :class="section.cls">{{ group.type }}</strong>
+              <span class="badge">{{ group.count }}</span>
+              <span class="muted small">
+                {{ group.names.length }}
+                {{ group.names.length === 1 ? "Name" : "Namen" }}
+              </span>
+            </summary>
+            <div class="tree-children">
+              <template v-for="nameGroup in group.names" :key="nameGroup.name">
+                <!-- Geändert: jede Entity einzeln aufklappbar (Feld-Diff) -->
+                <template v-if="section.key === 'modified'">
+                  <details
+                    v-for="entry in nameGroup.entries"
+                    :key="entry.globalId"
+                    class="entity-detail tree-leaf"
+                    @toggle="(e: Event) => (e.target as HTMLDetailsElement).open && loadDetail(entry)"
+                  >
+                    <summary>
+                      {{ nameGroup.name }}
+                      <span class="commit-id">{{ entry.globalId }}</span>
+                    </summary>
+                    <div style="margin-top: 0.5rem">
+                      <div
+                        v-if="details.get(entry.globalId) === 'loading'"
+                        class="muted small"
+                      >
+                        Lade Details …
+                      </div>
+                      <div
+                        v-else-if="details.get(entry.globalId)"
+                        class="table-wrap"
+                      >
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Gruppe</th>
+                              <th>Feld</th>
+                              <th>Vorher</th>
+                              <th>Nachher</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr
+                              v-for="change in (details.get(entry.globalId) as EntityFieldDiff).changes"
+                              :key="`${change.group}:${change.field}`"
+                            >
+                              <td class="small">{{ change.group }}</td>
+                              <td class="small"><strong>{{ change.field }}</strong></td>
+                              <td class="small mono diff-row-removed">
+                                {{ change.before ?? "—" }}
+                              </td>
+                              <td class="small mono diff-row-added">
+                                {{ change.after ?? "—" }}
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </details>
+                </template>
+                <!-- Neu/Entfernt: gleiche Namen zusammengefasst -->
                 <details
-                  class="entity-detail"
-                  @toggle="(e: Event) => (e.target as HTMLDetailsElement).open && loadDetail(entry)"
+                  v-else-if="nameGroup.entries.length > 1"
+                  class="tree-name"
                 >
                   <summary>
-                    <strong>{{ entry.type }}</strong>
-                    {{ entry.name || "(ohne Name)" }}
-                    <span class="commit-id">{{ entry.globalId }}</span>
+                    {{ nameGroup.name }}
+                    <span class="badge">{{ nameGroup.entries.length }}</span>
                   </summary>
-                  <div style="margin-top: 0.5rem">
-                    <div
-                      v-if="details.get(entry.globalId) === 'loading'"
-                      class="muted small"
+                  <ul class="tree-guids">
+                    <li
+                      v-for="entry in nameGroup.entries"
+                      :key="entry.globalId"
+                      class="commit-id"
                     >
-                      Lade Details …
-                    </div>
-                    <div
-                      v-else-if="details.get(entry.globalId)"
-                      class="table-wrap"
-                    >
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>Gruppe</th>
-                            <th>Feld</th>
-                            <th>Vorher</th>
-                            <th>Nachher</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <tr
-                            v-for="change in (details.get(entry.globalId) as EntityFieldDiff).changes"
-                            :key="`${change.group}:${change.field}`"
-                          >
-                            <td class="small">{{ change.group }}</td>
-                            <td class="small"><strong>{{ change.field }}</strong></td>
-                            <td class="small mono diff-row-removed">
-                              {{ change.before ?? "—" }}
-                            </td>
-                            <td class="small mono diff-row-added">
-                              {{ change.after ?? "—" }}
-                            </td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
+                      {{ entry.globalId }}
+                    </li>
+                  </ul>
                 </details>
+                <div v-else class="tree-leaf">
+                  {{ nameGroup.name }}
+                  <span class="commit-id">{{ nameGroup.entries[0]!.globalId }}</span>
+                </div>
               </template>
-              <template v-else>
-                <strong>{{ entry.type }}</strong>
-                {{ entry.name || "(ohne Name)" }}
-                <span class="commit-id">{{ entry.globalId }}</span>
-              </template>
-            </li>
-          </ul>
+            </div>
+          </details>
         </div>
         <div
           v-if="!sections.length && !diffData.diff.identical"

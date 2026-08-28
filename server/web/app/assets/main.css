@@ -448,6 +448,71 @@ details.entity-detail summary {
   cursor: pointer;
 }
 
+/* ---- diff tree (Typ -> Name -> Entities) ------------------------------ */
+
+details.tree-group {
+  border-bottom: 1px solid var(--border);
+}
+
+details.tree-group:last-of-type {
+  border-bottom: none;
+}
+
+details.tree-group > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+details.tree-group > summary:hover {
+  background: var(--surface-2);
+}
+
+.tree-children {
+  padding: 0.25rem 1rem 0.6rem 2rem;
+  display: grid;
+  gap: 0.15rem;
+}
+
+details.tree-name > summary,
+.tree-leaf {
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+}
+
+details.tree-name > summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  list-style-position: inside;
+}
+
+details.tree-name > summary:hover,
+details.tree-leaf > summary:hover {
+  background: var(--surface-2);
+}
+
+.tree-guids {
+  margin: 0.15rem 0 0.35rem;
+  padding-left: 1.6rem;
+  list-style: none;
+  display: grid;
+  gap: 0.1rem;
+}
+
+details.tree-leaf > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  list-style-position: inside;
+}
+
 .login-page {
   min-height: 100vh;
   display: flex;
