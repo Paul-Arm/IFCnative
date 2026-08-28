@@ -317,6 +317,88 @@ test("multipart upload with message and branch fields", async () => {
   await app.close();
 });
 
+test("model settings + deletion; project deletion is owner-only", async () => {
+  const app = await makeApp();
+  const owner = await register(app, "owner@example.com", "Owner");
+  const maintainer = await register(app, "maint@example.com", "Maint");
+  await app.inject({
+    method: "POST",
+    url: "/api/projects",
+    headers: auth(owner),
+    payload: { name: "Acme", slug: "acme" },
+  });
+  await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/members",
+    headers: auth(owner),
+    payload: { email: "maint@example.com", role: "maintainer" },
+  });
+  await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/models",
+    headers: auth(owner),
+    payload: { name: "Tower", slug: "tower" },
+  });
+  const c1 = await commitIfc(app, owner, ifcModel(), "init");
+  assert.equal(c1.statusCode, 201);
+
+  // Sichtbarkeit ändern (admin darf).
+  const patched = await app.inject({
+    method: "PATCH",
+    url: "/api/projects/acme/models/tower",
+    headers: auth(maintainer),
+    payload: { visibility: "public" },
+  });
+  assert.equal(patched.statusCode, 200);
+  assert.equal(JSON.parse(patched.body).model.visibility, "public");
+
+  // Default-Branch muss existieren.
+  const badBranch = await app.inject({
+    method: "PATCH",
+    url: "/api/projects/acme/models/tower",
+    headers: auth(owner),
+    payload: { defaultBranch: "gibt-es-nicht" },
+  });
+  assert.equal(badBranch.statusCode, 400);
+
+  // Projekt löschen darf nur der Owner …
+  const denied = await app.inject({
+    method: "DELETE",
+    url: "/api/projects/acme",
+    headers: auth(maintainer),
+  });
+  assert.equal(denied.statusCode, 403);
+
+  // … Modell löschen darf der Maintainer.
+  const deletedModel = await app.inject({
+    method: "DELETE",
+    url: "/api/projects/acme/models/tower",
+    headers: auth(maintainer),
+  });
+  assert.equal(deletedModel.statusCode, 204);
+  const gone = await app.inject({
+    method: "GET",
+    url: "/api/projects/acme/models/tower",
+    headers: auth(owner),
+  });
+  assert.equal(gone.statusCode, 404);
+
+  const deletedProject = await app.inject({
+    method: "DELETE",
+    url: "/api/projects/acme",
+    headers: auth(owner),
+  });
+  assert.equal(deletedProject.statusCode, 204);
+  const projectGone = await app.inject({
+    method: "GET",
+    url: "/api/projects/acme",
+    headers: auth(owner),
+  });
+  assert.equal(projectGone.statusCode, 404);
+
+  await app.close();
+});
+
 test("health reports version and storage mode", async () => {
   const app = await makeApp();
   const res = await app.inject({ method: "GET", url: "/api/health" });

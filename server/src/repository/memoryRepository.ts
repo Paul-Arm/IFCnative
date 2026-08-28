@@ -139,6 +139,52 @@ export class MemoryRepository implements Repository {
     return [...this.models.values()].filter((m) => m.projectId === projectId);
   }
 
+  async updateModel(
+    modelId: string,
+    patch: Partial<Pick<Model, "name" | "visibility" | "defaultBranch">>,
+  ): Promise<Model | null> {
+    const model = this.models.get(modelId);
+    if (!model) {
+      return null;
+    }
+    Object.assign(model, patch);
+    return model;
+  }
+
+  async deleteModel(modelId: string): Promise<string[]> {
+    const commits = [...this.commits.values()].filter(
+      (c) => c.modelId === modelId,
+    );
+    const commitIds = new Set(commits.map((c) => c.id));
+    for (const id of commitIds) {
+      this.commits.delete(id);
+      this.commitEntities.delete(id);
+    }
+    for (const key of [...this.diffCache.keys()]) {
+      const [from, to] = key.split("->");
+      if (commitIds.has(from) || commitIds.has(to)) {
+        this.diffCache.delete(key);
+      }
+    }
+    for (const branch of [...this.branches.values()]) {
+      if (branch.modelId === modelId) {
+        this.branches.delete(branch.id);
+      }
+    }
+    this.models.delete(modelId);
+    return commits.map((c) => c.blobKey);
+  }
+
+  async deleteProject(projectId: string): Promise<string[]> {
+    const blobKeys: string[] = [];
+    for (const model of await this.listModels(projectId)) {
+      blobKeys.push(...(await this.deleteModel(model.id)));
+    }
+    this.members = this.members.filter((m) => m.projectId !== projectId);
+    this.projects.delete(projectId);
+    return blobKeys;
+  }
+
   async createBranch(input: Omit<Branch, "id">): Promise<Branch> {
     const branch: Branch = { ...input, id: randomUUID() };
     this.branches.set(branch.id, branch);

@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, access } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile, access } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import { type ObjectStore, toBuffer } from "./objectStore";
@@ -43,5 +43,9 @@ export class FilesystemObjectStore implements ObjectStore {
     } catch {
       return false;
     }
+  }
+
+  async delete(key: string): Promise<void> {
+    await rm(this.pathFor(key), { force: true });
   }
 }

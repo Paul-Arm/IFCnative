@@ -285,6 +285,58 @@ export class SqlRepository implements Repository {
     return rows.map(toModel);
   }
 
+  async updateModel(
+    modelId: string,
+    patch: Partial<Pick<Model, "name" | "visibility" | "defaultBranch">>,
+  ): Promise<Model | null> {
+    const { rows } = await this.sql.query<ModelRow>(
+      `update models set
+         name = coalesce($2, name),
+         visibility = coalesce($3, visibility),
+         default_branch = coalesce($4, default_branch)
+       where id = $1
+       returning *`,
+      [modelId, patch.name ?? null, patch.visibility ?? null, patch.defaultBranch ?? null],
+    );
+    return rows[0] ? toModel(rows[0]) : null;
+  }
+
+  async deleteModel(modelId: string): Promise<string[]> {
+    const { rows } = await this.sql.query<{ id: string; blob_key: string }>(
+      `select id, blob_key from commits where model_id = $1`,
+      [modelId],
+    );
+    // FK-sichere Reihenfolge; entity_objects bleiben (content-addressed,
+    // über Commits/Modelle geteilt).
+    await this.sql.query(
+      `delete from commit_entities where commit_id in
+         (select id from commits where model_id = $1)`,
+      [modelId],
+    );
+    await this.sql.query(
+      `delete from diffs_cache where
+         from_commit in (select id from commits where model_id = $1)
+         or to_commit in (select id from commits where model_id = $1)`,
+      [modelId],
+    );
+    await this.sql.query(`delete from commits where model_id = $1`, [modelId]);
+    await this.sql.query(`delete from branches where model_id = $1`, [modelId]);
+    await this.sql.query(`delete from models where id = $1`, [modelId]);
+    return rows.map((row) => row.blob_key);
+  }
+
+  async deleteProject(projectId: string): Promise<string[]> {
+    const blobKeys: string[] = [];
+    for (const model of await this.listModels(projectId)) {
+      blobKeys.push(...(await this.deleteModel(model.id)));
+    }
+    await this.sql.query(`delete from project_members where project_id = $1`, [
+      projectId,
+    ]);
+    await this.sql.query(`delete from projects where id = $1`, [projectId]);
+    return blobKeys;
+  }
+
   // ---- branches --------------------------------------------------------
 
   async createBranch(input: Omit<Branch, "id">): Promise<Branch> {

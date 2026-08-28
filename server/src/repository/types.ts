@@ -104,6 +104,19 @@ export interface Repository {
   createModel(input: Omit<Model, "id" | "createdAt">): Promise<Model>;
   getModel(projectId: string, slug: string): Promise<Model | null>;
   listModels(projectId: string): Promise<Model[]>;
+  updateModel(
+    modelId: string,
+    patch: Partial<Pick<Model, "name" | "visibility" | "defaultBranch">>,
+  ): Promise<Model | null>;
+  /**
+   * Delete a model with its branches, commits, manifests and cached diffs.
+   * Returns the blob keys of the deleted commits so the caller can clean up
+   * the object store. Shared entity payloads (content-addressed) stay.
+   */
+  deleteModel(modelId: string): Promise<string[]>;
+
+  /** Delete a project with members and all its models; returns all blob keys. */
+  deleteProject(projectId: string): Promise<string[]>;
 
   // Branches
   createBranch(input: Omit<Branch, "id">): Promise<Branch>;

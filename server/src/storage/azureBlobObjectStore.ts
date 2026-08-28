@@ -51,4 +51,8 @@ export class AzureBlobObjectStore implements ObjectStore {
   async exists(key: string): Promise<boolean> {
     return this.container.getBlockBlobClient(key).exists();
   }
+
+  async delete(key: string): Promise<void> {
+    await this.container.getBlockBlobClient(key).deleteIfExists();
+  }
 }

@@ -465,6 +465,75 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return map;
   }
 
+  // Modell-Einstellungen (Name, Sichtbarkeit, Standard-Branch) — admin.
+  app.patch(`${api}/projects/:slug/models/:model`, async (request, reply) => {
+    const { slug, model: modelSlug } = request.params as {
+      slug: string;
+      model: string;
+    };
+    const resolved = await resolveModel(slug, modelSlug, reply);
+    if (!resolved) return reply;
+    const { project, model } = resolved;
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    if (!(await requireMember(project, user, reply, "admin"))) return reply;
+    const body = (request.body ?? {}) as {
+      name?: string;
+      visibility?: "private" | "public";
+      defaultBranch?: string;
+    };
+    if (body.visibility && !["private", "public"].includes(body.visibility)) {
+      return reply.code(400).send({ error: "Invalid visibility" });
+    }
+    if (body.defaultBranch) {
+      if (!(await repo.getBranch(model.id, body.defaultBranch))) {
+        return reply.code(400).send({ error: "Branch does not exist" });
+      }
+    }
+    const updated = await repo.updateModel(model.id, {
+      name: body.name,
+      visibility: body.visibility,
+      defaultBranch: body.defaultBranch,
+    });
+    return reply.send({ model: updated });
+  });
+
+  // Modell löschen (admin): Metadaten sofort, Blobs best-effort.
+  app.delete(`${api}/projects/:slug/models/:model`, async (request, reply) => {
+    const { slug, model: modelSlug } = request.params as {
+      slug: string;
+      model: string;
+    };
+    const resolved = await resolveModel(slug, modelSlug, reply);
+    if (!resolved) return reply;
+    const { project, model } = resolved;
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    if (!(await requireMember(project, user, reply, "admin"))) return reply;
+    const blobKeys = await repo.deleteModel(model.id);
+    await Promise.allSettled(blobKeys.map((key) => store.delete(key)));
+    return reply.code(204).send();
+  });
+
+  // Projekt löschen — nur der Owner.
+  app.delete(`${api}/projects/:slug`, async (request, reply) => {
+    const { slug } = request.params as { slug: string };
+    const project = await resolveProject(slug, reply);
+    if (!project) return reply;
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    const member = await requireMember(project, user, reply, "admin");
+    if (!member) return reply;
+    if (member.role !== "owner") {
+      return reply
+        .code(403)
+        .send({ error: "Only the project owner can delete it" });
+    }
+    const blobKeys = await repo.deleteProject(project.id);
+    await Promise.allSettled(blobKeys.map((key) => store.delete(key)));
+    return reply.code(204).send();
+  });
+
   // ---- branches --------------------------------------------------------
 
   app.post(

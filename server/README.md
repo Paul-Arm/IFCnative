@@ -95,10 +95,13 @@ Auth: `Authorization: Bearer <JWT>` aus `/api/auth/login`. Fehler kommen als
 | GET | `/api/me` | aktueller Benutzer |
 | GET/POST | `/api/projects` | meine Projekte (mit Rolle) / anlegen `{name, slug?}` |
 | GET | `/api/projects/:slug` | Projekt + Mitglieder (mit Benutzerdaten) |
+| DELETE | `/api/projects/:slug` | Projekt löschen (nur Owner; inkl. Blobs) |
 | POST | `/api/projects/:slug/members` | Mitglied hinzufügen/Rolle ändern `{email, role}` (admin) |
 | DELETE | `/api/projects/:slug/members/:userId` | Mitglied entfernen (admin; Owner geschützt) |
 | GET/POST | `/api/projects/:slug/models` | Modelle (mit Head-Commit) / anlegen `{name, visibility?}` |
 | GET | `/api/projects/:slug/models/:model` | Modell + Branches (mit Heads) |
+| PATCH | `/api/projects/:slug/models/:model` | Einstellungen `{name?, visibility?, defaultBranch?}` (admin) |
+| DELETE | `/api/projects/:slug/models/:model` | Modell löschen (admin; inkl. Blobs) |
 | POST | `/api/projects/:slug/models/:model/branches` | Branch anlegen `{name, from?}` — startet am Head von `from` |
 | POST | `…/commits?branch=&message=` | IFC hochladen (raw Body **oder** Multipart `file` + Felder `message`/`branch`) → `{commit, diff}` |
 | GET | `…/commits?branch=` | Historie (Commits mit Autor) |
@@ -129,7 +132,7 @@ npm run typecheck      # tsc --noEmit
 ## Noch offen (bewusst später)
 
 - Drei-Wege-Merge mit Konflikt-Erkennung auf Entity-Ebene; Merge-UI.
-- Löschen/Umbenennen von Projekten und Modellen (API + UI).
+- Umbenennen von Projekten; Branches löschen.
 - Tags/Releases; geschützte Branches.
 - OpenAPI/Swagger-Doku; Pagination für sehr lange Historien.
 - Web-UI: 3D-Vorschau eines Commits.

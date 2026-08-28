@@ -187,4 +187,27 @@ export class JsonFileRepository extends MemoryRepository {
     await super.saveCachedDiff(fromCommitId, toCommitId, summary);
     this.scheduleSave();
   }
+
+  override async updateModel(
+    modelId: string,
+    patch: Partial<Pick<Model, "name" | "visibility" | "defaultBranch">>,
+  ): Promise<Model | null> {
+    const model = await super.updateModel(modelId, patch);
+    if (model) {
+      this.scheduleSave();
+    }
+    return model;
+  }
+
+  override async deleteModel(modelId: string): Promise<string[]> {
+    const blobKeys = await super.deleteModel(modelId);
+    this.scheduleSave();
+    return blobKeys;
+  }
+
+  override async deleteProject(projectId: string): Promise<string[]> {
+    const blobKeys = await super.deleteProject(projectId);
+    this.scheduleSave();
+    return blobKeys;
+  }
 }

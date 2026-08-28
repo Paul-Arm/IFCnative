@@ -105,6 +105,30 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
   dateStyle: "medium",
   timeStyle: "short",
 });
+
+// ---- delete project ---------------------------------------------------
+
+const isOwner = computed(() => projectData.value?.role === "owner");
+const deleteError = ref<string | null>(null);
+
+async function deleteProject(): Promise<void> {
+  const project = projectData.value?.project;
+  if (!project) return;
+  if (
+    !window.confirm(
+      `Projekt „${project.name}" mit allen Modellen und Versionsständen unwiderruflich löschen?`,
+    )
+  ) {
+    return;
+  }
+  deleteError.value = null;
+  try {
+    await api(`/projects/${slug}`, { method: "DELETE" });
+    await navigateTo("/");
+  } catch (e) {
+    deleteError.value = apiErrorMessage(e);
+  }
+}
 </script>
 
 <template>
@@ -237,6 +261,20 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
             </button>
           </div>
         </form>
+      </div>
+    </div>
+
+    <div v-if="isOwner" class="card" style="border-color: var(--danger)">
+      <div class="card-header">
+        <h2 style="color: var(--danger)">Gefahrenzone</h2>
+      </div>
+      <div class="card-body">
+        <div v-if="deleteError" class="alert error">{{ deleteError }}</div>
+        <p class="muted small" style="margin-top: 0">
+          Löscht das Projekt mit allen Modellen, Branches und Versionsständen —
+          unwiderruflich.
+        </p>
+        <button class="danger" @click="deleteProject">Projekt löschen</button>
       </div>
     </div>
   </div>

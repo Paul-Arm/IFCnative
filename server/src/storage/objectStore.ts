@@ -11,6 +11,8 @@ export interface ObjectStore {
   /** Fetch a blob; rejects if the key does not exist. */
   get(key: string): Promise<Buffer>;
   exists(key: string): Promise<boolean>;
+  /** Remove a blob; resolving is fine even if the key does not exist. */
+  delete(key: string): Promise<void>;
 }
 
 export function toBuffer(data: Buffer | string): Buffer {

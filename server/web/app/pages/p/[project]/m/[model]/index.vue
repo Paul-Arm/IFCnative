@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import type { Branch, Commit, GuidDiffSummary, Model } from "~/types/api";
+import type {
+  Branch,
+  Commit,
+  GuidDiffSummary,
+  Member,
+  Model,
+  Project,
+  Role,
+} from "~/types/api";
 
 const route = useRoute();
 const { api } = useApi();
@@ -11,6 +19,16 @@ const base = `/projects/${slug}/models/${modelSlug}`;
 const { data: modelData, refresh: refreshModel } = await useAsyncData(
   `model-${slug}-${modelSlug}`,
   () => api<{ model: Model; branches: Branch[] }>(base),
+);
+const { data: projectData } = await useAsyncData(`project-role-${slug}`, () =>
+  api<{ project: Project; members: Member[]; role: Role | null }>(
+    `/projects/${slug}`,
+  ),
+);
+const isAdmin = computed(
+  () =>
+    projectData.value?.role === "owner" ||
+    projectData.value?.role === "maintainer",
 );
 
 const selectedBranch = ref<string | null>(null);
@@ -107,6 +125,45 @@ async function createBranch(): Promise<void> {
     await refreshModel();
   } catch (e) {
     branchError.value = apiErrorMessage(e);
+  }
+}
+
+// ---- Einstellungen ----------------------------------------------------
+
+const settingsError = ref<string | null>(null);
+const settingsNotice = ref<string | null>(null);
+
+async function patchModel(patch: {
+  visibility?: "private" | "public";
+  defaultBranch?: string;
+}): Promise<void> {
+  settingsError.value = null;
+  settingsNotice.value = null;
+  try {
+    await api(base, { method: "PATCH", body: patch });
+    settingsNotice.value = "Gespeichert.";
+    await refreshModel();
+  } catch (e) {
+    settingsError.value = apiErrorMessage(e);
+  }
+}
+
+async function deleteModel(): Promise<void> {
+  const model = modelData.value?.model;
+  if (!model) return;
+  if (
+    !window.confirm(
+      `Modell „${model.name}" mit allen Branches und Versionsständen unwiderruflich löschen?`,
+    )
+  ) {
+    return;
+  }
+  settingsError.value = null;
+  try {
+    await api(base, { method: "DELETE" });
+    await navigateTo(`/p/${slug}`);
+  } catch (e) {
+    settingsError.value = apiErrorMessage(e);
   }
 }
 
@@ -282,6 +339,57 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
             </div>
           </div>
         </form>
+      </div>
+    </div>
+
+    <div v-if="isAdmin" class="card">
+      <div class="card-header"><h2>Einstellungen</h2></div>
+      <div class="card-body">
+        <div v-if="settingsError" class="alert error">{{ settingsError }}</div>
+        <div v-if="settingsNotice" class="alert success">{{ settingsNotice }}</div>
+        <div class="form-inline">
+          <div class="shrink">
+            <label for="settings-visibility">Sichtbarkeit</label>
+            <select
+              id="settings-visibility"
+              style="width: auto"
+              :value="modelData.model.visibility"
+              @change="
+                patchModel({
+                  visibility: ($event.target as HTMLSelectElement)
+                    .value as 'private' | 'public',
+                })
+              "
+            >
+              <option value="private">privat</option>
+              <option value="public">öffentlich</option>
+            </select>
+          </div>
+          <div class="shrink">
+            <label for="settings-default-branch">Standard-Branch</label>
+            <select
+              id="settings-default-branch"
+              style="width: auto"
+              :value="modelData.model.defaultBranch"
+              @change="
+                patchModel({
+                  defaultBranch: ($event.target as HTMLSelectElement).value,
+                })
+              "
+            >
+              <option
+                v-for="branch in modelData.branches"
+                :key="branch.id"
+                :value="branch.name"
+              >
+                {{ branch.name }}
+              </option>
+            </select>
+          </div>
+          <div class="shrink" style="margin-left: auto">
+            <button class="danger" @click="deleteModel">Modell löschen</button>
+          </div>
+        </div>
       </div>
     </div>
 
