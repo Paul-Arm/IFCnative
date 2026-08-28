@@ -159,8 +159,10 @@ export function VcsPanel({
     let cancelled = false;
     void client
       .listModels(projectSlug)
-      .then((list) => {
+      .then((all) => {
         if (cancelled) return;
+        // Markdown-Dokumente sind Hub-only; im Editor zählen nur IFC-Modelle.
+        const list = all.filter((model) => (model.kind ?? "ifc") === "ifc");
         setModels(list);
         setModelSlug((current) =>
           list.some((model) => model.slug === current)

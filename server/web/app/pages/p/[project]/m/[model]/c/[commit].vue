@@ -238,7 +238,16 @@ const sections = computed(() => {
         </select>
       </div>
 
-      <div v-if="!fromId" class="empty">
+      <div v-if="commitData.commit.schema === 'markdown'" class="card-body">
+        <div class="alert" :class="diffData?.diff.identical ? 'success' : ''" style="margin: 0">
+          Markdown-Datei — es gibt keinen Objekt-Diff.
+          <template v-if="diffData?.diff.identical">
+            Der Inhalt ist identisch mit der Vergleichsbasis.
+          </template>
+          <template v-else-if="fromId">Der Inhalt hat sich geändert.</template>
+        </div>
+      </div>
+      <div v-else-if="!fromId" class="empty">
         Erster Commit dieses Modells — alle
         {{ commitData.commit.entityCount }} Entities sind neu.
       </div>

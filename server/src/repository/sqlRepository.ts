@@ -11,6 +11,7 @@ import type {
   Commit,
   Member,
   Model,
+  ModelKind,
   Project,
   Repository,
   Role,
@@ -49,6 +50,7 @@ interface ModelRow {
   default_branch: string;
   created_at: string;
   folder: string;
+  kind: ModelKind;
 }
 interface BranchRow {
   id: string;
@@ -101,6 +103,7 @@ function toModel(row: ModelRow): Model {
     defaultBranch: row.default_branch,
     createdAt: row.created_at,
     folder: row.folder ?? "",
+    kind: row.kind ?? "ifc",
   };
 }
 function toBranch(row: BranchRow): Branch {
@@ -256,8 +259,8 @@ export class SqlRepository implements Repository {
   async createModel(input: Omit<Model, "id" | "createdAt">): Promise<Model> {
     const model: Model = { ...input, id: randomUUID(), createdAt: this.now() };
     await this.sql.query(
-      `insert into models (id, project_id, slug, name, visibility, default_branch, created_at, folder)
-       values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      `insert into models (id, project_id, slug, name, visibility, default_branch, created_at, folder, kind)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
       [
         model.id,
         model.projectId,
@@ -267,6 +270,7 @@ export class SqlRepository implements Repository {
         model.defaultBranch,
         model.createdAt,
         model.folder,
+        model.kind,
       ],
     );
     return model;

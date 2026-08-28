@@ -43,6 +43,7 @@ async function setup() {
     visibility: "private",
     defaultBranch: "main",
     folder: "",
+    kind: "ifc",
   });
   return { db, repo, service, user, project, model };
 }
@@ -68,14 +69,14 @@ test("commits persist, dedup entity payloads, and cache diffs", async () => {
   const v1 = await service.createCommit({
     model,
     branchName: "main",
-    ifcText: ifcModel(),
+    text: ifcModel(),
     authorId: user.id,
     message: "init",
   });
   const v2 = await service.createCommit({
     model,
     branchName: "main",
-    ifcText: ifcModel({ height: "3200." }),
+    text: ifcModel({ height: "3200." }),
     authorId: user.id,
     message: "raise",
   });

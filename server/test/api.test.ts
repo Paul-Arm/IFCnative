@@ -488,6 +488,75 @@ test("folders: create, place model, move, guarded delete", async () => {
   await app.close();
 });
 
+test("markdown files: create, commit without STEP check, identical detection, download", async () => {
+  const app = await makeApp();
+  const token = await register(app);
+  await app.inject({
+    method: "POST",
+    url: "/api/projects",
+    headers: auth(token),
+    payload: { name: "Acme", slug: "acme" },
+  });
+
+  const created = await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/models",
+    headers: auth(token),
+    payload: { name: "README.md", kind: "md", folder: "" },
+  });
+  assert.equal(created.statusCode, 201);
+  const model = JSON.parse(created.body).model;
+  assert.equal(model.kind, "md");
+
+  const commitMd = (content: string, message: string) =>
+    app.inject({
+      method: "POST",
+      url: `/api/projects/acme/models/${model.slug}/commits?message=${encodeURIComponent(message)}`,
+      headers: { ...auth(token), "content-type": "text/markdown" },
+      payload: content,
+    });
+
+  const c1 = await commitMd("# Projekt Acme\n\nHallo **Welt**.", "Erste Version");
+  assert.equal(c1.statusCode, 201);
+  const c1Body = JSON.parse(c1.body);
+  assert.equal(c1Body.commit.schema, "markdown");
+  assert.equal(c1Body.diff.identical, false);
+
+  // Identischer Inhalt wird als solcher erkannt.
+  const c2 = await commitMd("# Projekt Acme\n\nHallo **Welt**.", "Nochmal");
+  assert.equal(JSON.parse(c2.body).diff.identical, true);
+
+  // Geänderter Inhalt nicht.
+  const c3 = await commitMd("# Projekt Acme\n\nGeändert.", "Update");
+  assert.equal(JSON.parse(c3.body).diff.identical, false);
+
+  const file = await app.inject({
+    method: "GET",
+    url: `/api/projects/acme/models/${model.slug}/commits/${JSON.parse(c3.body).commit.id}/file`,
+    headers: auth(token),
+  });
+  assert.equal(file.statusCode, 200);
+  assert.ok(file.headers["content-type"]?.toString().includes("text/markdown"));
+  assert.ok(file.body.includes("Geändert"));
+
+  // IFC-Modelle verlangen weiterhin echten STEP-Inhalt.
+  await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/models",
+    headers: auth(token),
+    payload: { name: "Tower", slug: "tower" },
+  });
+  const notIfc = await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/models/tower/commits?message=x",
+    headers: { ...auth(token), "content-type": "application/x-step" },
+    payload: "# kein ifc",
+  });
+  assert.equal(notIfc.statusCode, 400);
+
+  await app.close();
+});
+
 test("health reports version and storage mode", async () => {
   const app = await makeApp();
   const res = await app.inject({ method: "GET", url: "/api/health" });

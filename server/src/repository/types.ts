@@ -51,6 +51,12 @@ export interface Member {
 
 export type Visibility = "private" | "public";
 
+/**
+ * Dateiart eines Modells: "ifc" = IFC-Modell mit semantischem GlobalId-Diff,
+ * "md" = Markdown-Dokument (z. B. README), versioniert ohne Objekt-Diff.
+ */
+export type ModelKind = "ifc" | "md";
+
 export interface Model {
   id: string;
   projectId: string;
@@ -61,6 +67,7 @@ export interface Model {
   createdAt: string;
   /** Ordnerpfad im Projekt, Segmente mit "/" getrennt; "" = Wurzel. */
   folder: string;
+  kind: ModelKind;
 }
 
 export interface Branch {

@@ -61,6 +61,8 @@ export interface VcsModel {
   createdAt: string;
   /** Ordnerpfad im Projekt ("" = Wurzel). */
   folder?: string;
+  /** "ifc" (Standard) oder "md" (Markdown-Dokument, für den Editor irrelevant). */
+  kind?: "ifc" | "md";
   branchCount?: number;
   head?: VcsCommit | null;
 }

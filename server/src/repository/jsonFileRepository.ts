@@ -57,9 +57,13 @@ export class JsonFileRepository extends MemoryRepository {
     this.users = new Map(parsed.users.map((user) => [user.id, user]));
     this.projects = new Map(parsed.projects.map((p) => [p.id, p]));
     this.members = parsed.members;
-    // Kataloge von vor dem Ordner-Feature haben kein `folder`-Feld an Modellen.
+    // Kataloge von vor dem Ordner-/Markdown-Feature haben kein `folder`-
+    // bzw. `kind`-Feld an Modellen.
     this.models = new Map(
-      parsed.models.map((m) => [m.id, { ...m, folder: m.folder ?? "" }]),
+      parsed.models.map((m) => [
+        m.id,
+        { ...m, folder: m.folder ?? "", kind: m.kind ?? "ifc" },
+      ]),
     );
     this.branches = new Map(parsed.branches.map((b) => [b.id, b]));
     this.commits = new Map(parsed.commits.map((c) => [c.id, c]));

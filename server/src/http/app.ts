@@ -114,9 +114,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return reply.code(404).send({ error: "Not found" });
   });
 
-  // Accept raw IFC/STEP request bodies as strings.
+  // Accept raw IFC/STEP and Markdown request bodies as strings.
   app.addContentTypeParser(
-    ["text/plain", "application/octet-stream", "application/x-step"],
+    ["text/plain", "application/octet-stream", "application/x-step", "text/markdown"],
     { parseAs: "string" },
     (_req, body, done) => done(null, body),
   );
@@ -502,9 +502,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       slug?: string;
       visibility?: "private" | "public";
       folder?: string;
+      kind?: "ifc" | "md";
     };
     if (!body.name) {
       return reply.code(400).send({ error: "name required" });
+    }
+    const kind = body.kind ?? "ifc";
+    if (!["ifc", "md"].includes(kind)) {
+      return reply.code(400).send({ error: "Invalid kind (ifc or md)" });
     }
     const folder = normalizeFolderPath(body.folder ?? "");
     if (folder === null) {
@@ -524,6 +529,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       visibility: body.visibility ?? "private",
       defaultBranch: "main",
       folder,
+      kind,
     });
     return reply.code(201).send({ model });
   });
@@ -729,7 +735,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
       const query = request.query as { branch?: string; message?: string };
       const upload = await readIfcUpload(request);
-      if (!upload.text || !upload.text.includes("ISO-10303-21")) {
+      if (upload.text === null || upload.text === "") {
+        return reply.code(400).send({ error: "File content required" });
+      }
+      if (model.kind === "md") {
+        if (upload.text.length > 2 * 1024 * 1024) {
+          return reply.code(400).send({ error: "Markdown too large (max 2 MB)" });
+        }
+      } else if (!upload.text.includes("ISO-10303-21")) {
         return reply.code(400).send({ error: "Valid IFC/STEP body required" });
       }
 
@@ -742,7 +755,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       const result = await commits.createCommit({
         model,
         branchName,
-        ifcText: upload.text,
+        text: upload.text,
         authorId: user.id,
         message: query.message ?? upload.fields.message ?? "",
       });
@@ -803,11 +816,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return reply.code(404).send({ error: "Commit not found" });
       }
       const buffer = await commits.downloadIfc(commit);
+      const isMd = model.kind === "md";
       return reply
-        .header("content-type", "application/x-step")
+        .header(
+          "content-type",
+          isMd ? "text/markdown; charset=utf-8" : "application/x-step",
+        )
         .header(
           "content-disposition",
-          `attachment; filename="${modelSlug}-${commitId}.ifc"`,
+          `attachment; filename="${modelSlug}-${commitId}.${isMd ? "md" : "ifc"}"`,
         )
         .send(buffer);
     },

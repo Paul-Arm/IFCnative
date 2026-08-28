@@ -95,6 +95,16 @@ const modelsInPath = computed(() =>
 const showFolderForm = ref(false);
 const folderName = ref("");
 const browserError = ref<string | null>(null);
+const newMenu = ref<HTMLDetailsElement | null>(null);
+
+function openCreateForm(which: "model" | "file" | "folder"): void {
+  showModelForm.value = which === "model";
+  showFileForm.value = which === "file";
+  showFolderForm.value = which === "folder";
+  if (newMenu.value) {
+    newMenu.value.open = false;
+  }
+}
 
 async function createFolder(): Promise<void> {
   browserError.value = null;
@@ -153,6 +163,83 @@ async function createModel(): Promise<void> {
     modelBusy.value = false;
   }
 }
+
+// ---- Markdown-Datei anlegen --------------------------------------------
+
+const showFileForm = ref(false);
+const fileName = ref("README.md");
+const fileContent = ref("");
+const fileMessage = ref("");
+const fileBusy = ref(false);
+const { token } = useAuth();
+
+async function createMarkdownFile(): Promise<void> {
+  browserError.value = null;
+  fileBusy.value = true;
+  try {
+    const name = fileName.value.trim() || "README.md";
+    const { model } = await api<{ model: Model }>(`/projects/${slug}/models`, {
+      method: "POST",
+      body: { name, kind: "md", folder: currentPath.value },
+    });
+    await $fetch(
+      `/api/projects/${slug}/models/${model.slug}/commits`,
+      {
+        method: "POST",
+        query: { message: fileMessage.value.trim() || "Erste Version" },
+        body: fileContent.value || `# ${name.replace(/\.md$/i, "")}\n`,
+        headers: {
+          "content-type": "text/markdown",
+          ...(token.value ? { authorization: `Bearer ${token.value}` } : {}),
+        },
+      },
+    );
+    fileName.value = "README.md";
+    fileContent.value = "";
+    fileMessage.value = "";
+    showFileForm.value = false;
+    await Promise.all([refreshModels(), refreshProject()]);
+  } catch (e) {
+    browserError.value = apiErrorMessage(e);
+  } finally {
+    fileBusy.value = false;
+  }
+}
+
+// ---- README-Anzeige (wie GitHub) ---------------------------------------
+
+const readmeModel = computed(
+  () =>
+    modelsInPath.value.find(
+      (model) =>
+        model.kind === "md" && model.name.toLowerCase() === "readme.md",
+    ) ?? null,
+);
+const readmeHtml = ref<string | null>(null);
+
+watch(
+  [readmeModel, currentPath],
+  async () => {
+    readmeHtml.value = null;
+    const model = readmeModel.value;
+    if (!model?.head) return;
+    try {
+      const text = await $fetch<string>(
+        `/api/projects/${slug}/models/${model.slug}/commits/${model.head.id}/file`,
+        {
+          responseType: "text",
+          headers: token.value
+            ? { authorization: `Bearer ${token.value}` }
+            : {},
+        },
+      );
+      readmeHtml.value = renderMarkdown(text);
+    } catch {
+      readmeHtml.value = null;
+    }
+  },
+  { immediate: true },
+);
 
 // ---- Mitglieder --------------------------------------------------------
 
@@ -285,17 +372,23 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
             </template>
           </div>
           <span class="topbar-spacer" />
-          <template v-if="canWrite">
-            <button @click="showFolderForm = !showFolderForm; showModelForm = false">
-              Neuer Ordner
-            </button>
-            <button
-              class="primary"
-              @click="showModelForm = !showModelForm; showFolderForm = false"
-            >
-              Neues Modell
-            </button>
-          </template>
+          <details v-if="canWrite" ref="newMenu" class="menu">
+            <summary class="btn primary">＋ Neu</summary>
+            <div class="menu-list">
+              <button class="menu-item" @click="openCreateForm('model')">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M2 1.75C2 .784 2.784 0 3.75 0h6.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 13.25 16h-9.5A1.75 1.75 0 0 1 2 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25h9.5a.25.25 0 0 0 .25-.25V6h-2.75A1.75 1.75 0 0 1 9 4.25V1.5Zm6.75.062V4.25c0 .138.112.25.25.25h2.688l-.011-.013-2.914-2.914-.013-.011Z"/></svg>
+                IFC-Modell
+              </button>
+              <button class="menu-item" @click="openCreateForm('file')">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 1.75A.75.75 0 0 1 .75 1h4.253c1.227 0 2.317.59 3 1.501A3.743 3.743 0 0 1 11.006 1h4.245a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-.75.75h-4.507a2.25 2.25 0 0 0-1.591.659l-.622.621a.75.75 0 0 1-1.06 0l-.622-.621A2.25 2.25 0 0 0 5.258 13H.75a.75.75 0 0 1-.75-.75Zm7.251 10.324.004-5.073-.002-2.253A2.25 2.25 0 0 0 5.003 2.5H1.5v9h3.757a3.75 3.75 0 0 1 1.994.574ZM8.755 4.75l-.004 7.322a3.752 3.752 0 0 1 1.992-.572H14.5v-9h-3.495a2.25 2.25 0 0 0-2.25 2.25Z"/></svg>
+                Markdown-Datei
+              </button>
+              <button class="menu-item" @click="openCreateForm('folder')">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 1.26 5.55 1 5 1H1.75Z"/></svg>
+                Ordner
+              </button>
+            </div>
+          </details>
         </div>
 
         <div v-if="showFolderForm" class="card-body" style="border-bottom: 1px solid var(--border)">
@@ -316,6 +409,51 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
             <div class="shrink">
               <button class="primary" type="submit">Anlegen</button>
             </div>
+          </form>
+        </div>
+
+        <div v-if="showFileForm" class="card-body" style="border-bottom: 1px solid var(--border)">
+          <p class="muted small" style="margin-top: 0">
+            Markdown-Datei — eine <code>README.md</code> wird wie bei GitHub
+            unter der Dateiliste angezeigt<span v-if="currentPath">
+              (wird in „{{ currentPath }}“ angelegt)</span>.
+          </p>
+          <form @submit.prevent="createMarkdownFile">
+            <div class="form-inline" style="margin-bottom: 0.9rem">
+              <div class="shrink">
+                <label for="file-name">Dateiname</label>
+                <input
+                  id="file-name"
+                  v-model="fileName"
+                  type="text"
+                  required
+                  placeholder="README.md"
+                  style="width: 220px"
+                />
+              </div>
+              <div>
+                <label for="file-message">Commit-Nachricht</label>
+                <input
+                  id="file-message"
+                  v-model="fileMessage"
+                  type="text"
+                  placeholder="Erste Version"
+                />
+              </div>
+            </div>
+            <div class="form-row">
+              <label for="file-content">Inhalt (Markdown)</label>
+              <textarea
+                id="file-content"
+                v-model="fileContent"
+                rows="8"
+                placeholder="# Überschrift&#10;&#10;Beschreibung des Projekts …"
+                style="font-family: var(--mono); font-size: 0.85rem"
+              ></textarea>
+            </div>
+            <button class="primary" type="submit" :disabled="fileBusy">
+              Datei anlegen
+            </button>
           </form>
         </div>
 
@@ -416,6 +554,20 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
           mit eigener Versionshistorie — mit Ordnern lassen sich die Dateien
           sortieren.
         </div>
+      </div>
+
+      <!-- README des aktuellen Ordners, wie bei GitHub -->
+      <div v-if="readmeHtml && readmeModel" class="card">
+        <div class="card-header">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" style="color: var(--text-muted)"><path d="M0 1.75A.75.75 0 0 1 .75 1h4.253c1.227 0 2.317.59 3 1.501A3.743 3.743 0 0 1 11.006 1h4.245a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-.75.75h-4.507a2.25 2.25 0 0 0-1.591.659l-.622.621a.75.75 0 0 1-1.06 0l-.622-.621A2.25 2.25 0 0 0 5.258 13H.75a.75.75 0 0 1-.75-.75Zm7.251 10.324.004-5.073-.002-2.253A2.25 2.25 0 0 0 5.003 2.5H1.5v9h3.757a3.75 3.75 0 0 1 1.994.574ZM8.755 4.75l-.004 7.322a3.752 3.752 0 0 1 1.992-.572H14.5v-9h-3.495a2.25 2.25 0 0 0-2.25 2.25Z"/></svg>
+          <strong>{{ readmeModel.name }}</strong>
+          <span class="topbar-spacer" />
+          <NuxtLink
+            :to="`/p/${slug}/m/${readmeModel.slug}`"
+            class="small"
+          >Historie & Bearbeiten</NuxtLink>
+        </div>
+        <div class="card-body markdown-body" v-html="readmeHtml"></div>
       </div>
     </template>
 

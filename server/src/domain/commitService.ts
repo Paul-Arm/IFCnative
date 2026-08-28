@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import {
   buildVersionManifest,
@@ -50,7 +50,8 @@ function manifestFromEntries(
 export interface CreateCommitInput {
   model: Model;
   branchName: string;
-  ifcText: string;
+  /** Dateiinhalt: STEP-Text bei kind "ifc", Markdown bei kind "md". */
+  text: string;
   authorId: string;
   message: string;
 }
@@ -97,7 +98,10 @@ export class CommitService {
   }
 
   async createCommit(input: CreateCommitInput): Promise<CreateCommitResult> {
-    const { model, branchName, ifcText, authorId, message } = input;
+    if (input.model.kind === "md") {
+      return this.createMarkdownCommit(input);
+    }
+    const { model, branchName, text: ifcText, authorId, message } = input;
 
     const doc = parseNativeIfcText(ifcText);
     const manifest = buildVersionManifest(doc);
@@ -146,6 +150,67 @@ export class CommitService {
 
     await this.repo.createCommit(commit);
     await this.repo.saveManifest(commitId, [...manifest.entries.values()]);
+    await this.repo.setBranchHead(branch.id, commit.id);
+
+    return { commit, diff };
+  }
+
+  /**
+   * Markdown-Commit: kein IFC-Parsing, kein Objekt-Diff. Der sha256 des
+   * Inhalts dient als manifestHash, damit die Identisch-Erkennung
+   * (gleicher Stand erneut committet) genauso funktioniert wie bei IFC.
+   */
+  private async createMarkdownCommit(
+    input: CreateCommitInput,
+  ): Promise<CreateCommitResult> {
+    const { model, branchName, text, authorId, message } = input;
+    const contentHash = createHash("sha256").update(text, "utf8").digest("hex");
+
+    let branch = await this.repo.getBranch(model.id, branchName);
+    if (!branch) {
+      branch = await this.repo.createBranch({
+        modelId: model.id,
+        name: branchName,
+        headCommitId: null,
+      });
+    }
+    const parentCommit = branch.headCommitId
+      ? await this.repo.getCommit(branch.headCommitId)
+      : null;
+
+    const commitId = randomUUID();
+    const blobKey = this.blobKey(model.id, commitId);
+    await this.store.put(blobKey, text, "text/markdown");
+
+    const diff: GuidDiffSummary = {
+      added: [],
+      removed: [],
+      modified: [],
+      unchanged: 0,
+      beforeManifestHash: parentCommit?.manifestHash ?? "",
+      afterManifestHash: contentHash,
+      identical: parentCommit ? parentCommit.manifestHash === contentHash : false,
+    };
+
+    const commit: Commit = {
+      id: commitId,
+      modelId: model.id,
+      branchName,
+      parentCommitId: parentCommit?.id ?? null,
+      manifestHash: contentHash,
+      blobKey,
+      schema: "markdown",
+      authorId,
+      message,
+      createdAt: new Date().toISOString(),
+      entityCount: 0,
+      added: 0,
+      removed: 0,
+      modified: 0,
+    };
+
+    await this.repo.createCommit(commit);
+    await this.repo.saveManifest(commitId, []);
     await this.repo.setBranchHead(branch.id, commit.id);
 
     return { commit, diff };

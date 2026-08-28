@@ -26,6 +26,11 @@ damit exakt einig, was „geändert“ bedeutet.
   Manifeste: `added / removed / modified` je GlobalId. Ein Re-Export (der nur
   STEP-Ids neu nummeriert) ergibt einen *leeren* Diff. Pro geänderter Entity
   gibt es Feld-Detail (welches Attribut/Pset-Feld, alt → neu).
+- **Markdown-Dateien** — Modelle mit `kind: "md"` (z. B. `README.md`) werden
+  wie IFC-Modelle versioniert (Commits + Nachricht, Branches, Download);
+  statt Objekt-Diff dient der Inhalts-Hash der Identisch-Erkennung. Eine
+  `README.md` wird in der Web-UI wie bei GitHub unter der Dateiliste des
+  jeweiligen Ordners gerendert (marked + DOMPurify).
 - **Öffentliche Modelle** — `visibility: public` ist ohne Anmeldung les- und
   diffbar (Portal-Zugriff ohne Client).
 
@@ -104,12 +109,12 @@ Auth: `Authorization: Bearer <JWT>` aus `/api/auth/login`. Fehler kommen als
 | DELETE | `/api/projects/:slug` | Projekt löschen (nur Owner; inkl. Blobs) |
 | POST | `/api/projects/:slug/members` | Mitglied hinzufügen/Rolle ändern `{email, role}` (admin) |
 | DELETE | `/api/projects/:slug/members/:userId` | Mitglied entfernen (admin; Owner geschützt) |
-| GET/POST | `/api/projects/:slug/models` | Modelle (mit Head-Commit) / anlegen `{name, visibility?, folder?}` |
+| GET/POST | `/api/projects/:slug/models` | Modelle (mit Head-Commit) / anlegen `{name, visibility?, folder?, kind?}` (`ifc`\|`md`) |
 | GET | `/api/projects/:slug/models/:model` | Modell + Branches (mit Heads) |
 | PATCH | `/api/projects/:slug/models/:model` | Einstellungen `{name?, visibility?, defaultBranch?, folder?}` (admin) |
 | DELETE | `/api/projects/:slug/models/:model` | Modell löschen (admin; inkl. Blobs) |
 | POST | `/api/projects/:slug/models/:model/branches` | Branch anlegen `{name, from?}` — startet am Head von `from` |
-| POST | `…/commits?branch=&message=` | IFC hochladen (raw Body **oder** Multipart `file` + Felder `message`/`branch`) → `{commit, diff}` |
+| POST | `…/commits?branch=&message=` | Datei-Inhalt hochladen (raw Body **oder** Multipart `file` + Felder `message`/`branch`) → `{commit, diff}`; IFC-Modelle verlangen STEP, `md` beliebigen Text (max 2 MB) |
 | GET | `…/commits?branch=` | Historie (Commits mit Autor) |
 | GET | `…/commits/:id` | Commit-Metadaten |
 | GET | `…/commits/:id/file` | Roh-IFC herunterladen (byte-identisch) |

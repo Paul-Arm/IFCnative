@@ -52,6 +52,8 @@ export interface Model {
   createdAt: string;
   /** Ordnerpfad im Projekt ("" = Wurzel), Segmente mit "/" getrennt. */
   folder: string;
+  /** "ifc" = IFC-Modell mit semantischem Diff, "md" = Markdown-Dokument. */
+  kind: "ifc" | "md";
   branchCount?: number;
   head?: Commit | null;
 }

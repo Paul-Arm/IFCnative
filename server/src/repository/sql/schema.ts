@@ -39,9 +39,11 @@ create table if not exists models (
   default_branch text not null,
   created_at text not null,
   folder text not null default '',
+  kind text not null default 'ifc',
   unique (project_id, slug)
 );
 alter table models add column if not exists folder text not null default '';
+alter table models add column if not exists kind text not null default 'ifc';
 
 create table if not exists project_folders (
   project_id uuid not null references projects(id),

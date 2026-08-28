@@ -31,6 +31,7 @@ async function setup() {
     visibility: "private",
     defaultBranch: "main",
     folder: "",
+    kind: "ifc",
   });
   return { repo, store, service, user, model };
 }
@@ -40,7 +41,7 @@ test("first commit reports every rooted entity as added", async () => {
   const result = await service.createCommit({
     model,
     branchName: "main",
-    ifcText: ifcModel(),
+    text: ifcModel(),
     authorId: user.id,
     message: "init",
   });
@@ -54,14 +55,14 @@ test("second commit diffs semantically against parent", async () => {
   const v1 = await service.createCommit({
     model,
     branchName: "main",
-    ifcText: ifcModel(),
+    text: ifcModel(),
     authorId: user.id,
     message: "init",
   });
   const v2 = await service.createCommit({
     model,
     branchName: "main",
-    ifcText: ifcModel({ height: "3200." }),
+    text: ifcModel({ height: "3200." }),
     authorId: user.id,
     message: "raise wall",
   });
@@ -88,7 +89,7 @@ test("download returns the exact stored IFC text", async () => {
   const v1 = await service.createCommit({
     model,
     branchName: "main",
-    ifcText: text,
+    text: text,
     authorId: user.id,
     message: "init",
   });
