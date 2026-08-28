@@ -244,7 +244,10 @@ function propertyBase(index: number) {
 }
 
 function productExtraBase(index: number) {
-  return 500 + index * 100;
+  // Disjunkt zu den Produkt-/Property-Blöcken (100 + n·40): mit der alten
+  // 500er-Basis kollidierte productBase(11) = 500 ab dem 12. Produkt mit dem
+  // Quantity-Block des ersten — doppelte Express-Ids, korrupte Datei.
+  return 1_000_000 + index * 100;
 }
 
 function sampleGuid(index: number) {

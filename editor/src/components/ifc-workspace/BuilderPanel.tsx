@@ -34,6 +34,7 @@ import {
   LabeledInput,
   PanelHeader,
   PanelShell,
+  parseDecimalInput,
   shortType,
 } from "./ui";
 
@@ -716,8 +717,7 @@ function coordinateClipboardToBodyPlacement(clipboard: CoordinateClipboard) {
 }
 
 function readCoordinateNumber(value: string) {
-  const parsed = Number(value.trim().replace(",", "."));
-  return Number.isFinite(parsed) ? parsed : 0;
+  return parseDecimalInput(value);
 }
 
 function readCutPlaneNumber(value: string) {

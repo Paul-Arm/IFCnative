@@ -43,22 +43,42 @@ export interface ThatOpenViewerProps {
   activeModelDeferredReason?: string;
   activeModelFileName?: string;
   activeModelLoaded?: boolean;
+  /**
+   * Anzahl kombinierbarer Objekte der aktuellen Mehrfachauswahl (Geometrie +
+   * Platzierung vorhanden); unter 2 ist der Rotary-Eintrag deaktiviert.
+   */
+  combineSelectionCount?: number;
+  /**
+   * Vollständige Mehrfachauswahl des aktiven Dokuments — alle enthaltenen
+   * Objekte werden im Viewer als Auswahl eingefärbt (der Gizmo hängt
+   * weiterhin nur am primären Element).
+   */
+  selectedEntityIds?: number[];
   cutPlane?: ViewerCutPlaneState;
   focusRequest?: { documentId: string; entityId: number; nonce: number } | null;
   editCapabilities?: ViewerEditCapabilities;
   /**
-   * Live-Mirror: eine bereits im nativen Dokument committete Änderung, die per
-   * Fragments-Edit-API sofort in das geladene Modell übernommen werden soll
-   * (statt auf "Modell neu berechnen" zu warten).
+   * Live-Mirror-Warteschlange: bereits im nativen Dokument committete
+   * Änderungen, die per Fragments-Edit-API in Reihenfolge in das geladene
+   * Modell übernommen werden (statt auf "Modell neu berechnen" zu warten).
+   * Verarbeitete Einträge entfernt der Workspace anhand der Result-Nonce.
    */
-  mirrorRequest?: ViewerMirrorRequest | null;
+  mirrorRequests?: ViewerMirrorRequest[];
   models: ThatOpenViewerModel[];
   onLoadActiveModel?(): void;
+  /**
+   * Feuert einmal beim Mount der Viewer-Komponente, BEVOR die erste
+   * Konvertierung startet — der Workspace rekonvertiert dann Sessions, deren
+   * Anzeige per Live-Mirror weiter war als ihr gespeicherter viewerModelText.
+   */
+  onViewerMounted?(): void;
   /** Rotary-Menü: neuen Körper am Rechtsklick-Punkt anlegen. */
   onAddBodyAt?(
     profile: NativeBodyProfile,
     target: ViewerContextMenuTarget,
   ): void;
+  /** Rotary-Menü: Mehrfachauswahl zu einem IFC-Objekt kombinieren. */
+  onCombineSelected?(): void;
   onCutPlaneActiveChange?(active: boolean): void;
   /** Rotary-Menü/Zerteilen: Schnittebenen-Achse zyklisch drehen (Y→X→Z). */
   onCutPlaneAxisCycle?(): void;
@@ -80,11 +100,16 @@ export interface ThatOpenViewerProps {
     rotation: ViewerRotationChange,
   ): ViewerTransformCommitReceipt | null;
   onPickCoordinates?(pick: ViewerCoordinatePick): void;
+  /**
+   * additive=true (Strg-/Umschalt-Klick im Viewer): Objekt zur
+   * Mehrfachauswahl hinzufügen bzw. daraus entfernen statt sie zu ersetzen.
+   */
   onSelect(
     id: number,
     source?: string,
     globalId?: string,
     documentId?: string,
+    additive?: boolean,
   ): void;
   /** Rotary-Menü/Zerteilen: Auswahl an der aktiven Schnittebene zerteilen. */
   onSplitSelected?(): void;
@@ -230,6 +255,8 @@ export interface ViewerMirrorRequest {
 export interface ViewerMirrorResult {
   documentId: string;
   label: string;
+  /** Nonce des verarbeiteten Requests — räumt ihn aus der Queue. */
+  nonce?: number;
   ok: boolean;
   pendingKey?: string;
   reason?: string;

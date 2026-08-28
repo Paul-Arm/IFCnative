@@ -2,21 +2,11 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "ifcnative-dev",
+      "name": "editor",
       "runtimeExecutable": "npm",
-      "runtimeArgs": [
-        "run",
-        "dev",
-        "--prefix",
-        "editor",
-        "--",
-        "--port",
-        "5199",
-        "--host",
-        "127.0.0.1"
-      ],
-      "port": 5199,
-      "autoPort": false
+      "runtimeArgs": ["run", "dev", "--prefix", "editor"],
+      "port": 5173,
+      "autoPort": true
     }
   ]
 }

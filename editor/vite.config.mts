@@ -37,7 +37,9 @@ export default defineConfig({
   },
   server: {
     host: "127.0.0.1",
-    port: 5173,
+    // PORT-Umgebungsvariable erlaubt parallele Dev-Server (z. B. Preview-
+    // Harness); ohne PORT bleibt es beim Standard 5173.
+    port: Number(process.env.PORT) || 5173,
     strictPort: true,
     watch: {
       ignored: ["**/src-tauri/**"],

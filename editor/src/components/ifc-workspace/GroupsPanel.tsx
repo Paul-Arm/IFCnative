@@ -32,6 +32,7 @@ export function GroupsPanel({
   revealSelectionNonce,
   search,
   selectedId,
+  selectedIds,
   onCenterCamera,
   onManageGroups,
   onRemove,
@@ -43,6 +44,8 @@ export function GroupsPanel({
   revealSelectionNonce: number;
   search: string;
   selectedId: number;
+  /** Vollständige (Mehrfach-)Auswahl des Workspaces, enthält selectedId. */
+  selectedIds: number[];
   onCenterCamera(id: number): void;
   onManageGroups(id: number): void;
   onRemove(id: number): void;
@@ -67,6 +70,12 @@ export function GroupsPanel({
   onRemoveMembershipRef.current = onRemoveMembership;
   onSelectRef.current = onSelect;
   onSelectManyRef.current = onSelectMany;
+  /** Unterdrückt Selektions-Echos, während der Reveal-Effekt selbst synct. */
+  const selectionSyncActiveRef = useRef(false);
+  /** Letztes Reveal-Ziel — Fokus/Scroll nur bei echter Zieländerung. */
+  const lastRevealRef = useRef<{ nonce: number; selectedId: number } | null>(
+    null,
+  );
 
   const { model } = useFileTree({
     density: "compact",
@@ -76,6 +85,9 @@ export function GroupsPanel({
     initialExpandedPaths: treeModel.expandedPaths,
     initialVisibleRowCount: 18,
     onSelectionChange: (paths) => {
+      // Echos des programmatischen Reveal-Syncs ignorieren (wie im
+      // Spatial-Baum) — sie tragen keine neue Information.
+      if (selectionSyncActiveRef.current) return;
       const ids: number[] = [];
       for (const path of paths) {
         const id = idByPathRef.current.get(path);
@@ -163,9 +175,49 @@ export function GroupsPanel({
 
     const item = model.getItem(path);
     if (!item) return;
-    if (!model.getSelectedPaths().includes(path)) {
-      model.getSelectedPaths().forEach((p) => model.getItem(p)?.deselect());
-      item.select();
+    // Wie im Spatial-Baum: mit der kompletten Workspace-Auswahl abgleichen,
+    // damit der Reveal eine Mehrfachauswahl (z. B. Strg-Klick im 3D-Viewer)
+    // nicht über den onSelectionChange-Callback wieder auflöst.
+    const targetPaths = new Set(
+      (selectedIds.length ? selectedIds : [selectedId]).flatMap((id) => {
+        const idPath = treeModel.pathById.get(id);
+        return idPath ? [idPath] : [];
+      }),
+    );
+    targetPaths.add(path);
+    // Mitglieder erscheinen unter JEDER Gruppe; pathById kennt nur das erste
+    // Vorkommen. Andere Vorkommen einer ausgewählten Entität (z. B. die vom
+    // Nutzer angeklickte Zeile unter einer zweiten Gruppe) bleiben selektiert.
+    const targetIds = new Set(selectedIds.length ? selectedIds : [selectedId]);
+    selectionSyncActiveRef.current = true;
+    try {
+      const currentPaths = model.getSelectedPaths();
+      for (const targetPath of targetPaths) {
+        if (!currentPaths.includes(targetPath)) {
+          model.getItem(targetPath)?.select();
+        }
+      }
+      for (const currentPath of currentPaths) {
+        if (targetPaths.has(currentPath)) {
+          continue;
+        }
+        const currentId = idByPathRef.current.get(currentPath);
+        if (currentId !== undefined && targetIds.has(currentId)) {
+          continue;
+        }
+        model.getItem(currentPath)?.deselect();
+      }
+    } finally {
+      selectionSyncActiveRef.current = false;
+    }
+    // Fokus/Scroll nur bei echter Zieländerung — sonst springt der Baum bei
+    // jeder additiven Erweiterung zur Primärzeile zurück.
+    const revealTargetChanged =
+      lastRevealRef.current?.selectedId !== selectedId ||
+      lastRevealRef.current?.nonce !== revealSelectionNonce;
+    lastRevealRef.current = { nonce: revealSelectionNonce, selectedId };
+    if (!revealTargetChanged) {
+      return;
     }
     item.focus();
 
@@ -193,7 +245,7 @@ export function GroupsPanel({
     };
     animationFrame = window.requestAnimationFrame(revealSelectedItem);
     return () => window.cancelAnimationFrame(animationFrame);
-  }, [model, revealSelectionNonce, selectedId, treeModel]);
+  }, [model, revealSelectionNonce, selectedId, selectedIds, treeModel]);
 
   // Wie im Spatial-Baum: Einfachklick selektiert nur, Chevron/Doppelklick
   // klappt auf bzw. zu.

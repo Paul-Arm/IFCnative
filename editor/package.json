@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "vite --host 127.0.0.1 --port 5173",
-    "dev": "vite --host 127.0.0.1 --port 5173",
+    "dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
@@ -21,7 +21,7 @@
     "patch-thatopen-fragments": "node ./scripts/patch-thatopen-fragments.js",
     "patch-react-dnd-react19": "node ./scripts/patch-react-dnd-react19.js",
     "lint": "eslint . --max-warnings=0",
-    "test:ifc": "tsx --test tests/ifc.test.ts tests/catalog.test.ts tests/versioning.test.ts tests/portal.test.ts"
+    "test:ifc": "tsx --test tests/ifc.test.ts tests/catalog.test.ts tests/versioning.test.ts tests/portal.test.ts tests/ids.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

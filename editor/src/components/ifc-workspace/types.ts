@@ -18,7 +18,7 @@ export type MosaicViewId =
   | "pset-batch"
   | "resource-references"
   | "resource-controls"
-  | "object-info"
+  | "check"
   | "diagnostics"
   | "recent"
   | "notes"

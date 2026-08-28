@@ -275,6 +275,16 @@ export function ViewerRotaryMenu({
   };
 
   const onMenuKeyDown = (event: React.KeyboardEvent) => {
+    // Tasten auf einem fokussierten Flyout-Kind gehören dem Kind-Button:
+    // preventDefault würde dessen Enter/Space-Aktivierung unterdrücken und
+    // die Pfeiltasten würden stattdessen den Ring weiterdrehen — die
+    // Unteraktionen wären per Tastatur nie auslösbar.
+    if (
+      event.target instanceof HTMLElement &&
+      event.target.closest(".ifc-rotary-flyout")
+    ) {
+      return;
+    }
     if (event.key === "ArrowRight" || event.key === "ArrowDown") {
       event.preventDefault();
       const next = nextEnabledIndex(items, activeIndex, 1);

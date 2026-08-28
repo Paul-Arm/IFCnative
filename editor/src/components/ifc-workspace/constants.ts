@@ -14,7 +14,7 @@ export const MOSAIC_VIEW_IDS: MosaicViewId[] = [
   "pset-batch",
   "resource-references",
   "resource-controls",
-  "object-info",
+  "check",
   "diagnostics",
   "recent",
   "notes",
@@ -22,23 +22,21 @@ export const MOSAIC_VIEW_IDS: MosaicViewId[] = [
   "portal-settings",
 ];
 
-// Der Diagnostik-Assistent ist bewusst NICHT im Standard-Layout — er bleibt
-// über das "Fenster"-Menü und die Review-/Prüf-Workspaces erreichbar.
+// Der Diagnostik-Assistent und der Körper-Builder sind bewusst NICHT im
+// Standard-Layout — die häufigen Builder-Aktionen (Körper anlegen,
+// Duplizieren, Zerteilen, Kombinieren, Löschen) laufen über das Rotary-Menü
+// im Viewer; beide Panels bleiben über das "Fenster"-Menü und die
+// Build-/Review-Workspaces erreichbar.
 export const DEFAULT_MOSAIC_LAYOUT: MosaicNode<MosaicViewId> = {
   direction: "row",
-  first: {
-    direction: "column",
-    first: "structure",
-    second: "builder",
-    splitPercentage: 62,
-  },
+  first: "structure",
   second: {
     direction: "row",
     first: "viewer",
     second: "inspector",
     splitPercentage: 66,
   },
-  splitPercentage: 27,
+  splitPercentage: 24,
 };
 
 export const REVIEW_MOSAIC_LAYOUT: MosaicNode<MosaicViewId> = {
@@ -48,7 +46,7 @@ export const REVIEW_MOSAIC_LAYOUT: MosaicNode<MosaicViewId> = {
     first: "viewer",
     second: {
       direction: "row",
-      first: "object-info",
+      first: "check",
       second: "diagnostics",
       splitPercentage: 52,
     },
@@ -68,8 +66,13 @@ export const INSPECTION_MOSAIC_LAYOUT: MosaicNode<MosaicViewId> = {
   first: {
     direction: "column",
     first: "viewer",
-    second: "structure",
-    splitPercentage: 72,
+    second: {
+      direction: "row",
+      first: "structure",
+      second: "check",
+      splitPercentage: 45,
+    },
+    splitPercentage: 66,
   },
   second: {
     direction: "column",
@@ -138,7 +141,8 @@ export const DEFAULT_WORKSPACE_ID = "builtin:editor";
 export const BUILT_IN_WORKSPACES: WorkspaceDefinition[] = [
   {
     builtIn: true,
-    description: "Viewer, Struktur, Builder, Inspector und Review-Tools.",
+    description:
+      "Viewer, Struktur und Inspector — Bauen per Rechtsklick im Viewer.",
     id: DEFAULT_WORKSPACE_ID,
     layout: DEFAULT_MOSAIC_LAYOUT,
     name: "Editor",
@@ -152,7 +156,7 @@ export const BUILT_IN_WORKSPACES: WorkspaceDefinition[] = [
   },
   {
     builtIn: true,
-    description: "Prüfung mit Inspector, Ressourcen und Kontrollfreigaben.",
+    description: "Prüfung mit IDS, Inspector, Ressourcen und Freigaben.",
     id: "builtin:inspection",
     layout: INSPECTION_MOSAIC_LAYOUT,
     name: "Prüfung",
@@ -177,10 +181,10 @@ export const MOSAIC_TITLES: Record<MosaicViewId, string> = {
   builder: "Baukasten",
   catalog: "Objektkatalog",
   "catalog-review": "Objektkatalog: Prüfung",
+  check: "Prüfen",
   diagnostics: "Diagnostik",
   inspector: "Inspector",
   notes: "Notizen",
-  "object-info": "Objektinfo: IDs",
   portal: "MKP Portal",
   "portal-settings": "Portal-Einstellungen",
   "pset-batch": "Pset Batch",

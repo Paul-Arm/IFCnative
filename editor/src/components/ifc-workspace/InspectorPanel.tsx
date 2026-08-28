@@ -73,6 +73,7 @@ import {
     LabeledInput,
     PanelHeader,
     PanelShell,
+    parseDecimalInput,
     SegmentedControl,
     shortType,
     type DataTableColumn,
@@ -1573,8 +1574,7 @@ function formatPlacementCoordinate(value: number) {
 }
 
 function readPlacementCoordinate(value: string) {
-  const parsed = Number(value.trim().replace(",", "."));
-  return Number.isFinite(parsed) ? parsed : 0;
+  return parseDecimalInput(value);
 }
 
 function PlacementGeometryPanel({
@@ -1598,15 +1598,24 @@ function PlacementGeometryPanel({
   const [x, setX] = useState("0");
   const [y, setY] = useState("0");
   const [z, setZ] = useState("0");
+  // Viewer-Raum ist Meter, IFC-Raum ist Modelleinheit (mm-Modelle!).
+  const metersPerUnit = getNativeLengthUnitScale(document);
+  // Abmessungen werden — wie im Builder — in METERN angezeigt und editiert;
+  // die IFC-Rohwerte (Modelleinheiten) werden für die Anzeige umgerechnet.
+  const bodyMeters = (value: number | undefined) =>
+    value === undefined ? undefined : value * metersPerUnit;
   const [profile, setProfile] = useState<NativeBodyProfile>(
     body.profile ?? "rectangle",
   );
-  const [width, setWidth] = useState(formatEditableNumber(body.width, "1"));
-  const [depth, setDepth] = useState(formatEditableNumber(body.depth, "1"));
-  const [height, setHeight] = useState(formatEditableNumber(body.height, "1"));
-
-  // Viewer-Raum ist Meter, IFC-Raum ist Modelleinheit (mm-Modelle!).
-  const metersPerUnit = getNativeLengthUnitScale(document);
+  const [width, setWidth] = useState(
+    formatEditableNumber(bodyMeters(body.width), "1"),
+  );
+  const [depth, setDepth] = useState(
+    formatEditableNumber(bodyMeters(body.depth), "1"),
+  );
+  const [height, setHeight] = useState(
+    formatEditableNumber(bodyMeters(body.height), "1"),
+  );
 
   const displayPoint = useMemo(() => {
     if (!placement) {
@@ -1636,9 +1645,9 @@ function PlacementGeometryPanel({
 
   useEffect(() => {
     setProfile(body.profile ?? "rectangle");
-    setWidth(formatEditableNumber(body.width, "1"));
-    setDepth(formatEditableNumber(body.depth ?? body.width, "1"));
-    setHeight(formatEditableNumber(body.height, "1"));
+    setWidth(formatEditableNumber(bodyMeters(body.width), "1"));
+    setDepth(formatEditableNumber(bodyMeters(body.depth ?? body.width), "1"));
+    setHeight(formatEditableNumber(bodyMeters(body.height), "1"));
   }, [
     body.bodyRepresentationId,
     body.depth,
@@ -1790,7 +1799,9 @@ function PlacementGeometryPanel({
           </ResponsiveField>
           <ResponsiveField>
             <LabeledInput
-              label={profile === "cylinder" ? "Durchmesser X" : "Breite X"}
+              label={
+                profile === "cylinder" ? "Durchmesser X (m)" : "Breite X (m)"
+              }
               keyboardType="numeric"
               value={width}
               onChangeText={setWidth}
@@ -1798,7 +1809,9 @@ function PlacementGeometryPanel({
           </ResponsiveField>
           <ResponsiveField>
             <LabeledInput
-              label={profile === "cylinder" ? "Durchmesser Y" : "Tiefe Y"}
+              label={
+                profile === "cylinder" ? "Durchmesser Y (m)" : "Tiefe Y (m)"
+              }
               keyboardType="numeric"
               value={depth}
               onChangeText={setDepth}
@@ -1806,7 +1819,7 @@ function PlacementGeometryPanel({
           </ResponsiveField>
           <ResponsiveField>
             <LabeledInput
-              label="Höhe Z"
+              label="Höhe Z (m)"
               keyboardType="numeric"
               value={height}
               onChangeText={setHeight}

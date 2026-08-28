@@ -88,6 +88,7 @@ import {
     getNextNativeEntityId,
     ifcPlacementPointToViewerWorldPoint,
     mergeNativePropertySetValues,
+    parseIdsXml,
     nativeWorldDirectionInPlacementParentFrame,
     parseNativeIfcFileInWorker,
     planNativeEntityRemoval,
@@ -119,7 +120,9 @@ import {
     type CatalogObjectType,
     type CatalogValidationFinding,
     type DiagnosticObjectInfoDraft,
+    type IdsDocumentModel,
     type IfcObjectCatalog,
+    type NativeBodyProfile,
     type NativeDocumentDelta,
     type NativeEntityRemovalPlan,
     type NativeIfcDocument,
@@ -130,6 +133,7 @@ import { type NativeGraphPreset } from "@/ifc/nativeGraph";
 import {
     Button,
     MosaicWindowMenu,
+    parseDecimalInput,
     SegmentedControl,
     typeOption,
 } from "@/components/ifc-workspace/ui";
@@ -169,7 +173,7 @@ import {
     ResourceControlsPanel,
     ResourceReferencesPanel,
 } from "./ifc-workspace/InspectorPanel";
-import { ObjectInfoPanel } from "./ifc-workspace/ObjectInfoPanel";
+import { CheckPanel } from "./ifc-workspace/CheckPanel";
 import { PortalPanel } from "./ifc-workspace/PortalPanel";
 import { PortalSettingsPanel } from "./ifc-workspace/PortalSettingsPanel";
 import { PsetBatchPanel } from "./ifc-workspace/PsetBatchPanel";
@@ -244,7 +248,18 @@ interface WorkspaceDocumentSession {
   id: string;
   document: NativeIfcDocument;
   documentText: string;
+  /**
+   * Reines Cache-Flag: documentText hinkt dem Dokument hinterher und muss vor
+   * Verwendung neu serialisiert werden. Sagt NICHTS über gespeichert/exportiert
+   * aus — dafür gibt es hasUnexportedChanges.
+   */
   documentTextDirty: boolean;
+  /**
+   * Das Dokument enthält Änderungen, die noch in keiner exportierten Datei
+   * stehen. Steuert Autosave/Recovery, Tab-Punkt, Footer und die
+   * Schließen-Rückfrage; wird nur von einem erfolgreichen Export gelöscht.
+   */
+  hasUnexportedChanges: boolean;
   graphAnchorId: number;
   graphCollapsed: Set<number>;
   graphExpanded: Set<number>;
@@ -270,6 +285,13 @@ interface WorkspaceDocumentSession {
   viewerModelLoadRequested: boolean;
   viewerModelRevision: number;
   viewerModelText: string;
+  /**
+   * Die Anzeige ist per Live-Mirror weiter als viewerModelText: Ein Remount
+   * des Viewers würde vom veralteten Text konvertieren und alle gespiegelten
+   * Edits verlieren. Wird beim Mount über eine erzwungene Rekonvertierung
+   * aufgelöst; jedes frische Setzen von viewerModelText löscht das Flag.
+   */
+  viewerModelTextStale: boolean;
 }
 
 let nextWorkspaceDocumentId = 0;
@@ -308,6 +330,7 @@ function createWorkspaceDocumentSession(
     graphExpanded: new Set(),
     graphPinned: new Set(),
     graphPositions: options?.graphPositions ?? new Map(),
+    hasUnexportedChanges: false,
     id: options?.id ?? createWorkspaceDocumentId(document.fileName),
     pendingViewerChanges: [],
     redoStack: [],
@@ -322,6 +345,7 @@ function createWorkspaceDocumentSession(
     viewerModelLoadRequested,
     viewerModelRevision: options?.viewerModelRevision ?? 0,
     viewerModelText: text,
+    viewerModelTextStale: false,
   };
 }
 
@@ -412,8 +436,11 @@ export default function IfcWorkspace() {
     entityId: number;
     nonce: number;
   } | null>(null);
-  const [viewerMirrorRequest, setViewerMirrorRequest] =
-    useState<ViewerMirrorRequest | null>(null);
+  // Warteschlange statt Single-Slot: zwei schnelle Commits (oder Commits
+  // während der Viewer-Initialisierung) dürfen keine Mirror-Op verlieren.
+  const [viewerMirrorRequests, setViewerMirrorRequests] = useState<
+    ViewerMirrorRequest[]
+  >([]);
   const [viewerCutPlane, setViewerCutPlane] = useState<ViewerCutPlaneState>({
     active: false,
     mode: "translate",
@@ -424,6 +451,8 @@ export default function IfcWorkspace() {
   const [catalog, setCatalog] = useState<IfcObjectCatalog | null>(null);
   const [catalogKind, setCatalogKind] = useState<CatalogKind>("diagnostik");
   const [catalogImporting, setCatalogImporting] = useState(false);
+  const [idsModel, setIdsModel] = useState<IdsDocumentModel | null>(null);
+  const [idsImporting, setIdsImporting] = useState(false);
   const [selectedCatalogObjectId, setSelectedCatalogObjectId] = useState("");
   const [recentIfcFiles, setRecentIfcFiles] = useState(loadRecentIfcFiles);
   const [notes, setNotes] = useState(loadNotes);
@@ -477,6 +506,7 @@ export default function IfcWorkspace() {
   const graphPositions = activeSession.graphPositions;
   const documentText = activeSession.documentText;
   const documentTextDirty = activeSession.documentTextDirty;
+  const hasUnexportedChanges = activeSession.hasUnexportedChanges;
   const undoStack = activeSession.undoStack ?? [];
   const redoStack = activeSession.redoStack ?? [];
 
@@ -565,6 +595,20 @@ export default function IfcWorkspace() {
         : "Auswahl hat kein editierbares IFCLOCALPLACEMENT",
     };
   }, [document, selectedId]);
+  // Rotary-Menü: Kombinieren ist nur mit ≥2 platzierten Objekten mit
+  // Geometrie sinnvoll — gleiche Regel wie der Builder-Panel-Button.
+  const viewerCombineCount = useMemo(() => {
+    if (batchSelectionIds.length < 2) {
+      return 0;
+    }
+    return batchSelectionIds.every(
+      (id) =>
+        getNativeBodyRepresentation(document, id).hasRepresentation &&
+        Boolean(getNativePlacement(document, id)),
+    )
+      ? batchSelectionIds.length
+      : 0;
+  }, [batchSelectionIds, document]);
   const suggestedCatalogObject = useMemo(
     () =>
       catalog
@@ -816,7 +860,10 @@ export default function IfcWorkspace() {
           // Bewusst NICHT sofort serialisieren (O(Dokumentgröße) pro Edit,
           // relevant bei großen IFC-Dateien): Export und Neuberechnung
           // serialisieren bei documentTextDirty selbst.
-          documentTextDirty: true,
+          documentTextDirty: documentChanged ? true : session.documentTextDirty,
+          hasUnexportedChanges: documentChanged
+            ? true
+            : session.hasUnexportedChanges,
           graphPositions: nextGraphPositions ?? session.graphPositions,
           // Geometrie-Änderungen sammeln sich als ausstehende Änderungen;
           // der Live-Mirror räumt sie bei Erfolg wieder ab. Ohne Mirror
@@ -831,9 +878,22 @@ export default function IfcWorkspace() {
             : session.pendingViewerChanges,
           redoStack: documentChanged ? [] : (session.redoStack ?? []),
           selectedId: resolvedSelectedId,
-          selectedIds: new Set(
-            [...session.selectedIds].filter((id) => next.entityById.has(id)),
-          ),
+          // Invariante: selectedIds enthält immer das Primärobjekt. Wandert
+          // der Fokus auf eine neue Entität (z. B. Duplikat), kollabiert die
+          // Auswahl darauf; wurde das Primärobjekt gelöscht, bleibt der Rest
+          // der Mehrfachauswahl samt Nachfolger erhalten.
+          selectedIds: (() => {
+            const survivingIds = [...session.selectedIds].filter((id) =>
+              next.entityById.has(id),
+            );
+            if (survivingIds.includes(resolvedSelectedId)) {
+              return new Set(survivingIds);
+            }
+            if (!survivingIds.length || next.entityById.has(session.selectedId)) {
+              return new Set([resolvedSelectedId]);
+            }
+            return new Set([...survivingIds, resolvedSelectedId]);
+          })(),
           sourceIfcBytes: options?.reloadViewer ? null : session.sourceIfcBytes,
           sourceIfcFile: options?.reloadViewer ? null : session.sourceIfcFile,
           viewerModelDeferredReason: options?.reloadViewer
@@ -856,13 +916,16 @@ export default function IfcWorkspace() {
       options.viewerMirror &&
       activeSession.viewerModelLoadRequested
     ) {
-      setViewerMirrorRequest({
-        documentId: committedSessionId,
-        label: summary,
-        nonce: Date.now() + Math.random(),
-        op: options.viewerMirror,
-        pendingKey: options.pendingKey,
-      });
+      setViewerMirrorRequests((current) => [
+        ...current,
+        {
+          documentId: committedSessionId,
+          label: summary,
+          nonce: Date.now() + Math.random(),
+          op: options.viewerMirror as ViewerMirrorOp,
+          pendingKey: options.pendingKey,
+        },
+      ]);
     }
     if (log) {
       logAction(log);
@@ -873,6 +936,18 @@ export default function IfcWorkspace() {
   // sichtbar — der zugehörige Pending-Eintrag (Fallback-Recalc) entfällt.
   // Bei Fehlschlag bleibt er bestehen bzw. wird wiederhergestellt.
   const applyViewerMirrorResult = (result: ViewerMirrorResult) => {
+    // Konsumierten Request aus der Queue räumen: ein Remount des Viewers
+    // (frische handled-Nonces) würde ihn sonst erneut anwenden.
+    setViewerMirrorRequests((current) =>
+      current.filter((request) =>
+        result.nonce !== undefined
+          ? request.nonce !== result.nonce
+          : !(
+              request.documentId === result.documentId &&
+              request.label === result.label
+            ),
+      ),
+    );
     setDocumentSessions((current) =>
       current.map((session) => {
         if (session.id !== result.documentId) {
@@ -892,15 +967,29 @@ export default function IfcWorkspace() {
             ? change.key !== result.pendingKey
             : change.label !== result.label,
         );
-        return remaining.length === session.pendingViewerChanges.length
-          ? session
-          : { ...session, pendingViewerChanges: remaining };
+        return {
+          ...session,
+          pendingViewerChanges: remaining,
+          // Die Anzeige ist dem gespeicherten viewerModelText jetzt voraus —
+          // ein Viewer-Remount muss frisch rekonvertieren.
+          viewerModelTextStale: true,
+        };
       }),
     );
     logAction(
       result.ok
         ? `viewer.mirrorApplied({ label: ${JSON.stringify(result.label)} });`
         : `viewer.mirrorFailed({ label: ${JSON.stringify(result.label)}, reason: ${JSON.stringify(result.reason ?? "unknown")} });`,
+    );
+  };
+
+  // Frisch serialisierter viewerModelText enthält alle committeten Änderungen
+  // bereits — noch nicht angewendete Mirror-Ops dieser Sessions verfallen,
+  // sonst würden sie nach der Rekonvertierung doppelt angewendet.
+  const dropQueuedMirrorRequests = (documentIds: Iterable<string>) => {
+    const ids = new Set(documentIds);
+    setViewerMirrorRequests((current) =>
+      current.filter((request) => !ids.has(request.documentId)),
     );
   };
 
@@ -913,6 +1002,7 @@ export default function IfcWorkspace() {
     if (!pendingCount) {
       return;
     }
+    dropQueuedMirrorRequests([sessionId]);
     setDocumentSessions((current) =>
       current.map((session) => {
         if (session.id !== sessionId) {
@@ -932,12 +1022,50 @@ export default function IfcWorkspace() {
           viewerModelFile: null,
           viewerModelRevision: session.viewerModelRevision + 1,
           viewerModelText: text,
+          viewerModelTextStale: false,
         };
       }),
     );
     logAction(
       `viewer.recalculate({ file: '${activeSession.document.fileName}', pending: ${pendingCount} });`,
     );
+  };
+
+  // Beim (Re-)Mount des Viewers: Sessions, deren Anzeige per Live-Mirror
+  // weiter war als ihr viewerModelText, frisch serialisieren und per
+  // Revision-Bump rekonvertieren — sonst zeigt der neue Viewer den Stand
+  // vor den gespiegelten Edits, und "Modell neu berechnen" hätte mangels
+  // Pending-Einträgen nichts anzubieten.
+  const recalculateStaleViewerSessions = () => {
+    const staleIds = documentSessions
+      .filter((session) => session.viewerModelTextStale)
+      .map((session) => session.id);
+    if (!staleIds.length) {
+      return;
+    }
+    dropQueuedMirrorRequests(staleIds);
+    setDocumentSessions((current) =>
+      current.map((session) => {
+        if (!session.viewerModelTextStale) {
+          return session;
+        }
+        const text = session.documentTextDirty
+          ? serializeNativeIfcDocument(session.document)
+          : session.documentText;
+        return {
+          ...session,
+          documentText: text,
+          documentTextDirty: false,
+          pendingViewerChanges: [],
+          viewerModelBytes: null,
+          viewerModelFile: null,
+          viewerModelRevision: session.viewerModelRevision + 1,
+          viewerModelText: text,
+          viewerModelTextStale: false,
+        };
+      }),
+    );
+    logAction("viewer.staleRemountRecalc();");
   };
 
   const restoreDocumentHistory = (direction: "undo" | "redo") => {
@@ -962,6 +1090,7 @@ export default function IfcWorkspace() {
     const viewerModelText = serializeNativeIfcDocument(restoredDocument);
     const sessionId = activeSession.id;
     setDeleteRequest(null);
+    dropQueuedMirrorRequests([sessionId]);
     setDocumentSessions((current) =>
       current.map((session) => {
         if (session.id !== sessionId) {
@@ -977,6 +1106,8 @@ export default function IfcWorkspace() {
           document: restoredDocument,
           documentText: viewerModelText,
           documentTextDirty: false,
+          // Auch der zurückgeholte Stand weicht vom exportierten ab.
+          hasUnexportedChanges: true,
           graphAnchorId: entry.ui.graphAnchorId,
           graphCollapsed: new Set(entry.ui.graphCollapsed),
           graphExpanded: new Set(entry.ui.graphExpanded),
@@ -1007,6 +1138,7 @@ export default function IfcWorkspace() {
           viewerModelFile: null,
           viewerModelRevision: session.viewerModelRevision + 1,
           viewerModelText,
+          viewerModelTextStale: false,
         };
       }),
     );
@@ -1023,6 +1155,7 @@ export default function IfcWorkspace() {
     source = "ui",
     globalId?: string,
     documentId = activeSession.id,
+    additive = false,
   ) => {
     const selectionSession = documentSessions.find(
       (session) => session.id === documentId,
@@ -1030,41 +1163,101 @@ export default function IfcWorkspace() {
     if (!selectionSession) {
       return;
     }
+    // "thatopen": Linksklick im Viewer; "thatopen-context": Rechtsklick, der
+    // das Rotary-Menü öffnet — löst die Mehrfachauswahl nicht auf, wenn das
+    // Ziel dazugehört (Voraussetzung für "Kombinieren" im Rotary-Menü).
+    const fromViewer = source === "thatopen" || source === "thatopen-context";
     const selectionDocument = selectionSession.document;
-    const resolvedId =
-      source === "thatopen"
-        ? (resolveNativeMovableProductId(selectionDocument, id, globalId) ??
-          (selectionDocument.entityById.has(id)
-            ? id
-            : selectionDocument.entities.find(
-                (entity) => entity.globalId === globalId,
-              )?.id))
-        : selectionDocument.entityById.has(id) || !globalId
+    const resolvedId = fromViewer
+      ? (resolveNativeMovableProductId(selectionDocument, id, globalId) ??
+        (selectionDocument.entityById.has(id)
           ? id
           : selectionDocument.entities.find(
               (entity) => entity.globalId === globalId,
-            )?.id;
+            )?.id))
+      : selectionDocument.entityById.has(id) || !globalId
+        ? id
+        : selectionDocument.entities.find(
+            (entity) => entity.globalId === globalId,
+          )?.id;
     if (!resolvedId || !selectionDocument.entityById.has(resolvedId)) {
       return;
     }
-    if (source === "thatopen") {
+    if (fromViewer) {
       setStructureMode("tree");
       setSearch("");
       setTreeRevealNonce((current) => current + 1);
     }
     if (documentId !== activeSession.id) {
+      // Auch beim Dokumentwechsel gelten additive-Toggle und der
+      // Auswahl-Erhalt des Kontextmenü-Klicks — sonst zerstört ein
+      // Strg-/Rechtsklick die gemerkte Mehrfachauswahl des Zieldokuments.
       setDocumentSessions((current) =>
-        current.map((session) =>
-          session.id === documentId
-            ? {
-                ...session,
-                selectedId: resolvedId,
-                selectedIds: new Set([resolvedId]),
-              }
-            : session,
-        ),
+        current.map((session) => {
+          if (session.id !== documentId) {
+            return session;
+          }
+          if (additive) {
+            const nextIds = new Set(
+              session.selectedIds.size
+                ? session.selectedIds
+                : [session.selectedId],
+            );
+            if (nextIds.has(resolvedId) && nextIds.size > 1) {
+              nextIds.delete(resolvedId);
+            } else {
+              nextIds.add(resolvedId);
+            }
+            const nextPrimary = nextIds.has(resolvedId)
+              ? resolvedId
+              : ([...nextIds].at(-1) ?? resolvedId);
+            return {
+              ...session,
+              selectedId: nextPrimary,
+              selectedIds: nextIds,
+            };
+          }
+          if (
+            source === "thatopen-context" &&
+            session.selectedIds.has(resolvedId) &&
+            session.selectedIds.size > 1
+          ) {
+            return { ...session, selectedId: resolvedId };
+          }
+          return {
+            ...session,
+            selectedId: resolvedId,
+            selectedIds: new Set([resolvedId]),
+          };
+        }),
       );
       setActiveDocumentId(documentId);
+    } else if (additive) {
+      // Strg-/Umschalt-Klick: Objekt in der Mehrfachauswahl umschalten; das
+      // letzte verbleibende Objekt bleibt ausgewählt.
+      updateActiveSession((session) => {
+        const nextIds = new Set(
+          session.selectedIds.size ? session.selectedIds : [session.selectedId],
+        );
+        if (nextIds.has(resolvedId) && nextIds.size > 1) {
+          nextIds.delete(resolvedId);
+        } else {
+          nextIds.add(resolvedId);
+        }
+        const nextPrimary = nextIds.has(resolvedId)
+          ? resolvedId
+          : ([...nextIds].at(-1) ?? resolvedId);
+        return { ...session, selectedId: nextPrimary, selectedIds: nextIds };
+      });
+    } else if (source === "thatopen-context") {
+      updateActiveSession((session) => ({
+        ...session,
+        selectedId: resolvedId,
+        selectedIds:
+          session.selectedIds.has(resolvedId) && session.selectedIds.size > 1
+            ? session.selectedIds
+            : new Set([resolvedId]),
+      }));
     } else {
       setSelectedId(resolvedId);
       setSelectedIds(new Set([resolvedId]));
@@ -1159,6 +1352,25 @@ export default function IfcWorkspace() {
     asset: { file: File; name: string },
     source: "desktop" | "picker",
   ) => {
+    // "Öffnen" ersetzt ALLE offenen Dokumente (anders als "Hinzufügen") —
+    // gleiche Rückfrage wie beim Tab-Schließen, sonst sind nicht exportierte
+    // Stände samt Recovery nach dem nächsten Autosave-Lauf verloren.
+    const unexported = documentSessions.filter(
+      (session) => session.hasUnexportedChanges,
+    );
+    if (
+      unexported.length &&
+      !globalThis.confirm(
+        `Öffnen ersetzt die aktuell geöffneten Dokumente. ${unexported
+          .map((session) => `"${session.document.fileName}"`)
+          .join(
+            ", ",
+          )} ${unexported.length === 1 ? "hat" : "haben"} nicht exportierte Änderungen. Trotzdem öffnen?`,
+      )
+    ) {
+      logAction(`ui.openIfc.cancelled({ file: '${asset.name}' });`);
+      return;
+    }
     setLoadingIfcName(asset.name);
     logAction(
       `ui.openIfc.start({ file: '${asset.name}', source: '${source}', parser: 'worker' });`,
@@ -1300,6 +1512,26 @@ export default function IfcWorkspace() {
     }
   };
 
+  const importIds = async () => {
+    try {
+      const asset = await pickIdsFile();
+      if (!asset) {
+        return;
+      }
+      setIdsImporting(true);
+      const parsed = parseIdsXml(await asset.file.text(), asset.name);
+      setIdsModel(parsed);
+      setMosaicValue((current) => addMosaicView(current, "check"));
+      logAction(
+        `ui.importIds({ file: '${asset.name}', specifications: ${parsed.specifications.length} });`,
+      );
+    } catch (error) {
+      reportFailure("IDS-Import fehlgeschlagen", error);
+    } finally {
+      setIdsImporting(false);
+    }
+  };
+
   const applyCatalogFinding = (finding: CatalogValidationFinding) => {
     const sourceDocument = document;
     const next = applyCatalogQuickFix(sourceDocument, selectedId, finding);
@@ -1394,11 +1626,14 @@ export default function IfcWorkspace() {
   const exportIfc = async () => {
     const fileName = document.fileName.replace(/\.ifc$/i, "") || "IFCnative";
     try {
-      const contents: BlobPart = documentTextDirty
+      const serializedNow = documentTextDirty
         ? serializeNativeIfcDocument(document)
-        : documentText ||
+        : null;
+      const contents: BlobPart =
+        serializedNow ??
+        (documentText ||
           activeSession.sourceIfcBytes ||
-          serializeNativeIfcDocument(document);
+          serializeNativeIfcDocument(document));
       const blob = new Blob([contents], { type: "application/x-step" });
       if (!blob.size) {
         throw new Error("Serialisierung ergab ein leeres Dokument.");
@@ -1417,6 +1652,16 @@ export default function IfcWorkspace() {
         // Keep the object URL alive until the browser has consumed the click.
         globalThis.setTimeout(() => URL.revokeObjectURL(url), 1_000);
       }
+      // Der exportierte Stand ist jetzt gesichert: Kennzeichnung zurücksetzen
+      // (der nächste Autosave räumt den Recovery-Eintrag) und den frisch
+      // serialisierten Text als Cache behalten.
+      updateActiveSession((session) => ({
+        ...session,
+        ...(serializedNow
+          ? { documentText: serializedNow, documentTextDirty: false }
+          : {}),
+        hasUnexportedChanges: false,
+      }));
       setStatusAlert({
         message: `${fileName}.ifc exportiert (${(blob.size / 1_048_576).toFixed(1)} MB).`,
         tone: "success",
@@ -1544,7 +1789,7 @@ export default function IfcWorkspace() {
       return;
     }
     const dirty = autosaveSessionsRef.current.filter(
-      (session) => session.documentTextDirty,
+      (session) => session.hasUnexportedChanges,
     );
     // Im Notfall-Pfad nichts schreiben, wenn es nichts zu retten gibt: sonst
     // löscht ein Absturz einen noch nicht zurückgeholten Stand.
@@ -1668,7 +1913,7 @@ export default function IfcWorkspace() {
           }),
           // Der Stand ist weiterhin nicht exportiert — Kennzeichnung und
           // Autosave müssen das widerspiegeln.
-          documentTextDirty: true,
+          hasUnexportedChanges: true,
         });
       }
       if (!restored.length) {
@@ -2056,10 +2301,12 @@ export default function IfcWorkspace() {
   };
 
   const combineSelectedBodies = (name: string, removeSources: boolean) => {
-    const sourceIds = [
-      selectedId,
-      ...batchSelectionIds.filter((id) => id !== selectedId),
-    ];
+    // Nur die validierte (Mehrfach-)Auswahl kombinieren: selectedId kann
+    // z. B. nach Duplizieren außerhalb von selectedIds stehen und würde
+    // sonst als unsichtbares N+1-Objekt mitkombiniert (und mit entfernt).
+    const sourceIds = batchSelectionIds.includes(selectedId)
+      ? [selectedId, ...batchSelectionIds.filter((id) => id !== selectedId)]
+      : [...batchSelectionIds];
     const result = combineNativeBodyElements(document, sourceIds, {
       name,
       removeSources,
@@ -3369,27 +3616,32 @@ export default function IfcWorkspace() {
 
   const requestActiveViewerLoad = () => {
     const sessionId = activeSession.id;
+    dropQueuedMirrorRequests([sessionId]);
     setDocumentSessions((current) =>
       current.map((session) => {
         if (session.id !== sessionId) {
           return session;
         }
-        // Ausstehende Geometrie-Änderungen sind noch nicht in viewerModel*:
-        // dann vom aktuellen IFC-Text statt von den Original-Bytes laden.
-        const hasPending = session.pendingViewerChanges.length > 0;
+        // Ausstehende oder bereits gespiegelte Geometrie-Änderungen sind noch
+        // nicht in viewerModel*: dann vom aktuellen IFC-Text statt von den
+        // Original-Bytes laden.
+        const needsFreshText =
+          session.pendingViewerChanges.length > 0 ||
+          session.viewerModelTextStale;
         return {
           ...session,
           pendingViewerChanges: [],
-          viewerModelBytes: hasPending ? null : session.viewerModelBytes,
+          viewerModelBytes: needsFreshText ? null : session.viewerModelBytes,
           viewerModelDeferredReason: "",
-          viewerModelFile: hasPending ? null : session.viewerModelFile,
+          viewerModelFile: needsFreshText ? null : session.viewerModelFile,
           viewerModelLoadRequested: true,
           viewerModelRevision: session.viewerModelRevision + 1,
-          viewerModelText: hasPending
+          viewerModelText: needsFreshText
             ? session.documentTextDirty
               ? serializeNativeIfcDocument(session.document)
               : session.documentText
             : session.viewerModelText,
+          viewerModelTextStale: false,
         };
       }),
     );
@@ -3422,6 +3674,7 @@ export default function IfcWorkspace() {
           revealSelectionNonce={treeRevealNonce}
           search={search}
           selectedId={selectedId}
+          selectedIds={batchSelectionIds}
           onAddChild={addChildElement}
           onCenterCamera={(id) => centerViewerCamera(id, "tree")}
           onManageGroups={setGroupManagerEntityId}
@@ -3435,6 +3688,7 @@ export default function IfcWorkspace() {
           revealSelectionNonce={treeRevealNonce}
           search={search}
           selectedId={selectedId}
+          selectedIds={batchSelectionIds}
           onCenterCamera={(id) => centerViewerCamera(id, "groups")}
           onManageGroups={setGroupManagerEntityId}
           onRemove={(id) => requestDeleteEntity(id, "groups")}
@@ -3652,16 +3906,21 @@ export default function IfcWorkspace() {
               }
               activeModelFileName={activeSession.document.fileName}
               activeModelLoaded={activeSession.viewerModelLoadRequested}
+              combineSelectionCount={viewerCombineCount}
               cutPlane={viewerCutPlane}
               editCapabilities={viewerEditCapabilities}
               focusRequest={viewerFocusRequest}
-              mirrorRequest={viewerMirrorRequest}
+              mirrorRequests={viewerMirrorRequests}
               models={viewerModels}
               pendingViewerChanges={activeSession.pendingViewerChanges.map(
                 (change) => change.label,
               )}
+              selectedEntityIds={batchSelectionIds}
               onLog={logAction}
               onAddBodyAt={addBodyAtViewerPoint}
+              onCombineSelected={() =>
+                combineSelectedBodies("Kombiniertes Teil", true)
+              }
               onCutPlaneActiveChange={setCutPlaneActive}
               onCutPlaneAxisCycle={cycleCutPlaneAxis}
               onCutPlaneChange={applyViewerCutPlaneChange}
@@ -3674,6 +3933,7 @@ export default function IfcWorkspace() {
               onPickCoordinates={storePickedCoordinates}
               onRecalculateModel={recalculateViewerModel}
               onRotateSelected={rotateSelectedPlacement}
+              onViewerMounted={recalculateStaleViewerSessions}
               onSelect={selectEntity}
               onSplitSelected={splitSelectedBody}
             />
@@ -3752,14 +4012,21 @@ export default function IfcWorkspace() {
             />
           </TileContent>
         );
-      case "object-info":
+      case "check":
         return (
           <TileContent>
-            <ObjectInfoPanel
+            <CheckPanel
               document={viewerDocument}
-              findings={objectInfoFindings}
-              index={objectInfoIndex}
+              ids={idsModel}
+              idsImporting={idsImporting}
+              objectInfoFindings={objectInfoFindings}
+              objectInfoIndex={objectInfoIndex}
               selectedId={selectedId}
+              onImportIds={importIds}
+              onRemoveIds={() => {
+                setIdsModel(null);
+                logAction("ui.removeIds();");
+              }}
               onSelectEntity={selectEntity}
             />
           </TileContent>
@@ -3977,9 +4244,9 @@ export default function IfcWorkspace() {
       return;
     }
     if (
-      session.documentTextDirty &&
+      session.hasUnexportedChanges &&
       !globalThis.confirm(
-        `"${session.document.fileName}" hat ungespeicherte Änderungen. Trotzdem schließen?`,
+        `"${session.document.fileName}" hat nicht exportierte Änderungen. Trotzdem schließen?`,
       )
     ) {
       return;
@@ -4022,11 +4289,11 @@ export default function IfcWorkspace() {
                   <span className="min-w-0 flex-1 truncate text-xs font-medium">
                     {session.document.fileName}
                   </span>
-                  {session.documentTextDirty ? (
+                  {session.hasUnexportedChanges ? (
                     <span
-                      aria-label="Ungespeicherte Änderungen"
+                      aria-label="Nicht exportierte Änderungen"
                       className="size-1.5 shrink-0 rounded-full bg-warning"
-                      title="Ungespeicherte Änderungen"
+                      title="Nicht exportierte Änderungen"
                     />
                   ) : null}
                 </span>
@@ -4236,13 +4503,13 @@ export default function IfcWorkspace() {
           {loadingIfcName ? (
             <span className="text-primary">Lädt {loadingIfcName}…</span>
           ) : null}
-          {documentTextDirty ? (
+          {hasUnexportedChanges ? (
             <span className="flex items-center gap-1 text-warning-foreground dark:text-warning">
               <span className="size-1.5 rounded-full bg-warning" />
-              Ungespeichert
+              Nicht exportiert
             </span>
           ) : (
-            <span>Gespeichert</span>
+            <span>Exportiert</span>
           )}
           <Select
             value={String(uiScale)}
@@ -4318,6 +4585,22 @@ function pickCatalogFile() {
       input.type = "file";
       input.accept =
         ".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel";
+      input.onchange = () => {
+        const file = input.files?.[0];
+        resolve(file ? { file, name: file.name } : undefined);
+      };
+      input.onerror = () => reject(new Error("File picker failed."));
+      input.click();
+    },
+  );
+}
+
+function pickIdsFile() {
+  return new Promise<{ file: File; name: string } | undefined>(
+    (resolve, reject) => {
+      const input = globalThis.document.createElement("input");
+      input.type = "file";
+      input.accept = ".ids,.xml,application/xml,text/xml";
       input.onchange = () => {
         const file = input.files?.[0];
         resolve(file ? { file, name: file.name } : undefined);
@@ -4463,12 +4746,7 @@ function mergePendingViewerChange(
 }
 
 function readBodyCoordinate(value: string | undefined) {
-  const numeric = Number(
-    String(value ?? "")
-      .trim()
-      .replace(",", "."),
-  );
-  return Number.isFinite(numeric) ? numeric : 0;
+  return parseDecimalInput(value);
 }
 
 function parseCoordinateClipboardText(

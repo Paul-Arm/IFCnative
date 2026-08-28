@@ -14,6 +14,7 @@ import {
 } from "@/ifc";
 import { cn } from "@/lib/utils";
 
+import { IdChip, RowList } from "./IdCheckSection";
 import {
     Badge,
     CollapsibleSection,
@@ -278,13 +279,6 @@ function SummaryStat({
   );
 }
 
-function RowList({ children }: { children: ReactNode }) {
-  return (
-    <div className="divide-y divide-border/50 overflow-hidden rounded-md border border-border/60 bg-card">
-      {children}
-    </div>
-  );
-}
 
 function HiddenHint({ count }: { count: number }) {
   if (count <= 0) {
@@ -333,30 +327,6 @@ function SelectableRow({
     >
       {children}
     </div>
-  );
-}
-
-function IdChip({
-  label,
-  onSelect,
-  title,
-}: {
-  label: string;
-  onSelect(): void;
-  title: string;
-}) {
-  return (
-    <button
-      className="inline-flex h-5 shrink-0 items-center rounded border border-border/70 bg-muted/40 px-1.5 font-mono text-[10px] font-medium text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary"
-      title={title}
-      type="button"
-      onClick={(event) => {
-        event.stopPropagation();
-        onSelect();
-      }}
-    >
-      {label}
-    </button>
   );
 }
 

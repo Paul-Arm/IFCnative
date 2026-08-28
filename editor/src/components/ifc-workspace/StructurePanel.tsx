@@ -37,6 +37,7 @@ export function StructurePanel({
   revealSelectionNonce,
   search,
   selectedId,
+  selectedIds,
   onAddChild,
   onCenterCamera,
   onManageGroups,
@@ -49,6 +50,8 @@ export function StructurePanel({
   revealSelectionNonce: number;
   search: string;
   selectedId: number;
+  /** Vollständige (Mehrfach-)Auswahl des Workspaces, enthält selectedId. */
+  selectedIds: number[];
   onAddChild(parentId: number, type: string, name: string): void;
   onCenterCamera(id: number): void;
   onManageGroups(id: number): void;
@@ -69,6 +72,12 @@ export function StructurePanel({
   const onSelectRef = useRef(onSelect);
   const onSelectManyRef = useRef(onSelectMany);
   const onRemoveRef = useRef(onRemove);
+  /** Unterdrückt Selektions-Echos, während der Reveal-Effekt selbst synct. */
+  const selectionSyncActiveRef = useRef(false);
+  /** Letztes Reveal-Ziel — Fokus/Scroll nur bei echter Zieländerung. */
+  const lastRevealRef = useRef<{ nonce: number; selectedId: number } | null>(
+    null,
+  );
   onAddChildRef.current = onAddChild;
   onCenterCameraRef.current = onCenterCamera;
   onManageGroupsRef.current = onManageGroups;
@@ -88,6 +97,11 @@ export function StructurePanel({
     initialExpandedPaths: treeModel.expandedPaths,
     initialVisibleRowCount: 18,
     onSelectionChange: (paths) => {
+      // Echos des programmatischen Reveal-Syncs ignorieren: sie tragen keine
+      // neue Information und würden Auswahl-Objekte ohne Baum-Pfad (Gruppen/
+      // Systeme außerhalb der Raumstruktur) still aus der Workspace-Auswahl
+      // entfernen.
+      if (selectionSyncActiveRef.current) return;
       const ids: number[] = [];
       for (const path of paths) {
         const id = idByPathRef.current.get(path);
@@ -179,9 +193,43 @@ export function StructurePanel({
 
     const item = model.getItem(path);
     if (!item) return;
-    if (!model.getSelectedPaths().includes(path)) {
-      model.getSelectedPaths().forEach((p) => model.getItem(p)?.deselect());
-      item.select();
+    // Baum-Selektion mit der kompletten Workspace-Auswahl abgleichen — nicht
+    // nur mit selectedId: sonst reduziert der Reveal nach jedem Viewer-Klick
+    // die Baum-Selektion auf eine Zeile, deren onSelectionChange die
+    // Mehrfachauswahl (z. B. Strg-Klick im 3D-Viewer) wieder auflöst. Die
+    // dabei ausgelösten onSelectionChange-Echos werden per Flag unterdrückt.
+    const targetPaths = new Set(
+      (selectedIds.length ? selectedIds : [selectedId]).flatMap((id) => {
+        const idPath = treeModel.pathById.get(id);
+        return idPath ? [idPath] : [];
+      }),
+    );
+    targetPaths.add(path);
+    selectionSyncActiveRef.current = true;
+    try {
+      const currentPaths = model.getSelectedPaths();
+      for (const targetPath of targetPaths) {
+        if (!currentPaths.includes(targetPath)) {
+          model.getItem(targetPath)?.select();
+        }
+      }
+      for (const currentPath of currentPaths) {
+        if (!targetPaths.has(currentPath)) {
+          model.getItem(currentPath)?.deselect();
+        }
+      }
+    } finally {
+      selectionSyncActiveRef.current = false;
+    }
+    // Fokus und Scroll nur, wenn sich das Reveal-Ziel wirklich geändert hat —
+    // sonst springt der Viewport bei jeder additiven Auswahl-Erweiterung
+    // zurück zur (unveränderten) Primärzeile.
+    const revealTargetChanged =
+      lastRevealRef.current?.selectedId !== selectedId ||
+      lastRevealRef.current?.nonce !== revealSelectionNonce;
+    lastRevealRef.current = { nonce: revealSelectionNonce, selectedId };
+    if (!revealTargetChanged) {
+      return;
     }
     item.focus();
 
@@ -250,7 +298,7 @@ export function StructurePanel({
     animationFrame = window.requestAnimationFrame(revealSelectedItem);
 
     return () => window.cancelAnimationFrame(animationFrame);
-  }, [model, revealSelectionNonce, selectedId, treeModel]);
+  }, [model, revealSelectionNonce, selectedId, selectedIds, treeModel]);
 
   // Override default click behaviour: single click on a row body should only
   // select; only the chevron expands. Double click on a row body toggles

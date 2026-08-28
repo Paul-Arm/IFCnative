@@ -2454,9 +2454,15 @@ export function assignNativeBodyRepresentation(
   const volumeQuantityId = nextId++;
   const quantityRelId = nextId++;
   const contextRef = `#${document.entities.find((entity) => entity.type === "IFCGEOMETRICREPRESENTATIONCONTEXT")?.id ?? 10}`;
-  const width = positiveStepNumber(options.width, 1);
-  const depth = positiveStepNumber(options.depth, 1);
-  const height = positiveStepNumber(options.height, 1);
+  // Wie addNativeBodyElement: Draft-Maße sind METER (UI-/Viewer-Einheit) und
+  // werden in Modelleinheiten umgerechnet — vorher bedeutete dieselbe Zahl
+  // hier Modelleinheiten (1 = 1 mm in mm-Modellen), dort Meter.
+  const assignMetersPerUnit = getNativeLengthUnitScale(document);
+  const assignToModelUnits = (meters: string) =>
+    formatDecimal(Number(meters) / assignMetersPerUnit);
+  const width = assignToModelUnits(positiveStepNumber(options.width, 1));
+  const depth = assignToModelUnits(positiveStepNumber(options.depth, 1));
+  const height = assignToModelUnits(positiveStepNumber(options.height, 1));
   const profile = normalizeBodyProfile(options.profile);
   const radius = formatDecimal(Math.max(Number(width), Number(depth)) / 2);
   const footprintArea =
@@ -2503,10 +2509,31 @@ export function assignNativeBodyRepresentation(
     }
 
     setArg(nextProduct.args, 6, `#${existingBody.shapeId}`);
-    const solid = next.find((entity) => entity.id === existingBody.solidId);
-    const profileEntity = next.find(
-      (entity) => entity.id === existingBody.profileId,
-    );
+    // Copy-on-write: Duplikate teilen sich die Repräsentationskette (Fremd-
+    // IFCs zusätzlich Profile) — ohne exklusive Kopien würde die Zuweisung
+    // alle Mitnutzer gleichzeitig umformen.
+    const exclusiveChain = existingBody.bodyRepresentationId
+      ? ensureExclusiveBodyChain(
+          next,
+          document,
+          entityId,
+          {
+            bodyRepresentationId: existingBody.bodyRepresentationId,
+            profileId: existingBody.profileId,
+            shapeId: existingBody.shapeId,
+            solidId: existingBody.solidId,
+          },
+          () => nextId++,
+          { includeProfile: true },
+        )
+      : undefined;
+    const solid = exclusiveChain
+      ? next.find((entity) => entity.id === exclusiveChain.solidId)
+      : undefined;
+    const profileEntity =
+      exclusiveChain?.profileId !== undefined
+        ? next.find((entity) => entity.id === exclusiveChain.profileId)
+        : undefined;
     if (solid && profileEntity) {
       setArg(solid.args, 0, `#${profileEntity.id}`);
       setArg(solid.args, 3, height);
@@ -2534,7 +2561,7 @@ export function assignNativeBodyRepresentation(
               width,
               depth,
             ];
-      updateNativeBodyQuantities(next, document, entityId, {
+      writeExclusiveBodyQuantities(next, document, entityId, () => nextId++, {
         area: footprintArea,
         height,
         volume: netVolume,
@@ -2770,6 +2797,212 @@ function updateNativeBodyQuantities(
   }
 }
 
+function hasSharedIncomingRefs(
+  document: NativeIfcDocument,
+  id: number | undefined,
+) {
+  return id !== undefined && (document.incomingRefs.get(id)?.length ?? 0) > 1;
+}
+
+function replaceStepReference(
+  value: string | undefined,
+  from: number,
+  to: number,
+) {
+  return (value ?? "").replace(new RegExp(`#${from}(?![0-9])`, "g"), `#${to}`);
+}
+
+function removeStepReference(value: string | undefined, id: number) {
+  const ids = readReferences(value ?? "").filter((item) => item !== id);
+  return `(${ids.map((item) => `#${item}`).join(",")})`;
+}
+
+/**
+ * Copy-on-write für die Körper-Kette eines Produkts: Duplikate teilen sich
+ * Shape/Repräsentation/Solid (Fremd-IFCs zusätzlich Profile). Vor einer
+ * In-place-Änderung erhält das Produkt exklusive Kopien aller Glieder, die
+ * direkt oder über einen geteilten Vorfahren mitbenutzt werden — sonst
+ * ändert der Edit alle Mitnutzer gleichzeitig. Liefert die danach gültigen
+ * Ids; undefined, wenn ein Glied im Entity-Array fehlt.
+ */
+function ensureExclusiveBodyChain(
+  next: NativeIfcEntity[],
+  document: NativeIfcDocument,
+  productId: number,
+  chain: {
+    bodyRepresentationId: number;
+    profileId?: number;
+    shapeId: number;
+    solidId: number;
+  },
+  allocateId: () => number,
+  options: { includeProfile: boolean },
+) {
+  const shapeShared = hasSharedIncomingRefs(document, chain.shapeId);
+  const representationShared =
+    shapeShared || hasSharedIncomingRefs(document, chain.bodyRepresentationId);
+  const solidShared =
+    representationShared || hasSharedIncomingRefs(document, chain.solidId);
+  const profileShared =
+    options.includeProfile &&
+    chain.profileId !== undefined &&
+    (solidShared || hasSharedIncomingRefs(document, chain.profileId));
+
+  let profileId = chain.profileId;
+  if (profileShared && chain.profileId !== undefined) {
+    const profile = next.find((entity) => entity.id === chain.profileId);
+    if (!profile) {
+      return undefined;
+    }
+    profileId = allocateId();
+    next.push({ ...profile, args: [...profile.args], id: profileId });
+  }
+
+  let solidId = chain.solidId;
+  if (solidShared) {
+    const solid = next.find((entity) => entity.id === chain.solidId);
+    if (!solid) {
+      return undefined;
+    }
+    solidId = allocateId();
+    const copiedSolid = { ...solid, args: [...solid.args], id: solidId };
+    if (profileId !== undefined && profileId !== chain.profileId) {
+      setArg(copiedSolid.args, 0, `#${profileId}`);
+    }
+    next.push(copiedSolid);
+  } else if (profileId !== undefined && profileId !== chain.profileId) {
+    const solid = next.find((entity) => entity.id === chain.solidId);
+    if (!solid) {
+      return undefined;
+    }
+    setArg(solid.args, 0, `#${profileId}`);
+  }
+
+  let bodyRepresentationId = chain.bodyRepresentationId;
+  if (representationShared) {
+    const representation = next.find(
+      (entity) => entity.id === chain.bodyRepresentationId,
+    );
+    if (!representation) {
+      return undefined;
+    }
+    bodyRepresentationId = allocateId();
+    next.push({
+      ...representation,
+      args: representation.args.map((arg, index) =>
+        index === 3 ? replaceStepReference(arg, chain.solidId, solidId) : arg,
+      ),
+      id: bodyRepresentationId,
+    });
+  } else if (solidId !== chain.solidId) {
+    const representation = next.find(
+      (entity) => entity.id === chain.bodyRepresentationId,
+    );
+    if (!representation) {
+      return undefined;
+    }
+    representation.args[3] = replaceStepReference(
+      representation.args[3],
+      chain.solidId,
+      solidId,
+    );
+  }
+
+  let shapeId = chain.shapeId;
+  if (shapeShared) {
+    const shape = next.find((entity) => entity.id === chain.shapeId);
+    const nextProduct = next.find((entity) => entity.id === productId);
+    if (!shape || !nextProduct) {
+      return undefined;
+    }
+    shapeId = allocateId();
+    next.push({
+      ...shape,
+      args: shape.args.map((arg, index) =>
+        index === 2
+          ? replaceStepReference(
+              arg,
+              chain.bodyRepresentationId,
+              bodyRepresentationId,
+            )
+          : arg,
+      ),
+      id: shapeId,
+    });
+    setArg(nextProduct.args, 6, `#${shapeId}`);
+  } else if (bodyRepresentationId !== chain.bodyRepresentationId) {
+    const shape = next.find((entity) => entity.id === chain.shapeId);
+    if (!shape) {
+      return undefined;
+    }
+    shape.args[2] = replaceStepReference(
+      shape.args[2],
+      chain.bodyRepresentationId,
+      bodyRepresentationId,
+    );
+  }
+
+  return { bodyRepresentationId, profileId, shapeId, solidId };
+}
+
+/**
+ * Schreibt die Basis-Mengen eines Produkts — mit Copy-on-write, wenn sich
+ * mehrere Produkte (z. B. nach Duplizieren) dieselbe Qto-Instanz teilen:
+ * das Produkt wird aus der geteilten Beziehung gelöst und erhält einen
+ * eigenen Mengen-Satz. Liefert false, wenn das Produkt keine Basis-Mengen
+ * hat (der Aufrufer kann dann appendNativeBodyQuantities nutzen).
+ */
+function writeExclusiveBodyQuantities(
+  next: NativeIfcEntity[],
+  document: NativeIfcDocument,
+  entityId: number,
+  allocateId: () => number,
+  values: { area: string; height: string; volume: string },
+) {
+  const baseQuantities = document.propertySetsByEntity
+    .get(entityId)
+    ?.find(
+      (set) => set.kind === "Qto" && set.name === "IFCnative_BaseQuantities",
+    );
+  if (!baseQuantities) {
+    return false;
+  }
+  const relationship = document.relationshipsByEntity
+    .get(entityId)
+    ?.find(
+      (candidate) =>
+        candidate.type === "IFCRELDEFINESBYPROPERTIES" &&
+        candidate.sourceIds.includes(entityId) &&
+        candidate.targetIds.includes(baseQuantities.id),
+    );
+  const shared =
+    (relationship?.sourceIds.some((id) => id !== entityId) ?? false) ||
+    hasSharedIncomingRefs(document, baseQuantities.id);
+  if (!shared) {
+    updateNativeBodyQuantities(next, document, entityId, values);
+    return true;
+  }
+  if (relationship) {
+    const relationshipEntity = next.find(
+      (entity) => entity.id === relationship.id,
+    );
+    if (relationshipEntity) {
+      relationshipEntity.args[4] = removeStepReference(
+        relationshipEntity.args[4],
+        entityId,
+      );
+    }
+  }
+  appendNativeBodyQuantities(
+    next,
+    allocateId,
+    entityId,
+    values.area,
+    values.height,
+  );
+  return true;
+}
+
 /**
  * Teilt einen einfachen extrudierten Körper entlang seiner Extrusionsachse in
  * gleich lange, eigenständige IFC-Produkte. Metadaten-Zuordnungen (Psets,
@@ -2856,19 +3089,41 @@ export function splitNativeBodyElement(
   const baseName = product.name.trim() || `#${entityId}`;
   const partIds = [entityId];
   const nextOriginal = next.find((entity) => entity.id === entityId);
-  const nextOriginalSolid = next.find((entity) => entity.id === solid.id);
-  if (!nextOriginal || !nextOriginalSolid) {
+  if (!nextOriginal) {
     return undefined;
   }
   setArg(nextOriginal.args, 2, quote(`${baseName} – Teil 1/${partCount}`));
   nextOriginal.name = `${baseName} – Teil 1/${partCount}`;
+  // Copy-on-write: teilt sich das Original seine Körperkette mit einem
+  // Duplikat (geteilte Repräsentation), bekommt es vor dem Kürzen eine
+  // eigene Kopie — sonst schrumpft der unbeteiligte Mitnutzer mit.
+  const exclusiveChain = ensureExclusiveBodyChain(
+    next,
+    document,
+    entityId,
+    {
+      bodyRepresentationId: bodyRepresentation.id,
+      profileId: body.profileId,
+      shapeId: shape.id,
+      solidId: solid.id,
+    },
+    allocateId,
+    { includeProfile: false },
+  );
+  const nextOriginalSolid = exclusiveChain
+    ? next.find((entity) => entity.id === exclusiveChain.solidId)
+    : undefined;
+  if (!nextOriginalSolid) {
+    return undefined;
+  }
   setArg(nextOriginalSolid.args, 3, partLengthStep);
-  updateNativeBodyQuantities(next, document, entityId, {
-    area: footprintArea,
-    height: partLengthStep,
-    volume: multiplyStepNumbers(footprintArea, partLengthStep),
-  });
-  if (!hasNativeBodyQuantities(document, entityId)) {
+  if (
+    !writeExclusiveBodyQuantities(next, document, entityId, allocateId, {
+      area: footprintArea,
+      height: partLengthStep,
+      volume: multiplyStepNumbers(footprintArea, partLengthStep),
+    })
+  ) {
     appendNativeBodyQuantities(
       next,
       allocateId,
@@ -4094,6 +4349,23 @@ function removeSpecificNativeProducts(
   const removedIds = new Set(
     [...productIds].filter((id) => document.entityById.has(id)),
   );
+  // Hierarchie-Kinder der entfernten Produkte explizit vor dem Orphan-Sweep
+  // schützen: verliert ein Kind mit der gedroppten IFCRELAGGREGATES/-NESTS
+  // seine einzige eingehende Referenz, würde es sonst still mitgelöscht —
+  // entgegen der Zusage dieses Kommentars.
+  const protectedChildIds = new Set<number>();
+  for (const relationship of document.relationships) {
+    if (
+      HIERARCHY_RELATIONSHIP_TYPES.has(relationship.type) &&
+      relationship.sourceIds.some((id) => removedIds.has(id))
+    ) {
+      for (const childId of relationship.targetIds) {
+        if (!removedIds.has(childId)) {
+          protectedChildIds.add(childId);
+        }
+      }
+    }
+  }
   const survivors: NativeIfcEntity[] = [];
   for (const current of cloneDocumentEntities(document)) {
     if (removedIds.has(current.id)) {
@@ -4108,7 +4380,13 @@ function removeSpecificNativeProducts(
     }
     survivors.push(current);
   }
-  collectOrphanedResources(document, survivors, removedIds);
+  collectOrphanedResources(
+    document,
+    survivors,
+    removedIds,
+    undefined,
+    protectedChildIds,
+  );
   return rebuildNativeDocument(
     document,
     survivors.filter((entity) => !removedIds.has(entity.id)),
@@ -5876,6 +6154,8 @@ function collectOrphanedResources(
   survivors: NativeIfcEntity[],
   removedIds: Set<number>,
   extraSeedIds?: Iterable<number>,
+  /** Nie einsammeln — z. B. Hierarchie-Kinder gerade entfernter Produkte. */
+  protectedIds?: Set<number>,
 ) {
   const survivorById = new Map(survivors.map((entity) => [entity.id, entity]));
 
@@ -5922,6 +6202,7 @@ function collectOrphanedResources(
       !candidate ||
       (incomingCount.get(candidateId) ?? 0) > 0 ||
       hierarchyParentIds.has(candidateId) ||
+      protectedIds?.has(candidateId) ||
       isOrphanProtected(candidate.type)
     ) {
       continue;
@@ -6088,7 +6369,11 @@ function readSchema(headerText: string) {
 
 function readEntities(text: string, diagnostics: string[]) {
   const entities: NativeIfcEntity[] = [];
-  const regex = /#(\d+)\s*=\s*([A-Z0-9_]+)\s*\(([\s\S]*?)\);/gi;
+  // Quote-sicher: STEP-Strings ('' escaped Apostrophe) werden als Ganzes
+  // übersprungen, sonst zerreißt ein ');' innerhalb eines Namens (z. B.
+  // "Wand (Nord);") die Entity beim Reparse — Referenzen gingen verloren.
+  const regex =
+    /#(\d+)\s*=\s*([A-Z0-9_]+)\s*\(((?:'[^']*(?:''[^']*)*'|[^';])*)\);/gi;
   let match: RegExpExecArray | null;
   while ((match = regex.exec(text))) {
     const id = Number(match[1]);

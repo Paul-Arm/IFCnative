@@ -2,6 +2,7 @@ import {
     Box,
     Check,
     Circle,
+    Combine,
     Copy,
     CopyPlus,
     Cylinder,
@@ -62,17 +63,20 @@ export default function ThatOpenViewer({
   activeModelDeferredReason,
   activeModelFileName,
   activeModelLoaded = true,
+  combineSelectionCount = 0,
   cutPlane,
   editCapabilities = {
     canMove: false,
     canRotate: false,
   },
   focusRequest,
-  mirrorRequest,
+  mirrorRequests,
   models,
   onLoadActiveModel,
   onAddBodyAt,
+  onCombineSelected,
   onCutPlaneActiveChange,
+  onViewerMounted,
   onCutPlaneAxisCycle,
   onCutPlaneChange,
   onCutPlaneModeChange,
@@ -87,12 +91,14 @@ export default function ThatOpenViewer({
   onSelect,
   onSplitSelected,
   pendingViewerChanges,
+  selectedEntityIds,
 }: ThatOpenViewerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const runtimeRef = useRef<ViewerRuntime | null>(null);
   const activeDocumentIdRef = useRef(activeDocumentId);
   const modelsRef = useRef(models);
   const selectedByDocumentIdRef = useRef(new Map<string, number>());
+  const selectedEntityIdsRef = useRef<number[]>([]);
   const onLogRef = useRef(onLog);
   const onCutPlaneChangeRef = useRef(onCutPlaneChange);
   const onMirrorAppliedRef = useRef(onMirrorApplied);
@@ -100,8 +106,9 @@ export default function ThatOpenViewer({
   const onRotateSelectedRef = useRef(onRotateSelected);
   const onPickCoordinatesRef = useRef(onPickCoordinates);
   const onSelectRef = useRef(onSelect);
+  const onViewerMountedRef = useRef(onViewerMounted);
   const handledFocusNonceRef = useRef<number | undefined>(undefined);
-  const handledMirrorNonceRef = useRef<number | undefined>(undefined);
+  const handledMirrorNoncesRef = useRef(new Set<number>());
   const pickerActiveRef = useRef(false);
   const [runtimeReady, setRuntimeReady] = useState(0);
   const [modelReady, setModelReady] = useState(0);
@@ -125,6 +132,8 @@ export default function ThatOpenViewer({
     [activeDocumentId, models],
   );
   const activeSelectedId = activeModel?.selectedId ?? 0;
+  // Änderungssignatur der Mehrfachauswahl — triggert das Highlight neu.
+  const selectionSignature = (selectedEntityIds ?? []).join(",");
   const activeModelVisible = Boolean(activeModel);
   const hasVisibleModels = models.length > 0;
   const pendingChangeCount = pendingViewerChanges?.length ?? 0;
@@ -146,6 +155,7 @@ export default function ThatOpenViewer({
   selectedByDocumentIdRef.current = new Map(
     models.map((model) => [model.documentId, model.selectedId]),
   );
+  selectedEntityIdsRef.current = selectedEntityIds ?? [];
   onLogRef.current = onLog;
   onCutPlaneChangeRef.current = onCutPlaneChange;
   onMirrorAppliedRef.current = onMirrorApplied;
@@ -153,6 +163,7 @@ export default function ThatOpenViewer({
   onRotateSelectedRef.current = onRotateSelected;
   onPickCoordinatesRef.current = onPickCoordinates;
   onSelectRef.current = onSelect;
+  onViewerMountedRef.current = onViewerMounted;
   pickerActiveRef.current = pickerActive;
 
   const copyPick = async (pick: ViewerCoordinatePick) => {
@@ -171,6 +182,11 @@ export default function ThatOpenViewer({
   useEffect(() => {
     let disposed = false;
 
+    // Vor der ersten Konvertierung melden: der Workspace bumpt dann die
+    // Revision von Sessions mit veraltetem viewerModelText (Live-Mirror war
+    // weiter), damit dieser Mount nicht den alten Stand konvertiert.
+    onViewerMountedRef.current?.();
+
     async function init() {
       if (!containerRef.current) {
         return;
@@ -182,6 +198,10 @@ export default function ThatOpenViewer({
           selectedByDocumentIdRef.current.get(
             documentId ?? activeDocumentIdRef.current,
           ) ?? 0,
+        getSelectedIds: (documentId) =>
+          documentId === activeDocumentIdRef.current
+            ? selectedEntityIdsRef.current
+            : [],
         onError: (message) => {
           setError(message);
           setStatus("ThatOpen viewer error");
@@ -208,8 +228,8 @@ export default function ThatOpenViewer({
         onCoordinatePickerUsed: () => setPickerActive(false),
         onContextTarget: (target) => setContextTarget(target),
         onProgress: (progress) => setLoadProgress(progress),
-        onSelect: (id, source, globalId, documentId) =>
-          onSelectRef.current(id, source, globalId, documentId),
+        onSelect: (id, source, globalId, documentId, additive) =>
+          onSelectRef.current(id, source, globalId, documentId, additive),
         onStatus: setStatus,
       });
       if (disposed) {
@@ -305,7 +325,7 @@ export default function ThatOpenViewer({
     }
     void runtime.highlight(activeDocumentId, activeSelectedId);
     void runtime.updateGrid(activeDocumentId);
-  }, [activeDocumentId, activeSelectedId, modelReady]);
+  }, [activeDocumentId, activeSelectedId, modelReady, selectionSignature]);
 
   useEffect(() => {
     const runtime = runtimeRef.current;
@@ -322,34 +342,37 @@ export default function ThatOpenViewer({
     void runtime.focusSelected(focusRequest.documentId, focusRequest.entityId);
   }, [activeDocumentId, focusRequest, modelReady]);
 
-  // Live-Mirror: eine im nativen Dokument committete Änderung sofort per
-  // Fragments-Edit-API in das geladene Modell übernehmen. Läuft im Runtime
-  // hinter der Modell-Lade-Queue, damit ein Mirror nie ein gerade neu
-  // konvertiertes Modell (das die Änderung schon enthält) doppelt trifft.
+  // Live-Mirror-Queue: im nativen Dokument committete Änderungen in
+  // Reihenfolge per Fragments-Edit-API übernehmen. Läuft im Runtime hinter
+  // der Modell-Lade-Queue, damit ein Mirror nie ein gerade neu konvertiertes
+  // Modell (das die Änderung schon enthält) doppelt trifft. Verarbeitete
+  // Nonces werden lokal gemerkt; aus der Queue entfernt sie der Workspace
+  // über die Result-Nonce.
   useEffect(() => {
     const runtime = runtimeRef.current;
-    if (
-      !runtime ||
-      !runtimeReady ||
-      !mirrorRequest ||
-      handledMirrorNonceRef.current === mirrorRequest.nonce
-    ) {
+    if (!runtime || !runtimeReady || !mirrorRequests?.length) {
       return;
     }
-    handledMirrorNonceRef.current = mirrorRequest.nonce;
-    void runtime
-      .applyMirror(mirrorRequest)
-      .then((result) => onMirrorAppliedRef.current?.(result))
-      .catch((reason) => {
-        onMirrorAppliedRef.current?.({
-          documentId: mirrorRequest.documentId,
-          label: mirrorRequest.label,
-          ok: false,
-          pendingKey: mirrorRequest.pendingKey,
-          reason: stringifyError(reason),
+    for (const request of mirrorRequests) {
+      if (handledMirrorNoncesRef.current.has(request.nonce)) {
+        continue;
+      }
+      handledMirrorNoncesRef.current.add(request.nonce);
+      void runtime
+        .applyMirror(request)
+        .then((result) => onMirrorAppliedRef.current?.(result))
+        .catch((reason) => {
+          onMirrorAppliedRef.current?.({
+            documentId: request.documentId,
+            label: request.label,
+            nonce: request.nonce,
+            ok: false,
+            pendingKey: request.pendingKey,
+            reason: stringifyError(reason),
+          });
         });
-      });
-  }, [mirrorRequest, runtimeReady]);
+    }
+  }, [mirrorRequests, runtimeReady]);
 
   useEffect(() => {
     const runtime = runtimeRef.current;
@@ -467,6 +490,15 @@ export default function ThatOpenViewer({
       { icon: CopyPlus, id: "duplicate", label: "Duplizieren" },
       { icon: Slice, id: "split", label: "Zerteilen" },
       {
+        disabled: combineSelectionCount < 2,
+        icon: Combine,
+        id: "combine",
+        label:
+          combineSelectionCount >= 2
+            ? `Kombinieren (${combineSelectionCount})`
+            : "Kombinieren",
+      },
+      {
         accent: "var(--destructive, #dc2626)",
         children: [
           {
@@ -487,7 +519,7 @@ export default function ThatOpenViewer({
         label: "Körper löschen",
       },
     ],
-    [],
+    [combineSelectionCount],
   );
 
   const ADD_PROFILES: Record<string, NativeBodyProfile> = {
@@ -508,6 +540,8 @@ export default function ThatOpenViewer({
       onAddBodyAt?.(profile, target);
     } else if (item.id === "duplicate") {
       onDuplicateBody?.(target.entityId);
+    } else if (item.id === "combine") {
+      onCombineSelected?.();
     } else if (item.id === "split") {
       // Schnittebene auf der (per Rechtsklick selektierten) Auswahl spawnen;
       // bestätigt wird über die Leiste unten in der Mitte.
@@ -798,6 +832,8 @@ async function createThatOpenRuntime(
   callbacks: {
     getActiveDocumentId(): string;
     getSelectedId(documentId?: string): number;
+    /** Vollständige Mehrfachauswahl des Dokuments (leer für inaktive Dokumente). */
+    getSelectedIds(documentId: string): number[];
     isCoordinatePickerActive(): boolean;
     onError(message: string): void;
     onCoordinatePickerUsed(): void;
@@ -820,6 +856,7 @@ async function createThatOpenRuntime(
       source?: string,
       globalId?: string,
       documentId?: string,
+      additive?: boolean,
     ): void;
     onStatus(message: string): void;
   },
@@ -1066,6 +1103,7 @@ async function createThatOpenRuntime(
     },
     (line) => callbacks.onLog(line),
     () => void fragments.core.update(true),
+    isHiddenLocalId,
   );
   const coordinateCursor = createCoordinateCursor(THREE);
   world.scene.three.add(coordinateCursor.group, coordinateCursor.rayLine);
@@ -1082,6 +1120,14 @@ async function createThatOpenRuntime(
     documentId: string;
     fileName: string;
     fitItems?: Set<number>;
+    /**
+     * Per removeMirroredElement ausgeblendete (ersetzte/entfernte) Elemente je
+     * Fragments-Modell. highlight/resetHighlight kann ihre Sichtbarkeit
+     * zurücksetzen — nach jedem Highlight werden sie erneut ausgeblendet,
+     * sonst bleibt z. B. nach Kombinieren + Verschieben ein Geist-Körper
+     * stehen.
+     */
+    hiddenLocalIdsByModelId: Map<string, Set<number>>;
     loadKey: string;
     /**
      * Id-Mapping für per Mirror ERZEUGTE Elemente: createElements vergibt
@@ -1214,6 +1260,21 @@ async function createThatOpenRuntime(
 
   const modelsByDocumentId = new Map<string, LoadedViewerModel>();
   const documentIdByModelId = new Map<string, string>();
+  // Nach dispose() dürfen laufende Sync-/Mirror-Ops nichts mehr in die tote
+  // Fragments-Instanz laden (Worker-/GPU-Leak).
+  let runtimeDisposed = false;
+
+  // Zentrale Auskunft für alle Restore-Pfade: ist dieses Element in diesem
+  // Modell als ersetzt/entfernt ausgeblendet? Verhindert, dass Gizmo- oder
+  // Mirror-Restores einen vorgemerkten Geist wieder sichtbar machen.
+  function isHiddenLocalId(modelId: string, localId: number) {
+    for (const loaded of modelsByDocumentId.values()) {
+      if (loaded.hiddenLocalIdsByModelId.get(modelId)?.has(localId)) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   // Native Express-Id → Fragments-localId (nur für per Mirror erzeugte
   // Elemente verschieden; sonst identisch). Umkehrung direkt über
@@ -1447,6 +1508,7 @@ async function createThatOpenRuntime(
   async function disposeSubsetModels(loaded: LoadedViewerModel) {
     for (const subset of loaded.subsetModels.splice(0)) {
       await disposeDeltaModels(subset.model.modelId);
+      loaded.hiddenLocalIdsByModelId.delete(subset.model.modelId);
       documentIdByModelId.delete(subset.model.modelId);
       await fragments.core
         .disposeModel(subset.model.modelId)
@@ -1591,17 +1653,39 @@ async function createThatOpenRuntime(
       );
       await fragments.core.update(true);
     }
-    callbacks.onSelect(resolvedEntityId, "thatopen", globalId, documentId);
+    // Strg-/Umschalt-Klick schaltet das Objekt in der Mehrfachauswahl um
+    // (wie im Strukturbaum) statt die Auswahl zu ersetzen.
+    const additive = event.ctrlKey || event.metaKey || event.shiftKey;
+    callbacks.onSelect(
+      resolvedEntityId,
+      "thatopen",
+      globalId,
+      documentId,
+      additive,
+    );
     callbacks.onLog(
-      `viewer.select({ engine: 'thatopen', file: '${loadedModel.fileName}', localId: ${localId}, entityId: ${resolvedEntityId}${globalId ? `, globalId: '${globalId}'` : ""} });`,
+      `viewer.select({ engine: 'thatopen', file: '${loadedModel.fileName}', localId: ${localId}, entityId: ${resolvedEntityId}${globalId ? `, globalId: '${globalId}'` : ""}${additive ? ", additive: true" : ""} });`,
     );
     if (documentId === callbacks.getActiveDocumentId()) {
-      await highlight(documentId, resolvedEntityId);
+      // Bei Normalklick kollabiert die Auswahl auf das Element — der noch
+      // nicht geflushte React-State würde sonst kurz die alte Mehrfachauswahl
+      // mit einfärben.
+      await highlight(documentId, resolvedEntityId, { exclusive: !additive });
     }
   };
 
   canvas.addEventListener("pointerdown", trackPointerDown, { capture: true });
-  canvas.addEventListener("click", selectFromPointer, { capture: true });
+  // Async-Handler nie direkt registrieren: eine Rejection (z. B. Raycast
+  // während eines Modell-Reloads) landete sonst als unhandled rejection
+  // statt im Viewer-Log.
+  const handleSelectClick = (event: MouseEvent) => {
+    void selectFromPointer(event).catch((reason) => {
+      callbacks.onLog(
+        `viewer.selectError(${JSON.stringify(String(reason))});`,
+      );
+    });
+  };
+  canvas.addEventListener("click", handleSelectClick, { capture: true });
 
   // Rechtsklick: Körper unter dem Zeiger raycasten, auswählen (macht dessen
   // IFC aktiv) und das Rotary-Menü an der Zeigerposition öffnen.
@@ -1612,6 +1696,17 @@ async function createThatOpenRuntime(
     event.preventDefault();
     if (moveGizmo.isDragging() || cutPlaneGizmo.isDragging()) {
       return;
+    }
+    // Wie beim Linksklick: nach einer Drag-Bewegung (Kamera-Pan mit rechter
+    // Taste) kein Menü öffnen — contextmenu feuert unter Windows erst beim
+    // Loslassen der Taste.
+    if (pointerDown) {
+      const dx = event.clientX - pointerDown.x;
+      const dy = event.clientY - pointerDown.y;
+      pointerDown = null;
+      if (Math.hypot(dx, dy) > 4) {
+        return;
+      }
     }
     const mouse = new THREE.Vector2(event.clientX, event.clientY);
     const result = await fragments.raycast({
@@ -1650,7 +1745,10 @@ async function createThatOpenRuntime(
     const mappedEntityId = loadedModel.mirrorEntityIdByLocalId.get(localId);
     const resolvedEntityId = mappedEntityId ?? entityId ?? localId;
     const ifcPoint = sceneToIfcWorldPoint(loadedModel, result.point);
-    callbacks.onSelect(resolvedEntityId, "thatopen", globalId, documentId);
+    // "thatopen-context": eine bestehende Mehrfachauswahl bleibt erhalten,
+    // wenn das Rechtsklick-Ziel dazugehört (sonst wäre "Kombinieren" im
+    // Rotary-Menü nie erreichbar, weil der Rechtsklick sie auflösen würde).
+    callbacks.onSelect(resolvedEntityId, "thatopen-context", globalId, documentId);
     callbacks.onContextTarget({
       clientX: event.clientX,
       clientY: event.clientY,
@@ -1665,7 +1763,11 @@ async function createThatOpenRuntime(
     );
   };
   const handleContextMenu = (event: MouseEvent) => {
-    void openContextFromPointer(event);
+    void openContextFromPointer(event).catch((reason) => {
+      callbacks.onLog(
+        `viewer.contextMenuError(${JSON.stringify(String(reason))});`,
+      );
+    });
   };
   canvas.addEventListener("contextmenu", handleContextMenu);
 
@@ -1689,6 +1791,9 @@ async function createThatOpenRuntime(
     nextModels: ThatOpenViewerModel[],
     options?: { fitAfterLoad?: boolean },
   ) {
+    if (runtimeDisposed) {
+      return;
+    }
     const nextDocumentIds = new Set(
       nextModels.map((model) => model.documentId),
     );
@@ -1753,10 +1858,20 @@ async function createThatOpenRuntime(
       callbacks.onLog(
         `viewer.convert({ engine: 'worker', file: '${nextModel.fileName}', ms: ${Math.round(converted.elapsedMs)} });`,
       );
+      // Wurde die Runtime während der Worker-Konvertierung disposed (Pane
+      // geschlossen), NICHT mehr in die tote Fragments-Instanz laden — das
+      // Modell bliebe sonst bis zum App-Neustart im Speicher.
+      if (runtimeDisposed) {
+        return;
+      }
       const model = await fragments.core.load(converted.fragments, {
         modelId,
         raw: true,
       });
+      if (runtimeDisposed) {
+        await fragments.core.disposeModel(model.modelId).catch(() => undefined);
+        return;
+      }
       // Die Geometrie jedes IFC bleibt für float32-Präzision lokal rebased.
       // Fragments positioniert model.object relativ zum ersten geladenen IFC;
       // die individuelle Welt→Modell-Matrix bleibt für Picks/Schreibpfade.
@@ -1787,6 +1902,7 @@ async function createThatOpenRuntime(
         documentId: nextModel.documentId,
         fileName: nextModel.fileName,
         fitItems,
+        hiddenLocalIdsByModelId: new Map(),
         ifcWorldToModel,
         loadKey,
         mirrorEntityIdByLocalId: new Map(),
@@ -1822,7 +1938,7 @@ async function createThatOpenRuntime(
   function highlight(
     documentId: string,
     entityId: number,
-    options?: { updateGizmo?: boolean },
+    options?: { updateGizmo?: boolean; exclusive?: boolean },
   ) {
     const request = ++highlightRequest;
     const run = highlightQueue.then(async () => {
@@ -1835,22 +1951,75 @@ async function createThatOpenRuntime(
     return run;
   }
 
+  // resetHighlight wirkt global und kann die Sichtbarkeit ausgeblendeter
+  // (ersetzter) Elemente zurücksetzen — nach jedem Reset alle vorgemerkten
+  // Ausblendungen sämtlicher geladener Dokumente erneut anwenden, dazu die
+  // Preview-Ausblendung eines aktiven Gizmos.
+  async function reapplyHiddenLocalIds() {
+    for (const anyLoaded of modelsByDocumentId.values()) {
+      for (const [modelId, hidden] of anyLoaded.hiddenLocalIdsByModelId) {
+        if (!hidden.size) {
+          continue;
+        }
+        const target = fragments.list.get(modelId);
+        if (target) {
+          await target.setVisible([...hidden], false).catch(() => undefined);
+        }
+      }
+    }
+    const hiddenPreview = moveGizmo.getHiddenPreview();
+    if (hiddenPreview) {
+      const previewModel = fragments.list.get(hiddenPreview.modelId);
+      if (previewModel) {
+        await previewModel
+          .setVisible([hiddenPreview.localId], false)
+          .catch(() => undefined);
+      }
+    }
+  }
+
   async function highlightInternal(
     documentId: string,
     entityId: number,
-    options?: { updateGizmo?: boolean },
+    options?: { updateGizmo?: boolean; exclusive?: boolean },
   ) {
     const loaded = modelsByDocumentId.get(documentId);
     if (!loaded || !Number.isFinite(entityId) || entityId <= 0) {
+      // Auswahl nicht darstellbar (Dokument nicht geladen / leer): die alte
+      // Färbung und das Gizmo aktiv lösen, statt sie über den Dokumentwechsel
+      // hinweg stehen zu lassen.
+      await fragments.resetHighlight().catch(() => undefined);
+      if (options?.updateGizmo ?? true) {
+        await moveGizmo.updateSelection(0, null).catch(() => undefined);
+      }
+      await reapplyHiddenLocalIds();
+      await fragments.core.update(true).catch(() => undefined);
       return;
     }
+    // Die komplette Mehrfachauswahl einfärben, nicht nur das primäre Element;
+    // der Gizmo hängt weiterhin nur am primären. exclusive überspringt die
+    // Erweiterung, wenn der Aufrufer weiß, dass die Auswahl gerade auf ein
+    // Element kollabiert (der React-State hinkt dem Klick einen Tick nach).
+    const entityIds = new Set([entityId]);
+    if (!options?.exclusive) {
+      for (const id of callbacks.getSelectedIds(documentId)) {
+        if (Number.isFinite(id) && id > 0) {
+          entityIds.add(id);
+        }
+      }
+    }
     const localId = resolveLocalId(loaded, entityId);
+    const localIds = new Set(
+      [...entityIds].map((id) => resolveLocalId(loaded, id)),
+    );
     // Auch die Subset- und Delta-Modelle des Elternmodells einfärben — per
     // Edit-API oder Rekonvertierung erzeugte Elemente rendern dort, nicht im
     // Basismodell.
     const subsetParentIds = new Set(
       loaded.subsetModels
-        .filter((subset) => subset.entityIds.has(localId))
+        .filter((subset) =>
+          [...localIds].some((candidate) => subset.entityIds.has(candidate)),
+        )
         .map((subset) => subset.model.modelId),
     );
     const targets: Record<string, Set<number>> = {};
@@ -1859,14 +2028,21 @@ async function createThatOpenRuntime(
       if (
         modelId === loaded.model.modelId ||
         subsetParentIds.has(modelId) ||
-        (parentId !== undefined &&
+        (parentId != null &&
           (parentId === loaded.model.modelId || subsetParentIds.has(parentId)))
       ) {
-        targets[modelId] = new Set([localId]);
+        const hidden = loaded.hiddenLocalIdsByModelId.get(modelId);
+        targets[modelId] = new Set(
+          hidden ? [...localIds].filter((id) => !hidden.has(id)) : localIds,
+        );
       }
     }
     await fragments.resetHighlight();
     await fragments.highlight(selectionMaterial, targets);
+    // resetHighlight/highlight kann die Sichtbarkeit zuvor ausgeblendeter
+    // (ersetzter) Elemente zurücksetzen — z. B. blieb das kombinierte
+    // Duplikat sonst als nicht anklickbarer Geist-Körper stehen.
+    await reapplyHiddenLocalIds();
     await fragments.core.update(true);
     if (options?.updateGizmo ?? true) {
       await moveGizmo.updateSelection(
@@ -1943,6 +2119,25 @@ async function createThatOpenRuntime(
   // Entfernt ein Element aus der Anzeige: konvertierte Elemente werden
   // ausgeblendet (setVisible); per Mirror erzeugte Delta-Elemente reagieren
   // darauf nicht und werden über die Elements-API wieder gelöscht.
+  // Ausblendung eines ersetzten/entfernten Elements dauerhaft vormerken —
+  // highlightInternal wendet sie nach jedem Highlight erneut an. Elemente,
+  // die per Edit-API bearbeitet wurden, rendern im Delta-Modell: das muss
+  // mit vorgemerkt werden, sonst kehrt die Delta-Kopie als Geist zurück.
+  const rememberHiddenLocalId = (
+    loaded: LoadedViewerModel,
+    model: { deltaModelId?: string | null; modelId: string },
+    localId: number,
+  ) => {
+    for (const modelId of [model.modelId, model.deltaModelId ?? undefined]) {
+      if (!modelId) {
+        continue;
+      }
+      const hidden = loaded.hiddenLocalIdsByModelId.get(modelId) ?? new Set();
+      hidden.add(localId);
+      loaded.hiddenLocalIdsByModelId.set(modelId, hidden);
+    }
+  };
+
   async function removeMirroredElement(
     loaded: LoadedViewerModel,
     entityId: number,
@@ -1972,13 +2167,39 @@ async function createThatOpenRuntime(
       } else {
         await loaded.model.setVisible([localId], false);
       }
+      rememberHiddenLocalId(loaded, loaded.model, localId);
     }
     // Rendert ein Subset-Modell das Element (partielle Rekonvertierung),
     // dort ebenfalls ausblenden — das Basismodell kennt es ggf. gar nicht.
+    // Wie im Basis-Zweig element-bewusst, damit auch ein Subset-DELTA (nach
+    // Edit-API-Bearbeitung im Subset) mit ausgeblendet wird.
     for (const subset of loaded.subsetModels) {
       if (subset.entityIds.has(entityId)) {
-        await subset.model.setVisible([entityId], false).catch(() => undefined);
-        subset.entityIds.delete(entityId);
+        try {
+          const [subsetElement] = await fragments.core.editor.getElements(
+            subset.model.modelId,
+            [entityId],
+          );
+          if (subsetElement) {
+            await setFragmentElementVisible(
+              fragments.core,
+              subset.model,
+              subsetElement,
+              false,
+            );
+          } else {
+            await subset.model.setVisible([entityId], false);
+          }
+          rememberHiddenLocalId(loaded, subset.model, entityId);
+          subset.entityIds.delete(entityId);
+        } catch (reason) {
+          // Nicht schlucken: der Aufrufer meldet die Op als fehlgeschlagen,
+          // damit der "Modell neu berechnen"-Fallback erhalten bleibt.
+          callbacks.onLog(
+            `viewer.hideSubsetElementFailed({ modelId: '${subset.model.modelId}', id: ${entityId}, reason: ${JSON.stringify(String(reason))} });`,
+          );
+          throw reason;
+        }
       }
     }
     loaded.mirrorLocalIdByEntityId.delete(entityId);
@@ -1991,10 +2212,14 @@ async function createThatOpenRuntime(
     const finish = (ok: boolean, reason?: string): ViewerMirrorResult => ({
       documentId: request.documentId,
       label: request.label,
+      nonce: request.nonce,
       ok,
       pendingKey: request.pendingKey,
       reason,
     });
+    if (runtimeDisposed) {
+      return finish(false, "runtime-disposed");
+    }
     const loaded = modelsByDocumentId.get(request.documentId);
     if (!loaded) {
       return finish(false, "model-not-loaded");
@@ -2028,12 +2253,15 @@ async function createThatOpenRuntime(
           if (requests?.length) {
             await fragments.core.editor.edit(targetModel.modelId, requests);
           }
-          await setFragmentElementVisible(
-            fragments.core,
-            targetModel,
-            element,
-            true,
-          );
+          // Per Mirror ersetzte Elemente bleiben ausgeblendet.
+          if (!isHiddenLocalId(targetModel.modelId, localId)) {
+            await setFragmentElementVisible(
+              fragments.core,
+              targetModel,
+              element,
+              true,
+            );
+          }
         } finally {
           if (!disposed) {
             element.disposeMeshes(meshes);
@@ -2061,13 +2289,26 @@ async function createThatOpenRuntime(
         documentIdByModelId.set(subsetModel.modelId, request.documentId);
         // Ersetzte Produkte im Basismodell und in früheren Subsets ausblenden
         // — ihre neue Gestalt rendert ab jetzt das frische Teilmodell.
+        // Fehler beim Ausblenden werden NICHT geschluckt: die Op meldet dann
+        // Fehlschlag, damit der Pending-Eintrag (Recalc-Fallback) bestehen
+        // bleibt — sonst stünde das alte Element dauerhaft doppelt im Bild.
+        let hideFailure: unknown;
         for (const entityId of op.replacedEntityIds) {
-          await removeMirroredElement(loaded, entityId).catch(() => undefined);
+          await removeMirroredElement(loaded, entityId).catch((reason) => {
+            hideFailure = reason ?? "hide-failed";
+            callbacks.onLog(
+              `viewer.reconvertSubsetHideFailed({ id: ${entityId}, reason: ${JSON.stringify(String(reason))} });`,
+            );
+          });
         }
         loaded.subsetModels.push({
           entityIds: new Set(op.entityIds),
           model: subsetModel,
         });
+        if (hideFailure !== undefined) {
+          await fragments.core.update(true).catch(() => undefined);
+          return finish(false, `hide-replaced-failed: ${String(hideFailure)}`);
+        }
         callbacks.onLog(
           `viewer.reconvertSubset({ file: '${loaded.fileName}', modelId: '${subsetModel.modelId}', entities: [${op.entityIds.join(", ")}], replaced: [${op.replacedEntityIds.join(", ")}], ms: ${Math.round(converted.elapsedMs)} });`,
         );
@@ -2155,10 +2396,11 @@ async function createThatOpenRuntime(
   }
 
   async function dispose() {
+    runtimeDisposed = true;
     canvas.removeEventListener("pointerdown", trackPointerDown, {
       capture: true,
     });
-    canvas.removeEventListener("click", selectFromPointer, { capture: true });
+    canvas.removeEventListener("click", handleSelectClick, { capture: true });
     canvas.removeEventListener("contextmenu", handleContextMenu);
     canvas.removeEventListener("webglcontextlost", handleContextLost);
     canvas.removeEventListener("webglcontextrestored", handleContextRestored);
@@ -2449,6 +2691,7 @@ function createMoveGizmo(
   ) => Promise<void>,
   onLog: (line: string) => void,
   onSceneChange: () => void,
+  isHiddenLocalId: (modelId: string, localId: number) => boolean,
 ) {
   const controls = new TransformControls(camera, canvas);
   controls.setMode("translate");
@@ -2517,7 +2760,10 @@ function createMoveGizmo(
       model &&
       element &&
       Number.isFinite(localId) &&
-      localId > 0
+      localId > 0 &&
+      // Ein inzwischen per Mirror ersetztes/entferntes Element bleibt
+      // ausgeblendet — sonst stünde die alte Gestalt neben der neuen.
+      !isHiddenLocalId(model.modelId, localId)
     ) {
       await setFragmentElementVisible(fragments, model, element, true).catch(
         () => undefined,
@@ -2679,11 +2925,52 @@ function createMoveGizmo(
             ? { delta: { x: delta.x, y: delta.y, z: delta.z } }
             : { rotation, rotationChange }),
         };
+        // Erst das native STEP-Dokument schreiben — der Sync-Callback enthält
+        // die Guards (Auswahl gewechselt, Modell entladen). Würde der
+        // Fragments-Edit zuerst laufen, ließe er sich bei abgelehntem Sync
+        // nicht zurückrollen: Anzeige und Dokument würden still divergieren.
+        let receipt: MoveGizmoCommitReceipt | null = null;
+        try {
+          receipt = await onNativeSync(change);
+        } catch (reason) {
+          onLog(
+            `viewer.transformGizmo.nativeSyncError(${JSON.stringify(String(reason))});`,
+          );
+        }
+        if (!receipt) {
+          // Preview verwerfen und das Original wieder zeigen — die Anzeige
+          // fällt auf den unveränderten nativen Stand zurück.
+          controls.detach();
+          helper.visible = false;
+          if (editMeshes) {
+            editMeshes.removeFromParent();
+            try {
+              element.disposeMeshes(editMeshes);
+            } catch {
+              // The owning model may already be disposed after a reload.
+            }
+          }
+          editElement = null;
+          editMeshes = null;
+          removeOrphanEditMeshes();
+          if (!isHiddenLocalId(model.modelId, localId)) {
+            await setFragmentElementVisible(
+              fragments,
+              model,
+              element,
+              true,
+            ).catch(() => undefined);
+          }
+          await fragments.update(true).catch(() => undefined);
+          onLog(
+            `viewer.transformGizmo.nativeSyncRejected({ id: ${localId} });`,
+          );
+          return null;
+        }
         let applied = false;
         try {
           // That Open EditElements commit order:
           // setMeshes -> dispose preview -> getRequests -> editor.edit -> update.
-          // No native STEP write happens until this worker-backed edit succeeds.
           await element.setMeshes(meshes);
           controls.detach();
           helper.visible = false;
@@ -2714,33 +3001,23 @@ function createMoveGizmo(
         removeOrphanEditMeshes();
         // Restore visibility using the tutorial's base/delta rule. After a
         // successful edit the stale base item stays hidden and the delta item
-        // becomes visible.
-        await setFragmentElementVisible(fragments, model, element, true).catch(
-          () => undefined,
-        );
+        // becomes visible. Per Mirror ersetzte Elemente bleiben ausgeblendet.
+        if (!isHiddenLocalId(model.modelId, localId)) {
+          await setFragmentElementVisible(
+            fragments,
+            model,
+            element,
+            true,
+          ).catch(() => undefined);
+        }
         await fragments.update(true).catch(() => undefined);
         if (!applied) {
+          // Natives Dokument ist bereits geändert: applied=false meldet den
+          // Fehlschlag an onTransformFinished, der Pending-Eintrag (Fallback
+          // "Modell neu berechnen") bleibt damit bestehen.
           onLog(
             `viewer.transformGizmo.reverted({ id: ${localId}, reason: 'fragments-edit-failed' });`,
           );
-          return null;
-        }
-        // Fragments is now authoritative for the completed interaction. Mirror
-        // the resulting world transform into the native STEP document so IFC
-        // export preserves the same pose.
-        let receipt: MoveGizmoCommitReceipt | null = null;
-        try {
-          receipt = await onNativeSync(change);
-        } catch (reason) {
-          onLog(
-            `viewer.transformGizmo.nativeSyncError(${JSON.stringify(String(reason))});`,
-          );
-        }
-        if (!receipt) {
-          onLog(
-            `viewer.transformGizmo.nativeSyncRejected({ id: ${localId} });`,
-          );
-          return null;
         }
         return { commit: { ...change, applied }, receipt };
       },
@@ -2801,8 +3078,15 @@ function createMoveGizmo(
     void enqueue(() => disposeEditable(true));
   };
 
+  /** Aktuell vom Gizmo als Preview ausgeblendetes Original (falls aktiv). */
+  const getHiddenPreview = () =>
+    editMeshes && selectedModel && selectedLocalId > 0
+      ? { localId: selectedLocalId, modelId: selectedModel.modelId }
+      : null;
+
   return {
     dispose,
+    getHiddenPreview,
     isDragging: () => dragging,
     setEnabled,
     setMode,

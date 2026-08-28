@@ -9,6 +9,7 @@ export * from "./fragmentDocument";
 export * from "./fragmentSession";
 export * from "./geometryIndex";
 export * from "./graphIndex";
+export * from "./ids";
 export * from "./modelSession";
 export * from "./nativeDocument";
 export * from "./nativeDocumentWorker";

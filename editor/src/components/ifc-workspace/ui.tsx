@@ -834,6 +834,27 @@ export function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+/**
+ * Parst Zahlen-Eingaben mit deutschem ODER englischem Dezimalformat:
+ * "1.234,56" → 1234.56 (Punkt = Tausendertrenner), "1,5" → 1.5,
+ * "2.5" → 2.5. Unbrauchbare Eingaben liefern den Fallback — bisher kippte
+ * z. B. ein eingefügtes "4.350,25" still auf 0.
+ */
+export function parseDecimalInput(
+  value: string | undefined,
+  fallback = 0,
+): number {
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed) {
+    return fallback;
+  }
+  const normalized = trimmed.includes(",")
+    ? trimmed.replace(/\./g, "").replace(/,/g, ".")
+    : trimmed;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 export function shortType(type: string): string {
   const [kind, firstType, secondType] = type.split(":");
   if (kind === "IFCPROPERTYLISTVALUE") {
