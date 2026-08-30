@@ -41,6 +41,7 @@ import {
   DropdownField,
   InlineAlert,
   LabeledInput,
+  SegmentedControl,
 } from "./ui";
 
 /** Ein vom Hub geladener IFC-Stand, den der Editor als Tab öffnet. */
@@ -412,20 +413,16 @@ export function StartPage({
             </div>
           ) : !auth ? (
             <div className="grid gap-2">
-              <div className="flex items-center gap-2">
-                <Button
-                  variant={authMode === "login" ? "default" : "outline"}
-                  onClick={() => setAuthMode("login")}
-                >
-                  Anmelden
-                </Button>
-                <Button
-                  variant={authMode === "register" ? "default" : "outline"}
-                  onClick={() => setAuthMode("register")}
-                >
-                  Registrieren
-                </Button>
-              </div>
+              {/* Moduswechsel als Tabs — bewusst KEIN Button, damit er nicht
+                  mit dem Absenden-Button darunter verwechselt wird. */}
+              <SegmentedControl
+                options={[
+                  { label: "Anmelden", value: "login" },
+                  { label: "Registrieren", value: "register" },
+                ]}
+                value={authMode}
+                onChange={(mode) => setAuthMode(mode as "login" | "register")}
+              />
               <LabeledInput label="E-Mail" value={email} onChangeText={setEmail} />
               {authMode === "register" ? (
                 <LabeledInput label="Name" value={name} onChangeText={setName} />
