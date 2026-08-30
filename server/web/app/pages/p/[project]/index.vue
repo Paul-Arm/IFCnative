@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import hljs from "highlight.js/lib/core";
+import pythonLang from "highlight.js/lib/languages/python";
 import {
   PhArrowElbowLeftUp,
   PhBookOpen,
@@ -850,6 +852,13 @@ if fehler:
 print("Alle Prüfungen bestanden")
 sys.exit(0)
 `;
+
+hljs.registerLanguage("python", pythonLang);
+
+/** Vorlage mit Syntax-Highlighting (hljs-Klassen, gestylt in main.css). */
+const pyTemplateHtml = computed(
+  () => hljs.highlight(PY_TEMPLATE, { language: "python" }).value,
+);
 
 async function copyPyTemplate(): Promise<void> {
   try {
@@ -1778,32 +1787,11 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
                     <button
                       type="button"
                       class="link-btn"
-                      @click="showPyTemplate = !showPyTemplate"
+                      @click="showPyTemplate = true"
                     >
-                      {{ showPyTemplate ? "Vorlage ausblenden" : "Skript-Vorlage anzeigen" }}
+                      Skript-Vorlage anzeigen
                     </button>
                   </p>
-                  <div
-                    v-if="actionKind === 'python' && showPyTemplate"
-                    class="py-template"
-                  >
-                    <div class="py-template-bar">
-                      <span class="muted small mono">check.py</span>
-                      <span class="topbar-spacer" />
-                      <button type="button" class="btn small" @click="copyPyTemplate">
-                        {{ pyTemplateCopied ? "Kopiert ✓" : "Kopieren" }}
-                      </button>
-                      <button
-                        type="button"
-                        class="btn small"
-                        title="Vorlage direkt als Prüfdatei ins Formular übernehmen"
-                        @click="usePyTemplate"
-                      >
-                        Als Datei übernehmen
-                      </button>
-                    </div>
-                    <pre>{{ PY_TEMPLATE }}</pre>
-                  </div>
                 </div>
               </div>
               <div class="af-row">
@@ -2193,5 +2181,40 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
         </div>
       </div>
     </template>
+
+    <!-- Modal: Python-Skript-Vorlage (mit Syntax-Highlighting) -->
+    <div
+      v-if="showPyTemplate"
+      class="modal-backdrop"
+      @click.self="showPyTemplate = false"
+    >
+      <div class="card modal modal-wide">
+        <div class="card-header">
+          <h2>Python-Skript-Vorlage</h2>
+          <span class="muted small mono">check.py</span>
+          <span class="topbar-spacer" />
+          <button type="button" class="btn small" @click="copyPyTemplate">
+            {{ pyTemplateCopied ? "Kopiert ✓" : "Kopieren" }}
+          </button>
+          <button
+            type="button"
+            class="btn small primary"
+            title="Vorlage direkt als Prüfdatei ins Formular übernehmen"
+            @click="usePyTemplate"
+          >
+            Als Datei übernehmen
+          </button>
+          <button
+            type="button"
+            class="link"
+            title="Schließen"
+            @click="showPyTemplate = false"
+          >
+            ✕
+          </button>
+        </div>
+        <pre class="py-code"><code v-html="pyTemplateHtml"></code></pre>
+      </div>
+    </div>
   </div>
 </template>

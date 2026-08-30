@@ -517,30 +517,96 @@ tr:last-child td {
   filter: none;
 }
 
-/* Aufklappbare Python-Skript-Vorlage */
-.py-template {
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface-2);
-  overflow: hidden;
+/* Python-Skript-Vorlage (Modal mit Syntax-Highlighting) */
+.modal.modal-wide {
+  max-width: 820px;
 }
 
-.py-template-bar {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.35rem 0.6rem;
-  border-bottom: 1px solid var(--border);
-}
-
-.py-template pre {
+.py-code {
   margin: 0;
-  padding: 0.75rem;
-  max-height: 320px;
+  padding: 1rem 1.25rem;
   overflow: auto;
+  max-height: 68vh;
+  background: var(--surface-2);
+  border-radius: 0 0 calc(var(--radius) - 1px) calc(var(--radius) - 1px);
   font-family: var(--mono);
-  font-size: 0.75rem;
-  line-height: 1.5;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  tab-size: 4;
+}
+
+/* hljs-Farbschema in GitHub-Palette (hell; dunkle Werte unten) */
+.py-code .hljs-keyword {
+  color: #cf222e;
+}
+
+.py-code .hljs-string,
+.py-code .hljs-subst {
+  color: #0a3069;
+}
+
+.py-code .hljs-comment,
+.py-code .hljs-doctag {
+  color: #6e7781;
+  font-style: italic;
+}
+
+.py-code .hljs-number,
+.py-code .hljs-literal {
+  color: #0550ae;
+}
+
+.py-code .hljs-built_in,
+.py-code .hljs-type {
+  color: #953800;
+}
+
+.py-code .hljs-title,
+.py-code .hljs-title.function_ {
+  color: #8250df;
+}
+
+.py-code .hljs-params {
+  color: var(--text);
+}
+
+.py-code .hljs-meta {
+  color: #116329;
+}
+
+@media (prefers-color-scheme: dark) {
+  .py-code .hljs-keyword {
+    color: #ff7b72;
+  }
+
+  .py-code .hljs-string,
+  .py-code .hljs-subst {
+    color: #a5d6ff;
+  }
+
+  .py-code .hljs-comment,
+  .py-code .hljs-doctag {
+    color: #8b949e;
+  }
+
+  .py-code .hljs-number,
+  .py-code .hljs-literal {
+    color: #79c0ff;
+  }
+
+  .py-code .hljs-built_in,
+  .py-code .hljs-type {
+    color: #ffa657;
+  }
+
+  .py-code .hljs-title,
+  .py-code .hljs-title.function_ {
+    color: #d2a8ff;
+  }
+
+  .py-code .hljs-meta {
+    color: #7ee787;
+  }
 }
 
 .action-form-check {

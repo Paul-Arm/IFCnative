@@ -186,6 +186,7 @@ import {
     StartPage,
     type StartPageHubDocument,
 } from "./ifc-workspace/StartPage";
+import { VcsOriginStatus } from "./ifc-workspace/VcsOriginStatus";
 import { VcsPanel } from "./ifc-workspace/VcsPanel";
 import { PortalSettingsPanel } from "./ifc-workspace/PortalSettingsPanel";
 import { PsetBatchPanel } from "./ifc-workspace/PsetBatchPanel";
@@ -4911,14 +4912,11 @@ export default function IfcWorkspace() {
             <span className="text-primary">Lädt {loadingIfcName}…</span>
           ) : null}
           {activeSession.vcsOrigin ? (
-            <span
-              className="max-w-64 truncate"
-              title={`Vom IFC Hub geladen: ${activeSession.vcsOrigin.projectName} / ${activeSession.vcsOrigin.modelName} (${activeSession.vcsOrigin.branch})`}
-            >
-              Hub: {activeSession.vcsOrigin.projectSlug}/
-              {activeSession.vcsOrigin.modelSlug} (
-              {activeSession.vcsOrigin.branch})
-            </span>
+            <VcsOriginStatus
+              auth={vcsAuth}
+              origin={activeSession.vcsOrigin}
+              settings={vcsSettings}
+            />
           ) : null}
           {hasUnexportedChanges ? (
             <span className="flex items-center gap-1 text-warning-foreground dark:text-warning">
