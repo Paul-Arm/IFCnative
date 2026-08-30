@@ -95,6 +95,7 @@ function toggleRaw(): void {
     // Quelltext -> Editor: Markdown neu parsen.
     editor.commands.setContent(props.modelValue, false);
   }
+  linkOpen.value = false;
   raw.value = !raw.value;
 }
 
@@ -102,15 +103,35 @@ function onRawInput(event: Event): void {
   emit("update:modelValue", (event.target as HTMLTextAreaElement).value);
 }
 
+// Inline-Eingabe für Link-URLs — window.prompt() ist in eingebetteten
+// Browsern/WebViews blockiert.
+const linkOpen = ref(false);
+const linkUrl = ref("");
+const linkInput = ref<HTMLInputElement | null>(null);
+
 function setLink(): void {
-  const previous = editor.getAttributes("link").href as string | undefined;
-  const url = window.prompt("Link-URL (leer = Link entfernen):", previous ?? "");
-  if (url === null) return;
+  if (linkOpen.value) {
+    linkOpen.value = false;
+    return;
+  }
+  linkUrl.value = (editor.getAttributes("link").href as string | undefined) ?? "";
+  linkOpen.value = true;
+  nextTick(() => linkInput.value?.focus());
+}
+
+function applyLink(): void {
+  const url = linkUrl.value.trim();
+  linkOpen.value = false;
   if (!url) {
     editor.chain().focus().extendMarkRange("link").unsetLink().run();
     return;
   }
   editor.chain().focus().extendMarkRange("link").setLink({ href: url }).run();
+}
+
+function removeLink(): void {
+  linkOpen.value = false;
+  editor.chain().focus().extendMarkRange("link").unsetLink().run();
 }
 
 function insertTable(): void {
@@ -180,7 +201,7 @@ const buttons: ToolButton[][] = [
       icon: PhLinkSimple,
       title: "Link setzen/entfernen",
       action: setLink,
-      isActive: () => editor.isActive("link"),
+      isActive: () => linkOpen.value || editor.isActive("link"),
     },
   ],
   [
@@ -270,6 +291,21 @@ const buttons: ToolButton[][] = [
       >
         <PhMarkdownLogo :size="16" aria-hidden="true" />
       </button>
+    </div>
+    <!-- Kein <form>: der Editor steckt oft in einem Seiten-Formular, und bei
+         verschachtelten Formularen schluckt der Browser das Enter-Submit. -->
+    <div v-if="linkOpen && !raw" class="md-link-bar">
+      <input
+        ref="linkInput"
+        v-model="linkUrl"
+        type="text"
+        placeholder="https://…"
+        spellcheck="false"
+        @keydown.enter.prevent="applyLink"
+        @keydown.esc.prevent="linkOpen = false"
+      />
+      <button class="primary" type="button" @click="applyLink">Übernehmen</button>
+      <button type="button" @click="removeLink">Entfernen</button>
     </div>
     <textarea
       v-if="raw"

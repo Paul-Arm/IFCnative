@@ -5,7 +5,8 @@
       "name": "ifc-vcs-server",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "server", "run", "start"],
-      "port": 8787
+      "port": 8787,
+      "autoPort": true
     },
     {
       "name": "editor",

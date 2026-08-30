@@ -70,21 +70,37 @@ async function toggleAdmin(target: AdminUser, isAdmin: boolean): Promise<void> {
   }
 }
 
-async function setPassword(target: AdminUser): Promise<void> {
-  const password = window.prompt(
-    `Neues Passwort für ${target.email} (min. 8 Zeichen):`,
-  );
-  if (password === null) return;
-  error.value = null;
+// Passwort-Dialog — window.prompt() ist in eingebetteten Browsern/WebViews
+// blockiert, daher ein kleines Modal mit Passwortfeld.
+const pwTarget = ref<AdminUser | null>(null);
+const pwValue = ref("");
+const pwError = ref<string | null>(null);
+const pwBusy = ref(false);
+
+function setPassword(target: AdminUser): void {
+  pwValue.value = "";
+  pwError.value = null;
+  pwTarget.value = target;
+}
+
+async function submitPassword(): Promise<void> {
+  const target = pwTarget.value;
+  if (!target) return;
+  pwError.value = null;
   notice.value = null;
+  pwBusy.value = true;
   try {
     await api(`/admin/users/${target.id}`, {
       method: "PATCH",
-      body: { password },
+      body: { password: pwValue.value },
     });
     notice.value = `Passwort für ${target.email} gesetzt.`;
+    pwTarget.value = null;
+    pwValue.value = "";
   } catch (e) {
-    error.value = apiErrorMessage(e);
+    pwError.value = apiErrorMessage(e);
+  } finally {
+    pwBusy.value = false;
   }
 }
 
@@ -214,6 +230,43 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" });
             </button>
           </div>
         </form>
+      </div>
+    </div>
+
+    <!-- ================= Modal: Passwort setzen ================= -->
+    <div v-if="pwTarget" class="modal-backdrop" @click.self="pwTarget = null">
+      <div class="card modal">
+        <div class="card-header">
+          <h2>Passwort setzen</h2>
+          <span class="topbar-spacer" />
+          <button class="link" @click="pwTarget = null">✕</button>
+        </div>
+        <div class="card-body">
+          <div v-if="pwError" class="alert error">{{ pwError }}</div>
+          <form @submit.prevent="submitPassword">
+            <div class="form-row">
+              <label for="admin-set-password">
+                Neues Passwort für {{ pwTarget.email }} (min. 8 Zeichen)
+              </label>
+              <input
+                id="admin-set-password"
+                v-model="pwValue"
+                type="password"
+                required
+                minlength="8"
+                autofocus
+                @keydown.esc.prevent="pwTarget = null"
+              />
+            </div>
+            <div class="form-inline">
+              <div class="shrink" style="margin-left: auto">
+                <button class="primary" type="submit" :disabled="pwBusy">
+                  {{ pwBusy ? "Speichert …" : "Passwort setzen" }}
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
       </div>
     </div>
   </div>
