@@ -151,6 +151,48 @@ create table if not exists issue_comments (
   created_at text not null
 );
 create index if not exists issue_comments_issue_idx on issue_comments(issue_id);
+
+create table if not exists library_files (
+  id uuid primary key,
+  name text not null,
+  kind text not null,
+  file_key text not null,
+  file_name text not null,
+  owner_id uuid not null,
+  created_at text not null
+);
+
+create table if not exists actions (
+  id uuid primary key,
+  project_id uuid not null references projects(id),
+  name text not null,
+  kind text not null,
+  file_key text not null,
+  file_name text not null,
+  library_file_id uuid references library_files(id),
+  run_on_commit int not null default 0,
+  created_at text not null
+);
+create index if not exists actions_project_idx on actions(project_id);
+alter table actions add column if not exists library_file_id uuid;
+
+create table if not exists action_runs (
+  id uuid primary key,
+  project_id uuid not null references projects(id),
+  action_id uuid not null references actions(id),
+  model_id uuid not null references models(id),
+  commit_id uuid not null references commits(id),
+  number int not null,
+  status text not null,
+  summary text not null default '',
+  log text not null default '',
+  triggered_by uuid not null,
+  created_at text not null,
+  started_at text,
+  finished_at text
+);
+create index if not exists action_runs_project_idx on action_runs(project_id);
+create index if not exists action_runs_commit_idx on action_runs(commit_id);
 `;
 
 export function schemaStatements(): string[] {

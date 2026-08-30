@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { PhSignOut, PhUsersThree } from "@phosphor-icons/vue";
+import { PhBooks, PhSignOut, PhUsersThree } from "@phosphor-icons/vue";
 
 const { user, token, logout, setSession } = useAuth();
 const { api } = useApi();
@@ -27,6 +27,10 @@ onMounted(async () => {
           IFC Hub
         </NuxtLink>
         <span class="topbar-spacer" />
+        <NuxtLink to="/library" class="link small">
+          <PhBooks :size="15" aria-hidden="true" style="vertical-align: -3px" />
+          Bibliothek
+        </NuxtLink>
         <NuxtLink v-if="user?.isAdmin" to="/admin" class="link small">
           <PhUsersThree :size="15" aria-hidden="true" style="vertical-align: -3px" />
           Verwaltung

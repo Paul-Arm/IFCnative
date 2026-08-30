@@ -238,8 +238,8 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
                 <input id="edit-title" v-model="editTitle" type="text" required />
               </div>
               <div class="form-row">
-                <label for="edit-body">Beschreibung (Markdown)</label>
-                <textarea id="edit-body" v-model="editBody" rows="8"></textarea>
+                <label>Beschreibung (Markdown)</label>
+                <MarkdownEditor v-model="editBody" min-height="10rem" />
               </div>
               <div class="form-inline">
                 <button class="primary" @click="saveEdit">Speichern</button>
@@ -278,13 +278,12 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
         <div class="card">
           <div class="card-body">
             <div class="form-row">
-              <label for="comment-draft">Kommentar (Markdown)</label>
-              <textarea
-                id="comment-draft"
+              <label>Kommentar (Markdown)</label>
+              <MarkdownEditor
                 v-model="commentDraft"
-                rows="4"
                 placeholder="Antworten …"
-              ></textarea>
+                min-height="6rem"
+              />
             </div>
             <button
               class="primary"

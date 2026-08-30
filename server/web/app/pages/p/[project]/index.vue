@@ -15,12 +15,24 @@ import {
   PhFolderPlus,
   PhFolders,
   PhGear,
+  PhPlayCircle,
   PhPlus,
   PhRecord,
   PhUsers,
 } from "@phosphor-icons/vue";
 
-import type { Issue, Label, Member, Model, Project, Role } from "~/types/api";
+import type {
+  Action,
+  ActionKind,
+  ActionRun,
+  Issue,
+  Label,
+  LibraryFile,
+  Member,
+  Model,
+  Project,
+  Role,
+} from "~/types/api";
 
 const route = useRoute();
 const router = useRouter();
@@ -55,11 +67,18 @@ const isOwner = computed(() => projectData.value?.role === "owner");
 
 // ---- Tabs + aktueller Ordnerpfad --------------------------------------
 
-type Tab = "modelle" | "3d" | "issues" | "mitglieder" | "einstellungen";
+type Tab =
+  | "modelle"
+  | "3d"
+  | "issues"
+  | "actions"
+  | "mitglieder"
+  | "einstellungen";
 const tab = computed<Tab>(() => {
   const value = route.query.tab;
   return value === "3d" ||
     value === "issues" ||
+    value === "actions" ||
     value === "mitglieder" ||
     value === "einstellungen"
     ? value
@@ -558,6 +577,183 @@ const roles: Role[] = ["owner", "maintainer", "contributor", "viewer"];
 
 // ---- Projekt löschen ---------------------------------------------------
 
+// ---- Actions (Prüf-Workflows wie bei GitHub) ---------------------------
+
+const { data: actionsData, refresh: refreshActions } = await useAsyncData(
+  `actions-${slug}`,
+  () => api<{ actions: Action[] }>(`/projects/${slug}/actions`),
+);
+// Zentrale Bibliothek für den "Aus Bibliothek"-Picker im Anlege-Formular.
+const { data: libraryData } = await useAsyncData("library", () =>
+  api<{ files: LibraryFile[] }>("/library"),
+);
+const { data: runsData, refresh: refreshRuns } = await useAsyncData(
+  `runs-${slug}`,
+  () => api<{ runs: ActionRun[] }>(`/projects/${slug}/runs`),
+);
+
+const RUN_STATUS: Record<
+  ActionRun["status"],
+  { label: string; cls: string }
+> = {
+  queued: { label: "Wartet", cls: "" },
+  running: { label: "Läuft …", cls: "accent" },
+  success: { label: "Bestanden", cls: "success" },
+  failed: { label: "Fehlgeschlagen", cls: "danger" },
+  error: { label: "Fehler", cls: "warn" },
+};
+
+const showActionForm = ref(false);
+const actionName = ref("");
+const actionKind = ref<ActionKind>("ids");
+const actionRunOnCommit = ref(true);
+const actionFile = ref<File | null>(null);
+/** Quelle der Prüfdatei: eigener Upload oder zentraler Bibliothekseintrag. */
+const actionSource = ref<"upload" | "library">("upload");
+const actionLibraryId = ref("");
+const actionBusy = ref(false);
+const actionError = ref<string | null>(null);
+
+function onActionFile(event: Event): void {
+  actionFile.value = (event.target as HTMLInputElement).files?.[0] ?? null;
+  if (!actionName.value && actionFile.value) {
+    actionName.value = actionFile.value.name.replace(/\.(ids|xml|py)$/i, "");
+  }
+}
+
+async function createAction(): Promise<void> {
+  actionError.value = null;
+  let body: Record<string, unknown>;
+  if (actionSource.value === "library") {
+    if (!actionLibraryId.value) {
+      actionError.value = "Bitte einen Bibliothekseintrag auswählen.";
+      return;
+    }
+    body = {
+      name: actionName.value,
+      libraryFileId: actionLibraryId.value,
+      runOnCommit: actionRunOnCommit.value,
+    };
+  } else {
+    if (!actionFile.value) {
+      actionError.value = "Bitte eine Datei auswählen.";
+      return;
+    }
+    body = {
+      name: actionName.value,
+      kind: actionKind.value,
+      fileName: actionFile.value.name,
+      content: await actionFile.value.text(),
+      runOnCommit: actionRunOnCommit.value,
+    };
+  }
+  actionBusy.value = true;
+  try {
+    await api(`/projects/${slug}/actions`, { method: "POST", body });
+    actionName.value = "";
+    actionFile.value = null;
+    actionLibraryId.value = "";
+    showActionForm.value = false;
+    await refreshActions();
+  } catch (e) {
+    actionError.value = apiErrorMessage(e);
+  } finally {
+    actionBusy.value = false;
+  }
+}
+
+// Name vorbelegen, wenn ein Bibliothekseintrag gewählt wird.
+watch(actionLibraryId, (id) => {
+  const entry = libraryData.value?.files.find((file) => file.id === id);
+  if (entry && !actionName.value) {
+    actionName.value = entry.name;
+  }
+});
+
+async function toggleRunOnCommit(action: Action): Promise<void> {
+  actionError.value = null;
+  try {
+    await api(`/projects/${slug}/actions/${action.id}`, {
+      method: "PATCH",
+      body: { runOnCommit: !action.runOnCommit },
+    });
+    await refreshActions();
+  } catch (e) {
+    actionError.value = apiErrorMessage(e);
+  }
+}
+
+async function removeAction(action: Action): Promise<void> {
+  if (
+    !window.confirm(
+      `Action „${action.name}" samt aller bisherigen Runs löschen?`,
+    )
+  ) {
+    return;
+  }
+  actionError.value = null;
+  try {
+    await api(`/projects/${slug}/actions/${action.id}`, { method: "DELETE" });
+    await Promise.all([refreshActions(), refreshRuns()]);
+  } catch (e) {
+    actionError.value = apiErrorMessage(e);
+  }
+}
+
+async function downloadActionFile(action: Action): Promise<void> {
+  const blob = await $fetch<Blob>(
+    `/api/projects/${slug}/actions/${action.id}/file`,
+    {
+      responseType: "blob",
+      headers: token.value ? { authorization: `Bearer ${token.value}` } : {},
+    },
+  );
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = action.fileName;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// Run-Log wird erst beim Aufklappen geladen (kann groß sein).
+const runLogs = reactive(new Map<string, string | "loading">());
+
+async function loadRunLog(run: ActionRun): Promise<void> {
+  if (runLogs.has(run.id)) return;
+  runLogs.set(run.id, "loading");
+  try {
+    const result = await api<{ run: ActionRun }>(
+      `/projects/${slug}/runs/${run.id}`,
+    );
+    runLogs.set(run.id, result.run.log ?? "");
+  } catch {
+    runLogs.delete(run.id);
+  }
+}
+
+// Solange Runs laufen, den Stand alle 3 s nachladen (und fertige Logs
+// verwerfen, damit sie beim nächsten Aufklappen frisch kommen).
+const hasPendingRuns = computed(() =>
+  (runsData.value?.runs ?? []).some(
+    (run) => run.status === "queued" || run.status === "running",
+  ),
+);
+let runsTimer: ReturnType<typeof setInterval> | undefined;
+onMounted(() => {
+  runsTimer = setInterval(() => {
+    if (hasPendingRuns.value) {
+      for (const run of runsData.value?.runs ?? []) {
+        if (run.status === "queued" || run.status === "running") {
+          runLogs.delete(run.id);
+        }
+      }
+      void refreshRuns();
+    }
+  }, 3000);
+});
+onBeforeUnmount(() => clearInterval(runsTimer));
+
 const deleteError = ref<string | null>(null);
 const settingsError = ref<string | null>(null);
 const settingsNotice = ref<string | null>(null);
@@ -628,6 +824,11 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
         <PhRecord :size="16" aria-hidden="true" />
         Issues
         <span class="counter">{{ issuesData?.openCount ?? 0 }}</span>
+      </button>
+      <button :class="{ active: tab === 'actions' }" @click="goTo('actions')">
+        <PhPlayCircle :size="16" aria-hidden="true" />
+        Actions
+        <span class="counter">{{ actionsData?.actions.length ?? 0 }}</span>
       </button>
       <button :class="{ active: tab === 'mitglieder' }" @click="goTo('mitglieder')">
         <PhUsers :size="16" aria-hidden="true" />
@@ -735,14 +936,12 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
               </div>
             </div>
             <div class="form-row">
-              <label for="file-content">Inhalt (Markdown)</label>
-              <textarea
-                id="file-content"
+              <label>Inhalt (Markdown)</label>
+              <MarkdownEditor
                 v-model="fileContent"
-                rows="8"
-                placeholder="# Überschrift&#10;&#10;Beschreibung des Projekts …"
-                style="font-family: var(--mono); font-size: 0.85rem"
-              ></textarea>
+                placeholder="Beschreibung des Projekts …"
+                min-height="12rem"
+              />
             </div>
             <button class="primary" type="submit" :disabled="fileBusy">
               Datei anlegen
@@ -1021,13 +1220,12 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
               />
             </div>
             <div class="form-row">
-              <label for="issue-body">Beschreibung (Markdown)</label>
-              <textarea
-                id="issue-body"
+              <label>Beschreibung (Markdown)</label>
+              <MarkdownEditor
                 v-model="issueBody"
-                rows="5"
                 placeholder="Was ist das Problem?"
-              ></textarea>
+                min-height="8rem"
+              />
             </div>
             <div class="issue-pickers">
               <div class="issue-picker">
@@ -1138,6 +1336,209 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
         <div v-else class="empty">
           Keine {{ issueFilter === "open" ? "offenen" : "geschlossenen" }}
           Issues.
+        </div>
+      </div>
+    </template>
+
+    <!-- ================= Tab: Actions (Prüf-Workflows) ================= -->
+    <template v-else-if="tab === 'actions'">
+      <div v-if="actionError" class="alert error">{{ actionError }}</div>
+
+      <div class="card">
+        <div class="card-header">
+          <h2>Actions</h2>
+          <span class="topbar-spacer" />
+          <button
+            v-if="canWrite"
+            class="btn primary"
+            @click="showActionForm = !showActionForm"
+          >
+            ＋ Neue Action
+          </button>
+        </div>
+
+        <div
+          v-if="showActionForm"
+          class="card-body"
+          style="border-bottom: 1px solid var(--border)"
+        >
+          <form @submit.prevent="createAction">
+            <div class="form-inline">
+              <div class="shrink">
+                <label for="action-source">Quelle</label>
+                <select id="action-source" v-model="actionSource" style="width: auto">
+                  <option value="upload">Datei hochladen</option>
+                  <option value="library">Aus zentraler Bibliothek</option>
+                </select>
+              </div>
+              <template v-if="actionSource === 'upload'">
+                <div class="shrink">
+                  <label for="action-kind">Art</label>
+                  <select id="action-kind" v-model="actionKind" style="width: auto">
+                    <option value="ids">IDS-Prüfung (.ids-XML)</option>
+                    <option value="python">Python-Prüfskript (.py)</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="action-file">Datei</label>
+                  <input
+                    id="action-file"
+                    type="file"
+                    :accept="actionKind === 'ids' ? '.ids,.xml' : '.py'"
+                    @change="onActionFile"
+                  />
+                </div>
+              </template>
+              <div v-else>
+                <label for="action-library">Bibliothekseintrag</label>
+                <select id="action-library" v-model="actionLibraryId">
+                  <option value="" disabled>bitte wählen …</option>
+                  <option
+                    v-for="entry in libraryData?.files ?? []"
+                    :key="entry.id"
+                    :value="entry.id"
+                  >
+                    {{ entry.kind === "ids" ? "IDS" : "Python" }} ·
+                    {{ entry.name }} ({{ entry.fileName }})
+                  </option>
+                </select>
+              </div>
+              <div>
+                <label for="action-name">Name</label>
+                <input
+                  id="action-name"
+                  v-model="actionName"
+                  placeholder="z. B. IDS Hochbau"
+                  required
+                />
+              </div>
+            </div>
+            <p
+              v-if="actionSource === 'library' && !libraryData?.files.length"
+              class="muted small"
+              style="margin-top: 0.5rem"
+            >
+              Die Bibliothek ist noch leer —
+              <NuxtLink to="/library">hier</NuxtLink> IDS-Dateien und
+              Prüfskripte zentral ablegen.
+            </p>
+            <label style="display: flex; align-items: center; gap: 0.4rem; font-weight: 400; margin-top: 0.5rem">
+              <input v-model="actionRunOnCommit" type="checkbox" style="width: auto" />
+              Bei jedem neuen Commit automatisch ausführen
+            </label>
+            <p class="muted small" style="margin-top: 0.5rem">
+              Python-Skripte laufen auf dem Server und erhalten den IFC-Pfad als
+              erstes Argument (und als Umgebungsvariable <code>IFC_PATH</code>).
+              Exit-Code 0 bedeutet „bestanden".
+            </p>
+            <div style="margin-top: 0.75rem">
+              <button class="btn primary" type="submit" :disabled="actionBusy">
+                {{ actionBusy ? "Wird angelegt …" : "Action anlegen" }}
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <div v-if="!actionsData?.actions.length" class="empty">
+          Noch keine Actions konfiguriert. Lade eine IDS-Datei oder ein
+          Python-Prüfskript hoch, um Modelle automatisch zu prüfen.
+        </div>
+        <div v-else class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Art</th>
+                <th>Datei</th>
+                <th>Bei Commit</th>
+                <th v-if="canWrite"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="action in actionsData.actions" :key="action.id">
+                <td><strong>{{ action.name }}</strong></td>
+                <td>
+                  <span class="badge" :class="action.kind === 'ids' ? 'accent' : ''">
+                    {{ action.kind === "ids" ? "IDS" : "Python" }}
+                  </span>
+                </td>
+                <td class="small mono">
+                  <a href="#" @click.prevent="downloadActionFile(action)">
+                    {{ action.fileName }}
+                  </a>
+                  <span v-if="action.libraryFileId" class="badge" title="Datei kommt aus der zentralen Bibliothek">
+                    Bibliothek{{ action.libraryName ? `: ${action.libraryName}` : "" }}
+                  </span>
+                </td>
+                <td>
+                  <input
+                    type="checkbox"
+                    style="width: auto"
+                    :checked="action.runOnCommit"
+                    :disabled="!canWrite"
+                    @change="toggleRunOnCommit(action)"
+                  />
+                </td>
+                <td v-if="canWrite" style="text-align: right">
+                  <button class="btn danger small" @click="removeAction(action)">
+                    Löschen
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h2>Runs</h2>
+          <span v-if="hasPendingRuns" class="badge accent">läuft …</span>
+        </div>
+        <div v-if="!runsData?.runs.length" class="empty">
+          Noch keine Runs. Prüfe einen Commit über die Commit-Seite oder lege
+          eine Action mit „Bei Commit ausführen" an.
+        </div>
+        <div v-else>
+          <details
+            v-for="run in runsData.runs"
+            :key="run.id"
+            class="tree-group"
+            @toggle="(e: Event) => (e.target as HTMLDetailsElement).open && loadRunLog(run)"
+          >
+            <summary>
+              <span class="muted small">#{{ run.number }}</span>
+              <span class="badge" :class="RUN_STATUS[run.status].cls">
+                {{ RUN_STATUS[run.status].label }}
+              </span>
+              <strong>{{ run.action?.name ?? "(gelöschte Action)" }}</strong>
+              <span class="muted small">
+                {{ run.model?.name ?? "?" }} ·
+                <NuxtLink
+                  v-if="run.model"
+                  :to="`/p/${slug}/m/${run.model.slug}/c/${run.commitId}`"
+                  class="commit-id"
+                >{{ run.commitId.slice(0, 8) }}</NuxtLink>
+                · {{ dateFmt.format(new Date(run.createdAt)) }}
+                <template v-if="run.triggeredBy">
+                  · {{ run.triggeredBy.name }}
+                </template>
+              </span>
+            </summary>
+            <div class="tree-children">
+              <p v-if="run.summary" class="small" style="margin: 0.5rem 0">
+                {{ run.summary }}
+              </p>
+              <div v-if="runLogs.get(run.id) === 'loading'" class="muted small">
+                Lade Protokoll …
+              </div>
+              <pre
+                v-else-if="runLogs.get(run.id)"
+                class="run-log"
+              >{{ runLogs.get(run.id) }}</pre>
+              <div v-else class="muted small">Kein Protokoll vorhanden.</div>
+            </div>
+          </details>
         </div>
       </div>
     </template>

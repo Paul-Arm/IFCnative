@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -8,15 +9,19 @@ import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 
 import { hashPassword, verifyPassword } from "../auth/passwords";
+import { ActionRunner } from "../domain/actionRunner";
 import { CommitService } from "../domain/commitService";
 import { FragmentsService } from "../domain/fragmentsService";
 import type { ObjectStore } from "../storage/objectStore";
 import {
   ADMIN_ROLES,
+  type Action,
+  type ActionRun,
   type Commit,
   type Issue,
   type IssueLinks,
   type Member,
+  type Model,
   type Project,
   type Repository,
   type Role,
@@ -32,6 +37,8 @@ export interface AppDeps {
   jwtSecret: string;
   /** Reported by /api/health so clients can tell the storage mode. */
   storageMode?: "filesystem" | "azure";
+  /** Führt Action-Runs aus; ohne Angabe wird ein Standard-Runner gebaut. */
+  runner?: ActionRunner;
 }
 
 interface JwtPayload {
@@ -96,6 +103,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   const { repo, store, jwtSecret } = deps;
   const commits = new CommitService(repo, store);
   const fragmentsService = new FragmentsService(store);
+  const runner = deps.runner ?? new ActionRunner(repo, store);
 
   /** Vorschaubild eines Projekts (aus der 3D-Szene der Web-UI). */
   const projectImageKey = (projectId: string) => `projects/${projectId}/image.png`;
@@ -1334,6 +1342,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         authorId: user.id,
         message: query.message ?? upload.fields.message ?? "",
       });
+      // Actions mit "bei Commit ausführen" automatisch starten.
+      if (model.kind === "ifc") {
+        const autoActions = (await repo.listActions(project.id)).filter(
+          (action) => action.runOnCommit,
+        );
+        await queueRuns(project, model, result.commit.id, autoActions, user.id);
+      }
       const [commit] = await withAuthors([result.commit]);
       return reply.code(201).send({ commit, diff: result.diff });
     },
@@ -1442,6 +1457,552 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       }
     },
   );
+
+  // ---- Actions (Prüf-Workflows wie bei GitHub) -------------------------
+  // Die Prüfdatei einer Action kommt entweder als eigener Upload oder aus
+  // der zentralen, projektübergreifenden Bibliothek (libraryFileId).
+
+  const ACTION_KINDS = new Set(["ids", "python"]);
+  const ACTION_FILE_LIMIT = 5 * 1024 * 1024;
+
+  const actionFileKey = (projectId: string, actionId: string) =>
+    `projects/${projectId}/actions/${actionId}`;
+
+  const libraryFileKey = (fileId: string) => `library/${fileId}`;
+
+  function publicAction(action: Action) {
+    const { fileKey: _fileKey, ...rest } = action;
+    return rest;
+  }
+
+  interface ActionPayload {
+    name?: string;
+    kind?: string;
+    fileName?: string;
+    content?: string;
+    runOnCommit?: boolean;
+  }
+
+  /**
+   * Neue Action validieren; bei Fehler ist die Antwort schon gesendet
+   * (null zurück). Wird von der Projekt- und der Global-Route geteilt.
+   */
+  function validateNewAction(
+    body: ActionPayload,
+    reply: FastifyReply,
+  ): { name: string; kind: Action["kind"]; fileName: string; content: string } | null {
+    const name = body.name?.trim();
+    if (!name || name.length > 100) {
+      reply.code(400).send({ error: "Name required (max 100)" });
+      return null;
+    }
+    if (!body.kind || !ACTION_KINDS.has(body.kind)) {
+      reply.code(400).send({ error: "kind must be 'ids' or 'python'" });
+      return null;
+    }
+    if (!body.content) {
+      reply.code(400).send({ error: "content (file text) required" });
+      return null;
+    }
+    if (body.content.length > ACTION_FILE_LIMIT) {
+      reply.code(400).send({ error: "File too large (max 5 MB)" });
+      return null;
+    }
+    if (body.kind === "ids" && !body.content.includes("<ids")) {
+      reply.code(400).send({ error: "Not an IDS XML file" });
+      return null;
+    }
+    return {
+      name,
+      kind: body.kind as Action["kind"],
+      fileName:
+        body.fileName?.trim() ||
+        (body.kind === "ids" ? "specification.ids" : "check.py"),
+      content: body.content,
+    };
+  }
+
+  /**
+   * Action ändern (Name, runOnCommit, optional neuer Dateiinhalt); bei
+   * Validierungsfehlern ist die Antwort schon gesendet (null zurück).
+   */
+  async function patchActionWithFile(
+    action: Action,
+    body: ActionPayload,
+    reply: FastifyReply,
+  ): Promise<Action | null> {
+    if (body.name !== undefined && (!body.name.trim() || body.name.length > 100)) {
+      reply.code(400).send({ error: "Name must not be empty (max 100)" });
+      return null;
+    }
+    if (body.content !== undefined) {
+      if (action.libraryFileId) {
+        reply.code(400).send({
+          error:
+            "Datei kommt aus der Bibliothek — dort aktualisieren, nicht an der Action",
+        });
+        return null;
+      }
+      if (!body.content || body.content.length > ACTION_FILE_LIMIT) {
+        reply.code(400).send({ error: "File empty or too large (max 5 MB)" });
+        return null;
+      }
+      if (action.kind === "ids" && !body.content.includes("<ids")) {
+        reply.code(400).send({ error: "Not an IDS XML file" });
+        return null;
+      }
+      await store.put(
+        action.fileKey,
+        body.content,
+        action.kind === "ids" ? "application/xml" : "text/x-python",
+      );
+    }
+    const updated = await repo.updateAction(action.id, {
+      name: body.name?.trim(),
+      runOnCommit: body.runOnCommit,
+      fileName: body.fileName?.trim() || undefined,
+    });
+    return updated ?? action;
+  }
+
+  /** Prüfdatei (Action oder Bibliothek) als Download ausliefern. */
+  function sendCheckFile(
+    file: { kind: Action["kind"]; fileName: string; fileKey: string },
+    reply: FastifyReply,
+  ) {
+    return store.get(file.fileKey).then((buffer) =>
+      reply
+        .header(
+          "content-type",
+          file.kind === "ids" ? "application/xml" : "text/x-python",
+        )
+        .header("content-disposition", `attachment; filename="${file.fileName}"`)
+        .send(buffer),
+    );
+  }
+
+  /** Runs für die UI anreichern: Action, Modell, Auslöser — ohne Log. */
+  async function enrichRuns(projectId: string, runs: ActionRun[]) {
+    const actionById = new Map(
+      (await repo.listActions(projectId)).map((action) => [action.id, action]),
+    );
+    const modelById = new Map(
+      (await repo.listModels(projectId)).map((model) => [model.id, model]),
+    );
+    const users = await usersById(runs.map((run) => run.triggeredById));
+    return runs.map((run) => {
+      const { log: _log, ...rest } = run;
+      const action = actionById.get(run.actionId);
+      const model = modelById.get(run.modelId);
+      const triggeredBy = users.get(run.triggeredById);
+      return {
+        ...rest,
+        action: action
+          ? { id: action.id, name: action.name, kind: action.kind }
+          : null,
+        model: model
+          ? { id: model.id, slug: model.slug, name: model.name }
+          : null,
+        triggeredBy: triggeredBy ? publicUser(triggeredBy) : null,
+      };
+    });
+  }
+
+  /** Runs für die gegebenen Actions anlegen und einreihen. */
+  async function queueRuns(
+    project: Project,
+    model: Model,
+    commitId: string,
+    actions: Action[],
+    userId: string,
+  ): Promise<ActionRun[]> {
+    const runs: ActionRun[] = [];
+    for (const action of actions) {
+      const run = await repo.createActionRun({
+        projectId: project.id,
+        actionId: action.id,
+        modelId: model.id,
+        commitId,
+        status: "queued",
+        summary: "",
+        log: "",
+        triggeredById: userId,
+        startedAt: null,
+        finishedAt: null,
+      });
+      runner.enqueue(run.id);
+      runs.push(run);
+    }
+    return runs;
+  }
+
+  app.get(`${api}/projects/:slug/actions`, async (request, reply) => {
+    const { slug } = request.params as { slug: string };
+    const project = await resolveProject(slug, reply);
+    if (!project) return reply;
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    if (!(await requireMember(project, user, reply, "read"))) return reply;
+    const actions = await repo.listActions(project.id);
+    const libraryById = new Map(
+      (await repo.listLibraryFiles()).map((file) => [file.id, file]),
+    );
+    return reply.send({
+      actions: actions.map((action) => ({
+        ...publicAction(action),
+        libraryName: action.libraryFileId
+          ? libraryById.get(action.libraryFileId)?.name ?? null
+          : null,
+      })),
+    });
+  });
+
+  app.post(`${api}/projects/:slug/actions`, async (request, reply) => {
+    const { slug } = request.params as { slug: string };
+    const project = await resolveProject(slug, reply);
+    if (!project) return reply;
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    if (!(await requireMember(project, user, reply, "write"))) return reply;
+    const body = (request.body ?? {}) as ActionPayload & {
+      libraryFileId?: string;
+    };
+    const name = body.name?.trim();
+    if (!name || name.length > 100) {
+      return reply.code(400).send({ error: "Name required (max 100)" });
+    }
+    const actionId = randomUUID();
+    let action: Action;
+    if (body.libraryFileId) {
+      // Datei aus der zentralen Bibliothek referenzieren.
+      const libraryFile = await repo.getLibraryFile(body.libraryFileId);
+      if (!libraryFile) {
+        return reply.code(400).send({ error: "Unknown library file id" });
+      }
+      action = await repo.createAction({
+        id: actionId,
+        projectId: project.id,
+        name,
+        kind: libraryFile.kind,
+        fileKey: libraryFile.fileKey,
+        fileName: libraryFile.fileName,
+        libraryFileId: libraryFile.id,
+        runOnCommit: Boolean(body.runOnCommit),
+      });
+    } else {
+      const payload = validateNewAction(body, reply);
+      if (!payload) return reply;
+      const fileKey = actionFileKey(project.id, actionId);
+      await store.put(
+        fileKey,
+        payload.content,
+        payload.kind === "ids" ? "application/xml" : "text/x-python",
+      );
+      action = await repo.createAction({
+        id: actionId,
+        projectId: project.id,
+        name: payload.name,
+        kind: payload.kind,
+        fileKey,
+        fileName: payload.fileName,
+        libraryFileId: null,
+        runOnCommit: Boolean(body.runOnCommit),
+      });
+    }
+    return reply.code(201).send({ action: publicAction(action) });
+  });
+
+  app.get(
+    `${api}/projects/:slug/actions/:actionId/file`,
+    async (request, reply) => {
+      const { slug, actionId } = request.params as {
+        slug: string;
+        actionId: string;
+      };
+      const project = await resolveProject(slug, reply);
+      if (!project) return reply;
+      const user = await requireUser(request, reply);
+      if (!user) return reply;
+      if (!(await requireMember(project, user, reply, "read"))) return reply;
+      const action = await repo.getAction(actionId);
+      if (!action || action.projectId !== project.id) {
+        return reply.code(404).send({ error: "Action not found" });
+      }
+      return sendCheckFile(action, reply);
+    },
+  );
+
+  app.patch(`${api}/projects/:slug/actions/:actionId`, async (request, reply) => {
+    const { slug, actionId } = request.params as {
+      slug: string;
+      actionId: string;
+    };
+    const project = await resolveProject(slug, reply);
+    if (!project) return reply;
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    if (!(await requireMember(project, user, reply, "write"))) return reply;
+    const action = await repo.getAction(actionId);
+    if (!action || action.projectId !== project.id) {
+      return reply.code(404).send({ error: "Action not found" });
+    }
+    const updated = await patchActionWithFile(
+      action,
+      (request.body ?? {}) as ActionPayload,
+      reply,
+    );
+    if (!updated) return reply;
+    return reply.send({ action: publicAction(updated) });
+  });
+
+  app.delete(
+    `${api}/projects/:slug/actions/:actionId`,
+    async (request, reply) => {
+      const { slug, actionId } = request.params as {
+        slug: string;
+        actionId: string;
+      };
+      const project = await resolveProject(slug, reply);
+      if (!project) return reply;
+      const user = await requireUser(request, reply);
+      if (!user) return reply;
+      if (!(await requireMember(project, user, reply, "write"))) return reply;
+      const action = await repo.getAction(actionId);
+      if (!action || action.projectId !== project.id) {
+        return reply.code(404).send({ error: "Action not found" });
+      }
+      await repo.deleteAction(actionId);
+      // Bibliotheksdateien gehören der Bibliothek — nur eigene Blobs löschen.
+      if (!action.libraryFileId) {
+        await store.delete(action.fileKey).catch(() => undefined);
+      }
+      return reply.code(204).send();
+    },
+  );
+
+  // ---- Zentrale Skript-/IDS-Bibliothek (projektübergreifend) -----------
+  // Jeder angemeldete Benutzer kann lesen und hochladen; ändern/löschen darf
+  // der Eigentümer oder ein globaler Admin. Aktualisiert jemand die Datei,
+  // gilt der neue Stand sofort in allen referenzierenden Actions.
+
+  async function libraryUsage(fileIds: string[]): Promise<Map<string, number>> {
+    const usage = new Map<string, number>();
+    for (const id of fileIds) {
+      usage.set(id, await repo.countActionsUsingLibraryFile(id));
+    }
+    return usage;
+  }
+
+  app.get(`${api}/library`, async (request, reply) => {
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    const files = await repo.listLibraryFiles();
+    const usage = await libraryUsage(files.map((file) => file.id));
+    const owners = await usersById(files.map((file) => file.ownerId));
+    return reply.send({
+      files: files.map(({ fileKey: _fileKey, ...file }) => ({
+        ...file,
+        usageCount: usage.get(file.id) ?? 0,
+        owner: owners.get(file.ownerId)
+          ? publicUser(owners.get(file.ownerId) as User)
+          : null,
+      })),
+    });
+  });
+
+  app.post(`${api}/library`, async (request, reply) => {
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    const body = (request.body ?? {}) as ActionPayload;
+    const payload = validateNewAction(body, reply);
+    if (!payload) return reply;
+    const fileId = randomUUID();
+    const fileKey = libraryFileKey(fileId);
+    await store.put(
+      fileKey,
+      payload.content,
+      payload.kind === "ids" ? "application/xml" : "text/x-python",
+    );
+    const file = await repo.createLibraryFile({
+      id: fileId,
+      name: payload.name,
+      kind: payload.kind,
+      fileKey,
+      fileName: payload.fileName,
+      ownerId: user.id,
+    });
+    const { fileKey: _fileKey, ...rest } = file;
+    return reply.code(201).send({ file: { ...rest, usageCount: 0 } });
+  });
+
+  /** Bibliotheksdatei laden + Schreibrecht (Eigentümer/Admin) prüfen. */
+  async function resolveLibraryFile(
+    fileId: string,
+    user: User,
+    reply: FastifyReply,
+    forWrite: boolean,
+  ) {
+    const file = await repo.getLibraryFile(fileId);
+    if (!file) {
+      reply.code(404).send({ error: "Library file not found" });
+      return null;
+    }
+    if (forWrite && file.ownerId !== user.id && !user.isAdmin) {
+      reply.code(403).send({ error: "Only the owner or an admin may modify" });
+      return null;
+    }
+    return file;
+  }
+
+  app.get(`${api}/library/:fileId/file`, async (request, reply) => {
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    const { fileId } = request.params as { fileId: string };
+    const file = await resolveLibraryFile(fileId, user, reply, false);
+    if (!file) return reply;
+    return sendCheckFile(file, reply);
+  });
+
+  app.patch(`${api}/library/:fileId`, async (request, reply) => {
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    const { fileId } = request.params as { fileId: string };
+    const file = await resolveLibraryFile(fileId, user, reply, true);
+    if (!file) return reply;
+    const body = (request.body ?? {}) as {
+      name?: string;
+      fileName?: string;
+      content?: string;
+    };
+    if (body.name !== undefined && (!body.name.trim() || body.name.length > 100)) {
+      return reply.code(400).send({ error: "Name must not be empty (max 100)" });
+    }
+    if (body.content !== undefined) {
+      if (!body.content || body.content.length > ACTION_FILE_LIMIT) {
+        return reply
+          .code(400)
+          .send({ error: "File empty or too large (max 5 MB)" });
+      }
+      if (file.kind === "ids" && !body.content.includes("<ids")) {
+        return reply.code(400).send({ error: "Not an IDS XML file" });
+      }
+      await store.put(
+        file.fileKey,
+        body.content,
+        file.kind === "ids" ? "application/xml" : "text/x-python",
+      );
+    }
+    const updated = await repo.updateLibraryFile(fileId, {
+      name: body.name?.trim(),
+      fileName: body.fileName?.trim() || undefined,
+    });
+    if (!updated) {
+      return reply.code(404).send({ error: "Library file not found" });
+    }
+    const { fileKey: _fileKey, ...rest } = updated;
+    return reply.send({
+      file: {
+        ...rest,
+        usageCount: await repo.countActionsUsingLibraryFile(fileId),
+      },
+    });
+  });
+
+  app.delete(`${api}/library/:fileId`, async (request, reply) => {
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    const { fileId } = request.params as { fileId: string };
+    const file = await resolveLibraryFile(fileId, user, reply, true);
+    if (!file) return reply;
+    const usage = await repo.countActionsUsingLibraryFile(fileId);
+    if (usage > 0) {
+      return reply.code(409).send({
+        error: `Datei wird von ${usage} Action(s) verwendet — erst dort entfernen`,
+      });
+    }
+    await repo.deleteLibraryFile(fileId);
+    await store.delete(file.fileKey).catch(() => undefined);
+    return reply.code(204).send();
+  });
+
+  // Commit auf Knopfdruck prüfen: legt Runs für alle (oder die gewählten)
+  // Actions des Projekts an und reiht sie ein.
+  app.post(
+    `${api}/projects/:slug/models/:model/commits/:commitId/validate`,
+    async (request, reply) => {
+      const { slug, model: modelSlug, commitId } = request.params as {
+        slug: string;
+        model: string;
+        commitId: string;
+      };
+      const resolved = await resolveModel(slug, modelSlug, reply);
+      if (!resolved) return reply;
+      const { project, model } = resolved;
+      const user = await requireUser(request, reply);
+      if (!user) return reply;
+      if (!(await requireMember(project, user, reply, "write"))) return reply;
+      if (model.kind === "md") {
+        return reply
+          .code(400)
+          .send({ error: "Markdown-Dateien können nicht validiert werden" });
+      }
+      const commit = await repo.getCommit(commitId);
+      if (!commit || commit.modelId !== model.id) {
+        return reply.code(404).send({ error: "Commit not found" });
+      }
+      const body = (request.body ?? {}) as { actionIds?: string[] };
+      let actions = await repo.listActions(project.id);
+      if (body.actionIds !== undefined) {
+        const wanted = new Set(body.actionIds);
+        actions = actions.filter((action) => wanted.has(action.id));
+        if (actions.length !== wanted.size) {
+          return reply.code(400).send({ error: "Unknown action id" });
+        }
+      }
+      if (!actions.length) {
+        return reply
+          .code(400)
+          .send({ error: "Keine Actions im Projekt konfiguriert" });
+      }
+      const runs = await queueRuns(project, model, commit.id, actions, user.id);
+      return reply.code(201).send({ runs: await enrichRuns(project.id, runs) });
+    },
+  );
+
+  app.get(`${api}/projects/:slug/runs`, async (request, reply) => {
+    const { slug } = request.params as { slug: string };
+    const project = await resolveProject(slug, reply);
+    if (!project) return reply;
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    if (!(await requireMember(project, user, reply, "read"))) return reply;
+    const query = request.query as {
+      commit?: string;
+      action?: string;
+      model?: string;
+    };
+    const runs = await repo.listActionRuns(project.id, {
+      commitId: query.commit,
+      actionId: query.action,
+      modelId: query.model,
+    });
+    return reply.send({ runs: await enrichRuns(project.id, runs) });
+  });
+
+  app.get(`${api}/projects/:slug/runs/:runId`, async (request, reply) => {
+    const { slug, runId } = request.params as { slug: string; runId: string };
+    const project = await resolveProject(slug, reply);
+    if (!project) return reply;
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    if (!(await requireMember(project, user, reply, "read"))) return reply;
+    const run = await repo.getActionRun(runId);
+    if (!run || run.projectId !== project.id) {
+      return reply.code(404).send({ error: "Run not found" });
+    }
+    const [enriched] = await enrichRuns(project.id, [run]);
+    return reply.send({ run: { ...enriched, log: run.log } });
+  });
 
   // ---- semantic diff ---------------------------------------------------
 

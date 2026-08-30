@@ -7,7 +7,12 @@ import type {
 import { schemaStatements } from "./sql/schema";
 import type { SqlClient } from "./sql/sqlClient";
 import type {
+  Action,
+  ActionKind,
+  ActionRun,
+  ActionRunStatus,
   Branch,
+  LibraryFile,
   Commit,
   Issue,
   IssueComment,
@@ -115,6 +120,84 @@ function toModel(row: ModelRow): Model {
     kind: row.kind ?? "ifc",
   };
 }
+interface ActionRow {
+  id: string;
+  project_id: string;
+  name: string;
+  kind: ActionKind;
+  file_key: string;
+  file_name: string;
+  library_file_id: string | null;
+  run_on_commit: number;
+  created_at: string;
+}
+interface LibraryFileRow {
+  id: string;
+  name: string;
+  kind: ActionKind;
+  file_key: string;
+  file_name: string;
+  owner_id: string;
+  created_at: string;
+}
+interface ActionRunRow {
+  id: string;
+  project_id: string;
+  action_id: string;
+  model_id: string;
+  commit_id: string;
+  number: number;
+  status: ActionRunStatus;
+  summary: string;
+  log: string;
+  triggered_by: string;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+function toAction(row: ActionRow): Action {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    name: row.name,
+    kind: row.kind,
+    fileKey: row.file_key,
+    fileName: row.file_name,
+    libraryFileId: row.library_file_id ?? null,
+    runOnCommit: Boolean(row.run_on_commit),
+    createdAt: row.created_at,
+  };
+}
+function toLibraryFile(row: LibraryFileRow): LibraryFile {
+  return {
+    id: row.id,
+    name: row.name,
+    kind: row.kind,
+    fileKey: row.file_key,
+    fileName: row.file_name,
+    ownerId: row.owner_id,
+    createdAt: row.created_at,
+  };
+}
+function toActionRun(row: ActionRunRow): ActionRun {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    actionId: row.action_id,
+    modelId: row.model_id,
+    commitId: row.commit_id,
+    number: Number(row.number),
+    status: row.status,
+    summary: row.summary,
+    log: row.log,
+    triggeredById: row.triggered_by,
+    createdAt: row.created_at,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
+  };
+}
+
 function toBranch(row: BranchRow): Branch {
   return {
     id: row.id,
@@ -428,6 +511,9 @@ export class SqlRepository implements Repository {
     await this.sql.query(`delete from issue_models where model_id = $1`, [
       modelId,
     ]);
+    await this.sql.query(`delete from action_runs where model_id = $1`, [
+      modelId,
+    ]);
     // FK-sichere Reihenfolge; entity_objects bleiben (content-addressed,
     // über Commits/Modelle geteilt).
     await this.sql.query(
@@ -466,6 +552,18 @@ export class SqlRepository implements Repository {
     }
     await this.sql.query(`delete from issues where project_id = $1`, [projectId]);
     await this.sql.query(`delete from labels where project_id = $1`, [projectId]);
+    // Bibliotheksdateien gehören nicht dem Projekt — deren Blobs bleiben.
+    const { rows: actionRows } = await this.sql.query<{ file_key: string }>(
+      `select file_key from actions where project_id = $1 and library_file_id is null`,
+      [projectId],
+    );
+    blobKeys.push(...actionRows.map((row) => row.file_key));
+    await this.sql.query(`delete from action_runs where project_id = $1`, [
+      projectId,
+    ]);
+    await this.sql.query(`delete from actions where project_id = $1`, [
+      projectId,
+    ]);
     await this.sql.query(`delete from project_members where project_id = $1`, [
       projectId,
     ]);
@@ -705,6 +803,232 @@ export class SqlRepository implements Repository {
 
   async deleteIssueComment(commentId: string): Promise<void> {
     await this.sql.query(`delete from issue_comments where id = $1`, [commentId]);
+  }
+
+  // ---- actions + runs --------------------------------------------------
+
+  async createAction(input: Omit<Action, "createdAt">): Promise<Action> {
+    const action: Action = { ...input, createdAt: this.now() };
+    await this.sql.query(
+      `insert into actions (id, project_id, name, kind, file_key, file_name, library_file_id, run_on_commit, created_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        action.id,
+        action.projectId,
+        action.name,
+        action.kind,
+        action.fileKey,
+        action.fileName,
+        action.libraryFileId,
+        action.runOnCommit ? 1 : 0,
+        action.createdAt,
+      ],
+    );
+    return action;
+  }
+
+  async getAction(actionId: string): Promise<Action | null> {
+    const { rows } = await this.sql.query<ActionRow>(
+      `select * from actions where id = $1`,
+      [actionId],
+    );
+    return rows[0] ? toAction(rows[0]) : null;
+  }
+
+  async listActions(projectId: string): Promise<Action[]> {
+    const { rows } = await this.sql.query<ActionRow>(
+      `select * from actions where project_id = $1 order by created_at`,
+      [projectId],
+    );
+    return rows.map(toAction);
+  }
+
+  // ---- zentrale Skript-/IDS-Bibliothek ---------------------------------
+
+  async createLibraryFile(
+    input: Omit<LibraryFile, "createdAt">,
+  ): Promise<LibraryFile> {
+    const file: LibraryFile = { ...input, createdAt: this.now() };
+    await this.sql.query(
+      `insert into library_files (id, name, kind, file_key, file_name, owner_id, created_at)
+       values ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        file.id,
+        file.name,
+        file.kind,
+        file.fileKey,
+        file.fileName,
+        file.ownerId,
+        file.createdAt,
+      ],
+    );
+    return file;
+  }
+
+  async getLibraryFile(fileId: string): Promise<LibraryFile | null> {
+    const { rows } = await this.sql.query<LibraryFileRow>(
+      `select * from library_files where id = $1`,
+      [fileId],
+    );
+    return rows[0] ? toLibraryFile(rows[0]) : null;
+  }
+
+  async listLibraryFiles(): Promise<LibraryFile[]> {
+    const { rows } = await this.sql.query<LibraryFileRow>(
+      `select * from library_files order by created_at`,
+    );
+    return rows.map(toLibraryFile);
+  }
+
+  async updateLibraryFile(
+    fileId: string,
+    patch: Partial<Pick<LibraryFile, "name" | "fileName">>,
+  ): Promise<LibraryFile | null> {
+    const { rows } = await this.sql.query<LibraryFileRow>(
+      `update library_files set
+         name = coalesce($2, name),
+         file_name = coalesce($3, file_name)
+       where id = $1
+       returning *`,
+      [fileId, patch.name ?? null, patch.fileName ?? null],
+    );
+    return rows[0] ? toLibraryFile(rows[0]) : null;
+  }
+
+  async deleteLibraryFile(fileId: string): Promise<void> {
+    await this.sql.query(`delete from library_files where id = $1`, [fileId]);
+  }
+
+  async countActionsUsingLibraryFile(fileId: string): Promise<number> {
+    const { rows } = await this.sql.query<{ count: number | string }>(
+      `select count(*) as count from actions where library_file_id = $1`,
+      [fileId],
+    );
+    return Number(rows[0]?.count ?? 0);
+  }
+
+  async updateAction(
+    actionId: string,
+    patch: Partial<Pick<Action, "name" | "runOnCommit" | "fileName">>,
+  ): Promise<Action | null> {
+    const { rows } = await this.sql.query<ActionRow>(
+      `update actions set
+         name = coalesce($2, name),
+         run_on_commit = coalesce($3, run_on_commit),
+         file_name = coalesce($4, file_name)
+       where id = $1
+       returning *`,
+      [
+        actionId,
+        patch.name ?? null,
+        patch.runOnCommit === undefined ? null : patch.runOnCommit ? 1 : 0,
+        patch.fileName ?? null,
+      ],
+    );
+    return rows[0] ? toAction(rows[0]) : null;
+  }
+
+  async deleteAction(actionId: string): Promise<void> {
+    await this.sql.query(`delete from action_runs where action_id = $1`, [
+      actionId,
+    ]);
+    await this.sql.query(`delete from actions where id = $1`, [actionId]);
+  }
+
+  async createActionRun(
+    input: Omit<ActionRun, "id" | "number" | "createdAt">,
+  ): Promise<ActionRun> {
+    const { rows } = await this.sql.query<{ next: number }>(
+      `select coalesce(max(number), 0) + 1 as next from action_runs where project_id = $1`,
+      [input.projectId],
+    );
+    const run: ActionRun = {
+      ...input,
+      id: randomUUID(),
+      number: Number(rows[0]?.next ?? 1),
+      createdAt: this.now(),
+    };
+    await this.sql.query(
+      `insert into action_runs
+        (id, project_id, action_id, model_id, commit_id, number, status,
+         summary, log, triggered_by, created_at, started_at, finished_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+      [
+        run.id,
+        run.projectId,
+        run.actionId,
+        run.modelId,
+        run.commitId,
+        run.number,
+        run.status,
+        run.summary,
+        run.log,
+        run.triggeredById,
+        run.createdAt,
+        run.startedAt,
+        run.finishedAt,
+      ],
+    );
+    return run;
+  }
+
+  async getActionRun(runId: string): Promise<ActionRun | null> {
+    const { rows } = await this.sql.query<ActionRunRow>(
+      `select * from action_runs where id = $1`,
+      [runId],
+    );
+    return rows[0] ? toActionRun(rows[0]) : null;
+  }
+
+  async listActionRuns(
+    projectId: string,
+    filter?: { actionId?: string; modelId?: string; commitId?: string },
+  ): Promise<ActionRun[]> {
+    const conditions = ["project_id = $1"];
+    const params: unknown[] = [projectId];
+    for (const [column, value] of [
+      ["action_id", filter?.actionId],
+      ["model_id", filter?.modelId],
+      ["commit_id", filter?.commitId],
+    ] as const) {
+      if (value !== undefined) {
+        params.push(value);
+        conditions.push(`${column} = $${params.length}`);
+      }
+    }
+    const { rows } = await this.sql.query<ActionRunRow>(
+      `select * from action_runs where ${conditions.join(" and ")}
+       order by number desc`,
+      params,
+    );
+    return rows.map(toActionRun);
+  }
+
+  async updateActionRun(
+    runId: string,
+    patch: Partial<
+      Pick<ActionRun, "status" | "summary" | "log" | "startedAt" | "finishedAt">
+    >,
+  ): Promise<ActionRun | null> {
+    const { rows } = await this.sql.query<ActionRunRow>(
+      `update action_runs set
+         status = coalesce($2, status),
+         summary = coalesce($3, summary),
+         log = coalesce($4, log),
+         started_at = coalesce($5, started_at),
+         finished_at = coalesce($6, finished_at)
+       where id = $1
+       returning *`,
+      [
+        runId,
+        patch.status ?? null,
+        patch.summary ?? null,
+        patch.log ?? null,
+        patch.startedAt ?? null,
+        patch.finishedAt ?? null,
+      ],
+    );
+    return rows[0] ? toActionRun(rows[0]) : null;
   }
 
   // ---- folders ---------------------------------------------------------

@@ -20,3 +20,9 @@ export {
   diffEntityFields,
   type EntityFieldDiff,
 } from "../../../editor/src/ifc/versioning/entityFieldDiff";
+export {
+  parseIdsXml,
+  validateIds,
+  type IdsDocumentModel,
+  type IdsValidationSummary,
+} from "../../../editor/src/ifc/ids";

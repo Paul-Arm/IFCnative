@@ -116,6 +116,63 @@ export interface IssueComment {
   author: ApiUser | null;
 }
 
+// ---- Actions (Prüf-Workflows) -----------------------------------------
+
+export type ActionKind = "ids" | "python";
+
+export interface Action {
+  id: string;
+  projectId: string;
+  name: string;
+  kind: ActionKind;
+  fileName: string;
+  /** Gesetzt, wenn die Prüfdatei aus der zentralen Bibliothek kommt. */
+  libraryFileId: string | null;
+  /** Name des Bibliothekseintrags (nur im Projekt-Listing enthalten). */
+  libraryName?: string | null;
+  runOnCommit: boolean;
+  createdAt: string;
+}
+
+/** Eintrag der zentralen Skript-/IDS-Bibliothek (projektübergreifend). */
+export interface LibraryFile {
+  id: string;
+  name: string;
+  kind: ActionKind;
+  fileName: string;
+  ownerId: string;
+  createdAt: string;
+  usageCount: number;
+  owner: ApiUser | null;
+}
+
+export type ActionRunStatus =
+  | "queued"
+  | "running"
+  | "success"
+  | "failed"
+  | "error";
+
+export interface ActionRun {
+  id: string;
+  projectId: string;
+  actionId: string;
+  modelId: string;
+  commitId: string;
+  number: number;
+  status: ActionRunStatus;
+  summary: string;
+  triggeredById: string;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  action: { id: string; name: string; kind: ActionKind } | null;
+  model: { id: string; slug: string; name: string } | null;
+  triggeredBy: ApiUser | null;
+  /** Nur im Run-Detail (/runs/:id) enthalten. */
+  log?: string;
+}
+
 export type GuidChangeStatus = "added" | "removed" | "modified";
 
 export interface GuidDiffEntry {

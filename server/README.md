@@ -44,6 +44,35 @@ damit exakt einig, was „geändert“ bedeutet.
   Markdown-Beschreibung und Kommentar-Thread, offen/geschlossen, zuordenbar
   an Benutzer, 0..n Modelle und farbige Labels (Tab „Issues“ in der Web-UI;
   Detailseite im GitHub-Layout mit Meta-Sidebar rechts).
+- **Actions (Prüf-Workflows)** — wie GitHub Actions, aber für Modellprüfung:
+  pro Projekt hinterlegte Prüfungen, die gegen einen konkreten Commit laufen
+  (Tab „Actions“ in der Web-UI). Zwei Arten:
+  - **`ids`** — IDS-Validierung (buildingSMART Information Delivery
+    Specification): die hochgeladene `.ids`-XML wird mit dem geteilten
+    Editor-Validator (`editor/src/ifc/ids.ts`) komplett serverseitig in
+    TypeScript geprüft (XML-DOM via linkedom) — 6 Facetten, Cardinality,
+    Restrictions; deutscher Bericht mit den konkreten Verstößen je Objekt.
+  - **`python`** — beliebiges Python-Prüfskript: läuft als Kindprozess
+    (`PYTHON_BIN`, Default `python`/`python3`; Zeitlimit 5 min), bekommt den
+    IFC-Pfad als Argument 1 und als `IFC_PATH`-Umgebungsvariable.
+    **Exit-Code 0 = bestanden**, stdout/stderr landen im Run-Protokoll.
+  Jede Ausführung ist ein **Run** mit Status
+  (`queued/running/success/failed/error`), Kurzfazit und Protokoll; Runs
+  laufen sequenziell in einer In-Process-Queue. Auslösen per Knopfdruck auf
+  der Commit-Seite („Jetzt prüfen“) oder automatisch bei jedem neuen Commit
+  (Flag „Bei Commit ausführen“ je Action).
+- **Zentrale Skript-/IDS-Bibliothek** — Prüfdateien lassen sich
+  **projektübergreifend** ablegen (Seite „Bibliothek“ in der Topbar,
+  `/api/library`). Eine Action kann statt eines eigenen Uploads einen
+  Bibliothekseintrag referenzieren (`libraryFileId`); wird die Datei in der
+  Bibliothek aktualisiert, gilt der neue Stand sofort in allen
+  referenzierenden Actions aller Projekte. Hochladen darf jeder angemeldete
+  Benutzer; ändern/löschen der Eigentümer oder ein Admin; Löschen ist
+  blockiert (409), solange Actions die Datei verwenden.
+  > ⚠️ Python-Actions führen hochgeladenen Code auf dem Server aus — wie bei
+  > selbst gehosteten CI-Runnern. Anlegen/Ausführen verlangt deshalb
+  > Schreibrecht im Projekt; den Hub nur mit vertrauenswürdigen Mitgliedern
+  > betreiben oder `PYTHON_BIN` auf einen sandboxed Interpreter zeigen lassen.
 - **Globale Admins** — das fest verdrahtete Admin-Konto (`ADMIN_EMAIL`,
   Default `admin@ifc-hub.local`; `ADMIN_PASSWORD`, Default `ifc-hub-admin` —
   in Produktion setzen!) wird beim Start angelegt bzw. markiert. Admins haben
@@ -90,7 +119,8 @@ Konfiguration (`src/config.ts`): `PORT` (8787), `HOST`, `JWT_SECRET`,
 `STORAGE` (`filesystem`|`azure`), `DATA_DIR`,
 `AZURE_STORAGE_CONNECTION_STRING`, `AZURE_STORAGE_CONTAINER`,
 `DATABASE_URL` (Postgres; ohne = SQLite unter `DATA_DIR`), `ADMIN_EMAIL`,
-`ADMIN_PASSWORD` (fest verdrahtetes Admin-Konto).
+`ADMIN_PASSWORD` (fest verdrahtetes Admin-Konto), `PYTHON_BIN` (Interpreter
+für Python-Actions, Default `python` unter Windows, sonst `python3`).
 
 > **Hinweis:** Der lokale Modus ist ohne weitere Konfiguration persistent
 > (SQLite-Katalog + Blobs unter `DATA_DIR`; kein natives Modul nötig,
@@ -103,6 +133,13 @@ Single-Page-App: Login/Registrierung, Projekte (+ Mitgliederverwaltung),
 Modelle, Commit-Historie je Branch, IFC-Upload mit Commit-Nachricht,
 Commit-Detail mit semantischem Diff (wählbare Vergleichsbasis, Feld-Detail
 pro Entity), .ifc-Download.
+
+Markdown wird überall (md-Dateien, Issue-Beschreibungen, Kommentare) mit
+einem **WYSIWYG-Editor** bearbeitet (`components/MarkdownEditor.vue`,
+TipTap + tiptap-markdown): Toolbar für Überschriften, Fett/Kursiv, Listen,
+Aufgabenlisten, Tabellen, Links, Code — gespeichert wird reiner Markdown;
+über den Umschalter rechts in der Toolbar lässt sich jederzeit der
+Markdown-Quelltext direkt bearbeiten.
 
 - Der Fastify-Server liefert die gebaute SPA aus `public/` mit aus — **ein
   Prozess für UI + API**. Der Build ist eingecheckt; `npm run dev` reicht.
@@ -151,6 +188,15 @@ Auth: `Authorization: Bearer <JWT>` aus `/api/auth/login`. Fehler kommen als
 | GET | `…/commits/:id/fragments` | ThatOpen-Fragments für die 3D-Vorschau (erster Abruf konvertiert + cached; immutable-Cache-Header) |
 | GET | `…/diff?from=&to=` | semantischer Diff zweier Commits |
 | GET | `…/diff/entity?from=&to=&globalId=` | Feld-Detail einer geänderten Entity |
+| GET/POST | `/api/projects/:slug/actions` | Actions auflisten (inkl. `libraryName`) / anlegen `{name, kind, content, fileName?, runOnCommit?}` **oder** `{name, libraryFileId, runOnCommit?}` (write) |
+| PATCH/DELETE | `/api/projects/:slug/actions/:id` | Name/`runOnCommit`/Dateiinhalt ändern bzw. löschen (write) |
+| GET | `/api/projects/:slug/actions/:id/file` | hinterlegte IDS/Skript-Datei herunterladen |
+| POST | `…/commits/:id/validate` | Commit prüfen `{actionIds?}` (Default: alle Actions) → `{runs}` (write) |
+| GET | `/api/projects/:slug/runs?commit=&action=&model=` | Runs (ohne Log) mit Action/Modell/Auslöser |
+| GET | `/api/projects/:slug/runs/:runId` | Run-Detail inklusive Protokoll |
+| GET/POST | `/api/library` | zentrale Bibliothek auflisten (mit `usageCount`, `owner`) / Datei ablegen `{name, kind, content, fileName?}` (jeder Angemeldete) |
+| PATCH/DELETE | `/api/library/:id` | Name/Inhalt aktualisieren bzw. löschen (Eigentümer/Admin; DELETE 409 solange referenziert) |
+| GET | `/api/library/:id/file` | Bibliotheksdatei herunterladen |
 
 CORS ist offen (Bearer-Auth, keine Cookies) — Editor (Vite/Tauri) und
 Nuxt-Dev-Server können direkt zugreifen.

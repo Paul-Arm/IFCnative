@@ -5,7 +5,10 @@ import type {
   VersionManifestEntry,
 } from "../ifc";
 import type {
+  Action,
+  ActionRun,
   Branch,
+  LibraryFile,
   Commit,
   Issue,
   IssueComment,
@@ -46,6 +49,9 @@ export class MemoryRepository implements Repository {
   protected issues = new Map<string, Issue>();
   protected issueLinks = new Map<string, IssueLinks>();
   protected issueComments = new Map<string, IssueComment>();
+  protected actions = new Map<string, Action>();
+  protected actionRuns = new Map<string, ActionRun>();
+  protected libraryFiles = new Map<string, LibraryFile>();
 
   private now(): string {
     // Tests need determinism-free timestamps; ISO string is fine here.
@@ -237,6 +243,11 @@ export class MemoryRepository implements Repository {
     for (const links of this.issueLinks.values()) {
       links.modelIds = links.modelIds.filter((id) => id !== modelId);
     }
+    for (const run of [...this.actionRuns.values()]) {
+      if (run.modelId === modelId) {
+        this.actionRuns.delete(run.id);
+      }
+    }
     const commits = [...this.commits.values()].filter(
       (c) => c.modelId === modelId,
     );
@@ -283,8 +294,168 @@ export class MemoryRepository implements Repository {
         this.labels.delete(label.id);
       }
     }
+    for (const action of [...this.actions.values()]) {
+      if (action.projectId === projectId) {
+        // Bibliotheksdateien gehören nicht dem Projekt — Blob nicht löschen.
+        if (!action.libraryFileId) {
+          blobKeys.push(action.fileKey);
+        }
+        this.actions.delete(action.id);
+      }
+    }
+    for (const run of [...this.actionRuns.values()]) {
+      if (run.projectId === projectId) {
+        this.actionRuns.delete(run.id);
+      }
+    }
     this.projects.delete(projectId);
     return blobKeys;
+  }
+
+  // ---- actions + runs --------------------------------------------------
+
+  async createAction(input: Omit<Action, "createdAt">): Promise<Action> {
+    const action: Action = { ...input, createdAt: this.now() };
+    this.actions.set(action.id, action);
+    return action;
+  }
+
+  async getAction(actionId: string): Promise<Action | null> {
+    return this.actions.get(actionId) ?? null;
+  }
+
+  async listActions(projectId: string): Promise<Action[]> {
+    return [...this.actions.values()]
+      .filter((action) => action.projectId === projectId)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  // ---- zentrale Skript-/IDS-Bibliothek ---------------------------------
+
+  async createLibraryFile(
+    input: Omit<LibraryFile, "createdAt">,
+  ): Promise<LibraryFile> {
+    const file: LibraryFile = { ...input, createdAt: this.now() };
+    this.libraryFiles.set(file.id, file);
+    return file;
+  }
+
+  async getLibraryFile(fileId: string): Promise<LibraryFile | null> {
+    return this.libraryFiles.get(fileId) ?? null;
+  }
+
+  async listLibraryFiles(): Promise<LibraryFile[]> {
+    return [...this.libraryFiles.values()].sort((a, b) =>
+      a.createdAt.localeCompare(b.createdAt),
+    );
+  }
+
+  async updateLibraryFile(
+    fileId: string,
+    patch: Partial<Pick<LibraryFile, "name" | "fileName">>,
+  ): Promise<LibraryFile | null> {
+    const file = this.libraryFiles.get(fileId);
+    if (!file) {
+      return null;
+    }
+    for (const [key, value] of Object.entries(patch)) {
+      if (value !== undefined) {
+        (file as unknown as Record<string, unknown>)[key] = value;
+      }
+    }
+    return file;
+  }
+
+  async deleteLibraryFile(fileId: string): Promise<void> {
+    this.libraryFiles.delete(fileId);
+  }
+
+  async countActionsUsingLibraryFile(fileId: string): Promise<number> {
+    return [...this.actions.values()].filter(
+      (action) => action.libraryFileId === fileId,
+    ).length;
+  }
+
+  async updateAction(
+    actionId: string,
+    patch: Partial<Pick<Action, "name" | "runOnCommit" | "fileName">>,
+  ): Promise<Action | null> {
+    const action = this.actions.get(actionId);
+    if (!action) {
+      return null;
+    }
+    for (const [key, value] of Object.entries(patch)) {
+      if (value !== undefined) {
+        (action as unknown as Record<string, unknown>)[key] = value;
+      }
+    }
+    return action;
+  }
+
+  async deleteAction(actionId: string): Promise<void> {
+    for (const run of [...this.actionRuns.values()]) {
+      if (run.actionId === actionId) {
+        this.actionRuns.delete(run.id);
+      }
+    }
+    this.actions.delete(actionId);
+  }
+
+  async createActionRun(
+    input: Omit<ActionRun, "id" | "number" | "createdAt">,
+  ): Promise<ActionRun> {
+    const nextNumber =
+      Math.max(
+        0,
+        ...[...this.actionRuns.values()]
+          .filter((run) => run.projectId === input.projectId)
+          .map((run) => run.number),
+      ) + 1;
+    const run: ActionRun = {
+      ...input,
+      id: randomUUID(),
+      number: nextNumber,
+      createdAt: this.now(),
+    };
+    this.actionRuns.set(run.id, run);
+    return run;
+  }
+
+  async getActionRun(runId: string): Promise<ActionRun | null> {
+    return this.actionRuns.get(runId) ?? null;
+  }
+
+  async listActionRuns(
+    projectId: string,
+    filter?: { actionId?: string; modelId?: string; commitId?: string },
+  ): Promise<ActionRun[]> {
+    return [...this.actionRuns.values()]
+      .filter(
+        (run) =>
+          run.projectId === projectId &&
+          (filter?.actionId === undefined || run.actionId === filter.actionId) &&
+          (filter?.modelId === undefined || run.modelId === filter.modelId) &&
+          (filter?.commitId === undefined || run.commitId === filter.commitId),
+      )
+      .sort((a, b) => b.number - a.number);
+  }
+
+  async updateActionRun(
+    runId: string,
+    patch: Partial<
+      Pick<ActionRun, "status" | "summary" | "log" | "startedAt" | "finishedAt">
+    >,
+  ): Promise<ActionRun | null> {
+    const run = this.actionRuns.get(runId);
+    if (!run) {
+      return null;
+    }
+    for (const [key, value] of Object.entries(patch)) {
+      if (value !== undefined) {
+        (run as unknown as Record<string, unknown>)[key] = value;
+      }
+    }
+    return run;
   }
 
   // ---- labels + issues -------------------------------------------------

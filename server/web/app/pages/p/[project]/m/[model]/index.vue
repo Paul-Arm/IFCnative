@@ -485,11 +485,7 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
       </template>
       <div v-else class="card-body">
         <div class="form-row">
-          <textarea
-            v-model="editDraft"
-            rows="14"
-            style="font-family: var(--mono); font-size: 0.85rem"
-          ></textarea>
+          <MarkdownEditor v-model="editDraft" min-height="20rem" />
         </div>
         <div class="form-inline">
           <div>

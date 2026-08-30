@@ -139,6 +139,73 @@ export interface IssueLinks {
   labelIds: string[];
 }
 
+/**
+ * Art einer Action: "ids" = IDS-Prüfung (buildingSMART-XML, läuft im Server),
+ * "python" = beliebiges Python-Prüfskript (läuft als Kindprozess; Exit-Code 0
+ * = bestanden).
+ */
+export type ActionKind = "ids" | "python";
+
+/**
+ * Zentraler Bibliothekseintrag: eine IDS-XML oder ein Python-Prüfskript,
+ * projektübergreifend gespeichert. Projekt-Actions können statt einer
+ * eigenen Datei einen Bibliothekseintrag referenzieren — Aktualisierungen
+ * der Bibliotheksdatei gelten dann sofort in allen referenzierenden Actions.
+ */
+export interface LibraryFile {
+  id: string;
+  name: string;
+  kind: ActionKind;
+  /** Blob-Key der Datei im Object Store. */
+  fileKey: string;
+  fileName: string;
+  ownerId: string;
+  createdAt: string;
+}
+
+/** Projektgebundene Prüf-Action (wie ein GitHub-Actions-Workflow). */
+export interface Action {
+  id: string;
+  projectId: string;
+  name: string;
+  kind: ActionKind;
+  /** Blob-Key der Datei (bei Bibliotheks-Actions der der Bibliotheksdatei). */
+  fileKey: string;
+  fileName: string;
+  /** Gesetzt, wenn die Datei aus der zentralen Bibliothek kommt. */
+  libraryFileId: string | null;
+  /** Bei jedem neuen IFC-Commit automatisch ausführen. */
+  runOnCommit: boolean;
+  createdAt: string;
+}
+
+export type ActionRunStatus =
+  | "queued"
+  | "running"
+  | "success"
+  | "failed"
+  | "error";
+
+/** Eine Ausführung einer Action gegen einen konkreten Commit. */
+export interface ActionRun {
+  id: string;
+  projectId: string;
+  actionId: string;
+  modelId: string;
+  commitId: string;
+  /** Laufende Nummer je Projekt (wie GitHub-Run "#12"). */
+  number: number;
+  status: ActionRunStatus;
+  /** Kurzfazit, z. B. "3/5 Spezifikationen bestanden". */
+  summary: string;
+  /** Vollständiges Ausführungsprotokoll (Report bzw. stdout/stderr). */
+  log: string;
+  triggeredById: string;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
 export interface Repository {
   // Users
   createUser(input: Omit<User, "id" | "createdAt">): Promise<User>;
@@ -220,6 +287,48 @@ export interface Repository {
   listIssueComments(issueId: string): Promise<IssueComment[]>;
   getIssueComment(commentId: string): Promise<IssueComment | null>;
   deleteIssueComment(commentId: string): Promise<void>;
+
+  // Actions (Prüf-Workflows) + Runs
+  // Die Id kommt vom Aufrufer (wie bei createCommit), weil der Blob-Key der
+  // hinterlegten Datei die Action-Id enthält.
+  createAction(input: Omit<Action, "createdAt">): Promise<Action>;
+  getAction(actionId: string): Promise<Action | null>;
+  listActions(projectId: string): Promise<Action[]>;
+
+  // Zentrale Skript-/IDS-Bibliothek (projektübergreifend)
+  createLibraryFile(
+    input: Omit<LibraryFile, "createdAt">,
+  ): Promise<LibraryFile>;
+  getLibraryFile(fileId: string): Promise<LibraryFile | null>;
+  listLibraryFiles(): Promise<LibraryFile[]>;
+  updateLibraryFile(
+    fileId: string,
+    patch: Partial<Pick<LibraryFile, "name" | "fileName">>,
+  ): Promise<LibraryFile | null>;
+  deleteLibraryFile(fileId: string): Promise<void>;
+  /** Wie viele Actions (über alle Projekte) referenzieren die Datei? */
+  countActionsUsingLibraryFile(fileId: string): Promise<number>;
+  updateAction(
+    actionId: string,
+    patch: Partial<Pick<Action, "name" | "runOnCommit" | "fileName">>,
+  ): Promise<Action | null>;
+  /** Löscht die Action samt ihrer Runs. */
+  deleteAction(actionId: string): Promise<void>;
+
+  createActionRun(
+    input: Omit<ActionRun, "id" | "number" | "createdAt">,
+  ): Promise<ActionRun>;
+  getActionRun(runId: string): Promise<ActionRun | null>;
+  listActionRuns(
+    projectId: string,
+    filter?: { actionId?: string; modelId?: string; commitId?: string },
+  ): Promise<ActionRun[]>;
+  updateActionRun(
+    runId: string,
+    patch: Partial<
+      Pick<ActionRun, "status" | "summary" | "log" | "startedAt" | "finishedAt">
+    >,
+  ): Promise<ActionRun | null>;
 
   // Branches
   createBranch(input: Omit<Branch, "id">): Promise<Branch>;

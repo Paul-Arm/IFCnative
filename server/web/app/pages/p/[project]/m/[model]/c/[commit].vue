@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import type {
+  Action,
+  ActionRun,
   Commit,
   EntityFieldDiff,
   GuidDiffEntry,
@@ -82,6 +84,88 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
   dateStyle: "long",
   timeStyle: "short",
 });
+
+// ---- Prüfungen (Actions) ----------------------------------------------
+
+const isIfc = computed(() => commitData.value?.commit.schema !== "markdown");
+
+const { data: actionsData } = await useAsyncData(`actions-${slug}`, () =>
+  api<{ actions: Action[] }>(`/projects/${slug}/actions`),
+);
+const actionCount = computed(() => actionsData.value?.actions.length ?? 0);
+const { data: runsData, refresh: refreshRuns } = await useAsyncData(
+  `runs-${commitId}`,
+  () => api<{ runs: ActionRun[] }>(`/projects/${slug}/runs`, {
+    query: { commit: commitId },
+  }),
+);
+
+const RUN_STATUS: Record<
+  ActionRun["status"],
+  { label: string; cls: string }
+> = {
+  queued: { label: "Wartet", cls: "" },
+  running: { label: "Läuft …", cls: "accent" },
+  success: { label: "Bestanden", cls: "success" },
+  failed: { label: "Fehlgeschlagen", cls: "danger" },
+  error: { label: "Fehler", cls: "warn" },
+};
+
+const validateBusy = ref(false);
+const validateError = ref<string | null>(null);
+
+async function validateCommit(): Promise<void> {
+  validateError.value = null;
+  validateBusy.value = true;
+  try {
+    await api(`${base}/commits/${commitId}/validate`, {
+      method: "POST",
+      body: {},
+    });
+    await refreshRuns();
+  } catch (e) {
+    validateError.value = apiErrorMessage(e);
+  } finally {
+    validateBusy.value = false;
+  }
+}
+
+// Run-Log wird erst beim Aufklappen geladen.
+const runLogs = reactive(new Map<string, string | "loading">());
+
+async function loadRunLog(run: ActionRun): Promise<void> {
+  if (runLogs.has(run.id)) return;
+  runLogs.set(run.id, "loading");
+  try {
+    const result = await api<{ run: ActionRun }>(
+      `/projects/${slug}/runs/${run.id}`,
+    );
+    runLogs.set(run.id, result.run.log ?? "");
+  } catch {
+    runLogs.delete(run.id);
+  }
+}
+
+// Solange Runs laufen, alle 3 s nachladen.
+const hasPendingRuns = computed(() =>
+  (runsData.value?.runs ?? []).some(
+    (run) => run.status === "queued" || run.status === "running",
+  ),
+);
+let runsTimer: ReturnType<typeof setInterval> | undefined;
+onMounted(() => {
+  runsTimer = setInterval(() => {
+    if (hasPendingRuns.value) {
+      for (const run of runsData.value?.runs ?? []) {
+        if (run.status === "queued" || run.status === "running") {
+          runLogs.delete(run.id);
+        }
+      }
+      void refreshRuns();
+    }
+  }, 3000);
+});
+onBeforeUnmount(() => clearInterval(runsTimer));
 
 // ---- Gruppierung: Typ -> Name -> Entities -----------------------------
 
@@ -200,6 +284,64 @@ const sections = computed(() => {
             <span class="del">−{{ commitData.commit.removed }}</span>
           </span>
         </div>
+      </div>
+    </div>
+
+    <!-- ================= Prüfungen (Actions) ================= -->
+    <div v-if="isIfc" class="card">
+      <div class="card-header">
+        <h2>Prüfungen</h2>
+        <span v-if="hasPendingRuns" class="badge accent">läuft …</span>
+        <span class="topbar-spacer" />
+        <button
+          :disabled="validateBusy || !actionCount"
+          @click="validateCommit"
+        >
+          {{ validateBusy ? "Wird gestartet …" : "Jetzt prüfen" }}
+        </button>
+      </div>
+      <div v-if="validateError" class="card-body">
+        <div class="alert error" style="margin: 0">{{ validateError }}</div>
+      </div>
+      <div v-if="!actionCount" class="empty">
+        Keine Actions konfiguriert —
+        <NuxtLink :to="`/p/${slug}?tab=actions`">im Tab „Actions"</NuxtLink>
+        eine IDS-Datei oder ein Python-Prüfskript hinterlegen.
+      </div>
+      <div v-else-if="!runsData?.runs.length" class="empty">
+        Dieser Commit wurde noch nicht geprüft.
+      </div>
+      <div v-else>
+        <details
+          v-for="run in runsData.runs"
+          :key="run.id"
+          class="tree-group"
+          @toggle="(e: Event) => (e.target as HTMLDetailsElement).open && loadRunLog(run)"
+        >
+          <summary>
+            <span class="muted small">#{{ run.number }}</span>
+            <span class="badge" :class="RUN_STATUS[run.status].cls">
+              {{ RUN_STATUS[run.status].label }}
+            </span>
+            <strong>{{ run.action?.name ?? "(gelöschte Action)" }}</strong>
+            <span class="muted small">
+              {{ dateFmt.format(new Date(run.createdAt)) }}
+              <template v-if="run.triggeredBy">
+                · {{ run.triggeredBy.name }}
+              </template>
+            </span>
+          </summary>
+          <div class="tree-children">
+            <p v-if="run.summary" class="small" style="margin: 0.5rem 0">
+              {{ run.summary }}
+            </p>
+            <div v-if="runLogs.get(run.id) === 'loading'" class="muted small">
+              Lade Protokoll …
+            </div>
+            <pre v-else-if="runLogs.get(run.id)" class="run-log">{{ runLogs.get(run.id) }}</pre>
+            <div v-else class="muted small">Kein Protokoll vorhanden.</div>
+          </div>
+        </details>
       </div>
     </div>
 
