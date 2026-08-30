@@ -458,8 +458,61 @@ const issueBody = ref("");
 const issueAssignees = reactive(new Set<string>());
 const issueModels = reactive(new Set<string>());
 const issueLabels = reactive(new Set<string>());
+/** Betroffene GlobalIds (aus einem Prüf-Run) — verorten das Issue in 3D. */
+const issueGuids = ref<string[]>([]);
+const issueFromRun = ref<number | null>(null);
 const issueBusy = ref(false);
 const issueError = ref<string | null>(null);
+
+// "Issue aus Run erstellen": befüllt das Formular mit Prüfbericht,
+// Modell-Verknüpfung und den GUIDs der Verstöße (Button an fehlgeschlagenen
+// Runs bzw. ?fromRun=<id> von der Commit-Seite aus).
+async function prefillIssueFromRun(runId: string): Promise<void> {
+  try {
+    const { run } = await api<{ run: ActionRun }>(
+      `/projects/${slug}/runs/${runId}`,
+    );
+    showIssueForm.value = true;
+    issueFromRun.value = run.number;
+    issueTitle.value = `Prüfung fehlgeschlagen: ${run.action?.name ?? "Action"}`;
+    if (run.modelId) {
+      issueModels.add(run.modelId);
+    }
+    issueGuids.value = run.failedGuids ?? [];
+    const model = (modelsData.value?.models ?? []).find(
+      (entry) => entry.id === run.modelId,
+    );
+    const lines = [
+      `Die Prüfung **${run.action?.name ?? "?"}** (Run #${run.number}) ist fehlgeschlagen.`,
+      "",
+      `- Modell: **${run.model?.name ?? "?"}**`,
+      model
+        ? `- Commit: [\`${run.commitId.slice(0, 8)}\`](/p/${slug}/m/${model.slug}/c/${run.commitId})`
+        : `- Commit: \`${run.commitId.slice(0, 8)}\``,
+      `- Ergebnis: ${run.summary || "siehe Protokoll"}`,
+    ];
+    if (run.log) {
+      lines.push(
+        "",
+        "```",
+        run.log.length > 3000 ? `${run.log.slice(0, 3000)}\n… (gekürzt)` : run.log,
+        "```",
+      );
+    }
+    issueBody.value = lines.join("\n");
+    // Formular in den Blick holen.
+    goTo("issues");
+  } catch (e) {
+    issueError.value = apiErrorMessage(e);
+  }
+}
+
+onMounted(() => {
+  const fromRun = route.query.fromRun;
+  if (typeof fromRun === "string" && fromRun) {
+    void prefillIssueFromRun(fromRun);
+  }
+});
 
 function toggleSet(set: Set<string>, id: string, on: boolean): void {
   if (on) {
@@ -481,6 +534,7 @@ async function createIssue(): Promise<void> {
         assigneeIds: [...issueAssignees],
         modelIds: [...issueModels],
         labelIds: [...issueLabels],
+        guids: issueGuids.value,
       },
     });
     issueTitle.value = "";
@@ -488,6 +542,8 @@ async function createIssue(): Promise<void> {
     issueAssignees.clear();
     issueModels.clear();
     issueLabels.clear();
+    issueGuids.value = [];
+    issueFromRun.value = null;
     showIssueForm.value = false;
     issueFilter.value = "open";
     await refreshIssues();
@@ -1227,6 +1283,15 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
                 min-height="8rem"
               />
             </div>
+            <p v-if="issueGuids.length" class="muted small" style="margin: 0.5rem 0 0">
+              3D-Verortung:
+              <strong>{{ issueGuids.length }}</strong>
+              Objekt-GUIDs
+              <template v-if="issueFromRun !== null">
+                aus Run #{{ issueFromRun }}
+              </template>
+              werden mit dem Issue verlinkt.
+            </p>
             <div class="issue-pickers">
               <div class="issue-picker">
                 <label>Zugewiesen an</label>
@@ -1528,6 +1593,21 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
             <div class="tree-children">
               <p v-if="run.summary" class="small" style="margin: 0.5rem 0">
                 {{ run.summary }}
+              </p>
+              <p
+                v-if="run.status === 'failed' || run.status === 'error'"
+                style="margin: 0.5rem 0"
+              >
+                <button
+                  class="btn small"
+                  title="Issue mit Prüfbericht, Modell-Verknüpfung und den GUIDs der Verstöße anlegen"
+                  @click="prefillIssueFromRun(run.id)"
+                >
+                  Issue aus Run erstellen
+                </button>
+                <span v-if="run.failedGuids.length" class="muted small">
+                  {{ run.failedGuids.length }} betroffene Objekte werden verlinkt
+                </span>
               </p>
               <div v-if="runLogs.get(run.id) === 'loading'" class="muted small">
                 Lade Protokoll …

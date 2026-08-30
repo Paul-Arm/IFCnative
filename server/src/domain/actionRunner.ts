@@ -34,6 +34,7 @@ export interface ActionRunnerOptions {
 
 const LOG_LIMIT = 200_000;
 const FAILURE_LOG_LIMIT = 200;
+const GUID_LIMIT = 500;
 
 /**
  * Führt Action-Runs sequenziell im Serverprozess aus (eine kleine In-Process-
@@ -131,11 +132,13 @@ export class ActionRunner {
     status: "success" | "failed" | "error",
     summary: string,
     log: string,
+    failedGuids: string[] = [],
   ): Promise<void> {
     await this.repo.updateActionRun(run.id, {
       status,
       summary,
       log: log.length > LOG_LIMIT ? `${log.slice(0, LOG_LIMIT)}\n… (gekürzt)` : log,
+      failedGuids: [...new Set(failedGuids)].slice(0, GUID_LIMIT),
       finishedAt: new Date().toISOString(),
     });
   }
@@ -155,6 +158,16 @@ export class ActionRunner {
     const document = parseNativeIfcText(ifcBuffer.toString("utf8"));
     const summary = validateIds(document, ids);
     const passed = summary.failCount === 0;
+    // GlobalIds der Verstöße — für "Issue erstellen" + 3D-Verortung.
+    const failedGuids: string[] = [];
+    for (const result of summary.results) {
+      for (const failure of result.failures) {
+        const guid = document.entityById.get(failure.entityId)?.globalId;
+        if (guid) {
+          failedGuids.push(guid);
+        }
+      }
+    }
     await this.finish(
       run,
       passed ? "success" : "failed",
@@ -162,6 +175,7 @@ export class ActionRunner {
         `${summary.notApplicableCount} nicht anwendbar — ` +
         `${summary.totalFailures} Verstöße bei ${summary.totalChecked} geprüften Objekten.`,
       renderIdsReport(ids.warnings, summary),
+      failedGuids,
     );
   }
 
@@ -207,6 +221,11 @@ export class ActionRunner {
         );
       } else {
         const firstLine = result.stdout.trim().split(/\r?\n/).find(Boolean);
+        // Konvention: Zeilen "GUID: <GlobalId>" auf stdout markieren die
+        // beanstandeten Objekte (für Issues + 3D-Verortung).
+        const failedGuids = [...result.stdout.matchAll(/^GUID:\s*(\S+)\s*$/gim)]
+          .map((match) => match[1])
+          .filter((guid): guid is string => Boolean(guid));
         await this.finish(
           run,
           result.exitCode === 0 ? "success" : "failed",
@@ -214,6 +233,7 @@ export class ActionRunner {
             ? firstLine ?? "Skript erfolgreich (Exit-Code 0)."
             : `Skript meldet Exit-Code ${result.exitCode}.${firstLine ? ` ${firstLine}` : ""}`,
           log,
+          failedGuids,
         );
       }
     } finally {

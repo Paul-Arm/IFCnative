@@ -533,6 +533,7 @@ export class MemoryRepository implements Repository {
       assigneeIds: [],
       modelIds: [],
       labelIds: [],
+      guids: [],
     };
     this.issueLinks.set(issueId, {
       assigneeIds: links.assigneeIds
@@ -540,6 +541,7 @@ export class MemoryRepository implements Repository {
         : current.assigneeIds,
       modelIds: links.modelIds ? [...new Set(links.modelIds)] : current.modelIds,
       labelIds: links.labelIds ? [...new Set(links.labelIds)] : current.labelIds,
+      guids: links.guids ? [...new Set(links.guids)] : current.guids,
     });
   }
 
@@ -551,6 +553,7 @@ export class MemoryRepository implements Repository {
         assigneeIds: [...(links?.assigneeIds ?? [])],
         modelIds: [...(links?.modelIds ?? [])],
         labelIds: [...(links?.labelIds ?? [])],
+        guids: [...(links?.guids ?? [])],
       });
     }
     return map;

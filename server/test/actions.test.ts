@@ -8,7 +8,7 @@ import { ActionRunner } from "../src/domain/actionRunner";
 import { buildApp } from "../src/http/app";
 import { MemoryRepository } from "../src/repository/memoryRepository";
 import { FilesystemObjectStore } from "../src/storage/filesystemObjectStore";
-import { ifcModel } from "./fixtures";
+import { ifcModel, WALL } from "./fixtures";
 
 /**
  * Der "Python"-Interpreter ist in den Tests der Node-Prozess selbst — Node
@@ -144,6 +144,7 @@ test("IDS action: validate on demand, passing and failing", async () => {
     actionId: string;
     status: string;
     summary: string;
+    failedGuids: string[];
     action: { name: string };
   }[];
   assert.equal(runs.length, 2);
@@ -152,6 +153,9 @@ test("IDS action: validate on demand, passing and failing", async () => {
   assert.equal(passRun?.status, "success");
   assert.equal(failRun?.status, "failed");
   assert.match(failRun?.summary ?? "", /1 fehlgeschlagen/);
+  // Verstöße tragen die GlobalIds der betroffenen Objekte (3D-Verortung).
+  assert.deepEqual(passRun?.failedGuids, []);
+  assert.deepEqual(failRun?.failedGuids, [WALL]);
 
   // Log nur im Detail, mit den konkreten Verstößen.
   const detail = await app.inject({

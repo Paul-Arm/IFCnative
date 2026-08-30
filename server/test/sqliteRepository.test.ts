@@ -140,12 +140,14 @@ test("SQLite: Issues + Labels + Zuordnungen", async () => {
     assigneeIds: [user.id],
     modelIds: [model.id],
     labelIds: [label.id],
+    guids: ["0Wall00000000000000aa"],
   });
   const links = (await repo.getIssueLinks([first.id, second.id])).get(first.id);
   assert.deepEqual(links, {
     assigneeIds: [user.id],
     modelIds: [model.id],
     labelIds: [label.id],
+    guids: ["0Wall00000000000000aa"],
   });
 
   // Teil-Update: nur Labels ersetzen, Rest bleibt.
@@ -238,6 +240,7 @@ test("SQLite: Actions + Runs Roundtrip und Kaskaden", async () => {
     status: "queued",
     summary: "",
     log: "",
+    failedGuids: [],
     triggeredById: user.id,
     startedAt: null,
     finishedAt: null,
@@ -251,6 +254,7 @@ test("SQLite: Actions + Runs Roundtrip und Kaskaden", async () => {
     status: "queued",
     summary: "",
     log: "",
+    failedGuids: [],
     triggeredById: user.id,
     startedAt: null,
     finishedAt: null,

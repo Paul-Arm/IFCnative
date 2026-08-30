@@ -109,6 +109,59 @@ async function saveEdit(): Promise<void> {
   editing.value = false;
 }
 
+// ---- 3D-Verortung (betroffene GlobalIds im ThatOpen-Viewer) ------------
+
+interface ViewerHandle {
+  highlightGuids(guids: string[], zoom?: boolean): Promise<number>;
+}
+
+const viewerRef = ref<ViewerHandle | null>(null);
+const show3d = ref(false);
+/** Wie viele der Issue-GUIDs im geladenen Stand gefunden wurden. */
+const foundCount = ref<number | null>(null);
+const activeGuid = ref<string | null>(null);
+
+/** Verknüpfte IFC-Modelle mit Head-Commit als Viewer-Quellen. */
+const viewerSources = computed(() => {
+  const linked = new Set(
+    (issue.value?.models ?? [])
+      .filter((model) => model.kind === "ifc")
+      .map((model) => model.id),
+  );
+  return (modelsData.value?.models ?? [])
+    .filter((model) => linked.has(model.id) && model.head)
+    .map((model) => ({
+      key: model.id,
+      label: model.name,
+      src: `/api/projects/${slug}/models/${model.slug}/commits/${model.head!.id}/fragments`,
+    }));
+});
+
+const canLocate = computed(() =>
+  Boolean(issue.value?.guids.length && viewerSources.value.length),
+);
+
+async function markAll(): Promise<void> {
+  activeGuid.value = null;
+  foundCount.value =
+    (await viewerRef.value?.highlightGuids(issue.value?.guids ?? [], true)) ??
+    0;
+}
+
+/** Erst-Markierung nach dem Laden: kurz warten, bis die Szene steht. */
+function onViewerReady(): void {
+  setTimeout(() => void markAll(), 400);
+}
+
+async function markOne(guid: string): Promise<void> {
+  activeGuid.value = guid;
+  const found = await viewerRef.value?.highlightGuids([guid], true);
+  if (!found) {
+    // Objekt existiert im aktuellen Stand nicht (mehr) — alle markieren.
+    await markAll();
+  }
+}
+
 // ---- Kommentare --------------------------------------------------------
 
 const commentDraft = ref("");
@@ -247,6 +300,44 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
               </div>
             </template>
           </div>
+        </div>
+
+        <!-- ============ 3D-Verortung (betroffene Objekte) ============ -->
+        <div v-if="canLocate" class="card">
+          <div class="card-header">
+            <h2 style="margin: 0">3D-Verortung</h2>
+            <span class="badge accent">
+              {{ issue!.guids.length }}
+              {{ issue!.guids.length === 1 ? "Objekt" : "Objekte" }}
+            </span>
+            <span v-if="foundCount !== null" class="muted small">
+              {{ foundCount }} im aktuellen Stand gefunden
+            </span>
+            <span class="topbar-spacer" />
+            <button @click="show3d = !show3d">
+              {{ show3d ? "3D ausblenden" : "In 3D anzeigen" }}
+            </button>
+          </div>
+          <template v-if="show3d">
+            <div class="issue-guid-bar">
+              <button class="btn small" @click="markAll">Alle markieren</button>
+              <button
+                v-for="guid in issue!.guids"
+                :key="guid"
+                class="guid-chip"
+                :class="{ active: activeGuid === guid }"
+                :title="`Objekt ${guid} markieren und anfahren`"
+                @click="markOne(guid)"
+              >
+                {{ guid }}
+              </button>
+            </div>
+            <ModelViewer
+              ref="viewerRef"
+              :sources="viewerSources"
+              @ready="onViewerReady"
+            />
+          </template>
         </div>
 
         <div

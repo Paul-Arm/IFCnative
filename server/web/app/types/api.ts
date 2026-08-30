@@ -105,6 +105,8 @@ export interface Issue {
   assignees: ApiUser[];
   models: IssueModelRef[];
   labels: Label[];
+  /** Betroffene IFC-GlobalIds — verorten das Issue im 3D-Viewer. */
+  guids: string[];
 }
 
 export interface IssueComment {
@@ -162,6 +164,8 @@ export interface ActionRun {
   number: number;
   status: ActionRunStatus;
   summary: string;
+  /** GlobalIds der beanstandeten Objekte (für Issues + 3D-Verortung). */
+  failedGuids: string[];
   triggeredById: string;
   createdAt: string;
   startedAt: string | null;

@@ -623,6 +623,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         labels: (link?.labelIds ?? [])
           .map((id) => labelById.get(id))
           .filter((entry) => entry !== undefined),
+        guids: link?.guids ?? [],
       };
     });
   }
@@ -638,6 +639,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       assigneeIds?: string[];
       modelIds?: string[];
       labelIds?: string[];
+      guids?: string[];
     },
     reply: FastifyReply,
   ): Promise<Partial<IssueLinks> | null> {
@@ -670,6 +672,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return null;
       }
       links.labelIds = body.labelIds;
+    }
+    if (body.guids !== undefined) {
+      const cleaned = body.guids
+        .map((guid) => (typeof guid === "string" ? guid.trim() : ""))
+        .filter((guid) => guid.length > 0 && guid.length <= 64);
+      if (cleaned.length > 500) {
+        reply.code(400).send({ error: "Too many GUIDs (max 500)" });
+        return null;
+      }
+      links.guids = cleaned;
     }
     return links;
   }
@@ -708,6 +720,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       assigneeIds?: string[];
       modelIds?: string[];
       labelIds?: string[];
+      guids?: string[];
     };
     const title = body.title?.trim();
     if (!title || title.length > 200) {
@@ -843,6 +856,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       assigneeIds?: string[];
       modelIds?: string[];
       labelIds?: string[];
+      guids?: string[];
     };
     if (body.state && !["open", "closed"].includes(body.state)) {
       return reply.code(400).send({ error: "Invalid state" });
@@ -1626,6 +1640,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         status: "queued",
         summary: "",
         log: "",
+        failedGuids: [],
         triggeredById: userId,
         startedAt: null,
         finishedAt: null,

@@ -154,6 +154,7 @@ interface ActionRunRow {
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
+  failed_guids: string | null;
 }
 
 function toAction(row: ActionRow): Action {
@@ -191,11 +192,22 @@ function toActionRun(row: ActionRunRow): ActionRun {
     status: row.status,
     summary: row.summary,
     log: row.log,
+    failedGuids: parseJsonArray(row.failed_guids),
     triggeredById: row.triggered_by,
     createdAt: row.created_at,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
   };
+}
+
+function parseJsonArray(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((v) => typeof v === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 function toBranch(row: BranchRow): Branch {
@@ -542,6 +554,7 @@ export class SqlRepository implements Repository {
       "issue_assignees",
       "issue_models",
       "issue_label_links",
+      "issue_guids",
       "issue_comments",
     ]) {
       await this.sql.query(
@@ -704,6 +717,7 @@ export class SqlRepository implements Repository {
       ["assigneeIds", "issue_assignees", "user_id"],
       ["modelIds", "issue_models", "model_id"],
       ["labelIds", "issue_label_links", "label_id"],
+      ["guids", "issue_guids", "guid"],
     ];
     for (const [key, table, column] of tables) {
       const ids = links[key];
@@ -722,13 +736,14 @@ export class SqlRepository implements Repository {
     const map = new Map<string, IssueLinks>();
     if (!issueIds.length) return map;
     for (const id of issueIds) {
-      map.set(id, { assigneeIds: [], modelIds: [], labelIds: [] });
+      map.set(id, { assigneeIds: [], modelIds: [], labelIds: [], guids: [] });
     }
     const placeholders = issueIds.map((_, i) => `$${i + 1}`).join(", ");
     const tables: [keyof IssueLinks, string, string][] = [
       ["assigneeIds", "issue_assignees", "user_id"],
       ["modelIds", "issue_models", "model_id"],
       ["labelIds", "issue_label_links", "label_id"],
+      ["guids", "issue_guids", "guid"],
     ];
     for (const [key, table, column] of tables) {
       const { rows } = await this.sql.query<{
@@ -951,8 +966,8 @@ export class SqlRepository implements Repository {
     await this.sql.query(
       `insert into action_runs
         (id, project_id, action_id, model_id, commit_id, number, status,
-         summary, log, triggered_by, created_at, started_at, finished_at)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+         summary, log, triggered_by, created_at, started_at, finished_at, failed_guids)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
       [
         run.id,
         run.projectId,
@@ -967,6 +982,7 @@ export class SqlRepository implements Repository {
         run.createdAt,
         run.startedAt,
         run.finishedAt,
+        JSON.stringify(run.failedGuids ?? []),
       ],
     );
     return run;
@@ -1007,7 +1023,10 @@ export class SqlRepository implements Repository {
   async updateActionRun(
     runId: string,
     patch: Partial<
-      Pick<ActionRun, "status" | "summary" | "log" | "startedAt" | "finishedAt">
+      Pick<
+        ActionRun,
+        "status" | "summary" | "log" | "failedGuids" | "startedAt" | "finishedAt"
+      >
     >,
   ): Promise<ActionRun | null> {
     const { rows } = await this.sql.query<ActionRunRow>(
@@ -1016,7 +1035,8 @@ export class SqlRepository implements Repository {
          summary = coalesce($3, summary),
          log = coalesce($4, log),
          started_at = coalesce($5, started_at),
-         finished_at = coalesce($6, finished_at)
+         finished_at = coalesce($6, finished_at),
+         failed_guids = coalesce($7, failed_guids)
        where id = $1
        returning *`,
       [
@@ -1026,6 +1046,7 @@ export class SqlRepository implements Repository {
         patch.log ?? null,
         patch.startedAt ?? null,
         patch.finishedAt ?? null,
+        patch.failedGuids === undefined ? null : JSON.stringify(patch.failedGuids),
       ],
     );
     return rows[0] ? toActionRun(rows[0]) : null;

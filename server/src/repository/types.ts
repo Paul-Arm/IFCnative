@@ -132,11 +132,16 @@ export interface IssueComment {
   createdAt: string;
 }
 
-/** Zuordnungen eines Issues: Bearbeiter, Modelle, Labels (jeweils 0..n). */
+/**
+ * Zuordnungen eines Issues: Bearbeiter, Modelle, Labels, betroffene
+ * IFC-GlobalIds (jeweils 0..n). Die GlobalIds verorten das Issue im
+ * 3D-Viewer — z. B. die Verstöße einer fehlgeschlagenen Prüfung.
+ */
 export interface IssueLinks {
   assigneeIds: string[];
   modelIds: string[];
   labelIds: string[];
+  guids: string[];
 }
 
 /**
@@ -200,6 +205,11 @@ export interface ActionRun {
   summary: string;
   /** Vollständiges Ausführungsprotokoll (Report bzw. stdout/stderr). */
   log: string;
+  /**
+   * GlobalIds der beanstandeten Objekte (IDS: Verstöße; Python: Zeilen
+   * "GUID: <id>" auf stdout) — Grundlage für "Issue erstellen" + 3D-Verortung.
+   */
+  failedGuids: string[];
   triggeredById: string;
   createdAt: string;
   startedAt: string | null;
@@ -326,7 +336,10 @@ export interface Repository {
   updateActionRun(
     runId: string,
     patch: Partial<
-      Pick<ActionRun, "status" | "summary" | "log" | "startedAt" | "finishedAt">
+      Pick<
+        ActionRun,
+        "status" | "summary" | "log" | "failedGuids" | "startedAt" | "finishedAt"
+      >
     >,
   ): Promise<ActionRun | null>;
 

@@ -43,7 +43,19 @@ damit exakt einig, was „geändert“ bedeutet.
 - **Issues** — wie bei GitHub: pro Projekt nummerierte Issues mit
   Markdown-Beschreibung und Kommentar-Thread, offen/geschlossen, zuordenbar
   an Benutzer, 0..n Modelle und farbige Labels (Tab „Issues“ in der Web-UI;
-  Detailseite im GitHub-Layout mit Meta-Sidebar rechts).
+  Detailseite im GitHub-Layout mit Meta-Sidebar rechts). Zusätzlich können
+  Issues **IFC-GlobalIds** tragen (`guids`) und werden damit im 3D-Viewer
+  verortet.
+- **Issues aus Prüfungen + 3D-Verortung** — fehlgeschlagene Runs sammeln die
+  **GlobalIds der Verstöße** (`failedGuids`; IDS automatisch aus den
+  Verstoßobjekten, Python-Skripte per stdout-Konvention `GUID: <GlobalId>`
+  je Zeile). Der Button **„Issue aus Run erstellen“** (am Run auf der
+  Commit-Seite und im Actions-Tab) befüllt das Issue-Formular mit
+  Prüfbericht, Commit-Link, Modell-Verknüpfung und den GUIDs. Auf der
+  Issue-Detailseite zeigt die Karte **„3D-Verortung“** die verknüpften
+  Modelle im ThatOpen-Viewer: alle betroffenen Objekte rot markiert, je
+  GUID ein klickbarer Chip, der das Objekt anfährt
+  (`FragmentsModel.getLocalIdsByGuids` + Highlight + `fitToItems`).
 - **Actions (Prüf-Workflows)** — wie GitHub Actions, aber für Modellprüfung:
   pro Projekt hinterlegte Prüfungen, die gegen einen konkreten Commit laufen
   (Tab „Actions“ in der Web-UI). Zwei Arten:

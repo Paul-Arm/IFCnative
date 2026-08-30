@@ -11,6 +11,7 @@ export interface ViewerSource {
 }
 
 const props = defineProps<{ sources: ViewerSource[] }>();
+const emit = defineEmits<{ (e: "ready"): void }>();
 
 const container = ref<HTMLDivElement | null>(null);
 const status = ref<"laden" | "fertig" | "fehler">("laden");
@@ -23,6 +24,7 @@ interface LoadedModel {
   modelId: string;
   object: { visible: boolean };
   getLocalIds(): Promise<number[]>;
+  getLocalIdsByGuids(guids: string[]): Promise<(number | null)[]>;
 }
 
 const loaded = new Map<string, LoadedModel>();
@@ -101,7 +103,22 @@ function captureImage(): string | null {
   return canvas ? canvas.toDataURL("image/png") : null;
 }
 
-defineExpose({ setVisible, focusModel, captureImage });
+// ---- GUID-Verortung: Elemente per GlobalId markieren + anfahren --------
+
+let highlightGuidsImpl:
+  | ((guids: string[], zoom: boolean) => Promise<number>)
+  | null = null;
+
+/**
+ * Markiert die Objekte mit den gegebenen GlobalIds (über alle geladenen
+ * Modelle) und fährt die Kamera darauf. Gibt die Zahl der gefundenen
+ * Objekte zurück (GUIDs anderer Versionsstände können fehlen).
+ */
+async function highlightGuids(guids: string[], zoom = true): Promise<number> {
+  return (await highlightGuidsImpl?.(guids, zoom)) ?? 0;
+}
+
+defineExpose({ setVisible, focusModel, captureImage, highlightGuids });
 
 onMounted(async () => {
   try {
@@ -178,6 +195,45 @@ onMounted(async () => {
     clearSelection = async () => {
       await fragments.resetHighlight().catch(() => undefined);
       await fragments.core.update(true).catch(() => undefined);
+    };
+
+    // GUID-Markierung (Issue-Verortung): rote Hervorhebung + Kamerafahrt.
+    const markMaterial = {
+      color: new THREE.Color(0xf85149),
+      customId: "ifc-hub-issue-mark",
+      opacity: 0.95,
+      renderedFaces: FRAGS.RenderedFaces.TWO,
+      transparent: false,
+    };
+    highlightGuidsImpl = async (guids, zoom) => {
+      const items: Record<string, Set<number>> = {};
+      let found = 0;
+      for (const model of loaded.values()) {
+        try {
+          const localIds = await model.getLocalIdsByGuids(guids);
+          const set = new Set<number>();
+          for (const id of localIds ?? []) {
+            if (typeof id === "number") {
+              set.add(id);
+            }
+          }
+          if (set.size) {
+            items[model.modelId] = set;
+            found += set.size;
+          }
+        } catch {
+          // Modell ohne GUID-Index überspringen.
+        }
+      }
+      await fragments.resetHighlight().catch(() => undefined);
+      if (found) {
+        await fragments.highlight(markMaterial, items).catch(() => undefined);
+      }
+      await fragments.core.update(true).catch(() => undefined);
+      if (found && zoom) {
+        await world.camera.fitToItems(items).catch(() => undefined);
+      }
+      return found;
     };
     const labelByKey = new Map(
       props.sources.map((source) => [source.key, source.label ?? source.key]),
@@ -319,6 +375,7 @@ onMounted(async () => {
         console.warn("3D-Vorschau: Modelle übersprungen:", errors);
       }
       status.value = "fertig";
+      emit("ready");
     }
   } catch (error) {
     status.value = "fehler";

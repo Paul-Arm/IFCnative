@@ -143,6 +143,12 @@ create table if not exists issue_label_links (
   primary key (issue_id, label_id)
 );
 
+create table if not exists issue_guids (
+  issue_id uuid not null references issues(id),
+  guid text not null,
+  primary key (issue_id, guid)
+);
+
 create table if not exists issue_comments (
   id uuid primary key,
   issue_id uuid not null references issues(id),
@@ -189,10 +195,12 @@ create table if not exists action_runs (
   triggered_by uuid not null,
   created_at text not null,
   started_at text,
-  finished_at text
+  finished_at text,
+  failed_guids text not null default '[]'
 );
 create index if not exists action_runs_project_idx on action_runs(project_id);
 create index if not exists action_runs_commit_idx on action_runs(commit_id);
+alter table action_runs add column if not exists failed_guids text not null default '[]';
 `;
 
 export function schemaStatements(): string[] {

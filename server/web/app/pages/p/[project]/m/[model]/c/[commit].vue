@@ -335,6 +335,21 @@ const sections = computed(() => {
             <p v-if="run.summary" class="small" style="margin: 0.5rem 0">
               {{ run.summary }}
             </p>
+            <p
+              v-if="run.status === 'failed' || run.status === 'error'"
+              style="margin: 0.5rem 0"
+            >
+              <NuxtLink
+                class="btn small"
+                :to="`/p/${slug}?tab=issues&fromRun=${run.id}`"
+                title="Issue mit Prüfbericht, Modell-Verknüpfung und den GUIDs der Verstöße anlegen"
+              >
+                Issue aus Run erstellen
+              </NuxtLink>
+              <span v-if="run.failedGuids.length" class="muted small">
+                {{ run.failedGuids.length }} betroffene Objekte werden verlinkt
+              </span>
+            </p>
             <div v-if="runLogs.get(run.id) === 'loading'" class="muted small">
               Lade Protokoll …
             </div>
