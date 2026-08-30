@@ -380,34 +380,52 @@ tr:last-child td {
   outline: none;
 }
 
-/* ---- Actions-Formular -------------------------------------------------- */
+/* ---- Actions-Formular (Label-Spalte links, Controls rechts) ------------ */
 
 .action-form {
   display: grid;
-  gap: 1rem;
-  max-width: 660px;
+  gap: 0.9rem;
+  max-width: 720px;
 }
 
-.action-form .field {
+.af-row {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 0.3rem 1.25rem;
+  align-items: start;
+}
+
+.af-row > label {
+  margin: 0;
+  padding-top: 0.45rem;
+  color: var(--text-muted);
+}
+
+.af-control {
   display: grid;
   gap: 0.35rem;
   min-width: 0;
 }
 
-.action-form .field > label {
-  margin: 0;
-}
-
-.action-form-row {
+.af-control-row {
   display: flex;
-  gap: 1rem;
+  gap: 0.6rem;
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: center;
 }
 
-.action-form-row > .field {
-  flex: 1;
-  min-width: 220px;
+.af-control > input,
+.af-control > select {
+  max-width: 420px;
+}
+
+@media (max-width: 640px) {
+  .af-row {
+    grid-template-columns: 1fr;
+  }
+  .af-row > label {
+    padding-top: 0;
+  }
 }
 
 .field-hint {
@@ -415,6 +433,7 @@ tr:last-child td {
   font-size: 0.78rem;
   line-height: 1.4;
   color: var(--text-muted);
+  max-width: 460px;
 }
 
 /* Segmented Control (Quelle / Art) */
@@ -493,8 +512,16 @@ tr:last-child td {
 .action-form-footer {
   display: flex;
   gap: 0.6rem;
-  padding-top: 0.25rem;
+  margin-top: 0.25rem;
+  padding-top: 0.9rem;
   border-top: 1px solid var(--border);
+}
+
+@media (min-width: 641px) {
+  /* Buttons an der Control-Spalte ausrichten. */
+  .action-form-footer {
+    padding-left: calc(140px + 1.25rem);
+  }
 }
 
 /* Reichere Empty-States (Icon + Titel + Text) */

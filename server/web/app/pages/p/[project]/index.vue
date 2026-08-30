@@ -1665,31 +1665,32 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
           style="border-bottom: 1px solid var(--border)"
         >
           <form class="action-form" @submit.prevent="createAction">
-            <!-- Prüfdatei: hochladen oder aus der Bibliothek -->
-            <div class="field">
+            <div class="af-row">
               <label>Prüfdatei</label>
-              <div class="seg" role="tablist">
-                <button
-                  type="button"
-                  :class="{ active: actionSource === 'upload' }"
-                  @click="actionSource = 'upload'"
-                >
-                  Datei hochladen
-                </button>
-                <button
-                  type="button"
-                  :class="{ active: actionSource === 'library' }"
-                  @click="actionSource = 'library'"
-                >
-                  Aus zentraler Bibliothek
-                </button>
+              <div class="af-control">
+                <div class="seg">
+                  <button
+                    type="button"
+                    :class="{ active: actionSource === 'upload' }"
+                    @click="actionSource = 'upload'"
+                  >
+                    Datei hochladen
+                  </button>
+                  <button
+                    type="button"
+                    :class="{ active: actionSource === 'library' }"
+                    @click="actionSource = 'library'"
+                  >
+                    Aus zentraler Bibliothek
+                  </button>
+                </div>
               </div>
             </div>
 
             <template v-if="actionSource === 'upload'">
-              <div class="action-form-row">
-                <div class="field">
-                  <label>Art</label>
+              <div class="af-row">
+                <label>Art</label>
+                <div class="af-control">
                   <div class="seg">
                     <button
                       type="button"
@@ -1714,8 +1715,10 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
                     }}
                   </p>
                 </div>
-                <div class="field">
-                  <label>Datei</label>
+              </div>
+              <div class="af-row">
+                <label>Datei</label>
+                <div class="af-control">
                   <label class="file-pick">
                     <input
                       type="file"
@@ -1735,49 +1738,50 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
               </div>
             </template>
 
-            <div v-else class="field">
+            <div v-else class="af-row">
               <label for="action-library">Bibliothekseintrag</label>
-              <select
-                id="action-library"
-                v-model="actionLibraryId"
-                :disabled="!libraryData?.files.length"
-              >
-                <option value="" disabled>
-                  {{ libraryData?.files.length ? "bitte wählen …" : "Bibliothek ist leer" }}
-                </option>
-                <option
-                  v-for="entry in libraryData?.files ?? []"
-                  :key="entry.id"
-                  :value="entry.id"
-                >
-                  {{ entry.kind === "ids" ? "IDS" : "Python" }} ·
-                  {{ entry.name }} ({{ entry.fileName }})
-                </option>
-              </select>
-              <p class="field-hint">
-                Zentrale Dateien gelten projektübergreifend; Aktualisierungen in
-                der <NuxtLink to="/library">Bibliothek</NuxtLink> wirken sofort
-                in allen verknüpften Actions.
-              </p>
-            </div>
-
-            <div class="field">
-              <label for="action-name">Name</label>
-              <input
-                id="action-name"
-                v-model="actionName"
-                :placeholder="actionKind === 'ids' ? 'z. B. IDS Hochbau' : 'z. B. Kollisions-Check'"
-                required
-              />
-            </div>
-
-            <div class="field">
-              <label>Gilt für</label>
-              <div class="action-form-row">
+              <div class="af-control">
                 <select
-                  v-model="actionScopeType"
-                  style="width: auto; flex: 0 0 auto"
+                  id="action-library"
+                  v-model="actionLibraryId"
+                  :disabled="!libraryData?.files.length"
                 >
+                  <option value="" disabled>
+                    {{ libraryData?.files.length ? "bitte wählen …" : "Bibliothek ist leer" }}
+                  </option>
+                  <option
+                    v-for="entry in libraryData?.files ?? []"
+                    :key="entry.id"
+                    :value="entry.id"
+                  >
+                    {{ entry.kind === "ids" ? "IDS" : "Python" }} ·
+                    {{ entry.name }} ({{ entry.fileName }})
+                  </option>
+                </select>
+                <p class="field-hint">
+                  Zentrale Dateien gelten projektübergreifend; Aktualisierungen
+                  in der <NuxtLink to="/library">Bibliothek</NuxtLink> wirken
+                  sofort in allen verknüpften Actions.
+                </p>
+              </div>
+            </div>
+
+            <div class="af-row">
+              <label for="action-name">Name</label>
+              <div class="af-control">
+                <input
+                  id="action-name"
+                  v-model="actionName"
+                  :placeholder="actionKind === 'ids' ? 'z. B. IDS Hochbau' : 'z. B. Kollisions-Check'"
+                  required
+                />
+              </div>
+            </div>
+
+            <div class="af-row">
+              <label>Gilt für</label>
+              <div class="af-control af-control-row">
+                <select v-model="actionScopeType" style="width: auto">
                   <option value="project">Alle Modelle des Projekts</option>
                   <option value="folder">Einen Ordner (inkl. Unterordner)</option>
                   <option value="model">Ein einzelnes Modell</option>
@@ -1785,7 +1789,7 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
                 <select
                   v-if="actionScopeType === 'folder'"
                   v-model="actionScopeFolder"
-                  style="flex: 1"
+                  style="flex: 1; min-width: 180px"
                 >
                   <option value="" disabled>Ordner wählen …</option>
                   <option
@@ -1799,7 +1803,7 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
                 <select
                   v-if="actionScopeType === 'model'"
                   v-model="actionScopeModelId"
-                  style="flex: 1"
+                  style="flex: 1; min-width: 180px"
                 >
                   <option value="" disabled>Modell wählen …</option>
                   <option
@@ -1813,10 +1817,19 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
               </div>
             </div>
 
-            <label class="action-form-check">
-              <input v-model="actionRunOnCommit" type="checkbox" style="width: auto" />
-              Bei jedem neuen Commit im Geltungsbereich automatisch ausführen
-            </label>
+            <div class="af-row">
+              <label>Automatik</label>
+              <div class="af-control">
+                <label class="action-form-check">
+                  <input
+                    v-model="actionRunOnCommit"
+                    type="checkbox"
+                    style="width: auto"
+                  />
+                  Bei jedem neuen Commit im Geltungsbereich automatisch ausführen
+                </label>
+              </div>
+            </div>
 
             <div class="action-form-footer">
               <button class="btn primary" type="submit" :disabled="actionBusy">
