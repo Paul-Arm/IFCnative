@@ -517,6 +517,13 @@ onMounted(() => {
   if (typeof fromRun === "string" && fromRun) {
     void prefillIssueFromRun(fromRun);
   }
+  // Von der Modellseite: Formular öffnen, Modell vorverknüpfen.
+  const forModel = route.query.forModel;
+  if (typeof forModel === "string" && forModel) {
+    showIssueForm.value = true;
+    issueModels.add(forModel);
+    goTo("issues");
+  }
 });
 
 const hasBcfIssues = computed(() =>

@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import {
   PhBookOpen,
+  PhCheckCircle,
   PhCubeTransparent,
   PhGear,
   PhGitBranch,
   PhGitCommit,
   PhPencilSimple,
+  PhPlus,
+  PhRecord,
   PhUploadSimple,
 } from "@phosphor-icons/vue";
 
@@ -13,6 +16,7 @@ import type {
   Branch,
   Commit,
   GuidDiffSummary,
+  Issue,
   Member,
   Model,
   Project,
@@ -62,10 +66,12 @@ const folderCrumbs = computed(() => {
 
 // ---- Tabs --------------------------------------------------------------
 
-type Tab = "inhalt" | "commits" | "3d" | "einstellungen";
+type Tab = "inhalt" | "commits" | "3d" | "issues" | "einstellungen";
 const tab = computed<Tab>(() => {
   const value = route.query.tab;
-  if (value === "commits" || value === "einstellungen") return value;
+  if (value === "commits" || value === "issues" || value === "einstellungen") {
+    return value;
+  }
   if (value === "inhalt" && isMd.value) return "inhalt";
   if (value === "3d" && !isMd.value) return "3d";
   return isMd.value ? "inhalt" : "3d";
@@ -73,6 +79,39 @@ const tab = computed<Tab>(() => {
 
 function goTab(nextTab: Tab): void {
   router.replace({ query: { ...route.query, tab: nextTab } });
+}
+
+// ---- Issues dieses Modells ---------------------------------------------
+
+const { data: issuesData } = await useAsyncData(`issues-${slug}`, () =>
+  api<{ issues: Issue[]; openCount: number; closedCount: number }>(
+    `/projects/${slug}/issues`,
+  ),
+);
+
+/** Alle Issues, die mit DIESEM Modell verknüpft sind. */
+const modelIssues = computed(() =>
+  (issuesData.value?.issues ?? []).filter((issue) =>
+    issue.models.some((model) => model.slug === modelSlug),
+  ),
+);
+const issueFilter = ref<"open" | "closed">("open");
+const filteredModelIssues = computed(() =>
+  modelIssues.value.filter((issue) => issue.state === issueFilter.value),
+);
+const openModelIssueCount = computed(
+  () => modelIssues.value.filter((issue) => issue.state === "open").length,
+);
+const closedModelIssueCount = computed(
+  () => modelIssues.value.filter((issue) => issue.state === "closed").length,
+);
+
+/** Lesbare Textfarbe (schwarz/weiss) fuer eine Label-Hintergrundfarbe. */
+function labelTextColor(hex: string): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return 0.299 * r + 0.587 * g + 0.114 * b > 150 ? "#1f2328" : "#ffffff";
 }
 
 // ---- Branch-Auswahl + Commits -----------------------------------------
@@ -437,6 +476,11 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
         Commits
         <span class="counter">{{ commitsData?.commits.length ?? 0 }}</span>
       </button>
+      <button :class="{ active: tab === 'issues' }" @click="goTab('issues')">
+        <PhRecord :size="16" aria-hidden="true" />
+        Issues
+        <span class="counter">{{ openModelIssueCount }}</span>
+      </button>
       <button
         v-if="isAdmin"
         :class="{ active: tab === 'einstellungen' }"
@@ -635,6 +679,88 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
       />
       <div v-else class="empty">
         Noch keine Commits auf diesem Branch — erst einen Stand committen.
+      </div>
+    </div>
+
+    <!-- ================= Tab: Issues (dieses Modells) ================= -->
+    <div v-else-if="tab === 'issues'" class="card">
+      <div class="card-header">
+        <div class="tabs">
+          <button
+            :class="{ active: issueFilter === 'open' }"
+            @click="issueFilter = 'open'"
+          >
+            <PhRecord :size="14" aria-hidden="true" />
+            {{ openModelIssueCount }} Offen
+          </button>
+          <button
+            :class="{ active: issueFilter === 'closed' }"
+            @click="issueFilter = 'closed'"
+          >
+            <PhCheckCircle :size="14" aria-hidden="true" />
+            {{ closedModelIssueCount }} Geschlossen
+          </button>
+        </div>
+        <span class="topbar-spacer" />
+        <NuxtLink
+          class="btn primary"
+          :to="`/p/${slug}?tab=issues&forModel=${modelData.model.id}`"
+          title="Neues Issue anlegen — dieses Modell ist vorverknüpft"
+        >
+          <PhPlus :size="14" aria-hidden="true" />
+          Neues Issue
+        </NuxtLink>
+      </div>
+
+      <ul v-if="filteredModelIssues.length" class="list">
+        <li
+          v-for="issue in filteredModelIssues"
+          :key="issue.id"
+          class="list-item"
+        >
+          <span class="issue-state" :class="issue.state">
+            <PhRecord v-if="issue.state === 'open'" :size="18" />
+            <PhCheckCircle v-else :size="18" weight="fill" />
+          </span>
+          <div class="list-item-main">
+            <NuxtLink
+              :to="`/p/${slug}/i/${issue.number}`"
+              style="font-weight: 600"
+            >
+              {{ issue.title }}
+            </NuxtLink>
+            <span
+              v-if="issue.kind === 'bcf'"
+              class="badge accent"
+              title="Echtes IFC-Issue — als BCF exportierbar"
+            >BCF</span>
+            <span
+              v-for="label in issue.labels"
+              :key="label.id"
+              class="label-chip"
+              :style="{
+                backgroundColor: label.color,
+                color: labelTextColor(label.color),
+              }"
+            >{{ label.name }}</span>
+            <div class="muted small">
+              #{{ issue.number }} · {{ issue.author?.name ?? "?" }} ·
+              {{ dateFmt.format(new Date(issue.createdAt)) }}
+              <template v-if="issue.guids.length">
+                · {{ issue.guids.length }}
+                {{ issue.guids.length === 1 ? "Objekt verortet" : "Objekte verortet" }}
+              </template>
+            </div>
+          </div>
+          <span v-if="issue.assignees.length" class="muted small">
+            &rarr; {{ issue.assignees.map((a) => a.name).join(", ") }}
+          </span>
+        </li>
+      </ul>
+      <div v-else class="empty">
+        Keine {{ issueFilter === "open" ? "offenen" : "geschlossenen" }}
+        Issues zu diesem Modell — über „Neues Issue" eines anlegen oder auf
+        der Commit-Seite „Issue aus Run erstellen" nutzen.
       </div>
     </div>
 
