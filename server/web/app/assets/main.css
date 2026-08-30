@@ -312,6 +312,30 @@ tr:last-child td {
   background: var(--surface-2);
 }
 
+/* Inline-Eingabe für Link-URLs (Ersatz für window.prompt) */
+.md-link-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.md-link-bar input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.85rem;
+  background: var(--surface);
+}
+
+.md-link-bar button {
+  flex-shrink: 0;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.8rem;
+}
+
 .md-editor-content {
   min-height: var(--md-min-height, 10rem);
   padding: 0.75rem 1rem;
