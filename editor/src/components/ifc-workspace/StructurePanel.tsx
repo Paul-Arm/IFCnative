@@ -3,10 +3,11 @@ import { Boxes, Crosshair, Network, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 
-import type {
-    NativeIfcDocument,
-    NativeIfcEntity,
-    NativeIfcTreeNode,
+import {
+    listNativeFreeRootedObjects,
+    type NativeIfcDocument,
+    type NativeIfcEntity,
+    type NativeIfcTreeNode,
 } from "@/ifc";
 import { cn } from "@/lib/utils";
 
@@ -20,10 +21,19 @@ interface StructureTreeModel {
   pathById: Map<number, string>;
   typeById: Map<number, string>;
   nameById: Map<number, string>;
+  /** Rooted-Objekte ohne räumliche Zuordnung (Gruppe "Freie Objekte"). */
+  freeObjectCount: number;
 }
 
 /** Platzhalter-Zeile, wenn keine räumliche Struktur indiziert ist. */
 const EMPTY_TREE_PLACEHOLDER = "(Keine Raumstruktur indiziert)";
+
+/**
+ * Virtueller Ordner für Rooted-Objekte ohne räumliche Zuordnung. Nach
+ * IFC-Schema ist die Zuordnung optional — solche Objekte müssen ohne
+ * Struktur-Zwang sichtbar und bearbeitbar bleiben.
+ */
+const FREE_OBJECTS_FOLDER = "Freie Objekte";
 
 /** Maximale Zeilenzahl der Fallback-Suchliste. */
 const FALLBACK_ROW_LIMIT = 250;
@@ -556,19 +566,20 @@ export function StructurePanel({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
-      {treeModel.paths.length === 0 && onCreateStructure ? (
-        <div className="grid shrink-0 gap-2 rounded-lg border border-dashed border-border/70 bg-card/50 p-3">
-          <p className="text-xs text-muted-foreground">
-            Dieses Dokument hat keine räumliche Struktur (Projekt → Standort →
-            Gebäude → Geschoss). Erst mit ihr lassen sich Bauteile geordnet
-            einfügen.
+      {document.spatialRoots.length === 0 && onCreateStructure ? (
+        <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-dashed border-border/70 bg-card/50 px-3 py-2">
+          <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+            Keine Raumstruktur — nach IFC-Schema zulässig.{" "}
+            {treeModel.freeObjectCount
+              ? `${treeModel.freeObjectCount === 1 ? "Das freie Objekt ist" : `Die ${treeModel.freeObjectCount} freien Objekte sind`} unten aufgeführt und normal bearbeitbar. `
+              : ""}
+            Optional lässt sich Projekt → Standort → Gebäude → Geschoss
+            ergänzen.
           </p>
-          <div>
-            <Button variant="default" onClick={onCreateStructure}>
-              <Network aria-hidden className="size-3.5" />
-              Raumstruktur anlegen…
-            </Button>
-          </div>
+          <Button onClick={onCreateStructure}>
+            <Network aria-hidden className="size-3.5" />
+            Raumstruktur anlegen…
+          </Button>
         </div>
       ) : null}
       <div className="min-h-0 flex-1 overflow-hidden">
@@ -644,6 +655,7 @@ function buildStructureTreeModel(
 ): StructureTreeModel {
   const model: StructureTreeModel = {
     expandedPaths: [],
+    freeObjectCount: 0,
     idByPath: new Map(),
     nameById: new Map(),
     pathById: new Map(),
@@ -653,6 +665,26 @@ function buildStructureTreeModel(
   document.spatialRoots.forEach((root) =>
     addTreeNode(root, "", document, model),
   );
+
+  // Rooted-Objekte ohne räumliche Zuordnung unter einem virtuellen Ordner
+  // aufführen — die Datei ist auch ohne Raumstruktur schema-valide und muss
+  // ohne Umweg über "Raumstruktur anlegen" bearbeitbar sein. Der Ordner
+  // selbst hat bewusst keinen idByPath-Eintrag (keine echte Entität).
+  const freeObjects = listNativeFreeRootedObjects(document);
+  model.freeObjectCount = freeObjects.length;
+  if (freeObjects.length) {
+    const folderPath = `${FREE_OBJECTS_FOLDER}/`;
+    model.paths.push(folderPath);
+    model.expandedPaths.push(folderPath);
+    for (const entity of freeObjects) {
+      const basePath = `${FREE_OBJECTS_FOLDER}/${formatTreeSegment(entity)}`;
+      model.paths.push(basePath);
+      model.idByPath.set(basePath, entity.id);
+      model.pathById.set(entity.id, basePath);
+      model.typeById.set(entity.id, entity.type);
+      model.nameById.set(entity.id, entity.name || `#${entity.id}`);
+    }
+  }
   return model;
 }
 

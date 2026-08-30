@@ -1944,14 +1944,8 @@ export interface NativeSpatialStructureResult {
   storeyId: number;
 }
 
-/**
- * Ids aller Bauteile ohne räumliche Zuordnung (weder per Containment noch
- * per Aggregation irgendwo eingehängt) — z. B. in "leeren" Hub-Modellen,
- * die nur lose Objekte enthalten.
- */
-export function listNativeUnassignedProductIds(
-  document: NativeIfcDocument,
-): number[] {
+/** Ids aller Kinder von Aggregations-/Containment-Beziehungen. */
+function collectHierarchyChildIds(document: NativeIfcDocument): Set<number> {
   const containedIds = new Set<number>();
   for (const rel of document.relationships) {
     if (
@@ -1964,12 +1958,57 @@ export function listNativeUnassignedProductIds(
       containedIds.add(target);
     }
   }
+  return containedIds;
+}
+
+/**
+ * Ids aller Bauteile ohne räumliche Zuordnung (weder per Containment noch
+ * per Aggregation irgendwo eingehängt) — z. B. in "leeren" Hub-Modellen,
+ * die nur lose Objekte enthalten.
+ */
+export function listNativeUnassignedProductIds(
+  document: NativeIfcDocument,
+): number[] {
+  const containedIds = collectHierarchyChildIds(document);
   return document.entities
     .filter(
       (entity) =>
         isPhysicalProduct(entity.type) && !containedIds.has(entity.id),
     )
     .map((entity) => entity.id);
+}
+
+/** Echte 22-stellige IFC-GlobalId (parseNativeIfcText setzt globalId naiv
+ * aus args[0], auch für nicht-gerootete Entitäten mit String-Erstargument). */
+const IFC_GLOBAL_ID_PATTERN = /^[0-9A-Za-z_$]{22}$/;
+
+/**
+ * Frei stehende Rooted-Objekte: Entitäten mit echter GlobalId, die weder
+ * Wurzel des Raumstruktur-Baums sind (Projekt/Spatial) noch irgendwo per
+ * Aggregation/Containment hängen. Nach IFC-Schema ist das zulässig — die
+ * räumliche Zuordnung ist optional. Der Strukturbaum zeigt sie als eigene
+ * Gruppe, damit solche Dateien ohne Struktur-Zwang bearbeitbar bleiben.
+ * Beziehungs-, Property-, Typ- und Gruppen-Entitäten bleiben außen vor:
+ * sie hängen an ihren Zielobjekten bzw. haben eigene Panels.
+ */
+export function listNativeFreeRootedObjects(
+  document: NativeIfcDocument,
+): NativeIfcEntity[] {
+  const containedIds = collectHierarchyChildIds(document);
+  return document.entities.filter((entity) => {
+    const type = entity.type;
+    return (
+      IFC_GLOBAL_ID_PATTERN.test(entity.globalId) &&
+      !containedIds.has(entity.id) &&
+      type !== "IFCPROJECT" &&
+      !isSpatial(type) &&
+      !type.startsWith("IFCREL") &&
+      !type.startsWith("IFCPROPERTY") &&
+      type !== "IFCELEMENTQUANTITY" &&
+      !isTypeObject(type) &&
+      !isGroupObject(type)
+    );
+  });
 }
 
 /**
