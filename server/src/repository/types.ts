@@ -142,13 +142,24 @@ export interface IssueComment {
 }
 
 /**
- * Zuordnungen eines Issues: Bearbeiter, Modelle, Labels, betroffene
- * IFC-GlobalIds (jeweils 0..n). Die GlobalIds verorten das Issue im
- * 3D-Viewer — z. B. die Verstöße einer fehlgeschlagenen Prüfung.
+ * Modell-Verknüpfung eines Issues mit Versionsbezug: in welchem Commit ist
+ * der Fehler aufgefallen, mit welchem Commit wurde er behoben (beides
+ * optional, nachträglich setzbar).
+ */
+export interface IssueModelLink {
+  modelId: string;
+  foundCommitId: string | null;
+  fixedCommitId: string | null;
+}
+
+/**
+ * Zuordnungen eines Issues: Bearbeiter, Modelle (mit Versionsbezug), Labels,
+ * betroffene IFC-GlobalIds (jeweils 0..n). Die GlobalIds verorten das Issue
+ * im 3D-Viewer — z. B. die Verstöße einer fehlgeschlagenen Prüfung.
  */
 export interface IssueLinks {
   assigneeIds: string[];
-  modelIds: string[];
+  models: IssueModelLink[];
   labelIds: string[];
   guids: string[];
 }

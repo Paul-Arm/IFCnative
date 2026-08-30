@@ -140,16 +140,36 @@ test("SQLite: Issues + Labels + Zuordnungen", async () => {
   assert.equal(first.kind, "bcf");
   assert.equal(second.kind, "virtual");
 
+  await repo.createCommit({
+    id: "ic1",
+    modelId: model.id,
+    branchName: "main",
+    parentCommitId: null,
+    manifestHash: "mh",
+    blobKey: "models/m/commits/ic1.ifc",
+    schema: "IFC4",
+    authorId: user.id,
+    message: "gefunden in",
+    createdAt: new Date().toISOString(),
+    entityCount: 1,
+    added: 1,
+    removed: 0,
+    modified: 0,
+  });
   await repo.setIssueLinks(first.id, {
     assigneeIds: [user.id],
-    modelIds: [model.id],
+    models: [
+      { modelId: model.id, foundCommitId: "ic1", fixedCommitId: null },
+    ],
     labelIds: [label.id],
     guids: ["0Wall00000000000000aa"],
   });
   const links = (await repo.getIssueLinks([first.id, second.id])).get(first.id);
   assert.deepEqual(links, {
     assigneeIds: [user.id],
-    modelIds: [model.id],
+    models: [
+      { modelId: model.id, foundCommitId: "ic1", fixedCommitId: null },
+    ],
     labelIds: [label.id],
     guids: ["0Wall00000000000000aa"],
   });

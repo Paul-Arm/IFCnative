@@ -136,8 +136,12 @@ create table if not exists issue_assignees (
 create table if not exists issue_models (
   issue_id uuid not null references issues(id),
   model_id uuid not null references models(id),
+  found_commit_id uuid,
+  fixed_commit_id uuid,
   primary key (issue_id, model_id)
 );
+alter table issue_models add column if not exists found_commit_id uuid;
+alter table issue_models add column if not exists fixed_commit_id uuid;
 
 create table if not exists issue_label_links (
   issue_id uuid not null references issues(id),

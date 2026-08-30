@@ -7,6 +7,7 @@ import {
 } from "@phosphor-icons/vue";
 
 import type {
+  Commit,
   Issue,
   IssueComment,
   Label,
@@ -107,6 +108,45 @@ function startEdit(): void {
 async function saveEdit(): Promise<void> {
   await patchIssue({ title: editTitle.value, body: editBody.value });
   editing.value = false;
+}
+
+// ---- Versionsbezug (aufgefallen/behoben in Commit) ---------------------
+
+/** Commits je verknüpftem Modell (für die Auswahl in der Sidebar). */
+const commitsByModel = reactive(new Map<string, Commit[]>());
+watchEffect(() => {
+  for (const model of issue.value?.models ?? []) {
+    if (commitsByModel.has(model.id)) continue;
+    commitsByModel.set(model.id, []);
+    void api<{ commits: Commit[] }>(
+      `/projects/${slug}/models/${model.slug}/commits`,
+    )
+      .then((result) => commitsByModel.set(model.id, result.commits))
+      .catch(() => commitsByModel.delete(model.id));
+  }
+});
+
+const commitShort = (commit: { id: string; message: string; createdAt: string }) =>
+  `${commit.id.slice(0, 8)} · ${commit.message || "(ohne Nachricht)"} · ${new Date(commit.createdAt).toLocaleDateString("de-DE")}`;
+
+/** Aufgefallen-/Behoben-Commit eines verknüpften Modells setzen ("" = keiner). */
+async function setModelCommit(
+  modelId: string,
+  field: "found" | "fixed",
+  commitId: string,
+): Promise<void> {
+  const modelLinks = (issue.value?.models ?? []).map((model) => ({
+    modelId: model.id,
+    foundCommitId:
+      model.id === modelId && field === "found"
+        ? commitId || null
+        : model.foundCommitId,
+    fixedCommitId:
+      model.id === modelId && field === "fixed"
+        ? commitId || null
+        : model.fixedCommitId,
+  }));
+  await patchIssue({ modelLinks });
 }
 
 // ---- BCF-Export --------------------------------------------------------
@@ -515,6 +555,79 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
               </NuxtLink>
             </span>
           </label>
+
+          <!-- Versionsbezug je verknüpftem Modell -->
+          <div
+            v-for="linked in issue.models"
+            :key="`version-${linked.id}`"
+            class="issue-version"
+          >
+            <div class="small" style="font-weight: 600">{{ linked.name }}</div>
+
+            <span class="muted small">Aufgefallen in</span>
+            <select
+              v-if="canEdit"
+              :value="linked.foundCommitId ?? ''"
+              title="In welchem Versionsstand ist der Fehler aufgefallen?"
+              @change="
+                setModelCommit(
+                  linked.id,
+                  'found',
+                  ($event.target as HTMLSelectElement).value,
+                )
+              "
+            >
+              <option value="">— kein Commit —</option>
+              <option
+                v-for="commit in commitsByModel.get(linked.id) ?? []"
+                :key="commit.id"
+                :value="commit.id"
+              >
+                {{ commitShort(commit) }}
+              </option>
+            </select>
+            <NuxtLink
+              v-if="linked.foundCommit"
+              class="small mono"
+              :to="`/p/${slug}/m/${linked.slug}/c/${linked.foundCommit.id}`"
+            >
+              {{ linked.foundCommit.id.slice(0, 8) }} ·
+              {{ new Date(linked.foundCommit.createdAt).toLocaleDateString("de-DE") }}
+            </NuxtLink>
+            <span v-else-if="!canEdit" class="muted small">—</span>
+
+            <span class="muted small">Behoben in</span>
+            <select
+              v-if="canEdit"
+              :value="linked.fixedCommitId ?? ''"
+              title="Mit welchem Versionsstand wurde der Fehler behoben?"
+              @change="
+                setModelCommit(
+                  linked.id,
+                  'fixed',
+                  ($event.target as HTMLSelectElement).value,
+                )
+              "
+            >
+              <option value="">— kein Commit —</option>
+              <option
+                v-for="commit in commitsByModel.get(linked.id) ?? []"
+                :key="commit.id"
+                :value="commit.id"
+              >
+                {{ commitShort(commit) }}
+              </option>
+            </select>
+            <NuxtLink
+              v-if="linked.fixedCommit"
+              class="small mono"
+              :to="`/p/${slug}/m/${linked.slug}/c/${linked.fixedCommit.id}`"
+            >
+              {{ linked.fixedCommit.id.slice(0, 8) }} ·
+              {{ new Date(linked.fixedCommit.createdAt).toLocaleDateString("de-DE") }}
+            </NuxtLink>
+            <span v-else-if="!canEdit" class="muted small">—</span>
+          </div>
         </section>
 
         <section class="issue-side-section">

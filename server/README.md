@@ -198,7 +198,7 @@ Auth: `Authorization: Bearer <JWT>` aus `/api/auth/login`. Fehler kommen als
 | DELETE | `/api/projects/:slug` | Projekt löschen (nur Owner; inkl. Blobs) |
 | PUT/GET | `/api/projects/:slug/image` | Projektbild (PNG, z. B. Szenen-Screenshot aus dem 3D-Tab) setzen (write) / abrufen (Mitglied) |
 | GET/POST | `/api/projects/:slug/labels` | Labels auflisten / anlegen `{name, color}` (write) |
-| GET/POST | `/api/projects/:slug/issues` | Issues (`?state=open\|closed`, mit Zählern) / eröffnen `{title, body?, kind?: "virtual"\|"bcf", assigneeIds?, modelIds?, labelIds?, guids?}` (jedes Mitglied) |
+| GET/POST | `/api/projects/:slug/issues` | Issues (`?state=open\|closed`, mit Zählern) / eröffnen `{title, body?, kind?: "virtual"\|"bcf", assigneeIds?, modelIds?, modelLinks?: [{modelId, foundCommitId?, fixedCommitId?}], labelIds?, guids?}` — `modelLinks` trägt den Versionsbezug (in welchem Commit aufgefallen/behoben); die Kurzform `modelIds` erhält bestehende Commit-Bezüge (jedes Mitglied) |
 | GET | `/api/projects/:slug/issues/bcf` | alle BCF-Issues als `.bcfzip` (BCF 2.1) |
 | POST | `/api/projects/:slug/issues/bcf` | `.bcfzip` importieren (Body = Zip, `application/zip`) → `{imported, skipped}` (write) |
 | GET | `/api/projects/:slug/issues/:number/bcf` | einzelnes BCF-Issue als `.bcfzip` (400 bei virtuellen Issues) |

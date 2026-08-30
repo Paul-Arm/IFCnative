@@ -729,9 +729,8 @@ export class SqlRepository implements Repository {
     issueId: string,
     links: Partial<IssueLinks>,
   ): Promise<void> {
-    const tables: [keyof IssueLinks, string, string][] = [
+    const tables: ["assigneeIds" | "labelIds" | "guids", string, string][] = [
       ["assigneeIds", "issue_assignees", "user_id"],
-      ["modelIds", "issue_models", "model_id"],
       ["labelIds", "issue_label_links", "label_id"],
       ["guids", "issue_guids", "guid"],
     ];
@@ -746,18 +745,33 @@ export class SqlRepository implements Repository {
         );
       }
     }
+    // Modelle mit Versionsbezug (aufgefallen/behoben in Commit).
+    if (links.models !== undefined) {
+      await this.sql.query(`delete from issue_models where issue_id = $1`, [
+        issueId,
+      ]);
+      const deduped = new Map(
+        links.models.map((link) => [link.modelId, link]),
+      );
+      for (const link of deduped.values()) {
+        await this.sql.query(
+          `insert into issue_models (issue_id, model_id, found_commit_id, fixed_commit_id)
+           values ($1, $2, $3, $4)`,
+          [issueId, link.modelId, link.foundCommitId, link.fixedCommitId],
+        );
+      }
+    }
   }
 
   async getIssueLinks(issueIds: string[]): Promise<Map<string, IssueLinks>> {
     const map = new Map<string, IssueLinks>();
     if (!issueIds.length) return map;
     for (const id of issueIds) {
-      map.set(id, { assigneeIds: [], modelIds: [], labelIds: [], guids: [] });
+      map.set(id, { assigneeIds: [], models: [], labelIds: [], guids: [] });
     }
     const placeholders = issueIds.map((_, i) => `$${i + 1}`).join(", ");
-    const tables: [keyof IssueLinks, string, string][] = [
+    const tables: ["assigneeIds" | "labelIds" | "guids", string, string][] = [
       ["assigneeIds", "issue_assignees", "user_id"],
-      ["modelIds", "issue_models", "model_id"],
       ["labelIds", "issue_label_links", "label_id"],
       ["guids", "issue_guids", "guid"],
     ];
@@ -773,6 +787,23 @@ export class SqlRepository implements Repository {
       for (const row of rows) {
         map.get(row.issue_id)?.[key].push(row.linked);
       }
+    }
+    const { rows: modelRows } = await this.sql.query<{
+      issue_id: string;
+      model_id: string;
+      found_commit_id: string | null;
+      fixed_commit_id: string | null;
+    }>(
+      `select issue_id, model_id, found_commit_id, fixed_commit_id
+       from issue_models where issue_id in (${placeholders})`,
+      issueIds,
+    );
+    for (const row of modelRows) {
+      map.get(row.issue_id)?.models.push({
+        modelId: row.model_id,
+        foundCommitId: row.found_commit_id ?? null,
+        fixedCommitId: row.fixed_commit_id ?? null,
+      });
     }
     return map;
   }

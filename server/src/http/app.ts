@@ -605,6 +605,23 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       }
     }
     const users = await usersById(userIds);
+    // Referenzierte Commits (aufgefallen/behoben in) für die Anzeige laden.
+    const commits = await commitsById(
+      [...links.values()].flatMap((link) =>
+        link.models.flatMap((m) => [m.foundCommitId, m.fixedCommitId]),
+      ),
+    );
+    const commitRef = (id: string | null) => {
+      const commit = id ? commits.get(id) : undefined;
+      return commit
+        ? {
+            id: commit.id,
+            message: commit.message,
+            branchName: commit.branchName,
+            createdAt: commit.createdAt,
+          }
+        : null;
+    };
     return issues.map((issue) => {
       const link = links.get(issue.id);
       const author = users.get(issue.authorId);
@@ -615,16 +632,22 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           .map((id) => users.get(id))
           .filter((entry): entry is User => Boolean(entry))
           .map(publicUser),
-        models: (link?.modelIds ?? [])
-          .map((id) => modelById.get(id))
-          .filter((entry) => entry !== undefined)
-          .map((model) => ({
-            id: model.id,
-            slug: model.slug,
-            name: model.name,
-            folder: model.folder,
-            kind: model.kind,
-          })),
+        models: (link?.models ?? [])
+          .filter((m) => modelById.has(m.modelId))
+          .map((m) => {
+            const model = modelById.get(m.modelId)!;
+            return {
+              id: model.id,
+              slug: model.slug,
+              name: model.name,
+              folder: model.folder,
+              kind: model.kind,
+              foundCommitId: m.foundCommitId,
+              fixedCommitId: m.fixedCommitId,
+              foundCommit: commitRef(m.foundCommitId),
+              fixedCommit: commitRef(m.fixedCommitId),
+            };
+          }),
         labels: (link?.labelIds ?? [])
           .map((id) => labelById.get(id))
           .filter((entry) => entry !== undefined),
@@ -633,20 +656,31 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     });
   }
 
+  interface IssueLinksBody {
+    assigneeIds?: string[];
+    /** Nur Ids — bestehende Commit-Bezüge bleiben je Modell erhalten. */
+    modelIds?: string[];
+    /** Volle Form mit Versionsbezug (aufgefallen/behoben in Commit). */
+    modelLinks?: {
+      modelId?: string;
+      foundCommitId?: string | null;
+      fixedCommitId?: string | null;
+    }[];
+    labelIds?: string[];
+    guids?: string[];
+  }
+
   /**
    * Zuordnungs-Ids aus dem Request validieren: Assignees müssen Mitglieder
-   * sein, Modelle und Labels zum Projekt gehören. Gibt null zurück, wenn die
-   * Antwort schon gesendet wurde.
+   * sein, Modelle/Labels zum Projekt und Commit-Bezüge zum jeweiligen
+   * Modell gehören. Gibt null zurück, wenn die Antwort schon gesendet wurde.
+   * `existingModels` erhält die Commit-Bezüge, wenn nur `modelIds` kommt.
    */
   async function validateIssueLinks(
     project: Project,
-    body: {
-      assigneeIds?: string[];
-      modelIds?: string[];
-      labelIds?: string[];
-      guids?: string[];
-    },
+    body: IssueLinksBody,
     reply: FastifyReply,
+    existingModels: IssueLinks["models"] = [],
   ): Promise<Partial<IssueLinks> | null> {
     const links: Partial<IssueLinks> = {};
     if (body.assigneeIds !== undefined) {
@@ -658,15 +692,44 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       }
       links.assigneeIds = body.assigneeIds;
     }
-    if (body.modelIds !== undefined) {
+    if (body.modelLinks !== undefined || body.modelIds !== undefined) {
       const known = new Set(
         (await repo.listModels(project.id)).map((model) => model.id),
       );
-      if (body.modelIds.some((id) => !known.has(id))) {
-        reply.code(400).send({ error: "Unknown model id" });
-        return null;
+      // Kurzform "modelIds" in die volle Form heben — bestehende
+      // Commit-Bezüge der weiterhin verknüpften Modelle bleiben erhalten.
+      const byModel = new Map(existingModels.map((m) => [m.modelId, m]));
+      const rawLinks =
+        body.modelLinks ??
+        (body.modelIds ?? []).map((modelId) => ({
+          modelId,
+          foundCommitId: byModel.get(modelId)?.foundCommitId ?? null,
+          fixedCommitId: byModel.get(modelId)?.fixedCommitId ?? null,
+        }));
+      const models: IssueLinks["models"] = [];
+      for (const raw of rawLinks) {
+        if (!raw.modelId || !known.has(raw.modelId)) {
+          reply.code(400).send({ error: "Unknown model id" });
+          return null;
+        }
+        // Commit-Bezüge müssen zum jeweiligen Modell gehören.
+        for (const commitId of [raw.foundCommitId, raw.fixedCommitId]) {
+          if (!commitId) continue;
+          const commit = await repo.getCommit(commitId);
+          if (!commit || commit.modelId !== raw.modelId) {
+            reply
+              .code(400)
+              .send({ error: "Commit gehört nicht zum verknüpften Modell" });
+            return null;
+          }
+        }
+        models.push({
+          modelId: raw.modelId,
+          foundCommitId: raw.foundCommitId ?? null,
+          fixedCommitId: raw.fixedCommitId ?? null,
+        });
       }
-      links.modelIds = body.modelIds;
+      links.models = models;
     }
     if (body.labelIds !== undefined) {
       const known = new Set(
@@ -723,11 +786,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       title?: string;
       body?: string;
       kind?: string;
-      assigneeIds?: string[];
-      modelIds?: string[];
-      labelIds?: string[];
-      guids?: string[];
-    };
+    } & IssueLinksBody;
     const title = body.title?.trim();
     if (!title || title.length > 200) {
       return reply.code(400).send({ error: "Title required (max 200)" });
@@ -864,11 +923,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       body?: string;
       state?: string;
       kind?: string;
-      assigneeIds?: string[];
-      modelIds?: string[];
-      labelIds?: string[];
-      guids?: string[];
-    };
+    } & IssueLinksBody;
     if (body.state && !["open", "closed"].includes(body.state)) {
       return reply.code(400).send({ error: "Invalid state" });
     }
@@ -878,7 +933,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (body.title !== undefined && !body.title.trim()) {
       return reply.code(400).send({ error: "Title must not be empty" });
     }
-    const links = await validateIssueLinks(project, body, reply);
+    // Bestehende Modell-Verknüpfungen für die modelIds-Kurzform mitgeben,
+    // damit Commit-Bezüge beim An-/Abwählen von Modellen erhalten bleiben.
+    const existingLinks = (await repo.getIssueLinks([issue.id])).get(issue.id);
+    const links = await validateIssueLinks(
+      project,
+      body,
+      reply,
+      existingLinks?.models ?? [],
+    );
     if (!links) return reply;
     const updated = await repo.updateIssue(issue.id, {
       title: body.title?.trim(),
@@ -918,8 +981,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         issue,
         comments: commentsByIssue.get(issue.id) ?? [],
         guids: link?.guids ?? [],
-        modelFileNames: (link?.modelIds ?? [])
-          .map((id) => modelById.get(id)?.name)
+        modelFileNames: (link?.models ?? [])
+          .map((m) => modelById.get(m.modelId)?.name)
           .filter((name): name is string => Boolean(name)),
         usersById: users,
       };
@@ -1021,7 +1084,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       ];
       await repo.setIssueLinks(issue.id, {
         guids: topic.guids,
-        modelIds,
+        models: modelIds.map((modelId) => ({
+          modelId,
+          foundCommitId: null,
+          fixedCommitId: null,
+        })),
       });
       for (const comment of topic.comments) {
         // Fremde Autoren gibt es hier nicht als Benutzer — Original-Autor

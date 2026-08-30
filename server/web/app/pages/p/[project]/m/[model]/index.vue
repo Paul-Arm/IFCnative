@@ -750,6 +750,26 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
                 · {{ issue.guids.length }}
                 {{ issue.guids.length === 1 ? "Objekt verortet" : "Objekte verortet" }}
               </template>
+              <!-- Versionsbezug dieses Modells -->
+              <template
+                v-for="linked in issue.models.filter((m) => m.slug === modelSlug)"
+                :key="`ref-${linked.id}`"
+              >
+                <template v-if="linked.foundCommit">
+                  · aufgefallen in
+                  <NuxtLink
+                    class="commit-id"
+                    :to="`/p/${slug}/m/${modelSlug}/c/${linked.foundCommit.id}`"
+                  >{{ linked.foundCommit.id.slice(0, 8) }}</NuxtLink>
+                </template>
+                <template v-if="linked.fixedCommit">
+                  · behoben in
+                  <NuxtLink
+                    class="commit-id"
+                    :to="`/p/${slug}/m/${modelSlug}/c/${linked.fixedCommit.id}`"
+                  >{{ linked.fixedCommit.id.slice(0, 8) }}</NuxtLink>
+                </template>
+              </template>
             </div>
           </div>
           <span v-if="issue.assignees.length" class="muted small">

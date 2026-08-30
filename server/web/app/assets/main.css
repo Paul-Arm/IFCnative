@@ -402,6 +402,29 @@ tr:last-child td {
   flex: 1;
 }
 
+/* Versionsbezug im Issue-Formular ("aufgefallen in" je Modell) */
+.issue-found-commit {
+  margin-top: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+/* Versionsbezug in der Issue-Sidebar */
+.issue-version {
+  margin-top: 0.6rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.issue-version select {
+  width: 100%;
+  font-size: 0.8rem;
+}
+
 /* ---- Issue-3D-Verortung (GUID-Chips über dem Viewer) ------------------ */
 
 .issue-guid-bar {

@@ -86,12 +86,26 @@ export type IssueState = "open" | "closed";
 /** "virtual" = nur im Server; "bcf" = echtes IFC-Issue (BCF-exportierbar). */
 export type IssueKind = "virtual" | "bcf";
 
+/** Kurzinfo eines referenzierten Commits (aufgefallen/behoben in). */
+export interface IssueCommitRef {
+  id: string;
+  message: string;
+  branchName: string;
+  createdAt: string;
+}
+
 export interface IssueModelRef {
   id: string;
   slug: string;
   name: string;
   folder: string;
   kind: "ifc" | "md";
+  /** Commit, in dem der Fehler aufgefallen ist (optional). */
+  foundCommitId: string | null;
+  /** Commit, mit dem der Fehler behoben wurde (optional). */
+  fixedCommitId: string | null;
+  foundCommit: IssueCommitRef | null;
+  fixedCommit: IssueCommitRef | null;
 }
 
 export interface Issue {

@@ -241,7 +241,7 @@ export class MemoryRepository implements Repository {
 
   async deleteModel(modelId: string): Promise<string[]> {
     for (const links of this.issueLinks.values()) {
-      links.modelIds = links.modelIds.filter((id) => id !== modelId);
+      links.models = links.models.filter((link) => link.modelId !== modelId);
     }
     for (const run of [...this.actionRuns.values()]) {
       if (run.modelId === modelId) {
@@ -537,15 +537,23 @@ export class MemoryRepository implements Repository {
   ): Promise<void> {
     const current = this.issueLinks.get(issueId) ?? {
       assigneeIds: [],
-      modelIds: [],
+      models: [],
       labelIds: [],
       guids: [],
     };
+    // Modelle nach Id dedupen (letzter Eintrag gewinnt).
+    const models = links.models
+      ? [
+          ...new Map(
+            links.models.map((link) => [link.modelId, { ...link }]),
+          ).values(),
+        ]
+      : current.models;
     this.issueLinks.set(issueId, {
       assigneeIds: links.assigneeIds
         ? [...new Set(links.assigneeIds)]
         : current.assigneeIds,
-      modelIds: links.modelIds ? [...new Set(links.modelIds)] : current.modelIds,
+      models,
       labelIds: links.labelIds ? [...new Set(links.labelIds)] : current.labelIds,
       guids: links.guids ? [...new Set(links.guids)] : current.guids,
     });
@@ -557,7 +565,7 @@ export class MemoryRepository implements Repository {
       const links = this.issueLinks.get(id);
       map.set(id, {
         assigneeIds: [...(links?.assigneeIds ?? [])],
-        modelIds: [...(links?.modelIds ?? [])],
+        models: (links?.models ?? []).map((link) => ({ ...link })),
         labelIds: [...(links?.labelIds ?? [])],
         guids: [...(links?.guids ?? [])],
       });

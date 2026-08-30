@@ -25,6 +25,7 @@ import type {
   Action,
   ActionKind,
   ActionRun,
+  Commit,
   Issue,
   IssueKind,
   Label,
@@ -467,6 +468,42 @@ const issueFromRun = ref<number | null>(null);
 const issueBusy = ref(false);
 const issueError = ref<string | null>(null);
 
+// ---- Versionsbezug: "Aufgefallen in" Commit je gewähltem Modell --------
+
+/** Commits je Modell (lazy geladen, sobald ein Modell angehakt wird). */
+const commitsByModel = reactive(new Map<string, Commit[]>());
+/** Gewählter "Aufgefallen in"-Commit je Modell-Id ("" = keiner). */
+const issueFoundCommits = reactive(new Map<string, string>());
+
+async function loadModelCommits(modelId: string): Promise<void> {
+  if (commitsByModel.has(modelId)) return;
+  const model = (modelsData.value?.models ?? []).find(
+    (entry) => entry.id === modelId,
+  );
+  if (!model) return;
+  commitsByModel.set(modelId, []);
+  try {
+    const result = await api<{ commits: Commit[] }>(
+      `/projects/${slug}/models/${model.slug}/commits`,
+    );
+    commitsByModel.set(modelId, result.commits);
+  } catch {
+    commitsByModel.delete(modelId);
+  }
+}
+
+function toggleIssueModel(modelId: string, on: boolean): void {
+  toggleSet(issueModels, modelId, on);
+  if (on) {
+    void loadModelCommits(modelId);
+  } else {
+    issueFoundCommits.delete(modelId);
+  }
+}
+
+const commitShort = (commit: Commit) =>
+  `${commit.id.slice(0, 8)} · ${commit.message || "(ohne Nachricht)"} · ${new Date(commit.createdAt).toLocaleDateString("de-DE")}`;
+
 // "Issue aus Run erstellen": befüllt das Formular mit Prüfbericht,
 // Modell-Verknüpfung und den GUIDs der Verstöße (Button an fehlgeschlagenen
 // Runs bzw. ?fromRun=<id> von der Commit-Seite aus).
@@ -482,6 +519,9 @@ async function prefillIssueFromRun(runId: string): Promise<void> {
     issueTitle.value = `Prüfung fehlgeschlagen: ${run.action?.name ?? "Action"}`;
     if (run.modelId) {
       issueModels.add(run.modelId);
+      // Der geprüfte Commit ist der Stand, in dem der Fehler aufgefallen ist.
+      issueFoundCommits.set(run.modelId, run.commitId);
+      void loadModelCommits(run.modelId);
     }
     issueGuids.value = run.failedGuids ?? [];
     const model = (modelsData.value?.models ?? []).find(
@@ -522,6 +562,7 @@ onMounted(() => {
   if (typeof forModel === "string" && forModel) {
     showIssueForm.value = true;
     issueModels.add(forModel);
+    void loadModelCommits(forModel);
     goTo("issues");
   }
 });
@@ -604,7 +645,10 @@ async function createIssue(): Promise<void> {
         body: issueBody.value,
         kind: issueKind.value,
         assigneeIds: [...issueAssignees],
-        modelIds: [...issueModels],
+        modelLinks: [...issueModels].map((modelId) => ({
+          modelId,
+          foundCommitId: issueFoundCommits.get(modelId) || null,
+        })),
         labelIds: [...issueLabels],
         guids: issueGuids.value,
       },
@@ -612,6 +656,7 @@ async function createIssue(): Promise<void> {
     issueTitle.value = "";
     issueBody.value = "";
     issueKind.value = "virtual";
+    issueFoundCommits.clear();
     issueAssignees.clear();
     issueModels.clear();
     issueLabels.clear();
@@ -1434,8 +1479,7 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
                     type="checkbox"
                     :checked="issueModels.has(model.id)"
                     @change="
-                      toggleSet(
-                        issueModels,
+                      toggleIssueModel(
                         model.id,
                         ($event.target as HTMLInputElement).checked,
                       )
@@ -1445,6 +1489,39 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
                     {{ model.folder ? `${model.folder}/` : "" }}{{ model.name }}
                   </span>
                 </label>
+                <!-- Versionsbezug: in welchem Stand ist der Fehler aufgefallen? -->
+                <template v-for="modelId in [...issueModels]" :key="`fc-${modelId}`">
+                  <div class="issue-found-commit">
+                    <span class="muted small">
+                      {{
+                        (modelsData?.models ?? []).find((m) => m.id === modelId)
+                          ?.name ?? "?"
+                      }}
+                      — aufgefallen in:
+                    </span>
+                    <select
+                      style="width: 100%"
+                      :value="issueFoundCommits.get(modelId) ?? ''"
+                      @change="
+                        ($event.target as HTMLSelectElement).value
+                          ? issueFoundCommits.set(
+                              modelId,
+                              ($event.target as HTMLSelectElement).value,
+                            )
+                          : issueFoundCommits.delete(modelId)
+                      "
+                    >
+                      <option value="">— kein Commit —</option>
+                      <option
+                        v-for="commit in commitsByModel.get(modelId) ?? []"
+                        :key="commit.id"
+                        :value="commit.id"
+                      >
+                        {{ commitShort(commit) }}
+                      </option>
+                    </select>
+                  </div>
+                </template>
               </div>
               <div class="issue-picker">
                 <label>Labels</label>
