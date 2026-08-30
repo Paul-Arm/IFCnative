@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -12,9 +13,21 @@ import type { SqlClient } from "./sqlClient";
  * minimal übersetzt:
  * - "$N"-Platzhalter -> "?N" (nummerierte SQLite-Parameter, wiederverwendbar)
  * - "::jsonb"-Casts entfernt (Summary wird als TEXT gespeichert)
+ *
+ * Transaktionen: Es gibt genau EINE Verbindung. Damit parallele Requests
+ * nicht in eine fremde offene Transaktion hineinschreiben, serialisiert ein
+ * Mutex die Transaktionen, und einfache Queries warten, solange eine fremde
+ * Transaktion offen ist. Der eigene Transaktions-Kontext wird per
+ * AsyncLocalStorage erkannt (verschachtelte Aufrufe treten der äußeren
+ * Transaktion bei).
  */
 export class SqliteClient implements SqlClient {
   private readonly db: DatabaseSync;
+  private readonly txContext = new AsyncLocalStorage<true>();
+  /** Kette der wartenden Transaktionen (Mutex) — zeigt auf das Ende. */
+  private txTail: Promise<void> = Promise.resolve();
+  /** Auflösung der aktuell OFFENEN Transaktion (null = keine offen). */
+  private openTx: Promise<void> | null = null;
 
   constructor(path: string) {
     if (path !== ":memory:") {
@@ -25,10 +38,7 @@ export class SqliteClient implements SqlClient {
     this.db.exec("pragma foreign_keys = ON;");
   }
 
-  async query<T = unknown>(
-    text: string,
-    params: unknown[] = [],
-  ): Promise<{ rows: T[] }> {
+  private run<T>(text: string, params: unknown[]): { rows: T[] } {
     const sql = text
       .replace(/::jsonb/g, "")
       .replace(/\$(\d+)/g, "?$1");
@@ -41,6 +51,52 @@ export class SqliteClient implements SqlClient {
     }
     statement.run(...values);
     return { rows: [] };
+  }
+
+  async query<T = unknown>(
+    text: string,
+    params: unknown[] = [],
+  ): Promise<{ rows: T[] }> {
+    // Fremde offene Transaktion nicht kontaminieren: warten, bis sie zu ist.
+    while (this.openTx && !this.txContext.getStore()) {
+      await this.openTx;
+    }
+    return this.run<T>(text, params);
+  }
+
+  async transaction<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.txContext.getStore()) {
+      // Verschachtelt: in der äußeren Transaktion weiterlaufen.
+      return fn();
+    }
+    let release!: () => void;
+    const turn = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const previous = this.txTail;
+    this.txTail = previous.then(() => turn);
+    await previous;
+    this.openTx = turn;
+    try {
+      return await this.txContext.run(true, async () => {
+        this.db.exec("begin immediate");
+        try {
+          const result = await fn();
+          this.db.exec("commit");
+          return result;
+        } catch (error) {
+          try {
+            this.db.exec("rollback");
+          } catch {
+            // Rollback-Fehler nicht über den eigentlichen Fehler stellen.
+          }
+          throw error;
+        }
+      });
+    } finally {
+      this.openTx = null;
+      release();
+    }
   }
 
   async end(): Promise<void> {

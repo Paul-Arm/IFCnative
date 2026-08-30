@@ -262,6 +262,13 @@ export interface ActionRun {
 }
 
 export interface Repository {
+  /**
+   * Führt `fn` atomar aus (SQL: BEGIN/COMMIT mit Rollback bei Fehler;
+   * In-Memory: direkter Aufruf). Verschachtelte Aufrufe treten der äußeren
+   * Transaktion bei.
+   */
+  transaction<T>(fn: () => Promise<T>): Promise<T>;
+
   // Users
   createUser(input: Omit<User, "id" | "createdAt">): Promise<User>;
   getUserByEmail(email: string): Promise<User | null>;
@@ -327,6 +334,13 @@ export interface Repository {
       /** Feste Id (z. B. BCF-Topic-Guid beim Import); sonst zufällig. */
       id?: string;
     },
+  ): Promise<Issue>;
+  /** Issue + Zuordnungen atomar anlegen (inkl. Retry bei Nummern-Races). */
+  createIssueWithLinks(
+    input: Omit<Issue, "id" | "number" | "createdAt" | "updatedAt"> & {
+      id?: string;
+    },
+    links: Partial<IssueLinks>,
   ): Promise<Issue>;
   getIssue(projectId: string, number: number): Promise<Issue | null>;
   /** Issue direkt über die Id (projektübergreifend, für BCF-Dedupe). */

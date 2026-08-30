@@ -129,6 +129,8 @@ export class CommitService {
 
     const commitId = randomUUID();
     const blobKey = this.blobKey(model.id, commitId);
+    // Blob zuerst: schlägt die DB-Transaktion fehl, bleibt höchstens ein
+    // harmloser verwaister Blob zurück — nie ein Commit ohne Datei.
     await this.store.put(blobKey, ifcText, "application/x-step");
 
     const commit: Commit = {
@@ -148,9 +150,12 @@ export class CommitService {
       modified: diff.modified.length,
     };
 
-    await this.repo.createCommit(commit);
-    await this.repo.saveManifest(commitId, [...manifest.entries.values()]);
-    await this.repo.setBranchHead(branch.id, commit.id);
+    // Commit + Manifest + Branch-Head atomar — kein halber Commit bei Crash.
+    await this.repo.transaction(async () => {
+      await this.repo.createCommit(commit);
+      await this.repo.saveManifest(commitId, [...manifest.entries.values()]);
+      await this.repo.setBranchHead(branch.id, commit.id);
+    });
 
     return { commit, diff };
   }
@@ -209,9 +214,11 @@ export class CommitService {
       modified: 0,
     };
 
-    await this.repo.createCommit(commit);
-    await this.repo.saveManifest(commitId, []);
-    await this.repo.setBranchHead(branch.id, commit.id);
+    await this.repo.transaction(async () => {
+      await this.repo.createCommit(commit);
+      await this.repo.saveManifest(commitId, []);
+      await this.repo.setBranchHead(branch.id, commit.id);
+    });
 
     return { commit, diff };
   }

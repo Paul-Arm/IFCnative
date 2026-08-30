@@ -58,6 +58,11 @@ export class MemoryRepository implements Repository {
     return new Date().toISOString();
   }
 
+  /** In-Memory gibt es keine echte Atomarität — fn läuft direkt. */
+  async transaction<T>(fn: () => Promise<T>): Promise<T> {
+    return fn();
+  }
+
   async createUser(input: Omit<User, "id" | "createdAt">): Promise<User> {
     const user: User = { ...input, id: randomUUID(), createdAt: this.now() };
     this.users.set(user.id, user);
@@ -508,6 +513,15 @@ export class MemoryRepository implements Repository {
 
   async getIssueById(issueId: string): Promise<Issue | null> {
     return this.issues.get(issueId) ?? null;
+  }
+
+  async createIssueWithLinks(
+    input: Parameters<MemoryRepository["createIssue"]>[0],
+    links: Partial<IssueLinks>,
+  ): Promise<Issue> {
+    const issue = await this.createIssue(input);
+    await this.setIssueLinks(issue.id, links);
+    return issue;
   }
 
   async getIssue(projectId: string, number: number): Promise<Issue | null> {

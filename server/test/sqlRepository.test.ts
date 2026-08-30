@@ -14,9 +14,29 @@ import { ifcModel, PSET } from "./fixtures";
 
 async function setup() {
   const db = new PGlite();
+  // Testclient: eine Verbindung, Tests laufen sequenziell — BEGIN/COMMIT
+  // direkt auf der Verbindung reicht (verschachtelt via Tiefenzähler).
+  let txDepth = 0;
   const sql: SqlClient = {
     query: (text, params) =>
       db.query(text, params as unknown[]) as Promise<{ rows: never[] }>,
+    async transaction<T>(fn: () => Promise<T>): Promise<T> {
+      if (txDepth > 0) {
+        return fn();
+      }
+      txDepth += 1;
+      await db.query("begin");
+      try {
+        const result = await fn();
+        await db.query("commit");
+        return result;
+      } catch (error) {
+        await db.query("rollback").catch(() => undefined);
+        throw error;
+      } finally {
+        txDepth -= 1;
+      }
+    },
   };
   const repo = new SqlRepository(sql);
   await repo.migrate();

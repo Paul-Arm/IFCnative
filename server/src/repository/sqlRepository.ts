@@ -33,6 +33,21 @@ import type {
 /** Insert rows in chunks to stay well under Postgres' parameter limit. */
 const INSERT_CHUNK = 400;
 
+/** Wiederholungen bei Nummern-Races (unique constraint auf Laufnummern). */
+const NUMBER_RETRIES = 5;
+
+/** Unique-Verletzung erkennen — pg (Code 23505) und SQLite (Meldungstext). */
+function isUniqueViolation(error: unknown): boolean {
+  const code = (error as { code?: string })?.code;
+  if (code === "23505") {
+    return true;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    /unique constraint/i.test(message) || /duplicate key/i.test(message)
+  );
+}
+
 interface UserRow {
   id: string;
   email: string;
@@ -255,6 +270,10 @@ export class SqlRepository implements Repository {
     }
   }
 
+  async transaction<T>(fn: () => Promise<T>): Promise<T> {
+    return this.sql.transaction(fn);
+  }
+
   private now(): string {
     return new Date().toISOString();
   }
@@ -336,13 +355,15 @@ export class SqlRepository implements Repository {
   }
 
   async deleteUser(userId: string): Promise<void> {
-    await this.sql.query(`delete from issue_assignees where user_id = $1`, [
-      userId,
-    ]);
-    await this.sql.query(`delete from project_members where user_id = $1`, [
-      userId,
-    ]);
-    await this.sql.query(`delete from users where id = $1`, [userId]);
+    await this.sql.transaction(async () => {
+      await this.sql.query(`delete from issue_assignees where user_id = $1`, [
+        userId,
+      ]);
+      await this.sql.query(`delete from project_members where user_id = $1`, [
+        userId,
+      ]);
+      await this.sql.query(`delete from users where id = $1`, [userId]);
+    });
   }
 
   async listAllProjects(): Promise<Project[]> {
@@ -521,6 +542,10 @@ export class SqlRepository implements Repository {
   }
 
   async deleteModel(modelId: string): Promise<string[]> {
+    return this.sql.transaction(() => this.deleteModelInTx(modelId));
+  }
+
+  private async deleteModelInTx(modelId: string): Promise<string[]> {
     const { rows } = await this.sql.query<{ id: string; blob_key: string }>(
       `select id, blob_key from commits where model_id = $1`,
       [modelId],
@@ -568,45 +593,51 @@ export class SqlRepository implements Repository {
   }
 
   async deleteProject(projectId: string): Promise<string[]> {
-    const blobKeys: string[] = [];
-    for (const model of await this.listModels(projectId)) {
-      blobKeys.push(...(await this.deleteModel(model.id)));
-    }
-    for (const junction of [
-      "issue_assignees",
-      "issue_models",
-      "issue_label_links",
-      "issue_guids",
-      "issue_comments",
-    ]) {
-      await this.sql.query(
-        `delete from ${junction} where issue_id in
-           (select id from issues where project_id = $1)`,
+    return this.sql.transaction(async () => {
+      const blobKeys: string[] = [];
+      for (const model of await this.listModels(projectId)) {
+        blobKeys.push(...(await this.deleteModelInTx(model.id)));
+      }
+      for (const junction of [
+        "issue_assignees",
+        "issue_models",
+        "issue_label_links",
+        "issue_guids",
+        "issue_comments",
+      ]) {
+        await this.sql.query(
+          `delete from ${junction} where issue_id in
+             (select id from issues where project_id = $1)`,
+          [projectId],
+        );
+      }
+      await this.sql.query(`delete from issues where project_id = $1`, [
+        projectId,
+      ]);
+      await this.sql.query(`delete from labels where project_id = $1`, [
+        projectId,
+      ]);
+      // Bibliotheksdateien gehören nicht dem Projekt — deren Blobs bleiben.
+      const { rows: actionRows } = await this.sql.query<{ file_key: string }>(
+        `select file_key from actions where project_id = $1 and library_file_id is null`,
         [projectId],
       );
-    }
-    await this.sql.query(`delete from issues where project_id = $1`, [projectId]);
-    await this.sql.query(`delete from labels where project_id = $1`, [projectId]);
-    // Bibliotheksdateien gehören nicht dem Projekt — deren Blobs bleiben.
-    const { rows: actionRows } = await this.sql.query<{ file_key: string }>(
-      `select file_key from actions where project_id = $1 and library_file_id is null`,
-      [projectId],
-    );
-    blobKeys.push(...actionRows.map((row) => row.file_key));
-    await this.sql.query(`delete from action_runs where project_id = $1`, [
-      projectId,
-    ]);
-    await this.sql.query(`delete from actions where project_id = $1`, [
-      projectId,
-    ]);
-    await this.sql.query(`delete from project_members where project_id = $1`, [
-      projectId,
-    ]);
-    await this.sql.query(`delete from project_folders where project_id = $1`, [
-      projectId,
-    ]);
-    await this.sql.query(`delete from projects where id = $1`, [projectId]);
-    return blobKeys;
+      blobKeys.push(...actionRows.map((row) => row.file_key));
+      await this.sql.query(`delete from action_runs where project_id = $1`, [
+        projectId,
+      ]);
+      await this.sql.query(`delete from actions where project_id = $1`, [
+        projectId,
+      ]);
+      await this.sql.query(`delete from project_members where project_id = $1`, [
+        projectId,
+      ]);
+      await this.sql.query(`delete from project_folders where project_id = $1`, [
+        projectId,
+      ]);
+      await this.sql.query(`delete from projects where id = $1`, [projectId]);
+      return blobKeys;
+    });
   }
 
   // ---- labels + issues -------------------------------------------------
@@ -661,7 +692,26 @@ export class SqlRepository implements Repository {
     };
   }
 
-  async createIssue(
+  /**
+   * Transaktion mit Wiederholung bei Nummern-Races: Laufnummern entstehen
+   * per max+1; kollidieren zwei parallele Anlagen, faengt der Unique-
+   * Constraint das ab und der komplette Versuch laeuft erneut.
+   */
+  private async withNumberRetry<T>(fn: () => Promise<T>): Promise<T> {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await this.sql.transaction(fn);
+      } catch (error) {
+        if (attempt < NUMBER_RETRIES && isUniqueViolation(error)) {
+          continue;
+        }
+        throw error;
+      }
+    }
+  }
+
+  /** Nur innerhalb einer Transaktion aufrufen (Nummer per max+1). */
+  private async insertIssueInTx(
     input: Omit<Issue, "id" | "number" | "createdAt" | "updatedAt"> & {
       id?: string;
     },
@@ -695,6 +745,27 @@ export class SqlRepository implements Repository {
       ],
     );
     return issue;
+  }
+
+  async createIssue(
+    input: Omit<Issue, "id" | "number" | "createdAt" | "updatedAt"> & {
+      id?: string;
+    },
+  ): Promise<Issue> {
+    return this.withNumberRetry(() => this.insertIssueInTx(input));
+  }
+
+  async createIssueWithLinks(
+    input: Omit<Issue, "id" | "number" | "createdAt" | "updatedAt"> & {
+      id?: string;
+    },
+    links: Partial<IssueLinks>,
+  ): Promise<Issue> {
+    return this.withNumberRetry(async () => {
+      const issue = await this.insertIssueInTx(input);
+      await this.setIssueLinksInTx(issue.id, links);
+      return issue;
+    });
   }
 
   async getIssue(projectId: string, number: number): Promise<Issue | null> {
@@ -747,6 +818,13 @@ export class SqlRepository implements Repository {
   }
 
   async setIssueLinks(
+    issueId: string,
+    links: Partial<IssueLinks>,
+  ): Promise<void> {
+    await this.sql.transaction(() => this.setIssueLinksInTx(issueId, links));
+  }
+
+  private async setIssueLinksInTx(
     issueId: string,
     links: Partial<IssueLinks>,
   ): Promise<void> {
@@ -1014,48 +1092,52 @@ export class SqlRepository implements Repository {
   }
 
   async deleteAction(actionId: string): Promise<void> {
-    await this.sql.query(`delete from action_runs where action_id = $1`, [
-      actionId,
-    ]);
-    await this.sql.query(`delete from actions where id = $1`, [actionId]);
+    await this.sql.transaction(async () => {
+      await this.sql.query(`delete from action_runs where action_id = $1`, [
+        actionId,
+      ]);
+      await this.sql.query(`delete from actions where id = $1`, [actionId]);
+    });
   }
 
   async createActionRun(
     input: Omit<ActionRun, "id" | "number" | "createdAt">,
   ): Promise<ActionRun> {
-    const { rows } = await this.sql.query<{ next: number }>(
-      `select coalesce(max(number), 0) + 1 as next from action_runs where project_id = $1`,
-      [input.projectId],
-    );
-    const run: ActionRun = {
-      ...input,
-      id: randomUUID(),
-      number: Number(rows[0]?.next ?? 1),
-      createdAt: this.now(),
-    };
-    await this.sql.query(
-      `insert into action_runs
-        (id, project_id, action_id, model_id, commit_id, number, status,
-         summary, log, triggered_by, created_at, started_at, finished_at, failed_guids)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
-      [
-        run.id,
-        run.projectId,
-        run.actionId,
-        run.modelId,
-        run.commitId,
-        run.number,
-        run.status,
-        run.summary,
-        run.log,
-        run.triggeredById,
-        run.createdAt,
-        run.startedAt,
-        run.finishedAt,
-        JSON.stringify(run.failedGuids ?? []),
-      ],
-    );
-    return run;
+    return this.withNumberRetry(async () => {
+      const { rows } = await this.sql.query<{ next: number }>(
+        `select coalesce(max(number), 0) + 1 as next from action_runs where project_id = $1`,
+        [input.projectId],
+      );
+      const run: ActionRun = {
+        ...input,
+        id: randomUUID(),
+        number: Number(rows[0]?.next ?? 1),
+        createdAt: this.now(),
+      };
+      await this.sql.query(
+        `insert into action_runs
+          (id, project_id, action_id, model_id, commit_id, number, status,
+           summary, log, triggered_by, created_at, started_at, finished_at, failed_guids)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+        [
+          run.id,
+          run.projectId,
+          run.actionId,
+          run.modelId,
+          run.commitId,
+          run.number,
+          run.status,
+          run.summary,
+          run.log,
+          run.triggeredById,
+          run.createdAt,
+          run.startedAt,
+          run.finishedAt,
+          JSON.stringify(run.failedGuids ?? []),
+        ],
+      );
+      return run;
+    });
   }
 
   async getActionRun(runId: string): Promise<ActionRun | null> {
@@ -1238,6 +1320,13 @@ export class SqlRepository implements Repository {
   // ---- manifests (deduped entity store) --------------------------------
 
   async saveManifest(
+    commitId: string,
+    entries: VersionManifestEntry[],
+  ): Promise<void> {
+    await this.sql.transaction(() => this.saveManifestInTx(commitId, entries));
+  }
+
+  private async saveManifestInTx(
     commitId: string,
     entries: VersionManifestEntry[],
   ): Promise<void> {

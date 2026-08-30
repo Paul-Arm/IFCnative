@@ -75,6 +75,7 @@ import {
     buildObjectInfoIndex,
     catalogObjectLabel,
     combineNativeBodyElements,
+    createMinimalIfcProjectWithFreshGuids,
     createNativeSampleDocument,
     diffNativeDocuments,
     duplicateNativeBodyElement,
@@ -157,6 +158,7 @@ import {
     RELATION_TYPES,
 } from "./ifc-workspace/constants";
 import { DeleteEntityDialog } from "./ifc-workspace/DeleteEntityDialog";
+import { type NewIfcDraft } from "./ifc-workspace/NewIfcDialog";
 import { DiagnosticsAssistantPanel } from "./ifc-workspace/DiagnosticsAssistantPanel";
 import {
     clearRecoveryDocuments,
@@ -175,6 +177,11 @@ import {
 } from "./ifc-workspace/InspectorPanel";
 import { CheckPanel } from "./ifc-workspace/CheckPanel";
 import { PortalPanel } from "./ifc-workspace/PortalPanel";
+import { SaveDialog } from "./ifc-workspace/SaveDialog";
+import {
+    StartPage,
+    type StartPageHubDocument,
+} from "./ifc-workspace/StartPage";
 import { VcsPanel } from "./ifc-workspace/VcsPanel";
 import { PortalSettingsPanel } from "./ifc-workspace/PortalSettingsPanel";
 import { PsetBatchPanel } from "./ifc-workspace/PsetBatchPanel";
@@ -214,6 +221,8 @@ import {
     saveVcsSettings,
     type RecentIfcFileEntry,
 } from "./ifc-workspace/workspaceStorage";
+import { VcsApiClient } from "@/vcs/client";
+import type { VcsDocumentOrigin } from "@/vcs/types";
 import type { RelationshipFlowClipboardNode } from "./relationship-flow.types";
 import ThatOpenViewer from "./that-open-viewer";
 import type {
@@ -284,6 +293,12 @@ interface WorkspaceDocumentSession {
   sourceIfcFile: File | null;
   redoStack: WorkspaceHistoryEntry[];
   undoStack: WorkspaceHistoryEntry[];
+  /**
+   * Hub-Herkunft des Dokuments (Projekt/Modell/Branch): gesetzt, wenn der
+   * Stand vom IFC Hub geladen wurde. Steuert den Speichern-Dialog mit der
+   * Option "auf den Hub committen"; null = rein lokales Dokument.
+   */
+  vcsOrigin: VcsDocumentOrigin | null;
   viewerModelBytes: ArrayBuffer | null;
   viewerModelDeferredReason: string;
   viewerModelFile: File | null;
@@ -311,6 +326,7 @@ function createWorkspaceDocumentSession(
     id?: string;
     selectedId?: number;
     text?: string;
+    vcsOrigin?: VcsDocumentOrigin | null;
     viewerModelLoadRequested?: boolean;
     viewerModelRevision?: number;
   },
@@ -344,6 +360,7 @@ function createWorkspaceDocumentSession(
     sourceIfcBytes: sourceBytes,
     sourceIfcFile: sourceFile,
     undoStack: [],
+    vcsOrigin: options?.vcsOrigin ?? null,
     viewerModelBytes: sourceBytes,
     viewerModelDeferredReason,
     viewerModelFile: sourceFile,
@@ -491,6 +508,7 @@ export default function IfcWorkspace() {
     RecoveredDocument[]
   >([]);
   const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const { scale: uiScale, setScale: setUiScale } = useUiScale();
   const allWorkspaces = useMemo(
     () => [...BUILT_IN_WORKSPACES, ...customWorkspaces],
@@ -516,6 +534,13 @@ export default function IfcWorkspace() {
   const hasUnexportedChanges = activeSession.hasUnexportedChanges;
   const undoStack = activeSession.undoStack ?? [];
   const redoStack = activeSession.redoStack ?? [];
+  // Startseite: sichtbar, solange nur das unberührte Startdokument offen
+  // ist. Jedes echte Öffnen (Picker, Drop, Hub, Neue IFC, Desktop-Übergabe,
+  // Recovery) ersetzt bzw. ergänzt die Sessions und blendet sie dadurch aus.
+  const showStartPage =
+    documentSessions.length === 1 &&
+    documentSessions[0].id === initialDocument.id &&
+    !documentSessions[0].hasUnexportedChanges;
 
   const updateActiveSession = (
     updater: (session: WorkspaceDocumentSession) => WorkspaceDocumentSession,
@@ -1692,7 +1717,11 @@ export default function IfcWorkspace() {
 
   // Ein Versionsstand aus der IFC-Ablage wird als ZUSÄTZLICHER Tab geöffnet
   // (wie "Hinzufügen"), damit der aktuelle Arbeitsstand erhalten bleibt.
-  const openIfcTextFromVcs = async (text: string, fileName: string) => {
+  const openIfcTextFromVcs = async (
+    text: string,
+    fileName: string,
+    origin?: VcsDocumentOrigin,
+  ) => {
     setLoadingIfcName(fileName);
     try {
       const file = new File([text], fileName, { type: "application/x-step" });
@@ -1701,6 +1730,7 @@ export default function IfcWorkspace() {
         bytes: parsed.bytes,
         file,
         text,
+        vcsOrigin: origin ?? null,
       });
       startTransition(() => {
         setDocumentSessions((current) => [...current, session]);
@@ -1711,6 +1741,183 @@ export default function IfcWorkspace() {
     } finally {
       setLoadingIfcName("");
     }
+  };
+
+  // Startseite: per Drag-&-Drop übergebene IFC-Dateien öffnen. Ersetzt die
+  // Sessions komplett — die Startseite ist nur sichtbar, solange lediglich
+  // das unberührte Beispieldokument offen ist.
+  const openDroppedIfcFiles = async (files: File[]) => {
+    try {
+      setLoadingIfcName(
+        files.length === 1 ? files[0].name : `${files.length} IFC-Dateien`,
+      );
+      const nextSessions: WorkspaceDocumentSession[] = [];
+      for (const file of files) {
+        const parsed = await parseNativeIfcFileInWorker(file, file.name);
+        const session = createWorkspaceDocumentSession(parsed.document, {
+          bytes: parsed.bytes,
+          file,
+        });
+        nextSessions.push(session);
+        rememberRecentIfc(session, "opened", file);
+      }
+      startTransition(() => {
+        setDocumentSessions(nextSessions);
+        setActiveDocumentId(nextSessions[0].id);
+      });
+      setStatusAlert({
+        message:
+          files.length === 1
+            ? `${files[0].name} geöffnet.`
+            : `${files.length} IFC-Dateien geöffnet.`,
+        tone: "success",
+      });
+      logAction(`ui.startPage.drop({ files: ${files.length} });`);
+    } catch (error) {
+      reportFailure("IFC-Dateien konnten nicht geöffnet werden", error);
+    } finally {
+      setLoadingIfcName("");
+    }
+  };
+
+  // Startseite: vom Hub geladene Stände (einzelnes Modell oder ganzer
+  // Ordner) als Tabs öffnen — ersetzt das unberührte Beispieldokument.
+  const openHubDocuments = async (hubDocuments: StartPageHubDocument[]) => {
+    try {
+      setLoadingIfcName(
+        hubDocuments.length === 1
+          ? hubDocuments[0].fileName
+          : `${hubDocuments.length} Modelle vom IFC Hub`,
+      );
+      const nextSessions: WorkspaceDocumentSession[] = [];
+      for (const entry of hubDocuments) {
+        const file = new File([entry.text], entry.fileName, {
+          type: "application/x-step",
+        });
+        const parsed = await parseNativeIfcFileInWorker(file, entry.fileName);
+        const session = createWorkspaceDocumentSession(parsed.document, {
+          bytes: parsed.bytes,
+          file,
+          text: entry.text,
+          vcsOrigin: entry.origin,
+        });
+        nextSessions.push(session);
+        rememberRecentIfc(session, "opened", file);
+      }
+      startTransition(() => {
+        setDocumentSessions(nextSessions);
+        setActiveDocumentId(nextSessions[0].id);
+      });
+      setStatusAlert({
+        message:
+          hubDocuments.length === 1
+            ? `${hubDocuments[0].fileName} vom IFC Hub geladen.`
+            : `${hubDocuments.length} Modelle vom IFC Hub geladen.`,
+        tone: "success",
+      });
+      logAction(`ui.startPage.hubOpen({ files: ${hubDocuments.length} });`);
+    } catch (error) {
+      reportFailure("Laden vom IFC Hub fehlgeschlagen", error);
+    } finally {
+      setLoadingIfcName("");
+    }
+  };
+
+  // Startseite: neue IFC-Datei aus den abgefragten Startwerten erstellen —
+  // frische GlobalIds, wahlweise mit Beispielobjekt oder nur der Struktur.
+  const createNewIfcDocument = async (draft: NewIfcDraft) => {
+    try {
+      setLoadingIfcName(draft.fileName);
+      const text = createMinimalIfcProjectWithFreshGuids({
+        author: draft.author || undefined,
+        buildingName: draft.buildingName,
+        name: draft.projectName,
+        organization: draft.organization || undefined,
+        products: draft.includeSampleProduct ? undefined : [],
+        siteName: draft.siteName,
+        storeyName: draft.storeyName,
+      });
+      const file = new File([text], draft.fileName, {
+        type: "application/x-step",
+      });
+      const parsed = await parseNativeIfcFileInWorker(file, draft.fileName);
+      const session: WorkspaceDocumentSession = {
+        ...createWorkspaceDocumentSession(parsed.document, {
+          bytes: parsed.bytes,
+          file,
+          text,
+        }),
+        // Die frische Datei existiert noch nirgendwo auf der Platte —
+        // Autosave/Recovery und Tab-Punkt sollen sie sofort schützen.
+        hasUnexportedChanges: true,
+      };
+      startTransition(() => {
+        setDocumentSessions([session]);
+        setActiveDocumentId(session.id);
+      });
+      rememberRecentIfc(session, "sample", file);
+      setStatusAlert({
+        message: `${draft.fileName} erstellt.`,
+        tone: "success",
+      });
+      logAction(
+        `ui.startPage.newIfc({ file: '${draft.fileName}', sampleProduct: ${draft.includeSampleProduct} });`,
+      );
+    } catch (error) {
+      reportFailure("Neue IFC konnte nicht erstellt werden", error);
+    } finally {
+      setLoadingIfcName("");
+    }
+  };
+
+  // Speichern: Hub-Dokumente bekommen den Dialog (lokal ODER committen),
+  // rein lokale Dokumente exportieren wie bisher direkt.
+  const saveActiveDocument = () => {
+    if (activeSession.vcsOrigin) {
+      setSaveDialogOpen(true);
+    } else {
+      void exportIfc();
+    }
+  };
+
+  // Aktiven Stand mit Nachricht auf den Herkunfts-Branch des IFC Hub
+  // committen. Wirft bei Fehlern — der Speichern-Dialog zeigt sie an und
+  // bleibt offen, statt sie hinter dem Overlay zu verstecken.
+  const commitActiveDocumentToHub = async (message: string) => {
+    const origin = activeSession.vcsOrigin;
+    if (!origin) {
+      return;
+    }
+    if (!vcsAuth) {
+      throw new Error("Nicht am IFC Hub angemeldet.");
+    }
+    const client = new VcsApiClient(vcsSettings, vcsAuth);
+    const ifcText = getVcsIfcText();
+    const result = await client.createCommit(
+      origin.projectSlug,
+      origin.modelSlug,
+      { branch: origin.branch, message, ifcText },
+    );
+    updateActiveSession((session) => ({
+      ...session,
+      documentText: ifcText,
+      documentTextDirty: false,
+      // Der Stand liegt jetzt versioniert auf dem Hub — wie ein Export.
+      hasUnexportedChanges: false,
+      vcsOrigin: session.vcsOrigin
+        ? { ...session.vcsOrigin, commitId: result.commit.id }
+        : session.vcsOrigin,
+    }));
+    setSaveDialogOpen(false);
+    setStatusAlert({
+      message: result.diff.identical
+        ? `Commit ${result.commit.id.slice(0, 8)} auf ${origin.branch} angelegt (Stand identisch mit dem Branch-Kopf).`
+        : `Commit ${result.commit.id.slice(0, 8)} auf ${origin.branch} angelegt: ${result.diff.added.length} neu, ${result.diff.modified.length} geändert, ${result.diff.removed.length} entfernt.`,
+      tone: "success",
+    });
+    logAction(
+      `ui.saveDialog.commit({ project: '${origin.projectSlug}', model: '${origin.modelSlug}', branch: '${origin.branch}', commit: '${result.commit.id.slice(0, 8)}' });`,
+    );
   };
 
   // Erfolgsmeldungen verschwinden von selbst; Fehler bleiben stehen, bis sie
@@ -4404,6 +4611,78 @@ export default function IfcWorkspace() {
     </Tabs>
   );
 
+  // Von Startseite UND Arbeitsansicht geteilt: Recovery-Angebot und
+  // Statusmeldungen müssen auch auf der Startseite sichtbar sein.
+  const recoveryBanner = recoveredDocuments.length ? (
+    <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-warning/40 bg-warning/10 px-3 py-1.5 text-xs">
+      <span className="font-medium">
+        Nicht exportierte Änderungen aus einer früheren Sitzung gefunden:
+      </span>
+      <span className="text-muted-foreground">
+        {recoveredDocuments
+          .map(
+            (entry) =>
+              `${entry.fileName} (${entry.entityCount.toLocaleString("de-DE")} Entitäten, ${new Date(entry.savedAt).toLocaleString("de-DE")})`,
+          )
+          .join(" · ")}
+      </span>
+      <Button
+        disabled={recoveryBusy}
+        variant="default"
+        onClick={() => void restoreRecoveredDocuments()}
+      >
+        {recoveryBusy ? "Stellt wieder her…" : "Wiederherstellen"}
+      </Button>
+      <Button
+        disabled={recoveryBusy}
+        onClick={() => void discardRecoveredDocuments()}
+      >
+        Verwerfen
+      </Button>
+    </div>
+  ) : null;
+
+  const statusAlertBar = statusAlert ? (
+    <div
+      className={`flex shrink-0 items-center gap-2 border-b px-3 py-1.5 text-xs ${
+        statusAlert.tone === "danger"
+          ? "border-destructive/40 bg-destructive/10 text-destructive"
+          : "border-border/70 bg-muted/40 text-muted-foreground"
+      }`}
+      role={statusAlert.tone === "danger" ? "alert" : "status"}
+    >
+      <span className="min-w-0 flex-1 break-words">{statusAlert.message}</span>
+      <button
+        aria-label="Meldung schließen"
+        className="shrink-0 rounded-sm p-0.5 hover:bg-foreground/10"
+        type="button"
+        onClick={() => setStatusAlert(null)}
+      >
+        <X aria-hidden className="size-3" />
+      </button>
+    </div>
+  ) : null;
+
+  if (showStartPage) {
+    return (
+      <div className="flex min-h-screen flex-col bg-background text-foreground">
+        {recoveryBanner}
+        {statusAlertBar}
+        <StartPage
+          auth={vcsAuth}
+          loadingName={loadingIfcName}
+          settings={vcsSettings}
+          onAuthChange={setVcsAuth}
+          onCreateNewIfc={(draft) => void createNewIfcDocument(draft)}
+          onOpenDroppedFiles={(files) => void openDroppedIfcFiles(files)}
+          onOpenFilePicker={() => void openIfc()}
+          onOpenHubDocuments={openHubDocuments}
+          onSettingsChange={setVcsSettings}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
       <header className="relative z-20 flex shrink-0 flex-col gap-2 border-b border-border/70 bg-card/95 px-3 pt-2 pb-0 shadow-sm backdrop-blur lg:flex-row lg:items-center lg:gap-3">
@@ -4430,11 +4709,17 @@ export default function IfcWorkspace() {
           </Button>
           <Button
             disabled={Boolean(loadingIfcName)}
-            title="Aktives Dokument als IFC exportieren"
-            onClick={() => void exportIfc()}
+            title={
+              activeSession.vcsOrigin
+                ? "Lokal speichern oder auf den IFC Hub committen"
+                : "Aktives Dokument als IFC exportieren"
+            }
+            onClick={saveActiveDocument}
           >
             <HardDriveDownload aria-hidden className="size-3.5" />
-            <span className="hidden xl:inline">Exportieren</span>
+            <span className="hidden xl:inline">
+              {activeSession.vcsOrigin ? "Speichern" : "Exportieren"}
+            </span>
           </Button>
           <div className="mx-1 h-5 w-px bg-border/70" />
           <IconButton
@@ -4474,57 +4759,9 @@ export default function IfcWorkspace() {
         </div>
       </header>
 
-      {recoveredDocuments.length ? (
-        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-warning/40 bg-warning/10 px-3 py-1.5 text-xs">
-          <span className="font-medium">
-            Nicht exportierte Änderungen aus einer früheren Sitzung gefunden:
-          </span>
-          <span className="text-muted-foreground">
-            {recoveredDocuments
-              .map(
-                (entry) =>
-                  `${entry.fileName} (${entry.entityCount.toLocaleString("de-DE")} Entitäten, ${new Date(entry.savedAt).toLocaleString("de-DE")})`,
-              )
-              .join(" · ")}
-          </span>
-          <Button
-            disabled={recoveryBusy}
-            variant="default"
-            onClick={() => void restoreRecoveredDocuments()}
-          >
-            {recoveryBusy ? "Stellt wieder her…" : "Wiederherstellen"}
-          </Button>
-          <Button
-            disabled={recoveryBusy}
-            onClick={() => void discardRecoveredDocuments()}
-          >
-            Verwerfen
-          </Button>
-        </div>
-      ) : null}
+      {recoveryBanner}
 
-      {statusAlert ? (
-        <div
-          className={`flex shrink-0 items-center gap-2 border-b px-3 py-1.5 text-xs ${
-            statusAlert.tone === "danger"
-              ? "border-destructive/40 bg-destructive/10 text-destructive"
-              : "border-border/70 bg-muted/40 text-muted-foreground"
-          }`}
-          role={statusAlert.tone === "danger" ? "alert" : "status"}
-        >
-          <span className="min-w-0 flex-1 break-words">
-            {statusAlert.message}
-          </span>
-          <button
-            aria-label="Meldung schließen"
-            className="shrink-0 rounded-sm p-0.5 hover:bg-foreground/10"
-            type="button"
-            onClick={() => setStatusAlert(null)}
-          >
-            <X aria-hidden className="size-3" />
-          </button>
-        </div>
-      ) : null}
+      {statusAlertBar}
 
       <main className="min-h-0 flex-1 p-1.5">
         <div className="h-full overflow-hidden rounded-lg border border-border/60 bg-muted/30">
@@ -4550,6 +4787,16 @@ export default function IfcWorkspace() {
         plan={deleteRequest?.plan ?? null}
         onCancel={() => setDeleteRequest(null)}
         onConfirm={confirmDeleteEntity}
+      />
+
+      <SaveDialog
+        canCommit={Boolean(vcsAuth)}
+        fileName={document.fileName}
+        open={saveDialogOpen}
+        origin={activeSession.vcsOrigin}
+        onCommit={commitActiveDocumentToHub}
+        onExportLocal={() => void exportIfc()}
+        onOpenChange={setSaveDialogOpen}
       />
 
       <GroupManagerDialog
@@ -4585,6 +4832,16 @@ export default function IfcWorkspace() {
         <span className="ml-auto flex shrink-0 items-center gap-3">
           {loadingIfcName ? (
             <span className="text-primary">Lädt {loadingIfcName}…</span>
+          ) : null}
+          {activeSession.vcsOrigin ? (
+            <span
+              className="max-w-64 truncate"
+              title={`Vom IFC Hub geladen: ${activeSession.vcsOrigin.projectName} / ${activeSession.vcsOrigin.modelName} (${activeSession.vcsOrigin.branch})`}
+            >
+              Hub: {activeSession.vcsOrigin.projectSlug}/
+              {activeSession.vcsOrigin.modelSlug} (
+              {activeSession.vcsOrigin.branch})
+            </span>
           ) : null}
           {hasUnexportedChanges ? (
             <span className="flex items-center gap-1 text-warning-foreground dark:text-warning">

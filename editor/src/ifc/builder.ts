@@ -7,6 +7,10 @@ export interface MinimalProjectOptions {
   siteName?: string;
   buildingName?: string;
   storeyName?: string;
+  /**
+   * Bauteile des Startmodells. Nicht gesetzt = Beispielblock;
+   * explizit leeres Array = Projektstruktur ohne Bauteile.
+   */
   products?: BuilderProductOptions[];
 }
 
@@ -86,14 +90,50 @@ DATA;
 #50=IFCRELAGGREGATES('${SAMPLE_GUIDS[4]}',$,$,$,#1,(#40));
 #51=IFCRELAGGREGATES('${SAMPLE_GUIDS[5]}',$,$,$,#40,(#41));
 #52=IFCRELAGGREGATES('${SAMPLE_GUIDS[6]}',$,$,$,#41,(#42));
-${productStep}#81=IFCRELCONTAINEDINSPATIALSTRUCTURE('${SAMPLE_GUIDS[8]}',$,$,$,(${productIDs.map((id) => `#${id}`).join(",")}),#42);
-ENDSEC;
+${productStep}${
+    productIDs.length
+      ? `#81=IFCRELCONTAINEDINSPATIALSTRUCTURE('${SAMPLE_GUIDS[8]}',$,$,$,(${productIDs.map((id) => `#${id}`).join(",")}),#42);\n`
+      : ""
+  }ENDSEC;
 END-ISO-10303-21;
 `;
 }
 
 export function createMinimalIfcProjectBytes(options?: MinimalProjectOptions) {
   return new TextEncoder().encode(createMinimalIfcProject(options));
+}
+
+/** Zeichensatz der IFC-GlobalId-Kodierung (base64 nach IFC-Konvention). */
+const IFC_GUID_CHARS =
+  "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$";
+
+/** Zufällige 22-stellige IFC-GlobalId (erstes Zeichen auf 0–3 begrenzt). */
+export function createRandomIfcGuid(): string {
+  const bytes = new Uint8Array(22);
+  crypto.getRandomValues(bytes);
+  return [...bytes]
+    .map((byte, index) => IFC_GUID_CHARS[index === 0 ? byte % 4 : byte % 64])
+    .join("");
+}
+
+/**
+ * Wie createMinimalIfcProject, aber mit frischen zufälligen GlobalIds statt
+ * der festen Beispiel-GUIDs — für "Neue IFC erstellen", damit zwei neu
+ * angelegte Dateien nicht dieselben GlobalIds tragen.
+ */
+export function createMinimalIfcProjectWithFreshGuids(
+  options: MinimalProjectOptions = {},
+) {
+  const text = createMinimalIfcProject(options);
+  const replacements = new Map<string, string>();
+  return text.replace(/0IFCnative\d{12}/g, (match) => {
+    let fresh = replacements.get(match);
+    if (!fresh) {
+      fresh = createRandomIfcGuid();
+      replacements.set(match, fresh);
+    }
+    return fresh;
+  });
 }
 
 function escapeStepString(value: string) {
@@ -112,6 +152,11 @@ export function getBuilderProductExpressID(index: number) {
 }
 
 function normalizeProducts(products?: BuilderProductOptions[]) {
+  // Explizit leer = bewusst ohne Bauteile (neue IFC nur mit Struktur);
+  // nur ein FEHLENDES products fällt auf den Beispielblock zurück.
+  if (products && products.length === 0) {
+    return [];
+  }
   const fallback: BuilderProductOptions[] = [
     {
       depth: 2,

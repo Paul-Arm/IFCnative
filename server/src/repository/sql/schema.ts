@@ -196,7 +196,8 @@ create table if not exists action_runs (
   created_at text not null,
   started_at text,
   finished_at text,
-  failed_guids text not null default '[]'
+  failed_guids text not null default '[]',
+  unique (project_id, number)
 );
 create index if not exists action_runs_project_idx on action_runs(project_id);
 create index if not exists action_runs_commit_idx on action_runs(commit_id);

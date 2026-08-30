@@ -21,6 +21,7 @@ import type {
   VcsBranch,
   VcsCommit,
   VcsDiffSummary,
+  VcsDocumentOrigin,
   VcsIssue,
   VcsModel,
   VcsProject,
@@ -52,8 +53,15 @@ export interface VcsPanelProps {
   onAuthChange: (auth: VcsAuth | null) => void;
   /** Serialisiert den aktuellen Editor-Stand als IFC-Text (Export-Regel). */
   getIfcText: () => string;
-  /** Lädt IFC-Text als neuen Dokument-Tab in den Editor. */
-  onLoadIfc: (text: string, fileName: string) => Promise<void>;
+  /**
+   * Lädt IFC-Text als neuen Dokument-Tab in den Editor. Die Hub-Herkunft
+   * macht das Dokument beim Speichern direkt committbar.
+   */
+  onLoadIfc: (
+    text: string,
+    fileName: string,
+    origin?: VcsDocumentOrigin,
+  ) => Promise<void>;
   /**
    * Wählt Objekte per GlobalId im aktiven Dokument aus (Issue-Verortung);
    * gibt die Zahl der gefundenen Objekte zurück.
@@ -370,7 +378,16 @@ export function VcsPanel({
         commit.id,
       );
       const fileName = `${selectedModel?.name ?? modelSlug}-${commit.id.slice(0, 8)}.ifc`;
-      await onLoadIfc(text, fileName);
+      await onLoadIfc(text, fileName, {
+        branch: commit.branchName || branch,
+        commitId: commit.id,
+        modelName: selectedModel?.name ?? modelSlug,
+        modelSlug,
+        projectName:
+          projects.find((project) => project.slug === projectSlug)?.name ??
+          projectSlug,
+        projectSlug,
+      });
       setNotice(`${fileName} als neuer Tab geöffnet.`);
     } catch (openError) {
       setError(errorMessage(openError));

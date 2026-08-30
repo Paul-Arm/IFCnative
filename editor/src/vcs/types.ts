@@ -26,6 +26,20 @@ export interface VcsAuth {
 
 export type VcsRole = "owner" | "maintainer" | "contributor" | "viewer";
 
+/**
+ * Herkunft eines im Editor geöffneten Dokuments aus dem IFC Hub. Dokumente
+ * mit Origin bieten beim Speichern zusätzlich "auf den Hub committen" an.
+ */
+export interface VcsDocumentOrigin {
+  projectSlug: string;
+  projectName: string;
+  modelSlug: string;
+  modelName: string;
+  branch: string;
+  /** Commit, von dem der Stand geladen wurde (null = Branch war leer). */
+  commitId: string | null;
+}
+
 export interface VcsProject {
   id: string;
   slug: string;

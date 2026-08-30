@@ -781,15 +781,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     }
     const links = await validateIssueLinks(project, body, reply);
     if (!links) return reply;
-    const issue = await repo.createIssue({
-      projectId: project.id,
-      title,
-      body: body.body ?? "",
-      state: "open",
-      kind: (body.kind as Issue["kind"] | undefined) ?? "virtual",
-      authorId: user.id,
-    });
-    await repo.setIssueLinks(issue.id, links);
+    // Issue + Zuordnungen atomar (inkl. Retry bei Nummern-Races).
+    const issue = await repo.createIssueWithLinks(
+      {
+        projectId: project.id,
+        title,
+        body: body.body ?? "",
+        state: "open",
+        kind: (body.kind as Issue["kind"] | undefined) ?? "virtual",
+        authorId: user.id,
+      },
+      links,
+    );
     const [enriched] = await enrichIssues(project.id, [issue]);
     return reply.code(201).send({ issue: enriched });
   });
@@ -1043,15 +1046,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         skipped += 1;
         continue;
       }
-      const issue = await repo.createIssue({
-        id: UUID.test(topic.guid) && !existing ? topic.guid : undefined,
-        projectId: project.id,
-        title: topic.title.slice(0, 200),
-        body: topic.description,
-        state: topic.status,
-        kind: "bcf",
-        authorId: user.id,
-      });
       const modelIds = [
         ...new Set(
           topic.fileNames
@@ -1059,14 +1053,25 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             .filter((id): id is string => Boolean(id)),
         ),
       ];
-      await repo.setIssueLinks(issue.id, {
-        guids: topic.guids,
-        models: modelIds.map((modelId) => ({
-          modelId,
-          foundCommitId: null,
-          fixedCommitId: null,
-        })),
-      });
+      const issue = await repo.createIssueWithLinks(
+        {
+          id: UUID.test(topic.guid) && !existing ? topic.guid : undefined,
+          projectId: project.id,
+          title: topic.title.slice(0, 200),
+          body: topic.description,
+          state: topic.status,
+          kind: "bcf",
+          authorId: user.id,
+        },
+        {
+          guids: topic.guids,
+          models: modelIds.map((modelId) => ({
+            modelId,
+            foundCommitId: null,
+            fixedCommitId: null,
+          })),
+        },
+      );
       for (const comment of topic.comments) {
         // Fremde Autoren gibt es hier nicht als Benutzer — Original-Autor
         // und -Datum wandern in den Kommentartext.

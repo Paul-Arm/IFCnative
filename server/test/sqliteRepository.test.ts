@@ -197,6 +197,136 @@ test("SQLite: Issues + Labels + Zuordnungen", async () => {
   assert.equal((await repo.listLabels(project.id)).length, 0);
 });
 
+test("SQLite: Transaktionen rollen bei Fehlern zurueck; Nummern bleiben eindeutig", async () => {
+  const repo = new SqlRepository(new SqliteClient(":memory:"));
+  await repo.migrate();
+
+  const user = await repo.createUser({
+    email: "a@b.c",
+    name: "A",
+    passwordHash: "x",
+    isAdmin: false,
+  });
+  const project = await repo.createProject({
+    slug: "p",
+    name: "P",
+    ownerId: user.id,
+    visibility: "public",
+  });
+  const model = await repo.createModel({
+    projectId: project.id,
+    slug: "m",
+    name: "M",
+    visibility: "private",
+    defaultBranch: "main",
+    folder: "",
+    kind: "ifc",
+  });
+
+  // Rollback: Fehler in der Transaktion macht alle Schritte rueckgaengig.
+  await assert.rejects(
+    repo.transaction(async () => {
+      await repo.addFolder(project.id, "Rollback-Ordner");
+      throw new Error("boom");
+    }),
+    /boom/,
+  );
+  assert.deepEqual(await repo.listFolders(project.id), []);
+
+  // Atomar: schlaegt die Zuordnung fehl (FK auf unbekanntes Modell),
+  // existiert auch das Issue nicht.
+  await assert.rejects(
+    repo.createIssueWithLinks(
+      {
+        projectId: project.id,
+        title: "Halb",
+        body: "",
+        state: "open",
+        kind: "virtual",
+        authorId: user.id,
+      },
+      {
+        models: [
+          {
+            modelId: "00000000-0000-0000-0000-000000000000",
+            foundCommitId: null,
+            fixedCommitId: null,
+          },
+        ],
+      },
+    ),
+  );
+  assert.equal((await repo.listIssues(project.id)).length, 0);
+
+  // Parallele Anlagen: Laufnummern bleiben eindeutig und lueckenlos.
+  await repo.createCommit({
+    id: "c1",
+    modelId: model.id,
+    branchName: "main",
+    parentCommitId: null,
+    manifestHash: "mh",
+    blobKey: "b",
+    schema: "IFC4",
+    authorId: user.id,
+    message: "",
+    createdAt: new Date().toISOString(),
+    entityCount: 0,
+    added: 0,
+    removed: 0,
+    modified: 0,
+  });
+  const action = await repo.createAction({
+    id: "a1",
+    projectId: project.id,
+    name: "A",
+    kind: "ids",
+    fileKey: "k",
+    fileName: "a.ids",
+    libraryFileId: null,
+    scopeFolder: null,
+    scopeModelId: null,
+    runOnCommit: false,
+  });
+  const runs = await Promise.all(
+    Array.from({ length: 6 }, () =>
+      repo.createActionRun({
+        projectId: project.id,
+        actionId: action.id,
+        modelId: model.id,
+        commitId: "c1",
+        status: "queued",
+        summary: "",
+        log: "",
+        failedGuids: [],
+        triggeredById: user.id,
+        startedAt: null,
+        finishedAt: null,
+      }),
+    ),
+  );
+  assert.deepEqual(
+    runs.map((run) => run.number).sort((a, b) => a - b),
+    [1, 2, 3, 4, 5, 6],
+  );
+
+  const issues = await Promise.all(
+    Array.from({ length: 6 }, (_, index) =>
+      repo.createIssue({
+        projectId: project.id,
+        title: `Issue ${index}`,
+        body: "",
+        state: "open",
+        kind: "virtual",
+        authorId: user.id,
+      }),
+    ),
+  );
+  assert.deepEqual(
+    issues.map((issue) => issue.number).sort((a, b) => a - b),
+    [1, 2, 3, 4, 5, 6],
+  );
+});
+
 test("SQLite: Actions + Runs Roundtrip und Kaskaden", async () => {
   const repo = new SqlRepository(new SqliteClient(":memory:"));
   await repo.migrate();
