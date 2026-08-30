@@ -111,6 +111,14 @@ export interface Label {
 
 export type IssueState = "open" | "closed";
 
+/**
+ * Art des Issues: "virtual" = nur im Server (wie GitHub-Issues),
+ * "bcf" = echtes IFC-Issue im buildingSMART-BCF-Standard — als BCF-Topic
+ * exportierbar (.bcfzip mit Markup, Kommentaren und Viewpoint-Komponenten
+ * aus den verorteten GlobalIds). Die Issue-Id (UUID) ist die Topic-Guid.
+ */
+export type IssueKind = "virtual" | "bcf";
+
 export interface Issue {
   id: string;
   projectId: string;
@@ -119,6 +127,7 @@ export interface Issue {
   title: string;
   body: string;
   state: IssueState;
+  kind: IssueKind;
   authorId: string;
   createdAt: string;
   updatedAt: string;
@@ -284,7 +293,7 @@ export interface Repository {
   listIssues(projectId: string): Promise<Issue[]>;
   updateIssue(
     issueId: string,
-    patch: Partial<Pick<Issue, "title" | "body" | "state">>,
+    patch: Partial<Pick<Issue, "title" | "body" | "state" | "kind">>,
   ): Promise<Issue | null>;
   /** Ersetzt die jeweils übergebenen Zuordnungs-Mengen komplett. */
   setIssueLinks(issueId: string, links: Partial<IssueLinks>): Promise<void>;

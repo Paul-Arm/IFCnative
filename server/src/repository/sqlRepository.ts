@@ -16,6 +16,7 @@ import type {
   Commit,
   Issue,
   IssueComment,
+  IssueKind,
   IssueLinks,
   IssueState,
   Label,
@@ -620,6 +621,7 @@ export class SqlRepository implements Repository {
     title: string;
     body: string;
     state: IssueState;
+    kind: IssueKind | null;
     author_id: string;
     created_at: string;
     updated_at: string;
@@ -631,6 +633,7 @@ export class SqlRepository implements Repository {
       title: row.title,
       body: row.body,
       state: row.state,
+      kind: row.kind ?? "virtual",
       authorId: row.author_id,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
@@ -653,8 +656,8 @@ export class SqlRepository implements Repository {
       updatedAt: now,
     };
     await this.sql.query(
-      `insert into issues (id, project_id, number, title, body, state, author_id, created_at, updated_at)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      `insert into issues (id, project_id, number, title, body, state, kind, author_id, created_at, updated_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
       [
         issue.id,
         issue.projectId,
@@ -662,6 +665,7 @@ export class SqlRepository implements Repository {
         issue.title,
         issue.body,
         issue.state,
+        issue.kind,
         issue.authorId,
         issue.createdAt,
         issue.updatedAt,
@@ -688,14 +692,15 @@ export class SqlRepository implements Repository {
 
   async updateIssue(
     issueId: string,
-    patch: Partial<Pick<Issue, "title" | "body" | "state">>,
+    patch: Partial<Pick<Issue, "title" | "body" | "state" | "kind">>,
   ): Promise<Issue | null> {
     const { rows } = await this.sql.query<Parameters<SqlRepository["toIssue"]>[0]>(
       `update issues set
          title = coalesce($2, title),
          body = coalesce($3, body),
          state = coalesce($4, state),
-         updated_at = $5
+         kind = coalesce($5, kind),
+         updated_at = $6
        where id = $1
        returning *`,
       [
@@ -703,6 +708,7 @@ export class SqlRepository implements Repository {
         patch.title ?? null,
         patch.body ?? null,
         patch.state ?? null,
+        patch.kind ?? null,
         this.now(),
       ],
     );

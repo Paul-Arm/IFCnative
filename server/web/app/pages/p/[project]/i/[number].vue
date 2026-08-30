@@ -109,6 +109,31 @@ async function saveEdit(): Promise<void> {
   editing.value = false;
 }
 
+// ---- BCF-Export --------------------------------------------------------
+
+const { token } = useAuth();
+
+async function downloadBcf(): Promise<void> {
+  error.value = null;
+  try {
+    const blob = await $fetch<Blob>(
+      `/api/projects/${slug}/issues/${number}/bcf`,
+      {
+        responseType: "blob",
+        headers: token.value ? { authorization: `Bearer ${token.value}` } : {},
+      },
+    );
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${slug}-issue-${number}.bcfzip`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    error.value = apiErrorMessage(e);
+  }
+}
+
 // ---- 3D-Verortung (betroffene GlobalIds im ThatOpen-Viewer) ------------
 
 interface ViewerHandle {
@@ -262,6 +287,11 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
         <PhCheckCircle v-else :size="14" weight="fill" />
         {{ issue.state === "open" ? "Offen" : "Geschlossen" }}
       </span>
+      <span
+        v-if="issue.kind === 'bcf'"
+        class="badge accent"
+        title="Echtes IFC-Issue — als BCF exportierbar"
+      >BCF</span>
       <span class="muted small">
         <strong>{{ issue.author?.name ?? "?" }}</strong> eröffnete am
         {{ dateFmt.format(new Date(issue.createdAt)) }}
@@ -389,6 +419,35 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
 
       <!-- ============ Sidebar: Metadaten ============ -->
       <aside class="issue-side">
+        <section class="issue-side-section">
+          <h4>Issue-Art</h4>
+          <select
+            v-if="canEdit"
+            :value="issue.kind"
+            title="Virtuelle Issues leben nur im Server; IFC-Issues sind als BCF exportierbar"
+            @change="
+              patchIssue({
+                kind: ($event.target as HTMLSelectElement).value,
+              })
+            "
+          >
+            <option value="virtual">Virtuell (nur Server)</option>
+            <option value="bcf">IFC-Issue (BCF)</option>
+          </select>
+          <p v-else class="muted small" style="margin: 0">
+            {{ issue.kind === "bcf" ? "IFC-Issue (BCF)" : "Virtuell (nur Server)" }}
+          </p>
+          <button
+            v-if="issue.kind === 'bcf'"
+            class="btn small"
+            style="margin-top: 0.5rem"
+            title="Als BCF 2.1 (.bcfzip) exportieren — inkl. Kommentaren und Viewpoint mit den verorteten Objekten"
+            @click="downloadBcf"
+          >
+            Als BCF exportieren
+          </button>
+        </section>
+
         <section class="issue-side-section">
           <h4>Zugewiesen an</h4>
           <p v-if="!issue.assignees.length && !canEdit" class="muted small">

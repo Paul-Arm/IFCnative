@@ -124,6 +124,7 @@ test("SQLite: Issues + Labels + Zuordnungen", async () => {
     title: "Wand kollidiert",
     body: "Details …",
     state: "open",
+    kind: "bcf",
     authorId: user.id,
   });
   assert.equal(first.number, 1);
@@ -132,9 +133,12 @@ test("SQLite: Issues + Labels + Zuordnungen", async () => {
     title: "Zweites",
     body: "",
     state: "open",
+    kind: "virtual",
     authorId: user.id,
   });
   assert.equal(second.number, 2);
+  assert.equal(first.kind, "bcf");
+  assert.equal(second.kind, "virtual");
 
   await repo.setIssueLinks(first.id, {
     assigneeIds: [user.id],

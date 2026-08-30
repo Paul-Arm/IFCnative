@@ -510,7 +510,7 @@ export class MemoryRepository implements Repository {
 
   async updateIssue(
     issueId: string,
-    patch: Partial<Pick<Issue, "title" | "body" | "state">>,
+    patch: Partial<Pick<Issue, "title" | "body" | "state" | "kind">>,
   ): Promise<Issue | null> {
     const issue = this.issues.get(issueId);
     if (!issue) {

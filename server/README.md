@@ -45,7 +45,16 @@ damit exakt einig, was „geändert“ bedeutet.
   an Benutzer, 0..n Modelle und farbige Labels (Tab „Issues“ in der Web-UI;
   Detailseite im GitHub-Layout mit Meta-Sidebar rechts). Zusätzlich können
   Issues **IFC-GlobalIds** tragen (`guids`) und werden damit im 3D-Viewer
-  verortet.
+  verortet. Jedes Issue hat eine **Art** (`kind`): **`virtual`** (Standard —
+  lebt nur im Server, wie GitHub-Issues) oder **`bcf`** (echtes IFC-Issue im
+  buildingSMART-**BCF-2.1**-Standard). BCF-Issues sind als `.bcfzip`
+  exportierbar — einzeln (`GET …/issues/:number/bcf`) oder alle des Projekts
+  (`GET …/issues/bcf`): die Issue-UUID ist die Topic-Guid, Titel/Beschreibung/
+  Status/Kommentare wandern ins `markup.bcf`, die verorteten GlobalIds werden
+  als Viewpoint-Selektion (`Component IfcGuid=…`) mitgegeben, sodass andere
+  BIM-Werkzeuge direkt auf die betroffenen Objekte springen. Die Art ist
+  jederzeit umschaltbar (Formular-Auswahl bzw. Sidebar der Detailseite);
+  „Issue aus Run erstellen“ legt BCF als Art vor.
 - **Issues aus Prüfungen + 3D-Verortung** — fehlgeschlagene Runs sammeln die
   **GlobalIds der Verstöße** (`failedGuids`; IDS automatisch aus den
   Verstoßobjekten, Python-Skripte per stdout-Konvention `GUID: <GlobalId>`
@@ -183,7 +192,9 @@ Auth: `Authorization: Bearer <JWT>` aus `/api/auth/login`. Fehler kommen als
 | DELETE | `/api/projects/:slug` | Projekt löschen (nur Owner; inkl. Blobs) |
 | PUT/GET | `/api/projects/:slug/image` | Projektbild (PNG, z. B. Szenen-Screenshot aus dem 3D-Tab) setzen (write) / abrufen (Mitglied) |
 | GET/POST | `/api/projects/:slug/labels` | Labels auflisten / anlegen `{name, color}` (write) |
-| GET/POST | `/api/projects/:slug/issues` | Issues (`?state=open\|closed`, mit Zählern) / eröffnen `{title, body?, assigneeIds?, modelIds?, labelIds?}` (jedes Mitglied) |
+| GET/POST | `/api/projects/:slug/issues` | Issues (`?state=open\|closed`, mit Zählern) / eröffnen `{title, body?, kind?: "virtual"\|"bcf", assigneeIds?, modelIds?, labelIds?, guids?}` (jedes Mitglied) |
+| GET | `/api/projects/:slug/issues/bcf` | alle BCF-Issues als `.bcfzip` (BCF 2.1) |
+| GET | `/api/projects/:slug/issues/:number/bcf` | einzelnes BCF-Issue als `.bcfzip` (400 bei virtuellen Issues) |
 | GET/PATCH | `/api/projects/:slug/issues/:number` | Issue-Detail (inkl. `comments`) / ändern (Titel, Body, State, Zuordnungen — Autor oder write-Rolle) |
 | POST/DELETE | `/api/projects/:slug/issues/:number/comments(/:id)` | kommentieren (jedes Mitglied) / löschen (Autor oder write-Rolle) |
 | POST | `/api/projects/:slug/members` | Mitglied hinzufügen/Rolle ändern `{email, role}` (admin) |

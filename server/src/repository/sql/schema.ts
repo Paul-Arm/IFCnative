@@ -118,12 +118,14 @@ create table if not exists issues (
   title text not null,
   body text not null default '',
   state text not null default 'open',
+  kind text not null default 'virtual',
   author_id uuid not null references users(id),
   created_at text not null,
   updated_at text not null,
   unique (project_id, number)
 );
 create index if not exists issues_project_idx on issues(project_id);
+alter table issues add column if not exists kind text not null default 'virtual';
 
 create table if not exists issue_assignees (
   issue_id uuid not null references issues(id),

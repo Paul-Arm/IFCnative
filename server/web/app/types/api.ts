@@ -83,6 +83,9 @@ export interface Label {
 
 export type IssueState = "open" | "closed";
 
+/** "virtual" = nur im Server; "bcf" = echtes IFC-Issue (BCF-exportierbar). */
+export type IssueKind = "virtual" | "bcf";
+
 export interface IssueModelRef {
   id: string;
   slug: string;
@@ -98,6 +101,7 @@ export interface Issue {
   title: string;
   body: string;
   state: IssueState;
+  kind: IssueKind;
   authorId: string;
   createdAt: string;
   updatedAt: string;

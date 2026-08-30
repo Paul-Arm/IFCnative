@@ -26,6 +26,7 @@ import type {
   ActionKind,
   ActionRun,
   Issue,
+  IssueKind,
   Label,
   LibraryFile,
   Member,
@@ -455,6 +456,8 @@ const filteredIssues = computed(() =>
 const showIssueForm = ref(false);
 const issueTitle = ref("");
 const issueBody = ref("");
+/** "virtual" = nur im Server; "bcf" = echtes IFC-Issue (BCF-exportierbar). */
+const issueKind = ref<IssueKind>("virtual");
 const issueAssignees = reactive(new Set<string>());
 const issueModels = reactive(new Set<string>());
 const issueLabels = reactive(new Set<string>());
@@ -474,6 +477,8 @@ async function prefillIssueFromRun(runId: string): Promise<void> {
     );
     showIssueForm.value = true;
     issueFromRun.value = run.number;
+    // Prüf-Issues mit Verortung sind echte IFC-Issues (BCF) — vorbelegen.
+    issueKind.value = "bcf";
     issueTitle.value = `Prüfung fehlgeschlagen: ${run.action?.name ?? "Action"}`;
     if (run.modelId) {
       issueModels.add(run.modelId);
@@ -514,6 +519,29 @@ onMounted(() => {
   }
 });
 
+const hasBcfIssues = computed(() =>
+  (issuesData.value?.issues ?? []).some((issue) => issue.kind === "bcf"),
+);
+
+/** Alle BCF-Issues des Projekts als .bcfzip herunterladen. */
+async function downloadProjectBcf(): Promise<void> {
+  issueError.value = null;
+  try {
+    const blob = await $fetch<Blob>(`/api/projects/${slug}/issues/bcf`, {
+      responseType: "blob",
+      headers: token.value ? { authorization: `Bearer ${token.value}` } : {},
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${slug}-issues.bcfzip`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    issueError.value = apiErrorMessage(e);
+  }
+}
+
 function toggleSet(set: Set<string>, id: string, on: boolean): void {
   if (on) {
     set.add(id);
@@ -531,6 +559,7 @@ async function createIssue(): Promise<void> {
       body: {
         title: issueTitle.value,
         body: issueBody.value,
+        kind: issueKind.value,
         assigneeIds: [...issueAssignees],
         modelIds: [...issueModels],
         labelIds: [...issueLabels],
@@ -539,6 +568,7 @@ async function createIssue(): Promise<void> {
     });
     issueTitle.value = "";
     issueBody.value = "";
+    issueKind.value = "virtual";
     issueAssignees.clear();
     issueModels.clear();
     issueLabels.clear();
@@ -1253,6 +1283,13 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
             </button>
           </div>
           <span class="topbar-spacer" />
+          <button
+            v-if="hasBcfIssues"
+            title="Alle IFC-Issues (BCF) als .bcfzip exportieren"
+            @click="downloadProjectBcf"
+          >
+            BCF-Export
+          </button>
           <button class="primary" @click="showIssueForm = !showIssueForm">
             <PhPlus :size="14" aria-hidden="true" />
             Neues Issue
@@ -1265,15 +1302,29 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
           style="border-bottom: 1px solid var(--border)"
         >
           <form @submit.prevent="createIssue">
-            <div class="form-row">
-              <label for="issue-title">Titel</label>
-              <input
-                id="issue-title"
-                v-model="issueTitle"
-                type="text"
-                required
-                placeholder="Kurz und praezise"
-              />
+            <div class="form-inline">
+              <div>
+                <label for="issue-title">Titel</label>
+                <input
+                  id="issue-title"
+                  v-model="issueTitle"
+                  type="text"
+                  required
+                  placeholder="Kurz und praezise"
+                />
+              </div>
+              <div class="shrink">
+                <label for="issue-kind">Art</label>
+                <select
+                  id="issue-kind"
+                  v-model="issueKind"
+                  style="width: auto"
+                  title="Virtuelle Issues leben nur im Server; IFC-Issues sind als BCF exportierbar (Austausch mit anderen BIM-Werkzeugen)"
+                >
+                  <option value="virtual">Virtuell (nur Server)</option>
+                  <option value="bcf">IFC-Issue (BCF)</option>
+                </select>
+              </div>
             </div>
             <div class="form-row">
               <label>Beschreibung (Markdown)</label>
@@ -1376,6 +1427,11 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
               >
                 {{ issue.title }}
               </NuxtLink>
+              <span
+                v-if="issue.kind === 'bcf'"
+                class="badge accent"
+                title="Echtes IFC-Issue — als BCF exportierbar"
+              >BCF</span>
               <span
                 v-for="label in issue.labels"
                 :key="label.id"

@@ -10,6 +10,7 @@ import fastifyStatic from "@fastify/static";
 
 import { hashPassword, verifyPassword } from "../auth/passwords";
 import { ActionRunner } from "../domain/actionRunner";
+import { buildBcfZip, type BcfTopicInput } from "../domain/bcfService";
 import { CommitService } from "../domain/commitService";
 import { FragmentsService } from "../domain/fragmentsService";
 import type { ObjectStore } from "../storage/objectStore";
@@ -717,6 +718,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const body = (request.body ?? {}) as {
       title?: string;
       body?: string;
+      kind?: string;
       assigneeIds?: string[];
       modelIds?: string[];
       labelIds?: string[];
@@ -726,6 +728,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (!title || title.length > 200) {
       return reply.code(400).send({ error: "Title required (max 200)" });
     }
+    if (body.kind !== undefined && !["virtual", "bcf"].includes(body.kind)) {
+      return reply.code(400).send({ error: "kind must be 'virtual' or 'bcf'" });
+    }
     const links = await validateIssueLinks(project, body, reply);
     if (!links) return reply;
     const issue = await repo.createIssue({
@@ -733,6 +738,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       title,
       body: body.body ?? "",
       state: "open",
+      kind: (body.kind as Issue["kind"] | undefined) ?? "virtual",
       authorId: user.id,
     });
     await repo.setIssueLinks(issue.id, links);
@@ -853,6 +859,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       title?: string;
       body?: string;
       state?: string;
+      kind?: string;
       assigneeIds?: string[];
       modelIds?: string[];
       labelIds?: string[];
@@ -860,6 +867,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     };
     if (body.state && !["open", "closed"].includes(body.state)) {
       return reply.code(400).send({ error: "Invalid state" });
+    }
+    if (body.kind !== undefined && !["virtual", "bcf"].includes(body.kind)) {
+      return reply.code(400).send({ error: "kind must be 'virtual' or 'bcf'" });
     }
     if (body.title !== undefined && !body.title.trim()) {
       return reply.code(400).send({ error: "Title must not be empty" });
@@ -870,11 +880,102 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       title: body.title?.trim(),
       body: body.body,
       state: body.state as "open" | "closed" | undefined,
+      kind: body.kind as Issue["kind"] | undefined,
     });
     await repo.setIssueLinks(issue.id, links);
     const [enriched] = await enrichIssues(project.id, [updated ?? issue]);
     return reply.send({ issue: enriched });
   });
+
+  // ---- BCF-Export (echte IFC-Issues, buildingSMART BCF 2.1) ------------
+
+  async function bcfTopicsFor(
+    project: Project,
+    issues: Issue[],
+  ): Promise<BcfTopicInput[]> {
+    const links = await repo.getIssueLinks(issues.map((issue) => issue.id));
+    const modelById = new Map(
+      (await repo.listModels(project.id)).map((model) => [model.id, model]),
+    );
+    const userIds = new Set<string>();
+    const commentsByIssue = new Map<string, Awaited<ReturnType<typeof repo.listIssueComments>>>();
+    for (const issue of issues) {
+      userIds.add(issue.authorId);
+      const comments = await repo.listIssueComments(issue.id);
+      commentsByIssue.set(issue.id, comments);
+      for (const comment of comments) {
+        userIds.add(comment.authorId);
+      }
+    }
+    const users = await usersById(userIds);
+    return issues.map((issue) => {
+      const link = links.get(issue.id);
+      return {
+        issue,
+        comments: commentsByIssue.get(issue.id) ?? [],
+        guids: link?.guids ?? [],
+        modelFileNames: (link?.modelIds ?? [])
+          .map((id) => modelById.get(id)?.name)
+          .filter((name): name is string => Boolean(name)),
+        usersById: users,
+      };
+    });
+  }
+
+  function sendBcfZip(reply: FastifyReply, fileName: string, zip: Buffer) {
+    return reply
+      .header("content-type", "application/octet-stream")
+      .header("content-disposition", `attachment; filename="${fileName}"`)
+      .send(zip);
+  }
+
+  // Alle BCF-Issues des Projekts als eine .bcfzip (Austausch mit BIM-Tools).
+  app.get(`${api}/projects/:slug/issues/bcf`, async (request, reply) => {
+    const { slug } = request.params as { slug: string };
+    const project = await resolveProject(slug, reply);
+    if (!project) return reply;
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    if (!(await requireMember(project, user, reply, "read"))) return reply;
+    const issues = (await repo.listIssues(project.id)).filter(
+      (issue) => issue.kind === "bcf",
+    );
+    if (!issues.length) {
+      return reply.code(404).send({ error: "Keine BCF-Issues im Projekt" });
+    }
+    const zip = buildBcfZip(await bcfTopicsFor(project, issues));
+    return sendBcfZip(reply, `${project.slug}-issues.bcfzip`, zip);
+  });
+
+  app.get(
+    `${api}/projects/:slug/issues/:number/bcf`,
+    async (request, reply) => {
+      const { slug, number } = request.params as {
+        slug: string;
+        number: string;
+      };
+      const project = await resolveProject(slug, reply);
+      if (!project) return reply;
+      const user = await requireUser(request, reply);
+      if (!user) return reply;
+      if (!(await requireMember(project, user, reply, "read"))) return reply;
+      const issue = await repo.getIssue(project.id, Number(number));
+      if (!issue) {
+        return reply.code(404).send({ error: "Issue not found" });
+      }
+      if (issue.kind !== "bcf") {
+        return reply
+          .code(400)
+          .send({ error: "Nur BCF-Issues sind exportierbar (Art umstellen)" });
+      }
+      const zip = buildBcfZip(await bcfTopicsFor(project, [issue]));
+      return sendBcfZip(
+        reply,
+        `${project.slug}-issue-${issue.number}.bcfzip`,
+        zip,
+      );
+    },
+  );
 
   // ---- Projektbild (Screenshot aus der 3D-Szene) -----------------------
 
