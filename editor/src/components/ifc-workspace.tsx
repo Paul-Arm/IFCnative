@@ -2284,6 +2284,34 @@ export default function IfcWorkspace() {
     );
   };
 
+  // Freies Objekt ohne räumliche Zuordnung anlegen (Kontextmenü des
+  // Ordners "Freie Objekte"): wie addChildElement, nur bewusst ohne
+  // Parent-Beziehung — nach IFC-Schema zulässig.
+  const addFreeElement = (type: string, name: string) => {
+    const addedId = getNextNativeEntityId(document);
+    const next = addNativeElement(document, undefined, type, name);
+    const subset = extractNativeSubsetIfc(next, [addedId]);
+    commitDocument(
+      next,
+      addedId,
+      `Create free ${type} '${name}'`,
+      `tree.addFreeElement({ class: '${type}', name: ${JSON.stringify(name)}, id: ${addedId} });`,
+      undefined,
+      {
+        pendingKey: `body:${addedId}`,
+        reloadViewer: true,
+        viewerMirror: subset
+          ? {
+              entityIds: [addedId],
+              kind: "reconvert-subset",
+              replacedEntityIds: [],
+              subsetIfcText: subset.text,
+            }
+          : undefined,
+      },
+    );
+  };
+
   // Der Viewer stellt die Szene in echten IFC-Weltkoordinaten dar (Meter,
   // Y-up; die Koordinationsmatrix der Fragments-Konvertierung wird beim Laden
   // wieder angewendet). Ein Weltmodus-Punkt ist damit direkt eine
@@ -3966,6 +3994,7 @@ export default function IfcWorkspace() {
           selectedId={selectedId}
           selectedIds={batchSelectionIds}
           onAddChild={addChildElement}
+          onAddFree={addFreeElement}
           onCenterCamera={(id) => centerViewerCamera(id, "tree")}
           onCreateStructure={() => setStructureDialogOpen(true)}
           onManageGroups={setGroupManagerEntityId}

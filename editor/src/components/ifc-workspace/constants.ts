@@ -284,6 +284,18 @@ const STRUCTURE_ELEMENT_PARENT_TYPES = new Set([
  * decomposition rules (Project -> Site -> Building -> Storey -> Space,
  * elements contained in spatial structures, parts aggregated in elements).
  */
+/**
+ * Objekt-Typen für "Neues freies Objekt" im virtuellen Ordner "Freie
+ * Objekte" des Strukturbaums: Objekte ohne räumliche Zuordnung sind nach
+ * IFC-Schema zulässig und entstehen hier bewusst ohne Parent-Beziehung.
+ */
+export function structureFreeObjectGroups(): StructureChildGroup[] {
+  return [
+    { label: "Bauteile", options: STRUCTURE_BUILDING_ELEMENT_OPTIONS },
+    { label: "Technik", options: STRUCTURE_TECHNICAL_OPTIONS },
+  ];
+}
+
 export function structureChildGroupsForParent(
   parentType: string,
 ): StructureChildGroup[] {

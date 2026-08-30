@@ -11,7 +11,11 @@ import {
 } from "@/ifc";
 import { cn } from "@/lib/utils";
 
-import { structureChildGroupsForParent } from "./constants";
+import {
+    structureChildGroupsForParent,
+    structureFreeObjectGroups,
+    type StructureChildGroup,
+} from "./constants";
 import { Button, shortType } from "./ui";
 
 interface StructureTreeModel {
@@ -49,6 +53,7 @@ export function StructurePanel({
   selectedId,
   selectedIds,
   onAddChild,
+  onAddFree,
   onCenterCamera,
   onCreateStructure,
   onManageGroups,
@@ -64,6 +69,8 @@ export function StructurePanel({
   /** Vollständige (Mehrfach-)Auswahl des Workspaces, enthält selectedId. */
   selectedIds: number[];
   onAddChild(parentId: number, type: string, name: string): void;
+  /** Legt ein freies Objekt ohne Parent-Beziehung an (Ordner "Freie Objekte"). */
+  onAddFree?(type: string, name: string): void;
   onCenterCamera(id: number): void;
   /** Öffnet die Eingabemaske "Raumstruktur anlegen" (leere Dokumente). */
   onCreateStructure?(): void;
@@ -80,6 +87,7 @@ export function StructurePanel({
   const idByPathRef = useRef(treeModel.idByPath);
   const typeByIdRef = useRef(treeModel.typeById);
   const onAddChildRef = useRef(onAddChild);
+  const onAddFreeRef = useRef(onAddFree);
   const onCenterCameraRef = useRef(onCenterCamera);
   const onManageGroupsRef = useRef(onManageGroups);
   const onSelectRef = useRef(onSelect);
@@ -92,6 +100,7 @@ export function StructurePanel({
     null,
   );
   onAddChildRef.current = onAddChild;
+  onAddFreeRef.current = onAddFree;
   onCenterCameraRef.current = onCenterCamera;
   onManageGroupsRef.current = onManageGroups;
   onSelectRef.current = onSelect;
@@ -404,14 +413,49 @@ export function StructurePanel({
         close: (options?: { restoreFocus?: boolean }) => void;
       },
     ) => {
+      const menuItemClass =
+        "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground";
+
       const id = idByPathRef.current.get(item.path);
-      if (typeof id !== "number") return null;
+      if (typeof id !== "number") {
+        // Virtueller Ordner "Freie Objekte": neues Objekt ohne
+        // Parent-Beziehung anlegen (nach IFC-Schema zulässig).
+        const onAddFree = onAddFreeRef.current;
+        if (
+          !onAddFree ||
+          (item.path !== `${FREE_OBJECTS_FOLDER}/` &&
+            item.path !== FREE_OBJECTS_FOLDER)
+        ) {
+          return null;
+        }
+        const menu = (
+          <div
+            data-file-tree-context-menu-root="true"
+            style={{
+              position: "fixed",
+              left: context.anchorRect.left,
+              top: context.anchorRect.bottom + 4,
+              zIndex: 9999,
+            }}
+          >
+            <div className="min-w-[200px] max-w-[280px] rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md">
+              <AddOptionsSection
+                groups={structureFreeObjectGroups()}
+                heading="Neues freies Objekt anlegen"
+                menuItemClass={menuItemClass}
+                onPick={(type, name) => {
+                  context.close({ restoreFocus: false });
+                  onAddFree(type, name);
+                }}
+              />
+            </div>
+          </div>
+        );
+        return createPortal(menu, globalThis.document.body);
+      }
       const typeName = typeByIdRef.current.get(id);
       const isProtected = typeName === "IFCPROJECT";
       const childGroups = structureChildGroupsForParent(typeName ?? "");
-
-      const menuItemClass =
-        "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground";
 
       const menu = (
         <div
@@ -461,49 +505,15 @@ export function StructurePanel({
             {childGroups.length ? (
               <>
                 <div aria-hidden className="-mx-1 my-1 h-px bg-border" />
-                <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Neues Element anlegen
-                </div>
-                <div className="max-h-64 overflow-y-auto">
-                  {childGroups.map((group, groupIndex) => (
-                    <div key={group.label}>
-                      <div
-                        className={cn(
-                          "px-2 pb-0.5 pt-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/80",
-                          groupIndex > 0 && "mt-1 border-t border-border/50",
-                        )}
-                      >
-                        {group.label}
-                      </div>
-                      {group.options.map((option) => (
-                        <button
-                          key={`${group.label}-${option.value}`}
-                          type="button"
-                          className={menuItemClass}
-                          onClick={() => {
-                            context.close({ restoreFocus: false });
-                            onAddChildRef.current(
-                              id,
-                              option.value,
-                              option.label,
-                            );
-                          }}
-                        >
-                          <Plus
-                            aria-hidden
-                            className="size-3.5 shrink-0 text-muted-foreground"
-                          />
-                          <span className="min-w-0 flex-1 truncate">
-                            {option.label}
-                          </span>
-                          <span className="ml-auto shrink-0 text-[10px] uppercase text-muted-foreground">
-                            {shortType(option.value)}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  ))}
-                </div>
+                <AddOptionsSection
+                  groups={childGroups}
+                  heading="Neues Element anlegen"
+                  menuItemClass={menuItemClass}
+                  onPick={(type, name) => {
+                    context.close({ restoreFocus: false });
+                    onAddChildRef.current(id, type, name);
+                  }}
+                />
               </>
             ) : null}
             <div aria-hidden className="-mx-1 my-1 h-px bg-border" />
@@ -590,6 +600,58 @@ export function StructurePanel({
         />
       </div>
     </div>
+  );
+}
+
+/** Gruppierte Typ-Optionen ("Neues … anlegen") für die Baum-Kontextmenüs. */
+function AddOptionsSection({
+  groups,
+  heading,
+  menuItemClass,
+  onPick,
+}: {
+  groups: StructureChildGroup[];
+  heading: string;
+  menuItemClass: string;
+  onPick(type: string, name: string): void;
+}) {
+  return (
+    <>
+      <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        {heading}
+      </div>
+      <div className="max-h-64 overflow-y-auto">
+        {groups.map((group, groupIndex) => (
+          <div key={group.label}>
+            <div
+              className={cn(
+                "px-2 pb-0.5 pt-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/80",
+                groupIndex > 0 && "mt-1 border-t border-border/50",
+              )}
+            >
+              {group.label}
+            </div>
+            {group.options.map((option) => (
+              <button
+                key={`${group.label}-${option.value}`}
+                type="button"
+                className={menuItemClass}
+                onClick={() => onPick(option.value, option.label)}
+              >
+                <Plus
+                  aria-hidden
+                  className="size-3.5 shrink-0 text-muted-foreground"
+                />
+                <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                <span className="ml-auto shrink-0 text-[10px] uppercase text-muted-foreground">
+                  {shortType(option.value)}
+                </span>
+              </button>
+            ))}
+          </div>
+        ))}
+      </div>
+    </>
   );
 }
 
