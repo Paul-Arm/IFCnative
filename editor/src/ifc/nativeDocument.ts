@@ -4556,19 +4556,6 @@ function nativeBodyFootprintArea(body: NativeBodyRepresentationSummary) {
   );
 }
 
-function hasNativeBodyQuantities(
-  document: NativeIfcDocument,
-  entityId: number,
-) {
-  return Boolean(
-    document.propertySetsByEntity
-      .get(entityId)
-      ?.some(
-        (set) => set.kind === "Qto" && set.name === "IFCnative_BaseQuantities",
-      ),
-  );
-}
-
 function appendNativeBodyQuantities(
   entities: NativeIfcEntity[],
   allocateId: () => number,
