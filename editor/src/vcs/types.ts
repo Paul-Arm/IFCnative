@@ -60,9 +60,9 @@ export interface VcsModel {
   defaultBranch: string;
   createdAt: string;
   /** Ordnerpfad im Projekt ("" = Wurzel). */
-  folder?: string;
-  /** "ifc" (Standard) oder "md" (Markdown-Dokument, für den Editor irrelevant). */
-  kind?: "ifc" | "md";
+  folder: string;
+  /** "ifc" oder "md" (Markdown-Dokument, für den Editor irrelevant). */
+  kind: "ifc" | "md";
   branchCount?: number;
   head?: VcsCommit | null;
 }
@@ -94,4 +94,99 @@ export interface VcsHealth {
   status: string;
   version: string;
   storage: "filesystem" | "azure";
+}
+
+// ---- Actions (Prüf-Workflows) + Runs -----------------------------------
+
+export type VcsActionKind = "ids" | "python";
+
+export interface VcsAction {
+  id: string;
+  projectId: string;
+  name: string;
+  kind: VcsActionKind;
+  fileName: string;
+  libraryFileId: string | null;
+  libraryName?: string | null;
+  runOnCommit: boolean;
+  createdAt: string;
+}
+
+export type VcsRunStatus =
+  | "queued"
+  | "running"
+  | "success"
+  | "failed"
+  | "error";
+
+export interface VcsActionRun {
+  id: string;
+  projectId: string;
+  actionId: string;
+  modelId: string;
+  commitId: string;
+  number: number;
+  status: VcsRunStatus;
+  summary: string;
+  /** GlobalIds der beanstandeten Objekte (3D-Verortung / Issues). */
+  failedGuids: string[];
+  createdAt: string;
+  action: { id: string; name: string; kind: VcsActionKind } | null;
+  model: { id: string; slug: string; name: string } | null;
+  triggeredBy: VcsUser | null;
+  /** Nur im Run-Detail enthalten. */
+  log?: string;
+}
+
+// ---- Issues -------------------------------------------------------------
+
+export type VcsIssueKind = "virtual" | "bcf";
+
+export interface VcsIssueCommitRef {
+  id: string;
+  message: string;
+  branchName: string;
+  createdAt: string;
+}
+
+export interface VcsIssueModelRef {
+  id: string;
+  slug: string;
+  name: string;
+  folder: string;
+  kind: "ifc" | "md";
+  foundCommitId: string | null;
+  fixedCommitId: string | null;
+  foundCommit: VcsIssueCommitRef | null;
+  fixedCommit: VcsIssueCommitRef | null;
+}
+
+export interface VcsIssue {
+  id: string;
+  projectId: string;
+  number: number;
+  title: string;
+  body: string;
+  state: "open" | "closed";
+  kind: VcsIssueKind;
+  createdAt: string;
+  updatedAt: string;
+  author: VcsUser | null;
+  assignees: VcsUser[];
+  models: VcsIssueModelRef[];
+  /** Betroffene IFC-GlobalIds — im Editor direkt auswählbar. */
+  guids: string[];
+}
+
+/** Eingabe für ein neues Issue aus dem Editor heraus. */
+export interface VcsIssueInput {
+  title: string;
+  body?: string;
+  kind?: VcsIssueKind;
+  modelLinks?: {
+    modelId: string;
+    foundCommitId?: string | null;
+    fixedCommitId?: string | null;
+  }[];
+  guids?: string[];
 }

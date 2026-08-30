@@ -105,7 +105,7 @@ function toProject(row: ProjectRow): Project {
     name: row.name,
     ownerId: row.owner_id,
     createdAt: row.created_at,
-    visibility: row.visibility ?? "public",
+    visibility: row.visibility,
   };
 }
 function toModel(row: ModelRow): Model {
@@ -117,8 +117,8 @@ function toModel(row: ModelRow): Model {
     visibility: row.visibility,
     defaultBranch: row.default_branch,
     createdAt: row.created_at,
-    folder: row.folder ?? "",
-    kind: row.kind ?? "ifc",
+    folder: row.folder,
+    kind: row.kind,
   };
 }
 interface ActionRow {
@@ -621,7 +621,7 @@ export class SqlRepository implements Repository {
     title: string;
     body: string;
     state: IssueState;
-    kind: IssueKind | null;
+    kind: IssueKind;
     author_id: string;
     created_at: string;
     updated_at: string;
@@ -633,7 +633,7 @@ export class SqlRepository implements Repository {
       title: row.title,
       body: row.body,
       state: row.state,
-      kind: row.kind ?? "virtual",
+      kind: row.kind,
       authorId: row.author_id,
       createdAt: row.created_at,
       updatedAt: row.updated_at,

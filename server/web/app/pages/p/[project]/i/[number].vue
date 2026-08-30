@@ -129,6 +129,21 @@ watchEffect(() => {
 const commitShort = (commit: { id: string; message: string; createdAt: string }) =>
   `${commit.id.slice(0, 8)} · ${commit.message || "(ohne Nachricht)"} · ${new Date(commit.createdAt).toLocaleDateString("de-DE")}`;
 
+/** Modell an-/abwählen — bestehende Commit-Bezüge bleiben erhalten. */
+async function toggleLinkedModel(modelId: string, on: boolean): Promise<void> {
+  const modelLinks = (issue.value?.models ?? [])
+    .filter((model) => model.id !== modelId)
+    .map((model) => ({
+      modelId: model.id,
+      foundCommitId: model.foundCommitId,
+      fixedCommitId: model.fixedCommitId,
+    }));
+  if (on) {
+    modelLinks.push({ modelId, foundCommitId: null, fixedCommitId: null });
+  }
+  await patchIssue({ modelLinks });
+}
+
 /** Aufgefallen-/Behoben-Commit eines verknüpften Modells setzen ("" = keiner). */
 async function setModelCommit(
   modelId: string,
@@ -540,13 +555,10 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
               type="checkbox"
               :checked="issue.models.some((m) => m.id === model.id)"
               @change="
-                patchIssue({
-                  modelIds: idsWithToggle(
-                    issue.models.map((m) => m.id),
-                    model.id,
-                    ($event.target as HTMLInputElement).checked,
-                  ),
-                })
+                toggleLinkedModel(
+                  model.id,
+                  ($event.target as HTMLInputElement).checked,
+                )
               "
             />
             <span class="pv-label">

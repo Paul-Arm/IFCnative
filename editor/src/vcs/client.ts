@@ -9,11 +9,15 @@
  */
 
 import type {
+  VcsAction,
+  VcsActionRun,
   VcsAuth,
   VcsBranch,
   VcsCommit,
   VcsDiffSummary,
   VcsHealth,
+  VcsIssue,
+  VcsIssueInput,
   VcsModel,
   VcsProject,
   VcsSettings,
@@ -221,5 +225,74 @@ export class VcsApiClient {
         body: input.ifcText,
       },
     );
+  }
+
+  // ---- Actions (Prüfungen) + Runs --------------------------------------
+
+  async listActions(project: string): Promise<VcsAction[]> {
+    const body = await this.request<{ actions: VcsAction[] }>(
+      `/projects/${encodeURIComponent(project)}/actions`,
+      { headers: this.headers() },
+    );
+    return body.actions;
+  }
+
+  /** Startet Prüf-Runs für einen Commit (Default: alle Actions). */
+  async validateCommit(
+    project: string,
+    model: string,
+    commitId: string,
+    actionIds?: string[],
+  ): Promise<VcsActionRun[]> {
+    const body = await this.json<{ runs: VcsActionRun[] }>(
+      `/projects/${encodeURIComponent(project)}/models/${encodeURIComponent(model)}/commits/${encodeURIComponent(commitId)}/validate`,
+      "POST",
+      actionIds ? { actionIds } : {},
+    );
+    return body.runs;
+  }
+
+  async listRuns(
+    project: string,
+    filter: { commit?: string; model?: string } = {},
+  ): Promise<VcsActionRun[]> {
+    const params = new URLSearchParams();
+    if (filter.commit) params.set("commit", filter.commit);
+    if (filter.model) params.set("model", filter.model);
+    const encoded = params.toString();
+    const query = encoded ? `?${encoded}` : "";
+    const body = await this.request<{ runs: VcsActionRun[] }>(
+      `/projects/${encodeURIComponent(project)}/runs${query}`,
+      { headers: this.headers() },
+    );
+    return body.runs;
+  }
+
+  /** Run-Detail inklusive Protokoll. */
+  async getRun(project: string, runId: string): Promise<VcsActionRun> {
+    const body = await this.request<{ run: VcsActionRun }>(
+      `/projects/${encodeURIComponent(project)}/runs/${encodeURIComponent(runId)}`,
+      { headers: this.headers() },
+    );
+    return body.run;
+  }
+
+  // ---- Issues ----------------------------------------------------------
+
+  async listIssues(project: string): Promise<VcsIssue[]> {
+    const body = await this.request<{ issues: VcsIssue[] }>(
+      `/projects/${encodeURIComponent(project)}/issues`,
+      { headers: this.headers() },
+    );
+    return body.issues;
+  }
+
+  async createIssue(project: string, input: VcsIssueInput): Promise<VcsIssue> {
+    const body = await this.json<{ issue: VcsIssue }>(
+      `/projects/${encodeURIComponent(project)}/issues`,
+      "POST",
+      input,
+    );
+    return body.issue;
   }
 }

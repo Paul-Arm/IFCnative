@@ -76,7 +76,7 @@ test("BCF issues: kind selection, export as bcfzip with viewpoint components", a
       title: "Wand ohne FireRating",
       body: "Aus der IDS-Prüfung.",
       kind: "bcf",
-      modelIds: [modelId],
+      modelLinks: [{ modelId }],
       guids: [WALL],
     },
   });

@@ -617,7 +617,7 @@ test("issues: labels, create with links, filter, patch, permissions", async () =
       title: "Wand kollidiert mit Decke",
       body: "Siehe **Achse 3**.",
       assigneeIds: [ownerId],
-      modelIds: [model.id],
+      modelLinks: [{ modelId: model.id }],
       labelIds: [label.id],
     },
   });
@@ -633,7 +633,7 @@ test("issues: labels, create with links, filter, patch, permissions", async () =
     method: "POST",
     url: "/api/projects/acme/issues",
     headers: auth(owner),
-    payload: { title: "x", modelIds: ["nicht-da"] },
+    payload: { title: "x", modelLinks: [{ modelId: "nicht-da" }] },
   });
   assert.equal(bad.statusCode, 400);
 

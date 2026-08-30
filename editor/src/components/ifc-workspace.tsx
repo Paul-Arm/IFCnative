@@ -4165,6 +4165,27 @@ export default function IfcWorkspace() {
               settings={vcsSettings}
               onAuthChange={setVcsAuth}
               onLoadIfc={openIfcTextFromVcs}
+              onSelectGuids={(guids) => {
+                // Issue-Verortung: Objekte per GlobalId im aktiven Dokument
+                // auswählen (Mehrfachauswahl, wie Strg-Klick im Viewer).
+                if (!activeSession) {
+                  return 0;
+                }
+                const wanted = new Set(guids);
+                const ids = activeSession.document.entities
+                  .filter(
+                    (entity) => entity.globalId && wanted.has(entity.globalId),
+                  )
+                  .map((entity) => entity.id);
+                if (ids.length) {
+                  updateActiveSession((session) => ({
+                    ...session,
+                    selectedId: ids[0],
+                    selectedIds: new Set(ids),
+                  }));
+                }
+                return ids.length;
+              }}
               onSettingsChange={setVcsSettings}
             />
           </TileContent>

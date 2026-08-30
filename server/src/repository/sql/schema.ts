@@ -15,7 +15,6 @@ create table if not exists users (
   created_at text not null,
   is_admin int not null default 0
 );
-alter table users add column if not exists is_admin int not null default 0;
 
 create table if not exists projects (
   id uuid primary key,
@@ -25,7 +24,6 @@ create table if not exists projects (
   created_at text not null,
   visibility text not null default 'public'
 );
-alter table projects add column if not exists visibility text not null default 'public';
 
 create table if not exists project_members (
   project_id uuid not null references projects(id),
@@ -46,8 +44,6 @@ create table if not exists models (
   kind text not null default 'ifc',
   unique (project_id, slug)
 );
-alter table models add column if not exists folder text not null default '';
-alter table models add column if not exists kind text not null default 'ifc';
 
 create table if not exists project_folders (
   project_id uuid not null references projects(id),
@@ -125,7 +121,6 @@ create table if not exists issues (
   unique (project_id, number)
 );
 create index if not exists issues_project_idx on issues(project_id);
-alter table issues add column if not exists kind text not null default 'virtual';
 
 create table if not exists issue_assignees (
   issue_id uuid not null references issues(id),
@@ -140,8 +135,6 @@ create table if not exists issue_models (
   fixed_commit_id uuid,
   primary key (issue_id, model_id)
 );
-alter table issue_models add column if not exists found_commit_id uuid;
-alter table issue_models add column if not exists fixed_commit_id uuid;
 
 create table if not exists issue_label_links (
   issue_id uuid not null references issues(id),
@@ -186,7 +179,6 @@ create table if not exists actions (
   created_at text not null
 );
 create index if not exists actions_project_idx on actions(project_id);
-alter table actions add column if not exists library_file_id uuid;
 
 create table if not exists action_runs (
   id uuid primary key,
@@ -206,7 +198,6 @@ create table if not exists action_runs (
 );
 create index if not exists action_runs_project_idx on action_runs(project_id);
 create index if not exists action_runs_commit_idx on action_runs(commit_id);
-alter table action_runs add column if not exists failed_guids text not null default '[]';
 `;
 
 export function schemaStatements(): string[] {

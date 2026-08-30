@@ -84,12 +84,12 @@ test("issue model links carry found/fixed commit references", async () => {
   assert.equal(issue.models[0]?.foundCommit?.message, "Fehler drin");
   assert.equal(issue.models[0]?.fixedCommit, null);
 
-  // Kurzform-PATCH (nur modelIds) darf die Commit-Bezüge nicht auslöschen.
+  // Ein PATCH ohne modelLinks lässt die Verknüpfungen unangetastet.
   const kept = await app.inject({
     method: "PATCH",
     url: `/api/projects/acme/issues/${issue.number}`,
     headers: auth(token),
-    payload: { modelIds: [modelId] },
+    payload: { title: "Wand zu niedrig!" },
   });
   assert.equal(
     (JSON.parse(kept.body).issue as typeof issue).models[0]?.foundCommitId,
