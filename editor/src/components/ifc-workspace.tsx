@@ -80,6 +80,7 @@ import {
     diffNativeDocuments,
     duplicateNativeBodyElement,
     duplicateNativePropertySet,
+    ensureNativeSpatialStructure,
     extractNativeSubsetIfc,
     findCatalogObject,
     getNativeBodyRepresentation,
@@ -88,6 +89,7 @@ import {
     getNativePlacementWorld,
     getNextNativeEntityId,
     ifcPlacementPointToViewerWorldPoint,
+    listNativeUnassignedProductIds,
     mergeNativePropertySetValues,
     parseIdsXml,
     nativeWorldDirectionInPlacementParentFrame,
@@ -128,6 +130,7 @@ import {
     type NativeEntityRemovalPlan,
     type NativeIfcDocument,
     type NativeIfcEntity,
+    type NativeSpatialStructureDraft,
 } from "@/ifc";
 import { type NativeGraphPreset } from "@/ifc/nativeGraph";
 
@@ -178,6 +181,7 @@ import {
 import { CheckPanel } from "./ifc-workspace/CheckPanel";
 import { PortalPanel } from "./ifc-workspace/PortalPanel";
 import { SaveDialog } from "./ifc-workspace/SaveDialog";
+import { SpatialStructureDialog } from "./ifc-workspace/SpatialStructureDialog";
 import {
     StartPage,
     type StartPageHubDocument,
@@ -509,6 +513,7 @@ export default function IfcWorkspace() {
   >([]);
   const [recoveryBusy, setRecoveryBusy] = useState(false);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [structureDialogOpen, setStructureDialogOpen] = useState(false);
   const { scale: uiScale, setScale: setUiScale } = useUiScale();
   const allWorkspaces = useMemo(
     () => [...BUILT_IN_WORKSPACES, ...customWorkspaces],
@@ -1868,6 +1873,37 @@ export default function IfcWorkspace() {
     } finally {
       setLoadingIfcName("");
     }
+  };
+
+  // "Raumstruktur anlegen": fehlende Ebenen Projekt → Standort → Gebäude →
+  // Geschoss im aktiven Dokument ergänzen — der Weg, leere Modelle (z. B.
+  // frisch vom Hub) befüllbar zu machen. Läuft über commitDocument und ist
+  // damit rückgängig machbar.
+  const applySpatialStructure = (draft: NativeSpatialStructureDraft) => {
+    const result = ensureNativeSpatialStructure(document, draft);
+    if (result.document === document) {
+      setStatusAlert({
+        message: "Die Raumstruktur ist bereits vollständig.",
+        tone: "success",
+      });
+      return;
+    }
+    const parts = [...result.createdLabels];
+    if (result.adoptedCount) {
+      parts.push(
+        `${result.adoptedCount} Bauteil${result.adoptedCount === 1 ? "" : "e"} zugeordnet`,
+      );
+    }
+    commitDocument(
+      result.document,
+      result.storeyId,
+      `Raumstruktur anlegen (${parts.join(", ")})`,
+      `structure.ensure({ created: ${JSON.stringify(result.createdLabels)}, adopted: ${result.adoptedCount} });`,
+    );
+    setStatusAlert({
+      message: `Raumstruktur angelegt: ${parts.join(", ")}.`,
+      tone: "success",
+    });
   };
 
   // Speichern: Hub-Dokumente bekommen den Dialog (lokal ODER committen),
@@ -3931,6 +3967,7 @@ export default function IfcWorkspace() {
           selectedIds={batchSelectionIds}
           onAddChild={addChildElement}
           onCenterCamera={(id) => centerViewerCamera(id, "tree")}
+          onCreateStructure={() => setStructureDialogOpen(true)}
           onManageGroups={setGroupManagerEntityId}
           onRemove={(id) => requestDeleteEntity(id, "tree")}
           onSelect={selectEntity}
@@ -4787,6 +4824,17 @@ export default function IfcWorkspace() {
         plan={deleteRequest?.plan ?? null}
         onCancel={() => setDeleteRequest(null)}
         onConfirm={confirmDeleteEntity}
+      />
+
+      <SpatialStructureDialog
+        defaultProjectName={document.fileName.replace(/\.ifc$/i, "") || "Projekt"}
+        hasProject={Boolean(document.entitiesByType.get("IFCPROJECT")?.length)}
+        open={structureDialogOpen}
+        orphanCount={
+          structureDialogOpen ? listNativeUnassignedProductIds(document).length : 0
+        }
+        onCreate={applySpatialStructure}
+        onOpenChange={setStructureDialogOpen}
       />
 
       <SaveDialog

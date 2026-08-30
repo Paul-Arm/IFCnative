@@ -18,6 +18,8 @@ import {
   PhPlayCircle,
   PhPlus,
   PhRecord,
+  PhShieldCheck,
+  PhUploadSimple,
   PhUsers,
 } from "@phosphor-icons/vue";
 
@@ -810,6 +812,21 @@ function onActionFile(event: Event): void {
   }
 }
 
+/** Formular schließen und alle Eingaben zurücksetzen. */
+function resetActionForm(): void {
+  showActionForm.value = false;
+  actionError.value = null;
+  actionName.value = "";
+  actionKind.value = "ids";
+  actionSource.value = "upload";
+  actionFile.value = null;
+  actionLibraryId.value = "";
+  actionScopeType.value = "project";
+  actionScopeFolder.value = "";
+  actionScopeModelId.value = "";
+  actionRunOnCommit.value = true;
+}
+
 async function createAction(): Promise<void> {
   actionError.value = null;
   // Geltungsbereich zusammenstellen und prüfen.
@@ -856,13 +873,7 @@ async function createAction(): Promise<void> {
   actionBusy.value = true;
   try {
     await api(`/projects/${slug}/actions`, { method: "POST", body });
-    actionName.value = "";
-    actionFile.value = null;
-    actionLibraryId.value = "";
-    actionScopeType.value = "project";
-    actionScopeFolder.value = "";
-    actionScopeModelId.value = "";
-    showActionForm.value = false;
+    resetActionForm();
     await refreshActions();
   } catch (e) {
     actionError.value = apiErrorMessage(e);
@@ -1653,79 +1664,130 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
           class="card-body"
           style="border-bottom: 1px solid var(--border)"
         >
-          <form @submit.prevent="createAction">
-            <div class="form-inline">
-              <div class="shrink">
-                <label for="action-source">Quelle</label>
-                <select id="action-source" v-model="actionSource" style="width: auto">
-                  <option value="upload">Datei hochladen</option>
-                  <option value="library">Aus zentraler Bibliothek</option>
-                </select>
-              </div>
-              <template v-if="actionSource === 'upload'">
-                <div class="shrink">
-                  <label for="action-kind">Art</label>
-                  <select id="action-kind" v-model="actionKind" style="width: auto">
-                    <option value="ids">IDS-Prüfung (.ids-XML)</option>
-                    <option value="python">Python-Prüfskript (.py)</option>
-                  </select>
-                </div>
-                <div>
-                  <label for="action-file">Datei</label>
-                  <input
-                    id="action-file"
-                    type="file"
-                    :accept="actionKind === 'ids' ? '.ids,.xml' : '.py'"
-                    @change="onActionFile"
-                  />
-                </div>
-              </template>
-              <div v-else>
-                <label for="action-library">Bibliothekseintrag</label>
-                <select id="action-library" v-model="actionLibraryId">
-                  <option value="" disabled>bitte wählen …</option>
-                  <option
-                    v-for="entry in libraryData?.files ?? []"
-                    :key="entry.id"
-                    :value="entry.id"
-                  >
-                    {{ entry.kind === "ids" ? "IDS" : "Python" }} ·
-                    {{ entry.name }} ({{ entry.fileName }})
-                  </option>
-                </select>
-              </div>
-              <div>
-                <label for="action-name">Name</label>
-                <input
-                  id="action-name"
-                  v-model="actionName"
-                  placeholder="z. B. IDS Hochbau"
-                  required
-                />
+          <form class="action-form" @submit.prevent="createAction">
+            <!-- Prüfdatei: hochladen oder aus der Bibliothek -->
+            <div class="field">
+              <label>Prüfdatei</label>
+              <div class="seg" role="tablist">
+                <button
+                  type="button"
+                  :class="{ active: actionSource === 'upload' }"
+                  @click="actionSource = 'upload'"
+                >
+                  Datei hochladen
+                </button>
+                <button
+                  type="button"
+                  :class="{ active: actionSource === 'library' }"
+                  @click="actionSource = 'library'"
+                >
+                  Aus zentraler Bibliothek
+                </button>
               </div>
             </div>
-            <p
-              v-if="actionSource === 'library' && !libraryData?.files.length"
-              class="muted small"
-              style="margin-top: 0.5rem"
-            >
-              Die Bibliothek ist noch leer —
-              <NuxtLink to="/library">hier</NuxtLink> IDS-Dateien und
-              Prüfskripte zentral ablegen.
-            </p>
-            <div class="form-inline" style="margin-top: 0.5rem">
-              <div class="shrink">
-                <label for="action-scope">Gilt für</label>
-                <select id="action-scope" v-model="actionScopeType" style="width: auto">
+
+            <template v-if="actionSource === 'upload'">
+              <div class="action-form-row">
+                <div class="field">
+                  <label>Art</label>
+                  <div class="seg">
+                    <button
+                      type="button"
+                      :class="{ active: actionKind === 'ids' }"
+                      @click="actionKind = 'ids'"
+                    >
+                      IDS-Prüfung
+                    </button>
+                    <button
+                      type="button"
+                      :class="{ active: actionKind === 'python' }"
+                      @click="actionKind = 'python'"
+                    >
+                      Python-Skript
+                    </button>
+                  </div>
+                  <p class="field-hint">
+                    {{
+                      actionKind === "ids"
+                        ? "buildingSMART-IDS-XML — läuft komplett auf dem Server."
+                        : "Läuft als Prozess auf dem Server; IFC-Pfad als Argument 1 und IFC_PATH. Exit-Code 0 = bestanden, Zeilen „GUID: <GlobalId>“ verorten Verstöße."
+                    }}
+                  </p>
+                </div>
+                <div class="field">
+                  <label>Datei</label>
+                  <label class="file-pick">
+                    <input
+                      type="file"
+                      :accept="actionKind === 'ids' ? '.ids,.xml' : '.py'"
+                      @change="onActionFile"
+                    />
+                    <span class="btn">
+                      <PhUploadSimple :size="14" aria-hidden="true" />
+                      {{ actionKind === "ids" ? ".ids wählen …" : ".py wählen …" }}
+                    </span>
+                    <span v-if="actionFile" class="file-name mono">
+                      {{ actionFile.name }}
+                    </span>
+                    <span v-else class="muted small">keine Datei gewählt</span>
+                  </label>
+                </div>
+              </div>
+            </template>
+
+            <div v-else class="field">
+              <label for="action-library">Bibliothekseintrag</label>
+              <select
+                id="action-library"
+                v-model="actionLibraryId"
+                :disabled="!libraryData?.files.length"
+              >
+                <option value="" disabled>
+                  {{ libraryData?.files.length ? "bitte wählen …" : "Bibliothek ist leer" }}
+                </option>
+                <option
+                  v-for="entry in libraryData?.files ?? []"
+                  :key="entry.id"
+                  :value="entry.id"
+                >
+                  {{ entry.kind === "ids" ? "IDS" : "Python" }} ·
+                  {{ entry.name }} ({{ entry.fileName }})
+                </option>
+              </select>
+              <p class="field-hint">
+                Zentrale Dateien gelten projektübergreifend; Aktualisierungen in
+                der <NuxtLink to="/library">Bibliothek</NuxtLink> wirken sofort
+                in allen verknüpften Actions.
+              </p>
+            </div>
+
+            <div class="field">
+              <label for="action-name">Name</label>
+              <input
+                id="action-name"
+                v-model="actionName"
+                :placeholder="actionKind === 'ids' ? 'z. B. IDS Hochbau' : 'z. B. Kollisions-Check'"
+                required
+              />
+            </div>
+
+            <div class="field">
+              <label>Gilt für</label>
+              <div class="action-form-row">
+                <select
+                  v-model="actionScopeType"
+                  style="width: auto; flex: 0 0 auto"
+                >
                   <option value="project">Alle Modelle des Projekts</option>
                   <option value="folder">Einen Ordner (inkl. Unterordner)</option>
                   <option value="model">Ein einzelnes Modell</option>
                 </select>
-              </div>
-              <div v-if="actionScopeType === 'folder'">
-                <label for="action-scope-folder">Ordner</label>
-                <select id="action-scope-folder" v-model="actionScopeFolder">
-                  <option value="" disabled>bitte wählen …</option>
+                <select
+                  v-if="actionScopeType === 'folder'"
+                  v-model="actionScopeFolder"
+                  style="flex: 1"
+                >
+                  <option value="" disabled>Ordner wählen …</option>
                   <option
                     v-for="folder in projectData.folders"
                     :key="folder"
@@ -1734,11 +1796,12 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
                     {{ folder }}/
                   </option>
                 </select>
-              </div>
-              <div v-if="actionScopeType === 'model'">
-                <label for="action-scope-model">Modell</label>
-                <select id="action-scope-model" v-model="actionScopeModelId">
-                  <option value="" disabled>bitte wählen …</option>
+                <select
+                  v-if="actionScopeType === 'model'"
+                  v-model="actionScopeModelId"
+                  style="flex: 1"
+                >
+                  <option value="" disabled>Modell wählen …</option>
                   <option
                     v-for="model in (modelsData?.models ?? []).filter((m) => m.kind === 'ifc')"
                     :key="model.id"
@@ -1749,26 +1812,39 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
                 </select>
               </div>
             </div>
-            <label style="display: flex; align-items: center; gap: 0.4rem; font-weight: 400; margin-top: 0.5rem">
+
+            <label class="action-form-check">
               <input v-model="actionRunOnCommit" type="checkbox" style="width: auto" />
-              Bei jedem neuen Commit (im Geltungsbereich) automatisch ausführen
+              Bei jedem neuen Commit im Geltungsbereich automatisch ausführen
             </label>
-            <p class="muted small" style="margin-top: 0.5rem">
-              Python-Skripte laufen auf dem Server und erhalten den IFC-Pfad als
-              erstes Argument (und als Umgebungsvariable <code>IFC_PATH</code>).
-              Exit-Code 0 bedeutet „bestanden".
-            </p>
-            <div style="margin-top: 0.75rem">
+
+            <div class="action-form-footer">
               <button class="btn primary" type="submit" :disabled="actionBusy">
                 {{ actionBusy ? "Wird angelegt …" : "Action anlegen" }}
+              </button>
+              <button
+                class="btn"
+                type="button"
+                :disabled="actionBusy"
+                @click="resetActionForm"
+              >
+                Abbrechen
               </button>
             </div>
           </form>
         </div>
 
-        <div v-if="!actionsData?.actions.length" class="empty">
-          Noch keine Actions konfiguriert. Lade eine IDS-Datei oder ein
-          Python-Prüfskript hoch, um Modelle automatisch zu prüfen.
+        <div v-if="!actionsData?.actions.length" class="empty empty-rich">
+          <PhShieldCheck :size="30" aria-hidden="true" class="empty-icon" />
+          <div class="empty-title">Noch keine Actions konfiguriert</div>
+          <p>
+            Actions prüfen deine IFC-Modelle automatisch — mit
+            <strong>IDS-Dateien</strong> oder <strong>Python-Skripten</strong>,
+            bei jedem Commit oder auf Knopfdruck.
+          </p>
+          <button v-if="canWrite" class="btn primary" @click="showActionForm = true">
+            ＋ Erste Action anlegen
+          </button>
         </div>
         <div v-else class="table-wrap">
           <table>
@@ -1829,9 +1905,14 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
           <h2>Runs</h2>
           <span v-if="hasPendingRuns" class="badge accent">läuft …</span>
         </div>
-        <div v-if="!runsData?.runs.length" class="empty">
-          Noch keine Runs. Prüfe einen Commit über die Commit-Seite oder lege
-          eine Action mit „Bei Commit ausführen" an.
+        <div v-if="!runsData?.runs.length" class="empty empty-rich">
+          <PhPlayCircle :size="30" aria-hidden="true" class="empty-icon" />
+          <div class="empty-title">Noch keine Runs</div>
+          <p>
+            Runs entstehen automatisch bei Commits (Actions mit
+            „Bei Commit ausführen") oder über „Jetzt prüfen" auf der
+            Commit-Seite.
+          </p>
         </div>
         <div v-else>
           <details

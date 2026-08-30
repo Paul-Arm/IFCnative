@@ -1,5 +1,5 @@
 import { FileTree, useFileTree } from "@pierre/trees/react";
-import { Boxes, Crosshair, Plus, Trash2 } from "lucide-react";
+import { Boxes, Crosshair, Network, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 
@@ -11,7 +11,7 @@ import type {
 import { cn } from "@/lib/utils";
 
 import { structureChildGroupsForParent } from "./constants";
-import { shortType } from "./ui";
+import { Button, shortType } from "./ui";
 
 interface StructureTreeModel {
   paths: string[];
@@ -40,6 +40,7 @@ export function StructurePanel({
   selectedIds,
   onAddChild,
   onCenterCamera,
+  onCreateStructure,
   onManageGroups,
   onRemove,
   onSelect,
@@ -54,6 +55,8 @@ export function StructurePanel({
   selectedIds: number[];
   onAddChild(parentId: number, type: string, name: string): void;
   onCenterCamera(id: number): void;
+  /** Öffnet die Eingabemaske "Raumstruktur anlegen" (leere Dokumente). */
+  onCreateStructure?(): void;
   onManageGroups(id: number): void;
   onRemove(id: number): void;
   onSelect(id: number, source?: string): void;
@@ -552,12 +555,29 @@ export function StructurePanel({
   }
 
   return (
-    <div className="min-h-0 flex-1 overflow-hidden">
-      <FileTree
-        className="h-full w-full"
-        model={model}
-        renderContextMenu={renderContextMenu}
-      />
+    <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
+      {treeModel.paths.length === 0 && onCreateStructure ? (
+        <div className="grid shrink-0 gap-2 rounded-lg border border-dashed border-border/70 bg-card/50 p-3">
+          <p className="text-xs text-muted-foreground">
+            Dieses Dokument hat keine räumliche Struktur (Projekt → Standort →
+            Gebäude → Geschoss). Erst mit ihr lassen sich Bauteile geordnet
+            einfügen.
+          </p>
+          <div>
+            <Button variant="default" onClick={onCreateStructure}>
+              <Network aria-hidden className="size-3.5" />
+              Raumstruktur anlegen…
+            </Button>
+          </div>
+        </div>
+      ) : null}
+      <div className="min-h-0 flex-1 overflow-hidden">
+        <FileTree
+          className="h-full w-full"
+          model={model}
+          renderContextMenu={renderContextMenu}
+        />
+      </div>
     </div>
   );
 }

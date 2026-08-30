@@ -1923,6 +1923,382 @@ export function addNativeElement(
   return rebuildNativeDocument(document, next);
 }
 
+/** Eingaben für das Anlegen/Vervollständigen der Raumstruktur. */
+export interface NativeSpatialStructureDraft {
+  projectName: string;
+  siteName: string;
+  buildingName: string;
+  storeyName: string;
+  /** Freie Bauteile (ohne räumliche Zuordnung) dem Geschoss zuordnen. */
+  adoptOrphans: boolean;
+}
+
+export interface NativeSpatialStructureResult {
+  /** Unverändert (===) wenn nichts zu tun war. */
+  document: NativeIfcDocument;
+  /** Neu angelegte Ebenen für die Statusmeldung (deutsch). */
+  createdLabels: string[];
+  /** Anzahl der dem Geschoss zugeordneten freien Bauteile. */
+  adoptedCount: number;
+  /** Geschoss-Id für die Auswahl nach dem Anlegen. */
+  storeyId: number;
+}
+
+/**
+ * Ids aller Bauteile ohne räumliche Zuordnung (weder per Containment noch
+ * per Aggregation irgendwo eingehängt) — z. B. in "leeren" Hub-Modellen,
+ * die nur lose Objekte enthalten.
+ */
+export function listNativeUnassignedProductIds(
+  document: NativeIfcDocument,
+): number[] {
+  const containedIds = new Set<number>();
+  for (const rel of document.relationships) {
+    if (
+      rel.type !== "IFCRELAGGREGATES" &&
+      rel.type !== "IFCRELCONTAINEDINSPATIALSTRUCTURE"
+    ) {
+      continue;
+    }
+    for (const target of rel.targetIds) {
+      containedIds.add(target);
+    }
+  }
+  return document.entities
+    .filter(
+      (entity) =>
+        isPhysicalProduct(entity.type) && !containedIds.has(entity.id),
+    )
+    .map((entity) => entity.id);
+}
+
+/**
+ * Legt die räumliche Grundstruktur Projekt → Standort → Gebäude → Geschoss
+ * an bzw. vervollständigt sie: vorhandene Ebenen (erste ihres Typs) werden
+ * wiederverwendet und nur fehlende Entitäten/Verknüpfungen ergänzt. Für ein
+ * neues IFCPROJECT entstehen bei Bedarf auch Darstellungskontext und
+ * SI-Einheiten. Optional werden freie Bauteile per Containment dem Geschoss
+ * zugeordnet — der Weg, ein "leeres" Modell befüllbar zu machen.
+ */
+export function ensureNativeSpatialStructure(
+  document: NativeIfcDocument,
+  draft: NativeSpatialStructureDraft,
+): NativeSpatialStructureResult {
+  const next = cloneDocumentEntities(document);
+  let nextId = nextEntityId(next);
+  const allocate = () => nextId++;
+  const createdLabels: string[] = [];
+
+  // Bestehende Hierarchie-Kanten: Kind-Ids und Parent→Kind-Paare, damit
+  // vorhandene Verknüpfungen nicht doppelt angelegt werden.
+  const containedIds = new Set<number>();
+  const linkedPairs = new Set<string>();
+  for (const rel of document.relationships) {
+    if (
+      rel.type !== "IFCRELAGGREGATES" &&
+      rel.type !== "IFCRELCONTAINEDINSPATIALSTRUCTURE"
+    ) {
+      continue;
+    }
+    for (const source of rel.sourceIds) {
+      for (const target of rel.targetIds) {
+        containedIds.add(target);
+        linkedPairs.add(`${source}->${target}`);
+      }
+    }
+  }
+
+  const pushRooted = (
+    id: number,
+    type: string,
+    name: string,
+    args: string[],
+  ) => {
+    next.push({
+      args,
+      description: "",
+      globalId: createIfcGuid(id),
+      id,
+      name,
+      type,
+    });
+  };
+
+  // Gemeinsame Nullpunkt-Platzierung — nur angelegt, wenn eine Ebene neu
+  // entsteht (gleiches Muster wie der Datei-Builder: Site/Gebäude/Geschoss
+  // teilen sich eine Platzierung).
+  let sharedPlacementId: number | undefined;
+  const ensurePlacement = () => {
+    if (sharedPlacementId === undefined) {
+      const placementId = allocate();
+      const axisId = allocate();
+      const pointId = allocate();
+      next.push(
+        {
+          args: ["$", `#${axisId}`],
+          description: "",
+          globalId: "",
+          id: placementId,
+          name: "",
+          type: "IFCLOCALPLACEMENT",
+        },
+        {
+          args: [`#${pointId}`, "$", "$"],
+          description: "",
+          globalId: "",
+          id: axisId,
+          name: "",
+          type: "IFCAXIS2PLACEMENT3D",
+        },
+        {
+          args: ["(0.,0.,0.)"],
+          description: "",
+          globalId: "",
+          id: pointId,
+          name: "",
+          type: "IFCCARTESIANPOINT",
+        },
+      );
+      sharedPlacementId = placementId;
+    }
+    return sharedPlacementId;
+  };
+
+  // ---- Projekt ----------------------------------------------------------
+  const existingProject = document.entitiesByType.get("IFCPROJECT")?.[0];
+  let projectId: number;
+  if (existingProject) {
+    projectId = existingProject.id;
+  } else {
+    // Darstellungskontext + Einheiten wiederverwenden oder minimal anlegen —
+    // ohne sie wäre das neue IFCPROJECT schema-unvollständig.
+    let contextRef = document.entitiesByType.get(
+      "IFCGEOMETRICREPRESENTATIONCONTEXT",
+    )?.[0]?.id;
+    if (contextRef === undefined) {
+      const contextId = allocate();
+      const axisId = allocate();
+      const pointId = allocate();
+      next.push(
+        {
+          args: ["$", quote("Model"), "3", "1.E-05", `#${axisId}`, "$"],
+          description: "",
+          globalId: "",
+          id: contextId,
+          name: "",
+          type: "IFCGEOMETRICREPRESENTATIONCONTEXT",
+        },
+        {
+          args: [`#${pointId}`, "$", "$"],
+          description: "",
+          globalId: "",
+          id: axisId,
+          name: "",
+          type: "IFCAXIS2PLACEMENT3D",
+        },
+        {
+          args: ["(0.,0.,0.)"],
+          description: "",
+          globalId: "",
+          id: pointId,
+          name: "",
+          type: "IFCCARTESIANPOINT",
+        },
+      );
+      contextRef = contextId;
+    }
+    let unitsRef = document.entitiesByType.get("IFCUNITASSIGNMENT")?.[0]?.id;
+    if (unitsRef === undefined) {
+      const unitsId = allocate();
+      const lengthId = allocate();
+      const areaId = allocate();
+      const volumeId = allocate();
+      next.push(
+        {
+          args: [`(#${lengthId},#${areaId},#${volumeId})`],
+          description: "",
+          globalId: "",
+          id: unitsId,
+          name: "",
+          type: "IFCUNITASSIGNMENT",
+        },
+        {
+          args: ["*", ".LENGTHUNIT.", "$", ".METRE."],
+          description: "",
+          globalId: "",
+          id: lengthId,
+          name: "",
+          type: "IFCSIUNIT",
+        },
+        {
+          args: ["*", ".AREAUNIT.", "$", ".SQUARE_METRE."],
+          description: "",
+          globalId: "",
+          id: areaId,
+          name: "",
+          type: "IFCSIUNIT",
+        },
+        {
+          args: ["*", ".VOLUMEUNIT.", "$", ".CUBIC_METRE."],
+          description: "",
+          globalId: "",
+          id: volumeId,
+          name: "",
+          type: "IFCSIUNIT",
+        },
+      );
+      unitsRef = unitsId;
+    }
+    projectId = allocate();
+    pushRooted(projectId, "IFCPROJECT", draft.projectName, [
+      quote(createIfcGuid(projectId)),
+      "$",
+      quote(draft.projectName),
+      "$",
+      "$",
+      "$",
+      "$",
+      `(#${contextRef})`,
+      `#${unitsRef}`,
+    ]);
+    createdLabels.push("Projekt");
+  }
+
+  // ---- Standort → Gebäude → Geschoss ------------------------------------
+  const levels: {
+    type: string;
+    name: string;
+    label: string;
+    buildArgs: (id: number, placementRef: string) => string[];
+  }[] = [
+    {
+      buildArgs: (id, placementRef) => [
+        quote(createIfcGuid(id)),
+        "$",
+        quote(draft.siteName),
+        "$",
+        "$",
+        placementRef,
+        "$",
+        "$",
+        ".ELEMENT.",
+        "$",
+        "$",
+        "$",
+        "$",
+        "$",
+      ],
+      label: "Standort",
+      name: draft.siteName,
+      type: "IFCSITE",
+    },
+    {
+      buildArgs: (id, placementRef) => [
+        quote(createIfcGuid(id)),
+        "$",
+        quote(draft.buildingName),
+        "$",
+        "$",
+        placementRef,
+        "$",
+        "$",
+        ".ELEMENT.",
+        "$",
+        "$",
+        "$",
+      ],
+      label: "Gebäude",
+      name: draft.buildingName,
+      type: "IFCBUILDING",
+    },
+    {
+      buildArgs: (id, placementRef) => [
+        quote(createIfcGuid(id)),
+        "$",
+        quote(draft.storeyName),
+        "$",
+        "$",
+        placementRef,
+        "$",
+        "$",
+        ".ELEMENT.",
+        "0.",
+      ],
+      label: "Geschoss",
+      name: draft.storeyName,
+      type: "IFCBUILDINGSTOREY",
+    },
+  ];
+
+  const pushAggregates = (parentId: number, childId: number) => {
+    const relId = allocate();
+    pushRooted(relId, "IFCRELAGGREGATES", "", [
+      quote(createIfcGuid(relId)),
+      "$",
+      "$",
+      "$",
+      `#${parentId}`,
+      `(#${childId})`,
+    ]);
+  };
+
+  let parentId = projectId;
+  for (const level of levels) {
+    const existing = document.entitiesByType.get(level.type)?.[0];
+    let id: number;
+    if (existing) {
+      id = existing.id;
+      // Vorhandene, aber nirgends eingehängte Ebene an den Parent knüpfen;
+      // bereits verknüpfte Ebenen bleiben unangetastet.
+      if (!containedIds.has(id) && !linkedPairs.has(`${parentId}->${id}`)) {
+        pushAggregates(parentId, id);
+        createdLabels.push(`${level.label} verknüpft`);
+      }
+    } else {
+      id = allocate();
+      pushRooted(
+        id,
+        level.type,
+        level.name,
+        level.buildArgs(id, `#${ensurePlacement()}`),
+      );
+      pushAggregates(parentId, id);
+      createdLabels.push(level.label);
+    }
+    parentId = id;
+  }
+  const storeyId = parentId;
+
+  // ---- Freie Bauteile dem Geschoss zuordnen ------------------------------
+  let adoptedCount = 0;
+  if (draft.adoptOrphans) {
+    const orphanIds = listNativeUnassignedProductIds(document);
+    if (orphanIds.length) {
+      const relId = allocate();
+      pushRooted(relId, "IFCRELCONTAINEDINSPATIALSTRUCTURE", "", [
+        quote(createIfcGuid(relId)),
+        "$",
+        "$",
+        "$",
+        `(${orphanIds.map((id) => `#${id}`).join(",")})`,
+        `#${storeyId}`,
+      ]);
+      adoptedCount = orphanIds.length;
+    }
+  }
+
+  if (next.length === document.entities.length) {
+    // Nichts ergänzt — Struktur war bereits vollständig.
+    return { adoptedCount: 0, createdLabels: [], document, storeyId };
+  }
+  return {
+    adoptedCount,
+    createdLabels,
+    document: rebuildNativeDocument(document, next),
+    storeyId,
+  };
+}
+
 /**
  * Erzeugt die Profil-Entitäten für einen extrudierten Körper.
  *
