@@ -424,6 +424,133 @@ test("library: central file, referenced by an action, guarded deletion", async (
   await app.close();
 });
 
+test("action scope: project-wide, folder, or single model", async () => {
+  const { app, runner } = await makeApp();
+  const token = await register(app);
+  await app.inject({
+    method: "POST",
+    url: "/api/projects",
+    headers: auth(token),
+    payload: { name: "Acme", slug: "acme" },
+  });
+  await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/models",
+    headers: auth(token),
+    payload: { name: "Tower", slug: "tower" },
+  });
+  await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/models",
+    headers: auth(token),
+    payload: { name: "Halle", slug: "halle", folder: "Hochbau/EG" },
+  });
+  const models = JSON.parse(
+    (
+      await app.inject({
+        method: "GET",
+        url: "/api/projects/acme/models",
+        headers: auth(token),
+      })
+    ).body,
+  ).models as { id: string; slug: string }[];
+  const towerId = models.find((m) => m.slug === "tower")!.id;
+
+  // Drei Actions: projektweit, Ordner "Hochbau", nur Modell "tower".
+  const all = await createAction(app, token, {
+    name: "Projektweit",
+    kind: "ids",
+    content: idsXml("Height"),
+    runOnCommit: true,
+  });
+  const folderScoped = await createAction(app, token, {
+    name: "Nur Hochbau",
+    kind: "ids",
+    content: idsXml("Height"),
+    scopeFolder: "Hochbau",
+    runOnCommit: true,
+  });
+  const towerScoped = await createAction(app, token, {
+    name: "Nur Tower",
+    kind: "ids",
+    content: idsXml("Height"),
+    scopeModelId: towerId,
+    runOnCommit: true,
+  });
+
+  // Beides gleichzeitig ist ungültig.
+  const both = await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/actions",
+    headers: auth(token),
+    payload: {
+      name: "X",
+      kind: "ids",
+      content: idsXml("Height"),
+      scopeFolder: "Hochbau",
+      scopeModelId: towerId,
+    },
+  });
+  assert.equal(both.statusCode, 400);
+
+  // Commit in "Hochbau/EG": projektweite + Ordner-Action laufen automatisch.
+  const halleCommit = await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/models/halle/commits?message=init",
+    headers: { ...auth(token), "content-type": "application/x-step" },
+    payload: ifcModel(),
+  });
+  const halleCommitId = JSON.parse(halleCommit.body).commit.id as string;
+  await runner.idle();
+  const halleRuns = JSON.parse(
+    (
+      await app.inject({
+        method: "GET",
+        url: `/api/projects/acme/runs?commit=${halleCommitId}`,
+        headers: auth(token),
+      })
+    ).body,
+  ).runs as { actionId: string }[];
+  assert.deepEqual(
+    halleRuns.map((run) => run.actionId).sort(),
+    [all.id, folderScoped.id].sort(),
+  );
+
+  // Commit auf "tower": projektweite + Modell-Action.
+  const towerCommit = await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/models/tower/commits?message=init",
+    headers: { ...auth(token), "content-type": "application/x-step" },
+    payload: ifcModel(),
+  });
+  const towerCommitId = JSON.parse(towerCommit.body).commit.id as string;
+  await runner.idle();
+  const towerRuns = JSON.parse(
+    (
+      await app.inject({
+        method: "GET",
+        url: `/api/projects/acme/runs?commit=${towerCommitId}`,
+        headers: auth(token),
+      })
+    ).body,
+  ).runs as { actionId: string }[];
+  assert.deepEqual(
+    towerRuns.map((run) => run.actionId).sort(),
+    [all.id, towerScoped.id].sort(),
+  );
+
+  // Explizite Auswahl einer Action außerhalb des Geltungsbereichs -> 400.
+  const denied = await app.inject({
+    method: "POST",
+    url: `/api/projects/acme/models/tower/commits/${towerCommitId}/validate`,
+    headers: auth(token),
+    payload: { actionIds: [folderScoped.id] },
+  });
+  assert.equal(denied.statusCode, 400);
+
+  await app.close();
+});
+
 test("actions require write access; viewers can read runs", async () => {
   const { app } = await makeApp();
   const token = await register(app);

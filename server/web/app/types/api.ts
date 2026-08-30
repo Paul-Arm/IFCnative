@@ -150,8 +150,30 @@ export interface Action {
   libraryFileId: string | null;
   /** Name des Bibliothekseintrags (nur im Projekt-Listing enthalten). */
   libraryName?: string | null;
+  /** Geltungsbereich: beide null = alle Modelle; sonst Ordner ODER Modell. */
+  scopeFolder: string | null;
+  scopeModelId: string | null;
+  /** Name des Geltungsbereich-Modells (nur im Projekt-Listing). */
+  scopeModelName?: string | null;
   runOnCommit: boolean;
   createdAt: string;
+}
+
+/** Gilt die Action für dieses Modell? (Spiegel der Server-Logik.) */
+export function actionAppliesTo(
+  action: Action,
+  model: { id: string; folder: string },
+): boolean {
+  if (action.scopeModelId !== null) {
+    return action.scopeModelId === model.id;
+  }
+  if (action.scopeFolder !== null) {
+    return (
+      model.folder === action.scopeFolder ||
+      model.folder.startsWith(`${action.scopeFolder}/`)
+    );
+  }
+  return true;
 }
 
 /** Eintrag der zentralen Skript-/IDS-Bibliothek (projektübergreifend). */

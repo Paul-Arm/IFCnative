@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Input } from "@/components/ui/input";
 import { VcsApiClient, VcsApiError } from "@/vcs/client";
+import { vcsActionAppliesTo } from "@/vcs/types";
 import type {
   VcsAction,
   VcsActionRun,
@@ -341,6 +342,11 @@ export function VcsPanel({
       issue.models.some((model) => model.slug === modelSlug),
   );
 
+  /** Actions, deren Geltungsbereich das gewählte Modell abdeckt. */
+  const applicableActions = selectedModel
+    ? actions.filter((action) => vcsActionAppliesTo(action, selectedModel))
+    : [];
+
   /** Runs zum aktuellen Head-Commit des gewählten Branches. */
   const headRuns = headCommit
     ? runs.filter((run) => run.commitId === headCommit.id)
@@ -616,19 +622,19 @@ export function VcsPanel({
         <CollapsibleSection
           title="Prüfungen"
           meta={
-            actions.length
-              ? `${actions.length} Action(s) · ${headRuns.length} Run(s) am Head`
-              : "keine Actions im Projekt"
+            applicableActions.length
+              ? `${applicableActions.length} Action(s) für dieses Modell · ${headRuns.length} Run(s) am Head`
+              : "keine passenden Actions"
           }
         >
-          {actions.length ? (
+          {applicableActions.length ? (
             <>
               <div>
                 <Button
                   disabled={validateBusy || !headCommit}
                   title={
                     headCommit
-                      ? `Head-Commit ${headCommit.id.slice(0, 8)} mit allen ${actions.length} Actions prüfen`
+                      ? `Head-Commit ${headCommit.id.slice(0, 8)} mit den ${applicableActions.length} passenden Actions prüfen`
                       : "Noch kein Commit auf diesem Branch"
                   }
                   onClick={() => void handleValidate()}
@@ -686,8 +692,9 @@ export function VcsPanel({
             </>
           ) : (
             <p className="text-xs text-muted-foreground">
-              Keine Actions konfiguriert — IDS-Dateien und Prüfskripte werden
-              in der Web-Oberfläche (Tab „Actions“ bzw. „Bibliothek“) verwaltet.
+              Keine Actions mit passendem Geltungsbereich für dieses Modell —
+              Actions werden in der Web-Oberfläche (Tab „Actions“ bzw.
+              „Bibliothek“) verwaltet.
             </p>
           )}
         </CollapsibleSection>

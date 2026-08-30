@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import type {
-  Action,
-  ActionRun,
-  Commit,
-  EntityFieldDiff,
-  GuidDiffEntry,
-  GuidDiffSummary,
+import {
+  actionAppliesTo,
+  type Action,
+  type ActionRun,
+  type Commit,
+  type EntityFieldDiff,
+  type GuidDiffEntry,
+  type GuidDiffSummary,
+  type Model,
 } from "~/types/api";
 
 const route = useRoute();
@@ -92,7 +94,20 @@ const isIfc = computed(() => commitData.value?.commit.schema !== "markdown");
 const { data: actionsData } = await useAsyncData(`actions-${slug}`, () =>
   api<{ actions: Action[] }>(`/projects/${slug}/actions`),
 );
-const actionCount = computed(() => actionsData.value?.actions.length ?? 0);
+const { data: modelData } = await useAsyncData(
+  `model-${slug}-${modelSlug}`,
+  () => api<{ model: Model }>(base),
+);
+
+/** Nur Actions, deren Geltungsbereich dieses Modell abdeckt. */
+const applicableActions = computed(() => {
+  const model = modelData.value?.model;
+  if (!model) return [];
+  return (actionsData.value?.actions ?? []).filter((action) =>
+    actionAppliesTo(action, model),
+  );
+});
+const actionCount = computed(() => applicableActions.value.length);
 const { data: runsData, refresh: refreshRuns } = await useAsyncData(
   `runs-${commitId}`,
   () => api<{ runs: ActionRun[] }>(`/projects/${slug}/runs`, {
@@ -117,10 +132,10 @@ const validateError = ref<string | null>(null);
 // Auswahl, WELCHE Actions laufen sollen (Standard: alle).
 const selectedActions = reactive(new Set<string>());
 watch(
-  () => actionsData.value?.actions,
+  applicableActions,
   (actions) => {
     if (!selectedActions.size) {
-      for (const action of actions ?? []) {
+      for (const action of actions) {
         selectedActions.add(action.id);
       }
     }
@@ -329,7 +344,7 @@ const sections = computed(() => {
               Mit welchen Actions prüfen?
             </p>
             <label
-              v-for="action in actionsData?.actions ?? []"
+              v-for="action in applicableActions"
               :key="action.id"
               class="pv-item"
             >
@@ -363,9 +378,9 @@ const sections = computed(() => {
         <div class="alert error" style="margin: 0">{{ validateError }}</div>
       </div>
       <div v-if="!actionCount" class="empty">
-        Keine Actions konfiguriert —
+        Keine Actions mit passendem Geltungsbereich für dieses Modell —
         <NuxtLink :to="`/p/${slug}?tab=actions`">im Tab „Actions"</NuxtLink>
-        eine IDS-Datei oder ein Python-Prüfskript hinterlegen.
+        eine anlegen (alle Modelle, Ordner oder dieses Modell).
       </div>
       <div v-else-if="!runsData?.runs.length" class="empty">
         Dieser Commit wurde noch nicht geprüft.

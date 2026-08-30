@@ -83,6 +83,11 @@ damit exakt einig, was „geändert“ bedeutet.
     (`PYTHON_BIN`, Default `python`/`python3`; Zeitlimit 5 min), bekommt den
     IFC-Pfad als Argument 1 und als `IFC_PATH`-Umgebungsvariable.
     **Exit-Code 0 = bestanden**, stdout/stderr landen im Run-Protokoll.
+  Jede Action hat einen **Geltungsbereich**: alle IFC-Modelle des Projekts
+  (Standard), ein **Ordner** (inkl. Unterordner, `scopeFolder`) oder ein
+  **einzelnes Modell** (`scopeModelId`) — automatische Läufe bei Commits und
+  „Jetzt prüfen“ berücksichtigen nur Actions, deren Bereich das Modell
+  abdeckt; modellgebundene Actions werden mit dem Modell gelöscht.
   Jede Ausführung ist ein **Run** mit Status
   (`queued/running/success/failed/error`), Kurzfazit und Protokoll; Runs
   laufen sequenziell in einer In-Process-Queue. Auslösen per Knopfdruck auf
@@ -218,7 +223,7 @@ Auth: `Authorization: Bearer <JWT>` aus `/api/auth/login`. Fehler kommen als
 | GET | `…/commits/:id/fragments` | ThatOpen-Fragments für die 3D-Vorschau (erster Abruf konvertiert + cached; immutable-Cache-Header) |
 | GET | `…/diff?from=&to=` | semantischer Diff zweier Commits |
 | GET | `…/diff/entity?from=&to=&globalId=` | Feld-Detail einer geänderten Entity |
-| GET/POST | `/api/projects/:slug/actions` | Actions auflisten (inkl. `libraryName`) / anlegen `{name, kind, content, fileName?, runOnCommit?}` **oder** `{name, libraryFileId, runOnCommit?}` (write) |
+| GET/POST | `/api/projects/:slug/actions` | Actions auflisten (inkl. `libraryName`, `scopeModelName`) / anlegen `{name, kind, content, fileName?, runOnCommit?, scopeFolder?\|scopeModelId?}` **oder** `{name, libraryFileId, runOnCommit?, scopeFolder?\|scopeModelId?}` (write) |
 | PATCH/DELETE | `/api/projects/:slug/actions/:id` | Name/`runOnCommit`/Dateiinhalt ändern bzw. löschen (write) |
 | GET | `/api/projects/:slug/actions/:id/file` | hinterlegte IDS/Skript-Datei herunterladen |
 | POST | `…/commits/:id/validate` | Commit prüfen `{actionIds?}` (Default: alle Actions) → `{runs}` (write) |

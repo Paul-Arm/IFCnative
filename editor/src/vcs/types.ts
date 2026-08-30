@@ -108,8 +108,29 @@ export interface VcsAction {
   fileName: string;
   libraryFileId: string | null;
   libraryName?: string | null;
+  /** Geltungsbereich: beide null = alle Modelle; sonst Ordner ODER Modell. */
+  scopeFolder: string | null;
+  scopeModelId: string | null;
+  scopeModelName?: string | null;
   runOnCommit: boolean;
   createdAt: string;
+}
+
+/** Gilt die Action für dieses Modell? (Spiegel der Server-Logik.) */
+export function vcsActionAppliesTo(
+  action: VcsAction,
+  model: Pick<VcsModel, "id" | "folder">,
+): boolean {
+  if (action.scopeModelId !== null) {
+    return action.scopeModelId === model.id;
+  }
+  if (action.scopeFolder !== null) {
+    return (
+      model.folder === action.scopeFolder ||
+      model.folder.startsWith(`${action.scopeFolder}/`)
+    );
+  }
+  return true;
 }
 
 export type VcsRunStatus =

@@ -19,6 +19,7 @@ import { CommitService } from "../domain/commitService";
 import { FragmentsService } from "../domain/fragmentsService";
 import type { ObjectStore } from "../storage/objectStore";
 import {
+  actionAppliesTo,
   ADMIN_ROLES,
   type Action,
   type ActionRun,
@@ -1591,10 +1592,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         authorId: user.id,
         message: query.message ?? upload.fields.message ?? "",
       });
-      // Actions mit "bei Commit ausführen" automatisch starten.
+      // Actions mit "bei Commit ausführen" automatisch starten — nur die,
+      // deren Geltungsbereich das Modell abdeckt.
       if (model.kind === "ifc") {
         const autoActions = (await repo.listActions(project.id)).filter(
-          (action) => action.runOnCommit,
+          (action) => action.runOnCommit && actionAppliesTo(action, model),
         );
         await queueRuns(project, model, result.commit.id, autoActions, user.id);
       }
@@ -1897,15 +1899,57 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const libraryById = new Map(
       (await repo.listLibraryFiles()).map((file) => [file.id, file]),
     );
+    const modelById = new Map(
+      (await repo.listModels(project.id)).map((model) => [model.id, model]),
+    );
     return reply.send({
       actions: actions.map((action) => ({
         ...publicAction(action),
         libraryName: action.libraryFileId
           ? libraryById.get(action.libraryFileId)?.name ?? null
           : null,
+        scopeModelName: action.scopeModelId
+          ? modelById.get(action.scopeModelId)?.name ?? null
+          : null,
       })),
     });
   });
+
+  /**
+   * Geltungsbereich aus dem Request lesen: höchstens eines von
+   * scopeFolder/scopeModelId; Ordner normalisiert, Modell muss ein
+   * IFC-Modell des Projekts sein. null = Antwort schon gesendet.
+   */
+  async function resolveActionScope(
+    project: Project,
+    body: { scopeFolder?: string; scopeModelId?: string },
+    reply: FastifyReply,
+  ): Promise<{ scopeFolder: string | null; scopeModelId: string | null } | null> {
+    if (body.scopeFolder && body.scopeModelId) {
+      reply
+        .code(400)
+        .send({ error: "Entweder Ordner ODER Modell als Geltungsbereich" });
+      return null;
+    }
+    if (body.scopeModelId) {
+      const models = await repo.listModels(project.id);
+      const model = models.find((entry) => entry.id === body.scopeModelId);
+      if (!model || model.kind !== "ifc") {
+        reply.code(400).send({ error: "Unknown model id for scope" });
+        return null;
+      }
+      return { scopeFolder: null, scopeModelId: model.id };
+    }
+    if (body.scopeFolder !== undefined && body.scopeFolder !== "") {
+      const folder = normalizeFolderPath(body.scopeFolder);
+      if (!folder) {
+        reply.code(400).send({ error: "Invalid scope folder path" });
+        return null;
+      }
+      return { scopeFolder: folder, scopeModelId: null };
+    }
+    return { scopeFolder: null, scopeModelId: null };
+  }
 
   app.post(`${api}/projects/:slug/actions`, async (request, reply) => {
     const { slug } = request.params as { slug: string };
@@ -1916,11 +1960,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (!(await requireMember(project, user, reply, "write"))) return reply;
     const body = (request.body ?? {}) as ActionPayload & {
       libraryFileId?: string;
+      scopeFolder?: string;
+      scopeModelId?: string;
     };
     const name = body.name?.trim();
     if (!name || name.length > 100) {
       return reply.code(400).send({ error: "Name required (max 100)" });
     }
+    const scope = await resolveActionScope(project, body, reply);
+    if (!scope) return reply;
     const actionId = randomUUID();
     let action: Action;
     if (body.libraryFileId) {
@@ -1937,6 +1985,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         fileKey: libraryFile.fileKey,
         fileName: libraryFile.fileName,
         libraryFileId: libraryFile.id,
+        ...scope,
         runOnCommit: Boolean(body.runOnCommit),
       });
     } else {
@@ -1956,6 +2005,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         fileKey,
         fileName: payload.fileName,
         libraryFileId: null,
+        ...scope,
         runOnCommit: Boolean(body.runOnCommit),
       });
     }
@@ -2201,18 +2251,23 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return reply.code(404).send({ error: "Commit not found" });
       }
       const body = (request.body ?? {}) as { actionIds?: string[] };
-      let actions = await repo.listActions(project.id);
+      // Nur Actions, deren Geltungsbereich dieses Modell abdeckt.
+      let actions = (await repo.listActions(project.id)).filter((action) =>
+        actionAppliesTo(action, model),
+      );
       if (body.actionIds !== undefined) {
         const wanted = new Set(body.actionIds);
         actions = actions.filter((action) => wanted.has(action.id));
         if (actions.length !== wanted.size) {
-          return reply.code(400).send({ error: "Unknown action id" });
+          return reply
+            .code(400)
+            .send({ error: "Action unbekannt oder gilt nicht für dieses Modell" });
         }
       }
       if (!actions.length) {
         return reply
           .code(400)
-          .send({ error: "Keine Actions im Projekt konfiguriert" });
+          .send({ error: "Keine passenden Actions für dieses Modell" });
       }
       const runs = await queueRuns(project, model, commit.id, actions, user.id);
       return reply.code(201).send({ runs: await enrichRuns(project.id, runs) });

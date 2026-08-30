@@ -785,8 +785,23 @@ const actionFile = ref<File | null>(null);
 /** Quelle der Prüfdatei: eigener Upload oder zentraler Bibliothekseintrag. */
 const actionSource = ref<"upload" | "library">("upload");
 const actionLibraryId = ref("");
+/** Geltungsbereich: alle Modelle, ein Ordner oder ein einzelnes Modell. */
+const actionScopeType = ref<"project" | "folder" | "model">("project");
+const actionScopeFolder = ref("");
+const actionScopeModelId = ref("");
 const actionBusy = ref(false);
 const actionError = ref<string | null>(null);
+
+/** Beschreibt den Geltungsbereich einer Action für die Tabelle. */
+function scopeLabel(action: Action): string {
+  if (action.scopeModelId) {
+    return `Modell: ${action.scopeModelName ?? action.scopeModelId}`;
+  }
+  if (action.scopeFolder) {
+    return `Ordner: ${action.scopeFolder}/`;
+  }
+  return "Alle Modelle";
+}
 
 function onActionFile(event: Event): void {
   actionFile.value = (event.target as HTMLInputElement).files?.[0] ?? null;
@@ -797,6 +812,21 @@ function onActionFile(event: Event): void {
 
 async function createAction(): Promise<void> {
   actionError.value = null;
+  // Geltungsbereich zusammenstellen und prüfen.
+  const scope: Record<string, string> = {};
+  if (actionScopeType.value === "folder") {
+    if (!actionScopeFolder.value) {
+      actionError.value = "Bitte einen Ordner als Geltungsbereich wählen.";
+      return;
+    }
+    scope.scopeFolder = actionScopeFolder.value;
+  } else if (actionScopeType.value === "model") {
+    if (!actionScopeModelId.value) {
+      actionError.value = "Bitte ein Modell als Geltungsbereich wählen.";
+      return;
+    }
+    scope.scopeModelId = actionScopeModelId.value;
+  }
   let body: Record<string, unknown>;
   if (actionSource.value === "library") {
     if (!actionLibraryId.value) {
@@ -807,6 +837,7 @@ async function createAction(): Promise<void> {
       name: actionName.value,
       libraryFileId: actionLibraryId.value,
       runOnCommit: actionRunOnCommit.value,
+      ...scope,
     };
   } else {
     if (!actionFile.value) {
@@ -819,6 +850,7 @@ async function createAction(): Promise<void> {
       fileName: actionFile.value.name,
       content: await actionFile.value.text(),
       runOnCommit: actionRunOnCommit.value,
+      ...scope,
     };
   }
   actionBusy.value = true;
@@ -827,6 +859,9 @@ async function createAction(): Promise<void> {
     actionName.value = "";
     actionFile.value = null;
     actionLibraryId.value = "";
+    actionScopeType.value = "project";
+    actionScopeFolder.value = "";
+    actionScopeModelId.value = "";
     showActionForm.value = false;
     await refreshActions();
   } catch (e) {
@@ -1678,9 +1713,45 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
               <NuxtLink to="/library">hier</NuxtLink> IDS-Dateien und
               Prüfskripte zentral ablegen.
             </p>
+            <div class="form-inline" style="margin-top: 0.5rem">
+              <div class="shrink">
+                <label for="action-scope">Gilt für</label>
+                <select id="action-scope" v-model="actionScopeType" style="width: auto">
+                  <option value="project">Alle Modelle des Projekts</option>
+                  <option value="folder">Einen Ordner (inkl. Unterordner)</option>
+                  <option value="model">Ein einzelnes Modell</option>
+                </select>
+              </div>
+              <div v-if="actionScopeType === 'folder'">
+                <label for="action-scope-folder">Ordner</label>
+                <select id="action-scope-folder" v-model="actionScopeFolder">
+                  <option value="" disabled>bitte wählen …</option>
+                  <option
+                    v-for="folder in projectData.folders"
+                    :key="folder"
+                    :value="folder"
+                  >
+                    {{ folder }}/
+                  </option>
+                </select>
+              </div>
+              <div v-if="actionScopeType === 'model'">
+                <label for="action-scope-model">Modell</label>
+                <select id="action-scope-model" v-model="actionScopeModelId">
+                  <option value="" disabled>bitte wählen …</option>
+                  <option
+                    v-for="model in (modelsData?.models ?? []).filter((m) => m.kind === 'ifc')"
+                    :key="model.id"
+                    :value="model.id"
+                  >
+                    {{ model.folder ? `${model.folder}/` : "" }}{{ model.name }}
+                  </option>
+                </select>
+              </div>
+            </div>
             <label style="display: flex; align-items: center; gap: 0.4rem; font-weight: 400; margin-top: 0.5rem">
               <input v-model="actionRunOnCommit" type="checkbox" style="width: auto" />
-              Bei jedem neuen Commit automatisch ausführen
+              Bei jedem neuen Commit (im Geltungsbereich) automatisch ausführen
             </label>
             <p class="muted small" style="margin-top: 0.5rem">
               Python-Skripte laufen auf dem Server und erhalten den IFC-Pfad als
@@ -1705,6 +1776,7 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
               <tr>
                 <th>Name</th>
                 <th>Art</th>
+                <th>Gilt für</th>
                 <th>Datei</th>
                 <th>Bei Commit</th>
                 <th v-if="canWrite"></th>
@@ -1717,6 +1789,12 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
                   <span class="badge" :class="action.kind === 'ids' ? 'accent' : ''">
                     {{ action.kind === "ids" ? "IDS" : "Python" }}
                   </span>
+                </td>
+                <td class="small">
+                  <span
+                    class="badge"
+                    :class="!action.scopeFolder && !action.scopeModelId ? '' : 'accent'"
+                  >{{ scopeLabel(action) }}</span>
                 </td>
                 <td class="small mono">
                   <a href="#" @click.prevent="downloadActionFile(action)">

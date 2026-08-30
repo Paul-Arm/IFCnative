@@ -248,6 +248,16 @@ export class MemoryRepository implements Repository {
         this.actionRuns.delete(run.id);
       }
     }
+    // Actions, die nur für dieses Modell galten, gehen mit ihm.
+    const scopedActionBlobs: string[] = [];
+    for (const action of [...this.actions.values()]) {
+      if (action.scopeModelId === modelId) {
+        if (!action.libraryFileId) {
+          scopedActionBlobs.push(action.fileKey);
+        }
+        this.actions.delete(action.id);
+      }
+    }
     const commits = [...this.commits.values()].filter(
       (c) => c.modelId === modelId,
     );
@@ -268,7 +278,7 @@ export class MemoryRepository implements Repository {
       }
     }
     this.models.delete(modelId);
-    return commits.map((c) => c.blobKey);
+    return [...commits.map((c) => c.blobKey), ...scopedActionBlobs];
   }
 
   async deleteProject(projectId: string): Promise<string[]> {

@@ -247,6 +247,8 @@ test("SQLite: Actions + Runs Roundtrip und Kaskaden", async () => {
     fileKey: "projects/p/actions/a1",
     fileName: "hochbau.ids",
     libraryFileId: null,
+    scopeFolder: null,
+    scopeModelId: null,
     runOnCommit: true,
   });
   assert.equal((await repo.getAction(action.id))?.runOnCommit, true);
@@ -325,6 +327,8 @@ test("SQLite: Actions + Runs Roundtrip und Kaskaden", async () => {
     fileKey: "projects/p/actions/a2",
     fileName: "check.py",
     libraryFileId: null,
+    scopeFolder: null,
+    scopeModelId: null,
     runOnCommit: false,
   });
   await repo.createAction({
@@ -335,6 +339,8 @@ test("SQLite: Actions + Runs Roundtrip und Kaskaden", async () => {
     fileKey: libFile.fileKey,
     fileName: libFile.fileName,
     libraryFileId: libFile.id,
+    scopeFolder: null,
+    scopeModelId: null,
     runOnCommit: false,
   });
   assert.equal(await repo.countActionsUsingLibraryFile("lf1"), 1);

@@ -188,7 +188,13 @@ export interface LibraryFile {
   createdAt: string;
 }
 
-/** Projektgebundene Prüf-Action (wie ein GitHub-Actions-Workflow). */
+/**
+ * Projektgebundene Prüf-Action (wie ein GitHub-Actions-Workflow).
+ *
+ * Geltungsbereich: beide Scope-Felder null = gilt für ALLE IFC-Modelle des
+ * Projekts; `scopeFolder` = nur Modelle in diesem Ordner (inkl. Unterordner);
+ * `scopeModelId` = nur genau dieses Modell. Es ist höchstens eines gesetzt.
+ */
 export interface Action {
   id: string;
   projectId: string;
@@ -199,9 +205,28 @@ export interface Action {
   fileName: string;
   /** Gesetzt, wenn die Datei aus der zentralen Bibliothek kommt. */
   libraryFileId: string | null;
-  /** Bei jedem neuen IFC-Commit automatisch ausführen. */
+  scopeFolder: string | null;
+  scopeModelId: string | null;
+  /** Bei jedem neuen IFC-Commit (im Geltungsbereich) automatisch ausführen. */
   runOnCommit: boolean;
   createdAt: string;
+}
+
+/** Gilt die Action für dieses Modell? */
+export function actionAppliesTo(
+  action: Action,
+  model: Pick<Model, "id" | "folder">,
+): boolean {
+  if (action.scopeModelId !== null) {
+    return action.scopeModelId === model.id;
+  }
+  if (action.scopeFolder !== null) {
+    return (
+      model.folder === action.scopeFolder ||
+      model.folder.startsWith(`${action.scopeFolder}/`)
+    );
+  }
+  return true;
 }
 
 export type ActionRunStatus =

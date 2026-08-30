@@ -129,6 +129,8 @@ interface ActionRow {
   file_key: string;
   file_name: string;
   library_file_id: string | null;
+  scope_folder: string | null;
+  scope_model_id: string | null;
   run_on_commit: number;
   created_at: string;
 }
@@ -167,6 +169,8 @@ function toAction(row: ActionRow): Action {
     fileKey: row.file_key,
     fileName: row.file_name,
     libraryFileId: row.library_file_id ?? null,
+    scopeFolder: row.scope_folder ?? null,
+    scopeModelId: row.scope_model_id ?? null,
     runOnCommit: Boolean(row.run_on_commit),
     createdAt: row.created_at,
   };
@@ -527,6 +531,17 @@ export class SqlRepository implements Repository {
     await this.sql.query(`delete from action_runs where model_id = $1`, [
       modelId,
     ]);
+    // Actions, die nur für dieses Modell galten, gehen mit ihm.
+    const { rows: scopedActions } = await this.sql.query<{
+      file_key: string;
+      library_file_id: string | null;
+    }>(
+      `select file_key, library_file_id from actions where scope_model_id = $1`,
+      [modelId],
+    );
+    await this.sql.query(`delete from actions where scope_model_id = $1`, [
+      modelId,
+    ]);
     // FK-sichere Reihenfolge; entity_objects bleiben (content-addressed,
     // über Commits/Modelle geteilt).
     await this.sql.query(
@@ -543,7 +558,13 @@ export class SqlRepository implements Repository {
     await this.sql.query(`delete from commits where model_id = $1`, [modelId]);
     await this.sql.query(`delete from branches where model_id = $1`, [modelId]);
     await this.sql.query(`delete from models where id = $1`, [modelId]);
-    return rows.map((row) => row.blob_key);
+    return [
+      ...rows.map((row) => row.blob_key),
+      // Datei-Blobs der modellgebundenen Actions (Bibliotheksdateien bleiben).
+      ...scopedActions
+        .filter((action) => action.library_file_id === null)
+        .map((action) => action.file_key),
+    ];
   }
 
   async deleteProject(projectId: string): Promise<string[]> {
@@ -872,8 +893,8 @@ export class SqlRepository implements Repository {
   async createAction(input: Omit<Action, "createdAt">): Promise<Action> {
     const action: Action = { ...input, createdAt: this.now() };
     await this.sql.query(
-      `insert into actions (id, project_id, name, kind, file_key, file_name, library_file_id, run_on_commit, created_at)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      `insert into actions (id, project_id, name, kind, file_key, file_name, library_file_id, scope_folder, scope_model_id, run_on_commit, created_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
       [
         action.id,
         action.projectId,
@@ -882,6 +903,8 @@ export class SqlRepository implements Repository {
         action.fileKey,
         action.fileName,
         action.libraryFileId,
+        action.scopeFolder,
+        action.scopeModelId,
         action.runOnCommit ? 1 : 0,
         action.createdAt,
       ],

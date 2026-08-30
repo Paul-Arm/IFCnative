@@ -175,6 +175,8 @@ create table if not exists actions (
   file_key text not null,
   file_name text not null,
   library_file_id uuid references library_files(id),
+  scope_folder text,
+  scope_model_id uuid references models(id),
   run_on_commit int not null default 0,
   created_at text not null
 );
