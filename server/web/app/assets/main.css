@@ -501,6 +501,48 @@ tr:last-child td {
   max-width: 260px;
 }
 
+/* Text-Button in Hinweiszeilen ("Skript-Vorlage anzeigen") */
+.link-btn {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: inherit;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.link-btn:hover {
+  text-decoration: underline;
+  background: none;
+  filter: none;
+}
+
+/* Aufklappbare Python-Skript-Vorlage */
+.py-template {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.py-template-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.py-template pre {
+  margin: 0;
+  padding: 0.75rem;
+  max-height: 320px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
 .action-form-check {
   display: flex;
   align-items: center;

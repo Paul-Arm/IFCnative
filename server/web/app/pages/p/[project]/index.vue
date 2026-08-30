@@ -812,6 +812,68 @@ function onActionFile(event: Event): void {
   }
 }
 
+// ---- Python-Skript-Vorlage ---------------------------------------------
+
+const showPyTemplate = ref(false);
+const pyTemplateCopied = ref(false);
+
+const PY_TEMPLATE = `#!/usr/bin/env python3
+"""Prüfskript-Vorlage für IFC-Hub-Actions.
+
+Aufruf durch den Hub:   python check.py <pfad/zur/modell.ifc>
+- Der IFC-Pfad kommt als Argument 1 und als Umgebungsvariable IFC_PATH.
+- Exit-Code 0  = Prüfung bestanden, alles andere = fehlgeschlagen.
+- stdout/stderr landen im Run-Protokoll; die erste Zeile wird das Kurzfazit.
+- Zeilen im Format "GUID: <GlobalId>" markieren betroffene Objekte:
+  sie werden am Run gespeichert, in Issues übernommen und im
+  3D-Viewer verortet.
+"""
+import re
+import sys
+
+ifc_path = sys.argv[1]
+with open(ifc_path, encoding="utf-8", errors="replace") as handle:
+    text = handle.read()
+
+# --- Beispiel: alle IfcWall ohne Namen melden --------------------------
+# (durch eigene Prüf-Logik ersetzen)
+fehler: list[str] = []
+for match in re.finditer(r"IFCWALL\\('([^']{22})',[^,]*,\\s*(\\$|'')", text):
+    fehler.append(match.group(1))
+
+if fehler:
+    print(f"{len(fehler)} Wand/Wände ohne Namen")
+    for guid in fehler:
+        print(f"GUID: {guid}")
+    sys.exit(1)
+
+print("Alle Prüfungen bestanden")
+sys.exit(0)
+`;
+
+async function copyPyTemplate(): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(PY_TEMPLATE);
+    pyTemplateCopied.value = true;
+    setTimeout(() => {
+      pyTemplateCopied.value = false;
+    }, 2000);
+  } catch {
+    actionError.value = "Kopieren nicht möglich — Vorlage manuell markieren.";
+  }
+}
+
+/** Vorlage direkt als Datei ins Formular übernehmen. */
+function usePyTemplate(): void {
+  actionFile.value = new File([PY_TEMPLATE], "check.py", {
+    type: "text/x-python",
+  });
+  if (!actionName.value) {
+    actionName.value = "check";
+  }
+  showPyTemplate.value = false;
+}
+
 /** Formular schließen und alle Eingaben zurücksetzen. */
 function resetActionForm(): void {
   showActionForm.value = false;
@@ -825,6 +887,7 @@ function resetActionForm(): void {
   actionScopeFolder.value = "";
   actionScopeModelId.value = "";
   actionRunOnCommit.value = true;
+  showPyTemplate.value = false;
 }
 
 async function createAction(): Promise<void> {
@@ -1707,13 +1770,40 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
                       Python-Skript
                     </button>
                   </div>
-                  <p class="field-hint">
-                    {{
-                      actionKind === "ids"
-                        ? "buildingSMART-IDS-XML — läuft komplett auf dem Server."
-                        : "Läuft als Prozess auf dem Server; IFC-Pfad als Argument 1 und IFC_PATH. Exit-Code 0 = bestanden, Zeilen „GUID: <GlobalId>“ verorten Verstöße."
-                    }}
+                  <p v-if="actionKind === 'ids'" class="field-hint">
+                    buildingSMART-IDS-XML — läuft komplett auf dem Server.
                   </p>
+                  <p v-else class="field-hint">
+                    Läuft auf dem Server; Exit-Code 0 = bestanden.
+                    <button
+                      type="button"
+                      class="link-btn"
+                      @click="showPyTemplate = !showPyTemplate"
+                    >
+                      {{ showPyTemplate ? "Vorlage ausblenden" : "Skript-Vorlage anzeigen" }}
+                    </button>
+                  </p>
+                  <div
+                    v-if="actionKind === 'python' && showPyTemplate"
+                    class="py-template"
+                  >
+                    <div class="py-template-bar">
+                      <span class="muted small mono">check.py</span>
+                      <span class="topbar-spacer" />
+                      <button type="button" class="btn small" @click="copyPyTemplate">
+                        {{ pyTemplateCopied ? "Kopiert ✓" : "Kopieren" }}
+                      </button>
+                      <button
+                        type="button"
+                        class="btn small"
+                        title="Vorlage direkt als Prüfdatei ins Formular übernehmen"
+                        @click="usePyTemplate"
+                      >
+                        Als Datei übernehmen
+                      </button>
+                    </div>
+                    <pre>{{ PY_TEMPLATE }}</pre>
+                  </div>
                 </div>
               </div>
               <div class="af-row">
