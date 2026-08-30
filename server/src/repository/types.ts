@@ -287,9 +287,14 @@ export interface Repository {
 
   // Issues
   createIssue(
-    input: Omit<Issue, "id" | "number" | "createdAt" | "updatedAt">,
+    input: Omit<Issue, "id" | "number" | "createdAt" | "updatedAt"> & {
+      /** Feste Id (z. B. BCF-Topic-Guid beim Import); sonst zufällig. */
+      id?: string;
+    },
   ): Promise<Issue>;
   getIssue(projectId: string, number: number): Promise<Issue | null>;
+  /** Issue direkt über die Id (projektübergreifend, für BCF-Dedupe). */
+  getIssueById(issueId: string): Promise<Issue | null>;
   listIssues(projectId: string): Promise<Issue[]>;
   updateIssue(
     issueId: string,

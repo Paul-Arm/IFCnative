@@ -473,7 +473,9 @@ export class MemoryRepository implements Repository {
   }
 
   async createIssue(
-    input: Omit<Issue, "id" | "number" | "createdAt" | "updatedAt">,
+    input: Omit<Issue, "id" | "number" | "createdAt" | "updatedAt"> & {
+      id?: string;
+    },
   ): Promise<Issue> {
     const nextNumber =
       Math.max(
@@ -485,13 +487,17 @@ export class MemoryRepository implements Repository {
     const now = this.now();
     const issue: Issue = {
       ...input,
-      id: randomUUID(),
+      id: input.id ?? randomUUID(),
       number: nextNumber,
       createdAt: now,
       updatedAt: now,
     };
     this.issues.set(issue.id, issue);
     return issue;
+  }
+
+  async getIssueById(issueId: string): Promise<Issue | null> {
+    return this.issues.get(issueId) ?? null;
   }
 
   async getIssue(projectId: string, number: number): Promise<Issue | null> {

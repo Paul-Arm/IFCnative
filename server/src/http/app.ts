@@ -10,7 +10,11 @@ import fastifyStatic from "@fastify/static";
 
 import { hashPassword, verifyPassword } from "../auth/passwords";
 import { ActionRunner } from "../domain/actionRunner";
-import { buildBcfZip, type BcfTopicInput } from "../domain/bcfService";
+import {
+  buildBcfZip,
+  parseBcfZip,
+  type BcfTopicInput,
+} from "../domain/bcfService";
 import { CommitService } from "../domain/commitService";
 import { FragmentsService } from "../domain/fragmentsService";
 import type { ObjectStore } from "../storage/objectStore";
@@ -151,9 +155,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     { parseAs: "string" },
     (_req, body, done) => done(null, body),
   );
-  // PNG-Uploads (Projektbild) als Buffer.
+  // PNG-Uploads (Projektbild) und Zip-Uploads (BCF-Import) als Buffer.
   app.addContentTypeParser(
-    "image/png",
+    ["image/png", "application/zip"],
     { parseAs: "buffer" },
     (_req, body, done) => done(null, body),
   );
@@ -945,6 +949,93 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     }
     const zip = buildBcfZip(await bcfTopicsFor(project, issues));
     return sendBcfZip(reply, `${project.slug}-issues.bcfzip`, zip);
+  });
+
+  // BCF-Import: .bcfzip hochladen (Content-Type application/zip) —
+  // jedes Topic wird ein "bcf"-Issue mit Beschreibung, Status, Kommentaren
+  // und den Viewpoint-GUIDs (3D-Verortung). Bereits importierte Topics
+  // (gleiche Topic-Guid) werden übersprungen.
+  app.post(`${api}/projects/:slug/issues/bcf`, async (request, reply) => {
+    const { slug } = request.params as { slug: string };
+    const project = await resolveProject(slug, reply);
+    if (!project) return reply;
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    if (!(await requireMember(project, user, reply, "write"))) return reply;
+    const body = request.body;
+    if (!Buffer.isBuffer(body) || body.length === 0) {
+      return reply
+        .code(400)
+        .send({ error: "BCF-Zip als Body (application/zip) erforderlich" });
+    }
+    if (body.length > 50 * 1024 * 1024) {
+      return reply.code(400).send({ error: "Datei zu groß (max 50 MB)" });
+    }
+    let topics;
+    try {
+      topics = parseBcfZip(new Uint8Array(body));
+    } catch {
+      return reply.code(400).send({ error: "Keine lesbare BCF-Zip-Datei" });
+    }
+    if (!topics.length) {
+      return reply
+        .code(400)
+        .send({ error: "Kein BCF-Topic in der Datei gefunden" });
+    }
+    // Modell-Matching über die Header-Dateinamen (Name bzw. Name + .ifc).
+    const models = await repo.listModels(project.id);
+    const modelIdByName = new Map<string, string>();
+    for (const model of models) {
+      modelIdByName.set(model.name.toLowerCase(), model.id);
+      modelIdByName.set(`${model.name.toLowerCase()}.ifc`, model.id);
+      modelIdByName.set(`${model.slug.toLowerCase()}.ifc`, model.id);
+    }
+    const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    let imported = 0;
+    let skipped = 0;
+    for (const topic of topics) {
+      // Topic-Guid als Issue-Id übernehmen (stabiler Re-Import); bei
+      // Kollision im selben Projekt überspringen, sonst neue Id.
+      const existing = UUID.test(topic.guid)
+        ? await repo.getIssueById(topic.guid)
+        : null;
+      if (existing?.projectId === project.id) {
+        skipped += 1;
+        continue;
+      }
+      const issue = await repo.createIssue({
+        id: UUID.test(topic.guid) && !existing ? topic.guid : undefined,
+        projectId: project.id,
+        title: topic.title.slice(0, 200),
+        body: topic.description,
+        state: topic.status,
+        kind: "bcf",
+        authorId: user.id,
+      });
+      const modelIds = [
+        ...new Set(
+          topic.fileNames
+            .map((name) => modelIdByName.get(name.toLowerCase()))
+            .filter((id): id is string => Boolean(id)),
+        ),
+      ];
+      await repo.setIssueLinks(issue.id, {
+        guids: topic.guids,
+        modelIds,
+      });
+      for (const comment of topic.comments) {
+        // Fremde Autoren gibt es hier nicht als Benutzer — Original-Autor
+        // und -Datum wandern in den Kommentartext.
+        const meta = [comment.author, comment.date].filter(Boolean).join(", ");
+        await repo.createIssueComment({
+          issueId: issue.id,
+          authorId: user.id,
+          body: meta ? `**${meta}:**\n\n${comment.text}` : comment.text,
+        });
+      }
+      imported += 1;
+    }
+    return reply.code(201).send({ imported, skipped });
   });
 
   app.get(

@@ -164,6 +164,90 @@ test("BCF issues: kind selection, export as bcfzip with viewpoint components", a
     payload: { kind: "virtual" },
   });
   assert.equal(JSON.parse(toVirtual.body).issue.kind, "virtual");
+  await app.inject({
+    method: "PATCH",
+    url: `/api/projects/acme/issues/${issue.number}`,
+    headers: auth(token),
+    payload: { kind: "bcf", state: "open" },
+  });
+
+  // ---- Import: Export in ein zweites Projekt einspielen ----------------
+
+  const exportAgain = await app.inject({
+    method: "GET",
+    url: `/api/projects/acme/issues/${issue.number}/bcf`,
+    headers: auth(token),
+  });
+  const zip = exportAgain.rawPayload;
+
+  await app.inject({
+    method: "POST",
+    url: "/api/projects",
+    headers: auth(token),
+    payload: { name: "Beta", slug: "beta" },
+  });
+  await app.inject({
+    method: "POST",
+    url: "/api/projects/beta/models",
+    headers: auth(token),
+    payload: { name: "Tower", slug: "tower" },
+  });
+
+  const imported = await app.inject({
+    method: "POST",
+    url: "/api/projects/beta/issues/bcf",
+    headers: { ...auth(token), "content-type": "application/zip" },
+    payload: zip,
+  });
+  assert.equal(imported.statusCode, 201);
+  assert.deepEqual(JSON.parse(imported.body), { imported: 1, skipped: 0 });
+
+  const betaIssues = await app.inject({
+    method: "GET",
+    url: "/api/projects/beta/issues",
+    headers: auth(token),
+  });
+  const [betaIssue] = JSON.parse(betaIssues.body).issues as {
+    number: number;
+    title: string;
+    kind: string;
+    state: string;
+    body: string;
+    guids: string[];
+    models: { name: string }[];
+  }[];
+  assert.equal(betaIssue!.title, "Wand ohne FireRating");
+  assert.equal(betaIssue!.kind, "bcf");
+  assert.equal(betaIssue!.state, "open");
+  assert.equal(betaIssue!.body, "Aus der IDS-Prüfung.");
+  assert.deepEqual(betaIssue!.guids, [WALL]);
+  // Header-Filename "Tower" matcht das gleichnamige Modell im Zielprojekt.
+  assert.deepEqual(
+    betaIssue!.models.map((model) => model.name),
+    ["Tower"],
+  );
+
+  // Kommentare kommen mit (Original-Autor im Text).
+  const betaDetail = await app.inject({
+    method: "GET",
+    url: `/api/projects/beta/issues/${betaIssue!.number}`,
+    headers: auth(token),
+  });
+  const betaComments = JSON.parse(betaDetail.body).comments as {
+    body: string;
+  }[];
+  assert.equal(betaComments.length, 1);
+  assert.match(betaComments[0]!.body, /Bitte nachpflegen\./);
+  assert.match(betaComments[0]!.body, /user@example\.com/);
+
+  // Re-Import ins Quellprojekt: Topic-Guid existiert dort -> übersprungen.
+  const reimport = await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/issues/bcf",
+    headers: { ...auth(token), "content-type": "application/zip" },
+    payload: zip,
+  });
+  assert.deepEqual(JSON.parse(reimport.body), { imported: 0, skipped: 1 });
 
   await app.close();
 });

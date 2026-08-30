@@ -54,7 +54,13 @@ damit exakt einig, was „geändert“ bedeutet.
   als Viewpoint-Selektion (`Component IfcGuid=…`) mitgegeben, sodass andere
   BIM-Werkzeuge direkt auf die betroffenen Objekte springen. Die Art ist
   jederzeit umschaltbar (Formular-Auswahl bzw. Sidebar der Detailseite);
-  „Issue aus Run erstellen“ legt BCF als Art vor.
+  „Issue aus Run erstellen“ legt BCF als Art vor. Umgekehrt lassen sich
+  BCF-Dateien **importieren** (`POST …/issues/bcf`, Body = Zip mit
+  `Content-Type: application/zip`; Button „BCF-Import“ im Issues-Tab):
+  jedes Topic wird ein BCF-Issue mit Beschreibung, Status, Kommentaren
+  (Original-Autor/-Datum im Text) und den Viewpoint-GUIDs; Header-Dateinamen
+  werden auf gleichnamige Modelle gematcht, bereits importierte Topics
+  (gleiche Topic-Guid) übersprungen.
 - **Issues aus Prüfungen + 3D-Verortung** — fehlgeschlagene Runs sammeln die
   **GlobalIds der Verstöße** (`failedGuids`; IDS automatisch aus den
   Verstoßobjekten, Python-Skripte per stdout-Konvention `GUID: <GlobalId>`
@@ -194,6 +200,7 @@ Auth: `Authorization: Bearer <JWT>` aus `/api/auth/login`. Fehler kommen als
 | GET/POST | `/api/projects/:slug/labels` | Labels auflisten / anlegen `{name, color}` (write) |
 | GET/POST | `/api/projects/:slug/issues` | Issues (`?state=open\|closed`, mit Zählern) / eröffnen `{title, body?, kind?: "virtual"\|"bcf", assigneeIds?, modelIds?, labelIds?, guids?}` (jedes Mitglied) |
 | GET | `/api/projects/:slug/issues/bcf` | alle BCF-Issues als `.bcfzip` (BCF 2.1) |
+| POST | `/api/projects/:slug/issues/bcf` | `.bcfzip` importieren (Body = Zip, `application/zip`) → `{imported, skipped}` (write) |
 | GET | `/api/projects/:slug/issues/:number/bcf` | einzelnes BCF-Issue als `.bcfzip` (400 bei virtuellen Issues) |
 | GET/PATCH | `/api/projects/:slug/issues/:number` | Issue-Detail (inkl. `comments`) / ändern (Titel, Body, State, Zuordnungen — Autor oder write-Rolle) |
 | POST/DELETE | `/api/projects/:slug/issues/:number/comments(/:id)` | kommentieren (jedes Mitglied) / löschen (Autor oder write-Rolle) |

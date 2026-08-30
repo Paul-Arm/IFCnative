@@ -522,6 +522,42 @@ onMounted(() => {
 const hasBcfIssues = computed(() =>
   (issuesData.value?.issues ?? []).some((issue) => issue.kind === "bcf"),
 );
+const issueNotice = ref<string | null>(null);
+const bcfImportBusy = ref(false);
+
+/** .bcfzip hochladen — jedes Topic wird ein BCF-Issue. */
+async function importBcf(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = "";
+  if (!file) return;
+  issueError.value = null;
+  issueNotice.value = null;
+  bcfImportBusy.value = true;
+  try {
+    const result = await $fetch<{ imported: number; skipped: number }>(
+      `/api/projects/${slug}/issues/bcf`,
+      {
+        method: "POST",
+        body: await file.arrayBuffer(),
+        headers: {
+          "content-type": "application/zip",
+          ...(token.value ? { authorization: `Bearer ${token.value}` } : {}),
+        },
+      },
+    );
+    issueNotice.value =
+      `BCF-Import: ${result.imported} Issue(s) importiert` +
+      (result.skipped
+        ? `, ${result.skipped} übersprungen (bereits vorhanden).`
+        : ".");
+    await refreshIssues();
+  } catch (e) {
+    issueError.value = apiErrorMessage(e);
+  } finally {
+    bcfImportBusy.value = false;
+  }
+}
 
 /** Alle BCF-Issues des Projekts als .bcfzip herunterladen. */
 async function downloadProjectBcf(): Promise<void> {
@@ -1264,6 +1300,7 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
     <!-- ================= Tab: Issues ================= -->
     <template v-else-if="tab === 'issues'">
       <div v-if="issueError" class="alert error">{{ issueError }}</div>
+      <div v-if="issueNotice" class="alert success">{{ issueNotice }}</div>
       <div class="card">
         <div class="card-header">
           <div class="tabs">
@@ -1283,6 +1320,20 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
             </button>
           </div>
           <span class="topbar-spacer" />
+          <label
+            v-if="canWrite"
+            class="btn"
+            :style="bcfImportBusy ? 'opacity: 0.6; pointer-events: none' : ''"
+            title=".bcfzip importieren — jedes Topic wird ein IFC-Issue (BCF) mit Kommentaren und 3D-Verortung"
+          >
+            {{ bcfImportBusy ? "Importiere …" : "BCF-Import" }}
+            <input
+              type="file"
+              accept=".bcf,.bcfzip,.zip"
+              style="display: none"
+              @change="importBcf"
+            />
+          </label>
           <button
             v-if="hasBcfIssues"
             title="Alle IFC-Issues (BCF) als .bcfzip exportieren"

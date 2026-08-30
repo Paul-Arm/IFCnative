@@ -1,4 +1,5 @@
-import { strToU8, zipSync } from "fflate";
+import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
+import { DOMParser } from "linkedom";
 
 import type { Issue, IssueComment, User } from "../repository/types";
 
@@ -123,4 +124,173 @@ function esc(value: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+// ---------------------------------------------------------------------------
+// BCF-Import: .bcfzip -> Topics (Titel, Beschreibung, Status, Kommentare,
+// Viewpoint-GUIDs, referenzierte Dateinamen)
+// ---------------------------------------------------------------------------
+
+/** Minimale DOM-Sicht — passt auf Browser-Elemente und linkedom-Nodes. */
+interface XmlEl {
+  localName?: string;
+  tagName: string;
+  textContent: string | null;
+  children: ArrayLike<unknown> & Iterable<unknown>;
+  getAttribute(name: string): string | null;
+}
+
+export interface ParsedBcfComment {
+  author: string;
+  date: string;
+  text: string;
+}
+
+export interface ParsedBcfTopic {
+  /** Topic-Guid aus dem markup.bcf (bzw. der Ordnername). */
+  guid: string;
+  title: string;
+  description: string;
+  status: "open" | "closed";
+  creationAuthor: string;
+  comments: ParsedBcfComment[];
+  /** IfcGuids aller Viewpoint-Komponenten des Topics. */
+  guids: string[];
+  /** Dateinamen aus dem Markup-Header (zum Modell-Matching). */
+  fileNames: string[];
+}
+
+const TOPIC_LIMIT = 200;
+const GUID_LIMIT = 500;
+
+/**
+ * Liest eine BCF-2.x-Datei (.bcf/.bcfzip). Wirft bei kaputtem Zip; einzelne
+ * unlesbare Topics werden übersprungen statt den Import zu kippen.
+ */
+export function parseBcfZip(zip: Uint8Array): ParsedBcfTopic[] {
+  const files = unzipSync(zip);
+  const parser = new DOMParser();
+  const topics: ParsedBcfTopic[] = [];
+  for (const [path, data] of Object.entries(files)) {
+    if (!/^[^/]+\/markup\.bcf$/i.test(path.replace(/\\/g, "/"))) {
+      continue;
+    }
+    if (topics.length >= TOPIC_LIMIT) {
+      break;
+    }
+    const folder = path.replace(/\\/g, "/").split("/")[0] ?? "";
+    try {
+      const topic = parseMarkup(parser, strFromU8(data), folder);
+      // Alle Viewpoints des Topic-Ordners einsammeln (typisch viewpoint.bcfv).
+      const guids = new Set<string>();
+      for (const [vpPath, vpData] of Object.entries(files)) {
+        const normalized = vpPath.replace(/\\/g, "/");
+        if (
+          normalized.startsWith(`${folder}/`) &&
+          normalized.toLowerCase().endsWith(".bcfv")
+        ) {
+          for (const guid of parseViewpointGuids(parser, strFromU8(vpData))) {
+            guids.add(guid);
+          }
+        }
+      }
+      topic.guids = [...guids].slice(0, GUID_LIMIT);
+      topics.push(topic);
+    } catch {
+      // Unlesbares Topic überspringen.
+    }
+  }
+  return topics;
+}
+
+function parseMarkup(
+  parser: InstanceType<typeof DOMParser>,
+  xml: string,
+  folder: string,
+): ParsedBcfTopic {
+  const dom = parser.parseFromString(xml, "text/xml");
+  const root = dom.documentElement as unknown as XmlEl | null;
+  if (!root || localName(root) !== "markup") {
+    throw new Error("Kein Markup");
+  }
+  const topicEl = childByName(root, "topic");
+  const headerEl = childByName(root, "header");
+  const fileNames: string[] = [];
+  for (const fileEl of headerEl ? childrenByName(headerEl, "file") : []) {
+    const name = childByName(fileEl, "filename")?.textContent?.trim();
+    if (name) {
+      fileNames.push(name);
+    }
+  }
+  const comments: ParsedBcfComment[] = [];
+  for (const commentEl of childrenByName(root, "comment")) {
+    const text = childByName(commentEl, "comment")?.textContent?.trim();
+    if (text) {
+      comments.push({
+        author: childByName(commentEl, "author")?.textContent?.trim() ?? "",
+        date: childByName(commentEl, "date")?.textContent?.trim() ?? "",
+        text,
+      });
+    }
+  }
+  const rawStatus = (topicEl?.getAttribute("TopicStatus") ?? "").toLowerCase();
+  return {
+    guid: topicEl?.getAttribute("Guid")?.trim() || folder,
+    title:
+      childByName(topicEl, "title")?.textContent?.trim() || "(ohne Titel)",
+    description:
+      childByName(topicEl, "description")?.textContent?.trim() ?? "",
+    status: ["closed", "resolved"].includes(rawStatus) ? "closed" : "open",
+    creationAuthor:
+      childByName(topicEl, "creationauthor")?.textContent?.trim() ?? "",
+    comments,
+    guids: [],
+    fileNames,
+  };
+}
+
+function parseViewpointGuids(
+  parser: InstanceType<typeof DOMParser>,
+  xml: string,
+): string[] {
+  const guids: string[] = [];
+  try {
+    const dom = parser.parseFromString(xml, "text/xml");
+    const walk = (element: XmlEl | null | undefined): void => {
+      if (!element) return;
+      if (localName(element) === "component") {
+        const guid = element.getAttribute("IfcGuid")?.trim();
+        if (guid) {
+          guids.push(guid);
+        }
+      }
+      for (const child of element.children ?? []) {
+        walk(child as XmlEl);
+      }
+    };
+    walk(dom.documentElement as unknown as XmlEl | null);
+  } catch {
+    // Viewpoint unlesbar — ohne GUIDs weiter.
+  }
+  return guids;
+}
+
+function localName(element: XmlEl): string {
+  return (element.localName ?? element.tagName).toLowerCase();
+}
+
+function childByName(
+  parent: XmlEl | null | undefined,
+  name: string,
+): XmlEl | undefined {
+  if (!parent) return undefined;
+  return [...parent.children].find(
+    (child) => localName(child as XmlEl) === name,
+  ) as XmlEl | undefined;
+}
+
+function childrenByName(parent: XmlEl, name: string): XmlEl[] {
+  return [...parent.children].filter(
+    (child) => localName(child as XmlEl) === name,
+  ) as XmlEl[];
 }

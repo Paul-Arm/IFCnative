@@ -380,6 +380,28 @@ tr:last-child td {
   outline: none;
 }
 
+/* Auswahl-Dropdown "Jetzt prüfen" (welche Actions laufen sollen) */
+.validate-menu {
+  min-width: 280px;
+  padding: 0.6rem 0.75rem;
+}
+
+.validate-menu .pv-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0;
+  font-weight: 400;
+}
+
+.validate-menu .pv-item input {
+  width: auto;
+}
+
+.validate-menu .pv-label {
+  flex: 1;
+}
+
 /* ---- Issue-3D-Verortung (GUID-Chips über dem Viewer) ------------------ */
 
 .issue-guid-bar {

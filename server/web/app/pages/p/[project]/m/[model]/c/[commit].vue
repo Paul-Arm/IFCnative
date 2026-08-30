@@ -114,13 +114,40 @@ const RUN_STATUS: Record<
 const validateBusy = ref(false);
 const validateError = ref<string | null>(null);
 
+// Auswahl, WELCHE Actions laufen sollen (Standard: alle).
+const selectedActions = reactive(new Set<string>());
+watch(
+  () => actionsData.value?.actions,
+  (actions) => {
+    if (!selectedActions.size) {
+      for (const action of actions ?? []) {
+        selectedActions.add(action.id);
+      }
+    }
+  },
+  { immediate: true },
+);
+const validateMenu = ref<HTMLDetailsElement | null>(null);
+
+function toggleAction(id: string, on: boolean): void {
+  if (on) {
+    selectedActions.add(id);
+  } else {
+    selectedActions.delete(id);
+  }
+}
+
 async function validateCommit(): Promise<void> {
+  if (!selectedActions.size) return;
   validateError.value = null;
   validateBusy.value = true;
+  if (validateMenu.value) {
+    validateMenu.value.open = false;
+  }
   try {
     await api(`${base}/commits/${commitId}/validate`, {
       method: "POST",
-      body: {},
+      body: { actionIds: [...selectedActions] },
     });
     await refreshRuns();
   } catch (e) {
@@ -293,12 +320,44 @@ const sections = computed(() => {
         <h2>Prüfungen</h2>
         <span v-if="hasPendingRuns" class="badge accent">läuft …</span>
         <span class="topbar-spacer" />
-        <button
-          :disabled="validateBusy || !actionCount"
-          @click="validateCommit"
-        >
-          {{ validateBusy ? "Wird gestartet …" : "Jetzt prüfen" }}
-        </button>
+        <details v-if="actionCount" ref="validateMenu" class="menu">
+          <summary class="btn primary">
+            {{ validateBusy ? "Wird gestartet …" : "Jetzt prüfen" }}
+          </summary>
+          <div class="menu-list validate-menu">
+            <p class="muted small" style="margin: 0 0 0.25rem">
+              Mit welchen Actions prüfen?
+            </p>
+            <label
+              v-for="action in actionsData?.actions ?? []"
+              :key="action.id"
+              class="pv-item"
+            >
+              <input
+                type="checkbox"
+                :checked="selectedActions.has(action.id)"
+                @change="
+                  toggleAction(
+                    action.id,
+                    ($event.target as HTMLInputElement).checked,
+                  )
+                "
+              />
+              <span class="pv-label">{{ action.name }}</span>
+              <span class="badge" :class="action.kind === 'ids' ? 'accent' : ''">
+                {{ action.kind === "ids" ? "IDS" : "Python" }}
+              </span>
+            </label>
+            <button
+              class="primary"
+              style="margin-top: 0.5rem; width: 100%"
+              :disabled="validateBusy || !selectedActions.size"
+              @click="validateCommit"
+            >
+              Prüfung starten ({{ selectedActions.size }})
+            </button>
+          </div>
+        </details>
       </div>
       <div v-if="validateError" class="card-body">
         <div class="alert error" style="margin: 0">{{ validateError }}</div>

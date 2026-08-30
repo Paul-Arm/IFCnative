@@ -641,7 +641,9 @@ export class SqlRepository implements Repository {
   }
 
   async createIssue(
-    input: Omit<Issue, "id" | "number" | "createdAt" | "updatedAt">,
+    input: Omit<Issue, "id" | "number" | "createdAt" | "updatedAt"> & {
+      id?: string;
+    },
   ): Promise<Issue> {
     const { rows } = await this.sql.query<{ next: number }>(
       `select coalesce(max(number), 0) + 1 as next from issues where project_id = $1`,
@@ -650,7 +652,7 @@ export class SqlRepository implements Repository {
     const now = this.now();
     const issue: Issue = {
       ...input,
-      id: randomUUID(),
+      id: input.id ?? randomUUID(),
       number: Number(rows[0]?.next ?? 1),
       createdAt: now,
       updatedAt: now,
@@ -678,6 +680,14 @@ export class SqlRepository implements Repository {
     const { rows } = await this.sql.query<Parameters<SqlRepository["toIssue"]>[0]>(
       `select * from issues where project_id = $1 and number = $2`,
       [projectId, number],
+    );
+    return rows[0] ? this.toIssue(rows[0]) : null;
+  }
+
+  async getIssueById(issueId: string): Promise<Issue | null> {
+    const { rows } = await this.sql.query<Parameters<SqlRepository["toIssue"]>[0]>(
+      `select * from issues where id = $1`,
+      [issueId],
     );
     return rows[0] ? this.toIssue(rows[0]) : null;
   }
