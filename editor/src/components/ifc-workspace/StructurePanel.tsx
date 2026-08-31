@@ -16,6 +16,7 @@ import {
     structureFreeObjectGroups,
     type StructureChildGroup,
 } from "./constants";
+import { IFC_TREE_SPRITE_SHEET, ifcTreeIconFor } from "./structureTreeIcons";
 import { Button, shortType } from "./ui";
 
 interface StructureTreeModel {
@@ -118,6 +119,9 @@ export function StructurePanel({
     id: "ifcnative-structure-tree",
     initialExpandedPaths: treeModel.expandedPaths,
     initialVisibleRowCount: 18,
+    // Zwei Zeilen pro Eintrag (Name + Typ) brauchen mehr Höhe als das
+    // Compact-Preset; die Virtualisierung rechnet mit diesem Wert.
+    itemHeight: 38,
     onSelectionChange: (paths) => {
       // Echos des programmatischen Reveal-Syncs ignorieren: sie tragen keine
       // neue Information und würden Auswahl-Objekte ohne Baum-Pfad (Gruppen/
@@ -135,15 +139,32 @@ export function StructurePanel({
       onSelectManyRef.current(ids);
     },
     paths: initialPaths,
+    icons: {
+      // Blätter zeigen statt des generischen Datei-Icons einen dezenten
+      // Punkt — das Typ-Symbol sitzt in der zweiten Zeile (Decoration).
+      remap: { "file-tree-icon-file": "file-tree-icon-dot" },
+      spriteSheet: IFC_TREE_SPRITE_SHEET,
+    },
     renderRowDecoration: ({ item }) => {
       const id = idByPathRef.current.get(item.path);
       if (typeof id !== "number") return null;
       const typeName = typeByIdRef.current.get(id);
-      return typeName
-        ? { text: typeName.replace(/^IFC/i, ""), title: `#${id} · ${typeName}` }
-        : null;
+      if (!typeName) return null;
+      // Icon-Decoration; der title liefert Tooltip UND die sichtbare
+      // Typ-Zeile (per attr()-Content im unsafeCSS unten).
+      return {
+        icon: {
+          name: ifcTreeIconFor(typeName),
+          width: 11,
+          height: 11,
+          viewBox: "0 0 16 16",
+        },
+        title: `${typeName.replace(/^IFC/i, "")} · #${id}`,
+      };
     },
-    search: true,
+    // Kein baum-eigenes Suchfeld: die Panel-Suche filtert über
+    // model.setSearch, das unabhängig vom eingebauten Such-UI arbeitet.
+    search: false,
     composition: {
       contextMenu: {
         enabled: true,
@@ -180,6 +201,76 @@ export function StructurePanel({
           var(--muted-foreground) 35%,
           transparent
         );
+        /* Rand- und Zeilen-Abstände eindampfen: die Bibliothek reserviert
+           links/rechts je 16px Container-Padding plus Zeilen-Margins. */
+        --trees-padding-inline-override: 2px;
+        --trees-item-margin-x-override: 0px;
+        --trees-item-padding-x-override: 6px;
+        --trees-item-row-gap-override: 5px;
+      }
+      /* Zweizeilige Einträge: Name oben, Typ-Icon + IFC-Typ · #ID darunter.
+         Die Zeile ist im Original ein Flex-Row mit line-height = Zeilenhöhe;
+         hier als Grid mit fester Spaltenstruktur und zwei Inhaltszeilen.
+         Die Zeilen sind 1fr/1fr, damit Spalten wie die Einrückungslinien
+         (spacing) die volle Zeilenhöhe füllen — sonst reißen die Linien
+         zwischen den Einträgen ab. */
+      [data-type='item'] {
+        display: grid;
+        grid-template-columns: auto auto minmax(0, 1fr) auto;
+        grid-template-rows: 1fr 1fr;
+        grid-template-areas:
+          'spacing icon content action'
+          'spacing icon decoration action';
+        align-items: stretch;
+        column-gap: var(--trees-item-row-gap);
+        row-gap: 0;
+        line-height: 1.25;
+      }
+      [data-type='item'] > [data-item-section='spacing'] {
+        grid-area: spacing;
+        height: 100%;
+      }
+      [data-type='item'] > [data-item-section='icon'] {
+        grid-area: icon;
+        align-self: center;
+      }
+      /* Blatt-Zeilen: der auf den Dot umgemappte Datei-Slot rendert das
+         Symbol in voller 16px-Größe — auf einen dezenten Bullet schrumpfen. */
+      [data-item-type='file'] > [data-item-section='icon'] svg {
+        width: 5px;
+        height: 5px;
+        opacity: 0.55;
+      }
+      [data-type='item'] > [data-item-section='content'] {
+        grid-area: content;
+        align-self: end;
+      }
+      [data-type='item'] > [data-item-section='decoration'] {
+        grid-area: decoration;
+        align-self: start;
+        justify-content: flex-start;
+        text-align: start;
+        font-size: 10.5px;
+        letter-spacing: 0.01em;
+      }
+      [data-type='item'] > [data-item-section='decoration'] > span {
+        justify-content: flex-start;
+        gap: 4px;
+      }
+      [data-type='item'] > [data-item-section='decoration'] > span > svg {
+        flex-shrink: 0;
+      }
+      /* Sichtbarer Typ-Text aus dem title-Attribut der Icon-Decoration. */
+      [data-type='item'] > [data-item-section='decoration'] > span[title]::after {
+        content: attr(title);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      [data-type='item'] > [data-item-section='git'],
+      [data-type='item'] > [data-item-section='action'] {
+        grid-area: action;
+        align-self: center;
       }
     `,
   });
@@ -194,8 +285,17 @@ export function StructurePanel({
   }, [model, treeModel]);
 
   useEffect(() => {
-    model.setSearch(search ?? "");
-  }, [model, search]);
+    const trimmed = (search ?? "").trim();
+    // Die ID steht nicht mehr zwingend im Zeilennamen (nur noch in der
+    // Decoration-Zeile). Die Baum-Suche matcht aber über den vollständigen
+    // Pfad — reine ID-Eingaben ("533" / "#533") deshalb auf den Pfad des
+    // Treffers übersetzen, damit die versprochene ID-Suche weiter greift.
+    const idMatch = /^#?(\d+)$/.exec(trimmed);
+    const idPath = idMatch
+      ? treeModel.pathById.get(Number(idMatch[1]))
+      : undefined;
+    model.setSearch(idPath ?? trimmed);
+  }, [model, search, treeModel]);
 
   useEffect(() => {
     if (selectedId == null) return;
@@ -724,8 +824,9 @@ function buildStructureTreeModel(
     paths: [],
     typeById: new Map(),
   };
+  const rootSegments = new Set<string>();
   document.spatialRoots.forEach((root) =>
-    addTreeNode(root, "", document, model),
+    addTreeNode(root, "", document, model, rootSegments),
   );
 
   // Rooted-Objekte ohne räumliche Zuordnung unter einem virtuellen Ordner
@@ -755,11 +856,19 @@ function addTreeNode(
   parentPath: string,
   document: NativeIfcDocument,
   model: StructureTreeModel,
+  usedSiblingSegments: Set<string>,
 ) {
   const entity = document.entityById.get(node.id);
   if (!entity) return;
 
-  const segment = formatTreeSegment(entity);
+  // "#id" hängt nur noch bei Namenskollision unter Geschwistern am Segment —
+  // die ID steht sichtbar in der Decoration-Zeile; der Pfad muss aber
+  // eindeutig bleiben (Selektion, Reveal, ID-Suche laufen über Pfade).
+  const label = sanitizeSegment(entity.name || entity.type);
+  const segment = usedSiblingSegments.has(label)
+    ? `${label} #${entity.id}`
+    : label;
+  usedSiblingSegments.add(segment);
   const basePath = parentPath ? `${parentPath}/${segment}` : segment;
   const hasChildren = node.children.length > 0;
   const canonicalPath = hasChildren ? `${basePath}/` : basePath;
@@ -773,15 +882,11 @@ function addTreeNode(
 
   if (hasChildren) {
     model.expandedPaths.push(canonicalPath);
+    const childSegments = new Set<string>();
     node.children.forEach((child) =>
-      addTreeNode(child, basePath, document, model),
+      addTreeNode(child, basePath, document, model, childSegments),
     );
   }
-}
-
-function formatTreeSegment(entity: NativeIfcEntity) {
-  const label = sanitizeSegment(entity.name || entity.type);
-  return `${label} #${entity.id}`;
 }
 
 function sanitizeSegment(value: string) {

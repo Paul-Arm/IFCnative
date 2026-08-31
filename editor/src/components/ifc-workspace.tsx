@@ -3,23 +3,16 @@ import { Input } from "@/components/ui/input";
 import {
     Select,
     SelectContent,
-    SelectGroup,
     SelectItem,
-    SelectLabel,
-    SelectSeparator,
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-    FilePlus2,
-    FolderOpen,
-    HardDriveDownload,
+    FileText,
     PanelTopOpen,
     Plus,
     Redo2,
-    Save,
-    Trash2,
     Undo2,
     X,
 } from "lucide-react";
@@ -136,11 +129,11 @@ import { type NativeGraphPreset } from "@/ifc/nativeGraph";
 
 import {
     Button,
-    MosaicWindowMenu,
     parseDecimalInput,
     SegmentedControl,
     typeOption,
 } from "@/components/ifc-workspace/ui";
+import { WorkspaceMenubar } from "@/components/ifc-workspace/WorkspaceMenubar";
 import {
     UI_SCALE_OPTIONS,
     useUiScale,
@@ -792,6 +785,15 @@ export default function IfcWorkspace() {
     logAction(`ui.restoreWindow({ view: '${id}' });`);
   };
 
+  const toggleMosaicView = (id: MosaicViewId, open: boolean) => {
+    if (open) {
+      restoreMosaicView(id);
+      return;
+    }
+    setMosaicValue((current) => removeMosaicView(current, id));
+    logAction(`ui.closeWindow({ view: '${id}' });`);
+  };
+
   const resetMosaicLayout = () => {
     setMosaicValue(
       cloneMosaicNode(activeWorkspace?.layout) ?? DEFAULT_MOSAIC_LAYOUT,
@@ -1431,6 +1433,9 @@ export default function IfcWorkspace() {
   };
 
   const openIfc = async () => {
+    if (loadingIfcName) {
+      return;
+    }
     try {
       const asset = await pickIfcFile();
       if (!asset) {
@@ -1475,6 +1480,9 @@ export default function IfcWorkspace() {
   }, []);
 
   const addIfcFiles = async () => {
+    if (loadingIfcName) {
+      return;
+    }
     try {
       const assets = await pickIfcFiles(true);
       if (!assets.length) {
@@ -3867,6 +3875,18 @@ export default function IfcWorkspace() {
         redoDocument();
         return;
       }
+      if (commandKey && key === "o") {
+        event.preventDefault();
+        void openIfc();
+        return;
+      }
+      if (commandKey && key === "s") {
+        event.preventDefault();
+        if (!loadingIfcName) {
+          void exportIfc();
+        }
+        return;
+      }
       if (!commandKey && !event.shiftKey && event.key === "Delete") {
         event.preventDefault();
         requestDeleteEntity(selectedId, "keyboard");
@@ -3874,7 +3894,7 @@ export default function IfcWorkspace() {
     };
     window.addEventListener("keydown", handleEditorKeyDown);
     return () => window.removeEventListener("keydown", handleEditorKeyDown);
-  }, [activeSession, document, selectedId]);
+  }, [activeSession, document, selectedId, loadingIfcName]);
 
   const storePickedCoordinates = (pick: ViewerCoordinatePick) => {
     const copiedAt = new Date().toLocaleTimeString();
@@ -4502,99 +4522,6 @@ export default function IfcWorkspace() {
     </MosaicWindow>
   );
 
-  const renderWorkspaceSwitcher = () => (
-    <div className="flex shrink-0 items-center gap-1">
-      <Select
-        value={activeWorkspace?.id ?? DEFAULT_WORKSPACE_ID}
-        onValueChange={(nextValue) => {
-          if (nextValue) {
-            selectWorkspace(nextValue);
-          }
-        }}
-      >
-        <SelectTrigger
-          aria-label="Workspace"
-          className="w-52 bg-background"
-          size="sm"
-        >
-          <SelectValue>{activeWorkspace?.name ?? "Workspace"}</SelectValue>
-        </SelectTrigger>
-        <SelectContent
-          align="start"
-          className="!w-[30rem] max-w-[calc(100vw-2rem)]"
-        >
-          <SelectGroup>
-            <SelectLabel>Standard</SelectLabel>
-            {BUILT_IN_WORKSPACES.map((workspace) => (
-              <SelectItem key={workspace.id} value={workspace.id}>
-                <span className="flex min-w-0 flex-col">
-                  <span className="truncate">{workspace.name}</span>
-                  <span className="truncate text-xs text-muted-foreground">
-                    {workspace.description}
-                  </span>
-                </span>
-              </SelectItem>
-            ))}
-          </SelectGroup>
-          {customWorkspaces.length ? (
-            <>
-              <SelectSeparator />
-              <SelectGroup>
-                <SelectLabel>Eigene</SelectLabel>
-                {customWorkspaces.map((workspace) => (
-                  <SelectItem key={workspace.id} value={workspace.id}>
-                    <span className="flex min-w-0 flex-col">
-                      <span className="truncate">{workspace.name}</span>
-                      <span className="truncate text-xs text-muted-foreground">
-                        {workspace.updatedAt
-                          ? new Date(workspace.updatedAt).toLocaleString()
-                          : workspace.description}
-                      </span>
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </>
-          ) : null}
-        </SelectContent>
-      </Select>
-      <IconButton
-        aria-label="Neuen Workspace hinzufügen"
-        size="icon-sm"
-        title="Neuen Workspace hinzufügen"
-        variant="outline"
-        onClick={createWorkspaceFromCurrentLayout}
-      >
-        <Plus aria-hidden className="size-3.5" />
-      </IconButton>
-      <IconButton
-        aria-label="Workspace speichern"
-        disabled={Boolean(activeWorkspace?.builtIn)}
-        size="icon-sm"
-        title={
-          activeWorkspace?.builtIn
-            ? "Standard-Workspaces sind fix"
-            : "Workspace speichern"
-        }
-        variant="outline"
-        onClick={saveActiveWorkspace}
-      >
-        <Save aria-hidden className="size-3.5" />
-      </IconButton>
-      {!activeWorkspace?.builtIn ? (
-        <IconButton
-          aria-label="Workspace löschen"
-          size="icon-sm"
-          title="Workspace löschen"
-          variant="outline"
-          onClick={deleteActiveWorkspace}
-        >
-          <Trash2 aria-hidden className="size-3.5" />
-        </IconButton>
-      ) : null}
-    </div>
-  );
-
   const closeDocumentSession = (sessionId: string) => {
     const session = documentSessions.find((item) => item.id === sessionId);
     if (!session || documentSessions.length <= 1) {
@@ -4618,65 +4545,79 @@ export default function IfcWorkspace() {
     );
   };
 
-  const renderDocumentTabs = () => (
-    <Tabs
-      value={activeSession.id}
-      onValueChange={(nextValue) => {
-        if (nextValue) {
-          setActiveDocumentId(nextValue);
-        }
-      }}
-      className="min-w-0 overflow-hidden"
-    >
-      <div className="-mx-1 overflow-x-auto overflow-y-hidden px-1">
-        <TabsList
-          variant="line"
-          className="h-auto min-w-max justify-start gap-1 bg-transparent p-0 pb-px"
-        >
-          {documentSessions.map((session) => (
-            // Wrapper statt Button-im-Button: der Schließen-Button liegt als
-            // Geschwister absolut über dem Tab (valides HTML, eigener Fokus).
-            <span key={session.id} className="group/tab relative inline-flex">
-              <TabsTrigger
-                value={session.id}
-                className="group relative h-auto min-w-36 max-w-56 flex-col items-start gap-0.5 rounded-t-md border-x border-t border-transparent bg-transparent py-1.5 pr-7 pl-2.5 text-left transition-colors hover:bg-muted/40 data-active:border-border data-active:bg-card data-active:shadow-[0_1px_0_0_var(--color-card)]"
-              >
-                <span className="flex w-full items-center gap-1.5">
-                  <span className="size-1.5 shrink-0 rounded-full bg-muted-foreground/40 group-data-active:bg-primary" />
-                  <span className="min-w-0 flex-1 truncate text-xs font-medium">
-                    {session.document.fileName}
-                  </span>
-                  {session.hasUnexportedChanges ? (
-                    <span
-                      aria-label="Nicht exportierte Änderungen"
-                      className="size-1.5 shrink-0 rounded-full bg-warning"
-                      title="Nicht exportierte Änderungen"
+  const renderDocumentTabs = () => {
+    const closable = documentSessions.length > 1;
+    return (
+      <Tabs
+        value={activeSession.id}
+        onValueChange={(nextValue) => {
+          if (nextValue) {
+            setActiveDocumentId(nextValue);
+          }
+        }}
+        className="min-w-0 flex-1"
+      >
+        <div className="flex min-w-0 items-center gap-1">
+          <div className="min-w-0 overflow-x-auto overflow-y-hidden">
+            <TabsList className="h-7 min-w-max justify-start gap-0.5 bg-transparent p-0">
+              {documentSessions.map((session) => (
+                // Wrapper statt Button-im-Button: der Schließen-Button liegt
+                // als Geschwister absolut über dem Tab (valides HTML, eigener
+                // Fokus).
+                <span
+                  key={session.id}
+                  className="group/tab relative inline-flex"
+                >
+                  <TabsTrigger
+                    value={session.id}
+                    title={`${session.document.fileName} · ${session.document.schema} · ${session.document.entities.length.toLocaleString("de-DE")} Entitäten`}
+                    className={`group h-7 max-w-96 flex-none justify-start gap-1.5 rounded-md pl-2.5 text-xs font-medium transition-colors hover:bg-background/60 data-active:bg-card dark:hover:bg-input/20 ${closable ? "pr-7" : "pr-2.5"}`}
+                  >
+                    <FileText
+                      aria-hidden
+                      className="size-3.5 shrink-0 text-muted-foreground/60 group-data-active:text-primary"
                     />
+                    <span className="min-w-0 truncate">
+                      {session.document.fileName}
+                    </span>
+                    {session.hasUnexportedChanges ? (
+                      <span
+                        aria-label="Nicht exportierte Änderungen"
+                        className="size-1.5 shrink-0 rounded-full bg-warning"
+                        title="Nicht exportierte Änderungen"
+                      />
+                    ) : null}
+                  </TabsTrigger>
+                  {closable ? (
+                    <button
+                      aria-label={`${session.document.fileName} schließen`}
+                      className="absolute top-1/2 right-1.5 grid size-4.5 -translate-y-1/2 cursor-pointer place-items-center rounded-sm text-muted-foreground/60 opacity-0 transition-opacity group-hover/tab:opacity-100 hover:bg-muted hover:text-foreground focus-visible:opacity-100"
+                      title="Schließen"
+                      type="button"
+                      onClick={() => closeDocumentSession(session.id)}
+                    >
+                      <X aria-hidden className="size-3" />
+                    </button>
                   ) : null}
                 </span>
-                <span className="w-full truncate pl-3 text-[0.65rem] font-normal text-muted-foreground">
-                  {session.document.schema} ·{" "}
-                  {session.document.entities.length.toLocaleString("de-DE")}{" "}
-                  Entitäten
-                </span>
-              </TabsTrigger>
-              {documentSessions.length > 1 ? (
-                <button
-                  aria-label={`${session.document.fileName} schließen`}
-                  className="absolute top-1.5 right-1.5 grid size-4 cursor-pointer place-items-center rounded-sm text-muted-foreground/60 opacity-0 transition-opacity group-hover/tab:opacity-100 hover:bg-muted hover:text-foreground focus-visible:opacity-100"
-                  title="Schließen"
-                  type="button"
-                  onClick={() => closeDocumentSession(session.id)}
-                >
-                  <X aria-hidden className="size-3" />
-                </button>
-              ) : null}
-            </span>
-          ))}
-        </TabsList>
-      </div>
-    </Tabs>
-  );
+              ))}
+            </TabsList>
+          </div>
+          <IconButton
+            aria-label="Weitere IFC-Dateien hinzufügen"
+            className="size-6 shrink-0 text-muted-foreground hover:text-foreground"
+            disabled={Boolean(loadingIfcName)}
+            size="icon-sm"
+            title="Weitere IFC-Dateien hinzufügen"
+            variant="ghost"
+            onClick={() => void addIfcFiles()}
+          >
+            <Plus aria-hidden className="size-3.5" />
+          </IconButton>
+        </div>
+      </Tabs>
+    );
+  };
 
   // Von Startseite UND Arbeitsansicht geteilt: Recovery-Angebot und
   // Statusmeldungen müssen auch auf der Startseite sichtbar sein.
@@ -4752,77 +4693,72 @@ export default function IfcWorkspace() {
 
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
-      <header className="relative z-20 flex shrink-0 flex-col gap-2 border-b border-border/70 bg-card/95 px-3 pt-2 pb-0 shadow-sm backdrop-blur lg:flex-row lg:items-center lg:gap-3">
-        {renderWorkspaceSwitcher()}
-        <div className="min-w-0 flex-1">{renderDocumentTabs()}</div>
-        <div className="flex shrink-0 items-center gap-1.5 pb-2 lg:pb-0">
-          <Button
-            disabled={Boolean(loadingIfcName)}
-            variant="default"
-            onClick={() => void openIfc()}
-          >
-            <FolderOpen aria-hidden className="size-3.5" />
-            <span className="hidden xl:inline">
-              {loadingIfcName ? "Lädt…" : "IFC öffnen"}
-            </span>
-          </Button>
-          <Button
-            disabled={Boolean(loadingIfcName)}
-            title="Weitere IFC-Dateien hinzufügen"
-            onClick={() => void addIfcFiles()}
-          >
-            <FilePlus2 aria-hidden className="size-3.5" />
-            <span className="hidden xl:inline">Hinzufügen</span>
-          </Button>
-          <Button
-            disabled={Boolean(loadingIfcName)}
-            title={
-              activeSession.vcsOrigin
-                ? "Lokal speichern oder auf den IFC Hub committen"
-                : "Aktives Dokument als IFC exportieren"
-            }
-            onClick={saveActiveDocument}
-          >
-            <HardDriveDownload aria-hidden className="size-3.5" />
-            <span className="hidden xl:inline">
-              {activeSession.vcsOrigin ? "Speichern" : "Exportieren"}
-            </span>
-          </Button>
-          <div className="mx-1 h-5 w-px bg-border/70" />
-          <IconButton
-            aria-label="Rückgängig"
-            disabled={!undoStack.length}
-            size="icon-sm"
-            title={
-              undoStack.length
-                ? `Rückgängig: ${undoStack.at(-1)?.summary} · Strg+Z`
-                : "Nichts rückgängig zu machen"
-            }
-            variant="outline"
-            onClick={undoDocument}
-          >
-            <Undo2 aria-hidden className="size-3.5" />
-          </IconButton>
-          <IconButton
-            aria-label="Wiederholen"
-            disabled={!redoStack.length}
-            size="icon-sm"
-            title={
-              redoStack.length
-                ? `Wiederholen: ${redoStack.at(-1)?.summary} · Strg+Umschalt+Z`
-                : "Nichts zu wiederholen"
-            }
-            variant="outline"
-            onClick={redoDocument}
-          >
-            <Redo2 aria-hidden className="size-3.5" />
-          </IconButton>
-          <div className="mx-1 h-5 w-px bg-border/70" />
-          <MosaicWindowMenu
-            closedIds={closedMosaicIds}
-            onRestore={restoreMosaicView}
+      <header className="relative z-20 flex shrink-0 flex-col border-b border-border/70 bg-card/95 shadow-sm backdrop-blur">
+        <div className="flex h-9 items-center gap-2 px-2">
+          <img
+            alt=""
+            aria-hidden
+            className="size-5 shrink-0 rounded-[5px] select-none"
+            draggable={false}
+            src="/brand/ifcnative-icon-03-blueprint.svg"
           />
-          <ThemeToggle />
+          <WorkspaceMenubar
+            activeFileName={activeSession.document.fileName}
+            activeWorkspaceId={activeWorkspace?.id ?? DEFAULT_WORKSPACE_ID}
+            canCloseActiveDocument={documentSessions.length > 1}
+            closedViewIds={closedMosaicIds}
+            customWorkspaces={customWorkspaces}
+            loading={Boolean(loadingIfcName)}
+            redoSummary={redoStack.at(-1)?.summary}
+            undoSummary={undoStack.at(-1)?.summary}
+            onAddIfcFiles={() => void addIfcFiles()}
+            onCloseActiveDocument={() => closeDocumentSession(activeSession.id)}
+            onCreateWorkspace={createWorkspaceFromCurrentLayout}
+            onDeleteWorkspace={deleteActiveWorkspace}
+            onExportIfc={saveActiveDocument}
+            onOpenIfc={() => void openIfc()}
+            onRedo={redoDocument}
+            onResetLayout={resetMosaicLayout}
+            onSaveWorkspace={saveActiveWorkspace}
+            onSelectWorkspace={selectWorkspace}
+            onToggleView={toggleMosaicView}
+            onUndo={undoDocument}
+          />
+          <div className="ml-auto flex shrink-0 items-center gap-0.5">
+            <IconButton
+              aria-label="Rückgängig"
+              disabled={!undoStack.length}
+              size="icon-sm"
+              title={
+                undoStack.length
+                  ? `Rückgängig: ${undoStack.at(-1)?.summary} · Strg+Z`
+                  : "Nichts rückgängig zu machen"
+              }
+              variant="ghost"
+              onClick={undoDocument}
+            >
+              <Undo2 aria-hidden className="size-3.5" />
+            </IconButton>
+            <IconButton
+              aria-label="Wiederholen"
+              disabled={!redoStack.length}
+              size="icon-sm"
+              title={
+                redoStack.length
+                  ? `Wiederholen: ${redoStack.at(-1)?.summary} · Strg+Umschalt+Z`
+                  : "Nichts zu wiederholen"
+              }
+              variant="ghost"
+              onClick={redoDocument}
+            >
+              <Redo2 aria-hidden className="size-3.5" />
+            </IconButton>
+            <div className="mx-1 h-4 w-px bg-border/70" />
+            <ThemeToggle />
+          </div>
+        </div>
+        <div className="flex items-center bg-muted/50 px-1.5 py-1">
+          {renderDocumentTabs()}
         </div>
       </header>
 
@@ -4830,23 +4766,21 @@ export default function IfcWorkspace() {
 
       {statusAlertBar}
 
-      <main className="min-h-0 flex-1 p-1.5">
-        <div className="h-full overflow-hidden rounded-lg border border-border/60 bg-muted/30">
-          <Mosaic<MosaicViewId>
-            className="ifcnative-mosaic"
-            renderTile={renderMosaicTile}
-            resize={{ minimumPaneSizePercentage: 12 }}
-            value={mosaicValue}
-            zeroStateView={
-              <div className="flex h-full items-center justify-center">
-                <Button variant="default" onClick={resetMosaicLayout}>
-                  Layout wiederherstellen
-                </Button>
-              </div>
-            }
-            onChange={setMosaicValue}
-          />
-        </div>
+      <main className="min-h-0 flex-1 overflow-hidden p-1">
+        <Mosaic<MosaicViewId>
+          className="ifcnative-mosaic"
+          renderTile={renderMosaicTile}
+          resize={{ minimumPaneSizePercentage: 12 }}
+          value={mosaicValue}
+          zeroStateView={
+            <div className="flex h-full items-center justify-center">
+              <Button variant="default" onClick={resetMosaicLayout}>
+                Layout wiederherstellen
+              </Button>
+            </div>
+          }
+          onChange={setMosaicValue}
+        />
       </main>
 
       <DeleteEntityDialog
@@ -5135,6 +5069,30 @@ function addMosaicView<T extends string | number>(
     second: id,
     splitPercentage: 74,
   };
+}
+
+function removeMosaicView<T extends string | number>(
+  node: MosaicNode<T> | null,
+  id: T,
+): MosaicNode<T> | null {
+  if (node == null) {
+    return null;
+  }
+  if (typeof node !== "object") {
+    return node === id ? null : node;
+  }
+  const first = removeMosaicView(node.first, id);
+  const second = removeMosaicView(node.second, id);
+  if (first == null) {
+    return second;
+  }
+  if (second == null) {
+    return first;
+  }
+  if (first === node.first && second === node.second) {
+    return node;
+  }
+  return { ...node, first, second };
 }
 
 function formatCoordinate(value: number) {

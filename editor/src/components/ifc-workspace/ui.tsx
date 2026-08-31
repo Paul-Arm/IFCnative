@@ -6,14 +6,6 @@ import {
     CollapsibleContent,
     CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuGroup,
-    DropdownMenuItem,
-    DropdownMenuLabel,
-    DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
     Select,
@@ -40,7 +32,6 @@ import {
     AlertTriangle,
     ChevronDown,
     Info,
-    LayoutGrid,
     OctagonX,
 } from "lucide-react";
 import {
@@ -49,9 +40,6 @@ import {
     type CSSProperties,
     type ReactNode,
 } from "react";
-
-import { MOSAIC_TITLES } from "./constants";
-import type { MosaicViewId } from "./types";
 
 type ButtonVariant = VariantProps<typeof buttonVariants>["variant"];
 type ButtonSize = VariantProps<typeof buttonVariants>["size"];
@@ -288,54 +276,6 @@ function dataTableColumnStyle(column: DataTableColumn): CSSProperties {
     minWidth: column.minWidth ?? 0,
     width: column.width,
   };
-}
-
-export function MosaicWindowMenu({
-  closedIds,
-  onRestore,
-}: {
-  closedIds: MosaicViewId[];
-  onRestore(id: MosaicViewId): void;
-}) {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        className={cn(
-          buttonVariants({ size: "sm", variant: "outline" }),
-          "gap-1.5",
-        )}
-      >
-        <LayoutGrid aria-hidden className="size-3.5" />
-        <span className="hidden sm:inline">Fenster</span>
-        {closedIds.length ? (
-          <span className="rounded-full bg-primary/15 px-1.5 text-[0.65rem] font-semibold text-primary">
-            {closedIds.length}
-          </span>
-        ) : null}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56">
-        <DropdownMenuGroup>
-          <DropdownMenuLabel>Geschlossene Fenster</DropdownMenuLabel>
-          {closedIds.length ? (
-            closedIds.map((id) => (
-              <DropdownMenuItem
-                key={id}
-                className="justify-between"
-                onClick={() => onRestore(id)}
-              >
-                <span className="truncate">{MOSAIC_TITLES[id]}</span>
-                <span className="text-xs text-muted-foreground">Öffnen</span>
-              </DropdownMenuItem>
-            ))
-          ) : (
-            <div className="px-1.5 py-2 text-sm text-muted-foreground">
-              Alle Fenster sind geöffnet
-            </div>
-          )}
-        </DropdownMenuGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
 }
 
 export interface SegmentedOption {
