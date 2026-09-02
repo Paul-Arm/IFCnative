@@ -154,6 +154,12 @@ Konfiguration (`src/config.ts`): `PORT` (8787), `HOST`, `JWT_SECRET`,
 `ADMIN_PASSWORD` (fest verdrahtetes Admin-Konto), `PYTHON_BIN` (Interpreter
 für Python-Actions, Default `python` unter Windows, sonst `python3`).
 
+**Speicher:** `npm start` setzt `--max-old-space-size=8192`, weil der
+STEP-Parser beim Commit die gesamte IFC als Objektbaum im Heap hält (eine
+270-MB-IFC mit 5 Mio. Entities braucht ~5 GB; das Node-Default von ~4 GB
+reicht dafür nicht). Bei anderem Startbefehl das Limit per `NODE_OPTIONS`
+setzen.
+
 > **Hinweis:** Der lokale Modus ist ohne weitere Konfiguration persistent
 > (SQLite-Katalog + Blobs unter `DATA_DIR`; kein natives Modul nötig,
 > node:sqlite ist eingebaut). Beide Modi laufen über dieselbe SqlRepository
