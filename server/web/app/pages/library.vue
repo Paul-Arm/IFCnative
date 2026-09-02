@@ -6,9 +6,12 @@ import type { ActionKind, LibraryFile } from "~/types/api";
 const { api } = useApi();
 const { user, token } = useAuth();
 
-const { data, refresh } = await useAsyncData("library", () =>
-  api<{ files: LibraryFile[] }>("/library"),
+const { data, refresh, status } = useAsyncData(
+  "library",
+  () => api<{ files: LibraryFile[] }>("/library"),
+  { lazy: true },
 );
+const pending = computed(() => status.value === "pending" || status.value === "idle");
 
 const error = ref<string | null>(null);
 const notice = ref<string | null>(null);
@@ -130,7 +133,8 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" });
           IDS-Dateien und Python-Prüfskripte, projektübergreifend nutzbar
         </span>
       </div>
-      <div v-if="!data?.files.length" class="empty">
+      <SkeletonRows v-if="pending" :rows="3" />
+      <div v-else-if="!data?.files.length" class="empty">
         Noch keine Dateien in der Bibliothek — unten die erste IDS-Datei oder
         das erste Prüfskript ablegen. Projekte können sie dann im Tab
         „Actions" über „Aus zentraler Bibliothek" verwenden.

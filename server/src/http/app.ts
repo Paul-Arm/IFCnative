@@ -16,7 +16,13 @@ import {
   type BcfTopicInput,
 } from "../domain/bcfService";
 import { CommitService } from "../domain/commitService";
+import {
+  DIFF_PAGE_LIMIT_DEFAULT,
+  diffOverview,
+  diffPage,
+} from "../domain/diffView";
 import { FragmentsService } from "../domain/fragmentsService";
+import { IfcWorkerPool, defaultIfcWorkerPool } from "../domain/ifcWorkerPool";
 import type { ObjectStore } from "../storage/objectStore";
 import {
   actionAppliesTo,
@@ -45,6 +51,8 @@ export interface AppDeps {
   storageMode?: "filesystem" | "azure";
   /** Führt Action-Runs aus; ohne Angabe wird ein Standard-Runner gebaut. */
   runner?: ActionRunner;
+  /** Worker-Pool für Parsing/Konvertierung; Standard: prozessweiter Pool. */
+  workers?: IfcWorkerPool;
 }
 
 interface JwtPayload {
@@ -107,9 +115,10 @@ function normalizeFolderPath(input: string): string | null {
 
 export function buildApp(deps: AppDeps): FastifyInstance {
   const { repo, store, jwtSecret } = deps;
-  const commits = new CommitService(repo, store);
-  const fragmentsService = new FragmentsService(store);
-  const runner = deps.runner ?? new ActionRunner(repo, store);
+  const workers = deps.workers ?? defaultIfcWorkerPool();
+  const commits = new CommitService(repo, store, workers);
+  const fragmentsService = new FragmentsService(store, workers);
+  const runner = deps.runner ?? new ActionRunner(repo, store, { workers });
 
   /** Vorschaubild eines Projekts (aus der 3D-Szene der Web-UI). */
   const projectImageKey = (projectId: string) => `projects/${projectId}/image.png`;
@@ -1527,7 +1536,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // ---- commits (the core) ----------------------------------------------
 
   interface IfcUpload {
-    text: string | null;
+    /** Rohbytes — bleibt Buffer, damit 100-MB-IFCs nicht als String kopiert werden. */
+    bytes: Buffer | null;
     fields: Record<string, string>;
   }
 
@@ -1535,7 +1545,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   async function readIfcUpload(request: FastifyRequest): Promise<IfcUpload> {
     if (request.isMultipart()) {
       const file = await request.file();
-      if (!file) return { text: null, fields: {} };
+      if (!file) return { bytes: null, fields: {} };
       const buffer = await file.toBuffer();
       const fields: Record<string, string> = {};
       for (const [key, value] of Object.entries(file.fields)) {
@@ -1549,10 +1559,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           fields[key] = first.value;
         }
       }
-      return { text: buffer.toString("utf8"), fields };
+      return { bytes: buffer, fields };
     }
     return {
-      text: typeof request.body === "string" ? request.body : null,
+      bytes:
+        typeof request.body === "string"
+          ? Buffer.from(request.body, "utf8")
+          : null,
       fields: {},
     };
   }
@@ -1573,14 +1586,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
       const query = request.query as { branch?: string; message?: string };
       const upload = await readIfcUpload(request);
-      if (upload.text === null || upload.text === "") {
+      if (upload.bytes === null || upload.bytes.length === 0) {
         return reply.code(400).send({ error: "File content required" });
       }
       if (model.kind === "md") {
-        if (upload.text.length > 2 * 1024 * 1024) {
+        if (upload.bytes.length > 2 * 1024 * 1024) {
           return reply.code(400).send({ error: "Markdown too large (max 2 MB)" });
         }
-      } else if (!upload.text.includes("ISO-10303-21")) {
+      } else if (!upload.bytes.includes("ISO-10303-21")) {
         return reply.code(400).send({ error: "Valid IFC/STEP body required" });
       }
 
@@ -1593,7 +1606,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       const result = await commits.createCommit({
         model,
         branchName,
-        text: upload.text,
+        text: upload.bytes,
         authorId: user.id,
         message: query.message ?? upload.fields.message ?? "",
       });
@@ -1697,20 +1710,47 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       if (!commit || commit.modelId !== model.id) {
         return reply.code(404).send({ error: "Commit not found" });
       }
-      try {
-        const buffer = await fragmentsService.getFragments(commit);
-        return reply
+      const sendFragments = (buffer: Buffer) =>
+        reply
           .header("content-type", "application/octet-stream")
           // Commits sind unveränderlich — der Browser darf hart cachen.
           .header("cache-control", "private, max-age=31536000, immutable")
           .send(buffer);
-      } catch (error) {
-        return reply.code(500).send({
-          error: `IFC-zu-Fragments-Konvertierung fehlgeschlagen: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
+      const conversionError = (message: string) =>
+        reply.code(500).send({
+          error: `IFC-zu-Fragments-Konvertierung fehlgeschlagen: ${message}`,
         });
+
+      const query = request.query as { wait?: string };
+      if (query.wait === "1") {
+        // Blockierende Variante (Skripte/Tests): wartet auf die Konvertierung.
+        try {
+          return sendFragments(await fragmentsService.getFragments(commit));
+        } catch (error) {
+          return conversionError(
+            error instanceof Error ? error.message : String(error),
+          );
+        }
       }
+
+      // Standard: Konvertierung anstoßen und sofort antworten. Die UI fragt
+      // per Polling nach — so hängt kein Request minutenlang am Socket, und
+      // ein Proxy-Timeout bricht die Konvertierung nicht ab.
+      const state = await fragmentsService.start(commit);
+      if (state.state === "ready") {
+        return sendFragments(await fragmentsService.getFragments(commit));
+      }
+      if (state.state === "error") {
+        return conversionError(state.message || "unbekannter Fehler");
+      }
+      const startedAt =
+        state.state === "converting" ? state.startedAt : new Date().toISOString();
+      const elapsedMs = state.state === "converting" ? state.elapsedMs : 0;
+      return reply
+        .code(202)
+        .header("retry-after", "3")
+        .header("cache-control", "no-store")
+        .send({ status: "converting", startedAt, elapsedMs });
     },
   );
 
@@ -2339,8 +2379,59 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     ) {
       return reply.code(404).send({ error: "Commit not found" });
     }
-    return reply.send({ diff: await commits.getDiff(from, to) });
+    // Nur die Übersicht (Zähler je Status und IFC-Typ) — die Einträge holt
+    // die UI seitenweise über /diff/entries, sonst friert der Browser bei
+    // 100k+ Änderungen ein.
+    return reply.send({ diff: diffOverview(await commits.getDiff(from, to)) });
   });
+
+  // Seitenweise Diff-Einträge, eingegrenzt auf Status/Typ oder Volltext.
+  app.get(
+    `${api}/projects/:slug/models/:model/diff/entries`,
+    async (request, reply) => {
+      const { slug, model: modelSlug } = request.params as {
+        slug: string;
+        model: string;
+      };
+      const resolved = await resolveModel(slug, modelSlug, reply);
+      if (!resolved) return reply;
+      const { project, model } = resolved;
+      if (!(await canReadModel(request, reply, project, model.visibility))) return reply;
+      const query = request.query as {
+        from?: string;
+        to?: string;
+        status?: string;
+        type?: string;
+        q?: string;
+        offset?: string;
+        limit?: string;
+      };
+      if (!query.from || !query.to) {
+        return reply.code(400).send({ error: "from and to commit ids required" });
+      }
+      if (
+        query.status !== undefined &&
+        !["added", "modified", "removed"].includes(query.status)
+      ) {
+        return reply.code(400).send({ error: "Invalid status" });
+      }
+      const from = await repo.getCommit(query.from);
+      const to = await repo.getCommit(query.to);
+      if (!from || !to || from.modelId !== model.id || to.modelId !== model.id) {
+        return reply.code(404).send({ error: "Commit not found" });
+      }
+      const summary = await commits.getDiff(from, to);
+      return reply.send({
+        page: diffPage(summary, {
+          status: query.status as "added" | "modified" | "removed" | undefined,
+          type: query.type || undefined,
+          q: query.q || undefined,
+          offset: Number(query.offset ?? 0),
+          limit: Number(query.limit ?? DIFF_PAGE_LIMIT_DEFAULT),
+        }),
+      });
+    },
+  );
 
   // Field-level detail for a single changed entity (what actually changed).
   app.get(

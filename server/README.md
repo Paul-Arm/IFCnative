@@ -37,9 +37,19 @@ damit exakt einig, was „geändert“ bedeutet.
   (`src/domain/fragmentsService.ts`, web-ifc-WASM in Node) und das Ergebnis
   im Object Store neben der IFC gecacht (`….frag`) — Commits sind
   unveränderlich, der Cache veraltet nie; gleichzeitige Erst-Abrufe teilen
-  sich einen Konvertierungslauf. Der Fragments-Worker der Web-UI wird
-  versionsgleich aus dem Paket synchronisiert
+  sich einen Konvertierungslauf. Die Konvertierung läuft im Hintergrund:
+  `GET …/fragments` antwortet mit **202 + `{status: "converting", elapsedMs}`**,
+  die Web-UI fragt alle 3 s nach und zeigt Laufzeit und Download-Fortschritt
+  (`?wait=1` liefert die blockierende Variante für Skripte). Der
+  Fragments-Worker der Web-UI wird versionsgleich aus dem Paket synchronisiert
   (`web/scripts/sync-fragments-worker.mjs`).
+- **Worker-Pool** — STEP-Parsing, Manifest-Hashing, Feld-Diffs,
+  IDS-Validierung und die Fragments-Konvertierung laufen in
+  Worker-Threads (`src/domain/ifcWorkerPool.ts` + `ifcWorker.ts`), nicht im
+  Hauptthread: Ein 270-MB-Modell parst 30 s und konvertiert noch länger —
+  währenddessen bleibt die API für alle anderen Anfragen reaktionsfähig.
+  Pool-Größe per `IFC_WORKERS` (Standard 2, max. CPUs−1); jeder Worker erbt
+  das Heap-Limit des Prozesses.
 - **Issues** — wie bei GitHub: pro Projekt nummerierte Issues mit
   Markdown-Beschreibung und Kommentar-Thread, offen/geschlossen, zuordenbar
   an Benutzer, 0..n Modelle und farbige Labels (Tab „Issues“ in der Web-UI;
@@ -152,7 +162,8 @@ Konfiguration (`src/config.ts`): `PORT` (8787), `HOST`, `JWT_SECRET`,
 `AZURE_STORAGE_CONNECTION_STRING`, `AZURE_STORAGE_CONTAINER`,
 `DATABASE_URL` (Postgres; ohne = SQLite unter `DATA_DIR`), `ADMIN_EMAIL`,
 `ADMIN_PASSWORD` (fest verdrahtetes Admin-Konto), `PYTHON_BIN` (Interpreter
-für Python-Actions, Default `python` unter Windows, sonst `python3`).
+für Python-Actions, Default `python` unter Windows, sonst `python3`),
+`IFC_WORKERS` (Worker-Threads für Parsing/Konvertierung, Standard 2).
 
 **Speicher:** `npm start` setzt `--max-old-space-size=8192`, weil der
 STEP-Parser beim Commit die gesamte IFC als Objektbaum im Heap hält (eine
@@ -226,8 +237,9 @@ Auth: `Authorization: Bearer <JWT>` aus `/api/auth/login`. Fehler kommen als
 | GET | `…/commits?branch=` | Historie (Commits mit Autor) |
 | GET | `…/commits/:id` | Commit-Metadaten |
 | GET | `…/commits/:id/file` | Roh-IFC herunterladen (byte-identisch) |
-| GET | `…/commits/:id/fragments` | ThatOpen-Fragments für die 3D-Vorschau (erster Abruf konvertiert + cached; immutable-Cache-Header) |
-| GET | `…/diff?from=&to=` | semantischer Diff zweier Commits |
+| GET | `…/commits/:id/fragments` | ThatOpen-Fragments für die 3D-Vorschau: 200 + Bytes (immutable-Cache-Header) oder **202** `{status: "converting", startedAt, elapsedMs}` solange konvertiert wird (dann erneut fragen; `?wait=1` wartet serverseitig) |
+| GET | `…/diff?from=&to=` | Diff-Übersicht: `{identical, unchanged, added|modified|removed: {count, types: [{type, count}]}}` — keine Einträge, damit 100k-Änderungen den Browser nicht einfrieren |
+| GET | `…/diff/entries?from=&to=&status=&type=&q=&offset=&limit=` | Diff-Einträge seitenweise (`limit` ≤ 1000, Standard 200); `status`/`type` grenzen ein, `q` filtert Typ/Name/GlobalId über alle Status |
 | GET | `…/diff/entity?from=&to=&globalId=` | Feld-Detail einer geänderten Entity |
 | GET/POST | `/api/projects/:slug/actions` | Actions auflisten (inkl. `libraryName`, `scopeModelName`) / anlegen `{name, kind, content, fileName?, runOnCommit?, scopeFolder?\|scopeModelId?}` **oder** `{name, libraryFileId, runOnCommit?, scopeFolder?\|scopeModelId?}` (write) |
 | PATCH/DELETE | `/api/projects/:slug/actions/:id` | Name/`runOnCommit`/Dateiinhalt ändern bzw. löschen (write) |

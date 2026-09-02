@@ -1,1 +1,0 @@
-import"./Bc2uDOit.js";var e=globalThis.setInterval;export{e as t};

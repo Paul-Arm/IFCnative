@@ -12,6 +12,8 @@ export {
 export {
   buildVersionManifest,
   diffManifests,
+  type GuidChangeStatus,
+  type GuidDiffEntry,
   type GuidDiffSummary,
   type VersionManifest,
   type VersionManifestEntry,

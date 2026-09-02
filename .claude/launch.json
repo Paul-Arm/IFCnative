@@ -4,15 +4,36 @@
     {
       "name": "ifc-vcs-server",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "server", "run", "start"],
+      "runtimeArgs": [
+        "--prefix",
+        "server",
+        "run",
+        "start"
+      ],
       "port": 8787,
       "autoPort": true
     },
     {
       "name": "editor",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "editor", "run", "start"],
+      "runtimeArgs": [
+        "--prefix",
+        "editor",
+        "run",
+        "start"
+      ],
       "port": 5173
+    },
+    {
+      "name": "hub-web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "server/web",
+        "run",
+        "dev"
+      ],
+      "port": 3000
     }
   ]
 }

@@ -46,7 +46,14 @@ const { api } = useApi();
 const { user } = useAuth();
 const slug = route.params.project as string;
 
-const { data: projectData, refresh: refreshProject } = await useAsyncData(
+// Alle Daten laden "lazy": Die Seite rendert sofort und füllt sich Tab für
+// Tab, statt bis zur langsamsten der sieben Antworten leer zu bleiben.
+const {
+  data: projectData,
+  refresh: refreshProject,
+  status: projectStatus,
+  error: projectError,
+} = useAsyncData(
   `project-${slug}`,
   () =>
     api<{
@@ -55,10 +62,19 @@ const { data: projectData, refresh: refreshProject } = await useAsyncData(
       role: Role | null;
       folders: string[];
     }>(`/projects/${slug}`),
+  { lazy: true },
 );
-const { data: modelsData, refresh: refreshModels } = await useAsyncData(
+const {
+  data: modelsData,
+  refresh: refreshModels,
+  status: modelsStatus,
+} = useAsyncData(
   `models-${slug}`,
   () => api<{ models: Model[] }>(`/projects/${slug}/models`),
+  { lazy: true },
+);
+const modelsPending = computed(
+  () => modelsStatus.value === "pending" || modelsStatus.value === "idle",
 );
 
 const isAdmin = computed(
@@ -439,16 +455,25 @@ function downloadSceneImage(): void {
 
 // ---- Issues ------------------------------------------------------------
 
-const { data: issuesData, refresh: refreshIssues } = await useAsyncData(
+const {
+  data: issuesData,
+  refresh: refreshIssues,
+  status: issuesStatus,
+} = useAsyncData(
   `issues-${slug}`,
   () =>
     api<{ issues: Issue[]; openCount: number; closedCount: number }>(
       `/projects/${slug}/issues`,
     ),
+  { lazy: true },
 );
-const { data: labelsData, refresh: refreshLabels } = await useAsyncData(
+const issuesPending = computed(
+  () => issuesStatus.value === "pending" || issuesStatus.value === "idle",
+);
+const { data: labelsData, refresh: refreshLabels } = useAsyncData(
   `labels-${slug}`,
   () => api<{ labels: Label[] }>(`/projects/${slug}/labels`),
+  { lazy: true },
 );
 
 const issueFilter = ref<"open" | "closed">("open");
@@ -757,17 +782,35 @@ const roles: Role[] = ["owner", "maintainer", "contributor", "viewer"];
 
 // ---- Actions (Prüf-Workflows wie bei GitHub) ---------------------------
 
-const { data: actionsData, refresh: refreshActions } = await useAsyncData(
+const {
+  data: actionsData,
+  refresh: refreshActions,
+  status: actionsStatus,
+} = useAsyncData(
   `actions-${slug}`,
   () => api<{ actions: Action[] }>(`/projects/${slug}/actions`),
+  { lazy: true },
+);
+const actionsPending = computed(
+  () => actionsStatus.value === "pending" || actionsStatus.value === "idle",
 );
 // Zentrale Bibliothek für den "Aus Bibliothek"-Picker im Anlege-Formular.
-const { data: libraryData } = await useAsyncData("library", () =>
-  api<{ files: LibraryFile[] }>("/library"),
+const { data: libraryData } = useAsyncData(
+  "library",
+  () => api<{ files: LibraryFile[] }>("/library"),
+  { lazy: true },
 );
-const { data: runsData, refresh: refreshRuns } = await useAsyncData(
+const {
+  data: runsData,
+  refresh: refreshRuns,
+  status: runsStatus,
+} = useAsyncData(
   `runs-${slug}`,
   () => api<{ runs: ActionRun[] }>(`/projects/${slug}/runs`),
+  { lazy: true },
+);
+const runsPending = computed(
+  () => runsStatus.value === "pending" || runsStatus.value === "idle",
 );
 
 const RUN_STATUS: Record<
@@ -1093,7 +1136,16 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
 </script>
 
 <template>
-  <div v-if="projectData">
+  <div v-if="projectError" class="alert error">
+    Projekt konnte nicht geladen werden: {{ apiErrorMessage(projectError) }}
+  </div>
+  <div v-else-if="!projectData" class="card">
+    <div class="card-header">
+      <span class="skeleton" style="width: 30%; height: 1.2em" />
+    </div>
+    <SkeletonRows :rows="5" dots />
+  </div>
+  <div v-else>
     <nav class="breadcrumbs">
       <NuxtLink to="/">Projekte</NuxtLink>
       <span>/</span>
@@ -1105,7 +1157,9 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
       <button :class="{ active: tab === 'modelle' }" @click="goTo('modelle')">
         <PhFolders :size="16" aria-hidden="true" />
         Modelle
-        <span class="counter">{{ modelsData?.models.length ?? 0 }}</span>
+        <span class="counter" :class="{ pending: modelsPending }">{{
+          modelsPending ? "" : (modelsData?.models.length ?? 0)
+        }}</span>
       </button>
       <button :class="{ active: tab === '3d' }" @click="goTo('3d')">
         <PhCubeTransparent :size="16" aria-hidden="true" />
@@ -1115,12 +1169,16 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
       <button :class="{ active: tab === 'issues' }" @click="goTo('issues')">
         <PhRecord :size="16" aria-hidden="true" />
         Issues
-        <span class="counter">{{ issuesData?.openCount ?? 0 }}</span>
+        <span class="counter" :class="{ pending: issuesPending }">{{
+          issuesPending ? "" : (issuesData?.openCount ?? 0)
+        }}</span>
       </button>
       <button :class="{ active: tab === 'actions' }" @click="goTo('actions')">
         <PhPlayCircle :size="16" aria-hidden="true" />
         Actions
-        <span class="counter">{{ actionsData?.actions.length ?? 0 }}</span>
+        <span class="counter" :class="{ pending: actionsPending }">{{
+          actionsPending ? "" : (actionsData?.actions.length ?? 0)
+        }}</span>
       </button>
       <button :class="{ active: tab === 'mitglieder' }" @click="goTo('mitglieder')">
         <PhUsers :size="16" aria-hidden="true" />
@@ -1663,7 +1721,8 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
           </form>
         </div>
 
-        <ul v-if="filteredIssues.length" class="list">
+        <SkeletonRows v-if="issuesPending" :rows="4" dots />
+        <ul v-else-if="filteredIssues.length" class="list">
           <li
             v-for="issue in filteredIssues"
             :key="issue.id"
@@ -1925,7 +1984,8 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
           </form>
         </div>
 
-        <div v-if="!actionsData?.actions.length" class="empty empty-rich">
+        <SkeletonRows v-if="actionsPending" :rows="3" />
+        <div v-else-if="!actionsData?.actions.length" class="empty empty-rich">
           <PhShieldCheck :size="30" aria-hidden="true" class="empty-icon" />
           <div class="empty-title">Noch keine Actions konfiguriert</div>
           <p>
@@ -1996,7 +2056,8 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
           <h2>Runs</h2>
           <span v-if="hasPendingRuns" class="badge accent">läuft …</span>
         </div>
-        <div v-if="!runsData?.runs.length" class="empty empty-rich">
+        <SkeletonRows v-if="runsPending" :rows="3" />
+        <div v-else-if="!runsData?.runs.length" class="empty empty-rich">
           <PhPlayCircle :size="30" aria-hidden="true" class="empty-icon" />
           <div class="empty-title">Noch keine Runs</div>
           <p>

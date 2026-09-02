@@ -23,27 +23,40 @@ const { user } = useAuth();
 const slug = route.params.project as string;
 const number = Number(route.params.number);
 
-const { data: issueData, refresh } = await useAsyncData(
+// Issue lädt "lazy" mit Platzhalter; Projekt/Modelle/Labels parallel dazu.
+const {
+  data: issueData,
+  refresh,
+  status: issueStatus,
+  error: issueError,
+} = useAsyncData(
   `issue-${slug}-${number}`,
   () =>
     api<{ issue: Issue; comments: IssueComment[] }>(
       `/projects/${slug}/issues/${number}`,
     ),
+  { lazy: true },
 );
-const { data: projectData } = await useAsyncData(`project-role-${slug}`, () =>
-  api<{
-    project: Project;
-    members: Member[];
-    role: Role | null;
-    folders: string[];
-  }>(`/projects/${slug}`),
+const { data: projectData } = useAsyncData(
+  `project-role-${slug}`,
+  () =>
+    api<{
+      project: Project;
+      members: Member[];
+      role: Role | null;
+      folders: string[];
+    }>(`/projects/${slug}`),
+  { lazy: true },
 );
-const { data: modelsData } = await useAsyncData(`models-${slug}`, () =>
-  api<{ models: Model[] }>(`/projects/${slug}/models`),
+const { data: modelsData } = useAsyncData(
+  `models-${slug}`,
+  () => api<{ models: Model[] }>(`/projects/${slug}/models`),
+  { lazy: true },
 );
-const { data: labelsData, refresh: refreshLabels } = await useAsyncData(
+const { data: labelsData, refresh: refreshLabels } = useAsyncData(
   `labels-${slug}`,
   () => api<{ labels: Label[] }>(`/projects/${slug}/labels`),
+  { lazy: true },
 );
 
 async function createProjectLabel(
@@ -301,7 +314,16 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
 </script>
 
 <template>
-  <div v-if="issue">
+  <div v-if="issueError" class="alert error">
+    Issue konnte nicht geladen werden: {{ apiErrorMessage(issueError) }}
+  </div>
+  <div v-else-if="!issue && (issueStatus === 'pending' || issueStatus === 'idle')" class="card">
+    <div class="card-header">
+      <span class="skeleton" style="width: 45%; height: 1.2em" />
+    </div>
+    <SkeletonRows :rows="5" />
+  </div>
+  <div v-else-if="issue">
     <nav class="breadcrumbs">
       <NuxtLink to="/">Projekte</NuxtLink>
       <span>/</span>

@@ -31,17 +31,28 @@ const slug = route.params.project as string;
 const modelSlug = route.params.model as string;
 const base = `/projects/${slug}/models/${modelSlug}`;
 
-const { data: modelData, refresh: refreshModel } = await useAsyncData(
+// Modell + Rolle blockieren das erste Rendern (klein und schnell); alles
+// Weitere (Issues, Commits) lädt "lazy" mit sichtbaren Ladezuständen.
+const {
+  data: modelData,
+  refresh: refreshModel,
+  status: modelStatus,
+  error: modelError,
+} = useAsyncData(
   `model-${slug}-${modelSlug}`,
   () => api<{ model: Model; branches: Branch[] }>(base),
+  { lazy: true },
 );
-const { data: projectData } = await useAsyncData(`project-role-${slug}`, () =>
-  api<{
-    project: Project;
-    members: Member[];
-    role: Role | null;
-    folders: string[];
-  }>(`/projects/${slug}`),
+const { data: projectData } = useAsyncData(
+  `project-role-${slug}`,
+  () =>
+    api<{
+      project: Project;
+      members: Member[];
+      role: Role | null;
+      folders: string[];
+    }>(`/projects/${slug}`),
+  { lazy: true },
 );
 
 const isAdmin = computed(
@@ -83,10 +94,13 @@ function goTab(nextTab: Tab): void {
 
 // ---- Issues dieses Modells ---------------------------------------------
 
-const { data: issuesData } = await useAsyncData(`issues-${slug}`, () =>
-  api<{ issues: Issue[]; openCount: number; closedCount: number }>(
-    `/projects/${slug}/issues`,
-  ),
+const { data: issuesData, status: issuesStatus } = useAsyncData(
+  `issues-${slug}`,
+  () =>
+    api<{ issues: Issue[]; openCount: number; closedCount: number }>(
+      `/projects/${slug}/issues`,
+    ),
+  { lazy: true },
 );
 
 /** Alle Issues, die mit DIESEM Modell verknüpft sind. */
@@ -123,13 +137,27 @@ watchEffect(() => {
   }
 });
 
-const { data: commitsData, refresh: refreshCommits } = await useAsyncData(
+const {
+  data: commitsData,
+  refresh: refreshCommits,
+  status: commitsStatus,
+} = useAsyncData(
   `commits-${slug}-${modelSlug}`,
-  () =>
-    api<{ commits: Commit[] }>(`${base}/commits`, {
+  async () => {
+    // Erst, wenn der Standard-Branch bekannt ist — sonst würde die Liste
+    // einmal ohne Branch und gleich darauf mit Branch geladen.
+    if (selectedBranch.value === null) return null;
+    return api<{ commits: Commit[] }>(`${base}/commits`, {
       query: selectedBranch.value ? { branch: selectedBranch.value } : {},
-    }),
-  { watch: [selectedBranch] },
+    });
+  },
+  { lazy: true, watch: [selectedBranch] },
+);
+const commitsPending = computed(
+  () =>
+    commitsStatus.value === "pending" ||
+    commitsStatus.value === "idle" ||
+    (commitsData.value === null && commitsStatus.value !== "error"),
 );
 
 // ---- Commit-Graph ------------------------------------------------------
@@ -430,7 +458,16 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
 </script>
 
 <template>
-  <div v-if="modelData">
+  <div v-if="modelError" class="alert error">
+    Modell konnte nicht geladen werden: {{ apiErrorMessage(modelError) }}
+  </div>
+  <div v-else-if="!modelData" class="card">
+    <div class="card-header">
+      <span class="skeleton" style="width: 30%; height: 1.2em" />
+    </div>
+    <SkeletonRows :rows="4" />
+  </div>
+  <div v-else>
     <nav class="breadcrumbs">
       <NuxtLink to="/">Projekte</NuxtLink>
       <span>/</span>
@@ -474,7 +511,9 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
       <button :class="{ active: tab === 'commits' }" @click="goTab('commits')">
         <PhGitCommit :size="16" aria-hidden="true" />
         Commits
-        <span class="counter">{{ commitsData?.commits.length ?? 0 }}</span>
+        <span class="counter" :class="{ pending: commitsPending }">{{
+          commitsPending ? "" : (commitsData?.commits.length ?? 0)
+        }}</span>
       </button>
       <button :class="{ active: tab === 'issues' }" @click="goTab('issues')">
         <PhRecord :size="16" aria-hidden="true" />
@@ -594,7 +633,9 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
         </template>
       </div>
 
-      <div v-if="graph.rows.length" class="cg-wrap">
+      <SkeletonRows v-if="commitsPending && !graph.rows.length" :rows="4" dots />
+      <div v-else-if="graph.rows.length" class="cg-wrap" :class="{ refreshing: commitsPending }">
+        <LoadingState v-if="commitsPending" text="Lade Commits …" />
         <svg
           class="cg-svg"
           :width="graph.width"
@@ -666,8 +707,14 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
           {{ headCommit.id.slice(0, 8) }}
         </span>
       </div>
+      <LoadingState
+        v-if="commitsPending"
+        center
+        large
+        text="Lade Commit-Stand …"
+      />
       <ModelViewer
-        v-if="headCommit"
+        v-else-if="headCommit"
         :key="headCommit.id"
         :sources="[
           {
@@ -712,7 +759,12 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
         </NuxtLink>
       </div>
 
-      <ul v-if="filteredModelIssues.length" class="list">
+      <SkeletonRows
+        v-if="issuesStatus === 'pending' || issuesStatus === 'idle'"
+        :rows="3"
+        dots
+      />
+      <ul v-else-if="filteredModelIssues.length" class="list">
         <li
           v-for="issue in filteredModelIssues"
           :key="issue.id"

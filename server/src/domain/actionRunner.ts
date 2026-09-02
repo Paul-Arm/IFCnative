@@ -3,14 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { DOMParser } from "linkedom";
-
-import {
-  parseIdsXml,
-  parseNativeIfcText,
-  validateIds,
-  type IdsValidationSummary,
-} from "../ifc";
+import type { IdsValidationSummary } from "../ifc";
 import type { ObjectStore } from "../storage/objectStore";
 import type {
   Action,
@@ -18,18 +11,15 @@ import type {
   Commit,
   Repository,
 } from "../repository/types";
-
-// Der Editor-IDS-Parser erwartet einen DOM-Parser wie im Browser; Node bringt
-// keinen mit, linkedom liefert die kompatible Implementierung.
-if (typeof globalThis.DOMParser === "undefined") {
-  (globalThis as unknown as Record<string, unknown>).DOMParser = DOMParser;
-}
+import { IfcWorkerPool, defaultIfcWorkerPool } from "./ifcWorkerPool";
 
 export interface ActionRunnerOptions {
   /** Python-Interpreter für "python"-Actions (Standard: PYTHON_BIN bzw. python/python3). */
   pythonBin?: string;
   /** Zeitlimit je Skriptlauf in Millisekunden (Standard: 5 Minuten). */
   timeoutMs?: number;
+  /** Worker-Pool für IDS-Validierung (Standard: prozessweiter Pool). */
+  workers?: IfcWorkerPool;
 }
 
 const LOG_LIMIT = 200_000;
@@ -41,7 +31,8 @@ const GUID_LIMIT = 500;
  * Queue statt externer Worker — passt zum Ein-Prozess-Deployment des Hubs).
  *
  * - "ids": IDS-Validierung über den geteilten Editor-Validator, komplett in
- *   TypeScript — kein externer Prozess nötig.
+ *   TypeScript — läuft im IfcWorkerPool, damit das Parsen großer Modelle den
+ *   Server nicht anhält.
  * - "python": das hinterlegte Skript läuft als Kindprozess und bekommt den
  *   IFC-Pfad als Argument 1 sowie als Umgebungsvariable IFC_PATH.
  *   Exit-Code 0 = bestanden, alles andere = fehlgeschlagen.
@@ -51,6 +42,7 @@ export class ActionRunner {
   private active = false;
   private readonly pythonBin: string;
   private readonly timeoutMs: number;
+  private readonly workers: IfcWorkerPool;
 
   constructor(
     private readonly repo: Repository,
@@ -62,6 +54,7 @@ export class ActionRunner {
       process.env.PYTHON_BIN ??
       (process.platform === "win32" ? "python" : "python3");
     this.timeoutMs = options.timeoutMs ?? 5 * 60 * 1000;
+    this.workers = options.workers ?? defaultIfcWorkerPool();
   }
 
   /** Run einreihen; die Verarbeitung läuft asynchron im Hintergrund. */
@@ -154,27 +147,19 @@ export class ActionRunner {
       this.store.get(action.fileKey),
       this.store.get(commit.blobKey),
     ]);
-    const ids = parseIdsXml(idsBuffer.toString("utf8"), action.fileName);
-    const document = parseNativeIfcText(ifcBuffer.toString("utf8"));
-    const summary = validateIds(document, ids);
+    const { summary, idsWarnings, failedGuids } = await this.workers.validateIds(
+      idsBuffer.toString("utf8"),
+      action.fileName,
+      new Uint8Array(ifcBuffer),
+    );
     const passed = summary.failCount === 0;
-    // GlobalIds der Verstöße — für "Issue erstellen" + 3D-Verortung.
-    const failedGuids: string[] = [];
-    for (const result of summary.results) {
-      for (const failure of result.failures) {
-        const guid = document.entityById.get(failure.entityId)?.globalId;
-        if (guid) {
-          failedGuids.push(guid);
-        }
-      }
-    }
     await this.finish(
       run,
       passed ? "success" : "failed",
       `${summary.passCount} bestanden, ${summary.failCount} fehlgeschlagen, ` +
         `${summary.notApplicableCount} nicht anwendbar — ` +
         `${summary.totalFailures} Verstöße bei ${summary.totalChecked} geprüften Objekten.`,
-      renderIdsReport(ids.warnings, summary),
+      renderIdsReport(idsWarnings, summary),
       failedGuids,
     );
   }

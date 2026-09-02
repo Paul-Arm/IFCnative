@@ -4,28 +4,29 @@ import type { Project } from "~/types/api";
 const { api } = useApi();
 const { token } = useAuth();
 
-const { data, refresh } = await useAsyncData("projects", () =>
-  api<{ projects: Project[] }>("/projects"),
+const { data, refresh, status, error: loadError } = useAsyncData(
+  "projects",
+  () => api<{ projects: Project[] }>("/projects"),
+  { lazy: true },
 );
+const pending = computed(() => status.value === "pending" || status.value === "idle");
 
 // Projektbilder (Szenen-Screenshots) mit Auth laden -> Object-URLs.
+// Parallel statt nacheinander — sonst wartet das letzte Bild auf alle davor.
 const thumbs = reactive(new Map<string, string>());
 watch(
   data,
-  async () => {
+  () => {
     for (const project of data.value?.projects ?? []) {
       if (!project.hasImage || thumbs.has(project.id)) continue;
-      try {
-        const blob = await $fetch<Blob>(`/api/projects/${project.slug}/image`, {
-          responseType: "blob",
-          headers: token.value
-            ? { authorization: `Bearer ${token.value}` }
-            : {},
+      void $fetch<Blob>(`/api/projects/${project.slug}/image`, {
+        responseType: "blob",
+        headers: token.value ? { authorization: `Bearer ${token.value}` } : {},
+      })
+        .then((blob) => thumbs.set(project.id, URL.createObjectURL(blob)))
+        .catch(() => {
+          // Ohne Bild einfach den Platzhalter zeigen.
         });
-        thumbs.set(project.id, URL.createObjectURL(blob));
-      } catch {
-        // Ohne Bild einfach den Platzhalter zeigen.
-      }
     }
   },
   { immediate: true },
@@ -60,8 +61,12 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" });
   <div>
     <h1>Projekte</h1>
 
+    <div v-if="loadError" class="alert error">
+      Projekte konnten nicht geladen werden: {{ apiErrorMessage(loadError) }}
+    </div>
     <div class="card">
-      <ul v-if="data?.projects.length" class="list">
+      <SkeletonRows v-if="pending" :rows="4" dots />
+      <ul v-else-if="data?.projects.length" class="list">
         <li v-for="project in data.projects" :key="project.id" class="list-item">
           <img
             v-if="thumbs.get(project.id)"

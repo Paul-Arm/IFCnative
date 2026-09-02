@@ -16,7 +16,15 @@ const emit = defineEmits<{ (e: "ready"): void }>();
 const container = ref<HTMLDivElement | null>(null);
 const status = ref<"laden" | "fertig" | "fehler">("laden");
 const statusText = ref("Lade 3D-Vorschau …");
+/** Detailzeile unter dem Status (Konvertierungsdauer, Download-Größe). */
+const statusDetail = ref<string | null>(null);
+/** Download-Fortschritt 0..100, null = unbestimmt. */
+const progressPercent = ref<number | null>(null);
+/** Einzelne Modelle, die nicht geladen werden konnten (Rest wird gezeigt). */
+const skipped = ref<string[]>([]);
 let dispose: (() => void) | null = null;
+// Bricht Polling/Download ab, wenn die Ansicht verlassen wird.
+let abort: AbortController | null = null;
 
 const { token } = useAuth();
 
@@ -339,22 +347,49 @@ onMounted(async () => {
 
     const errors: string[] = [];
     let index = 0;
+    abort = new AbortController();
     for (const source of props.sources) {
       index += 1;
-      statusText.value =
+      const prefix =
         props.sources.length === 1
-          ? "Lade Fragments … (der erste Aufruf konvertiert die IFC auf dem Server)"
-          : `Lade ${source.label ?? "Modell"} (${index}/${props.sources.length}) …`;
+          ? ""
+          : `${source.label ?? "Modell"} (${index}/${props.sources.length}): `;
+      statusText.value = `${prefix}Lade 3D-Vorschau …`;
+      statusDetail.value = null;
+      progressPercent.value = null;
       try {
-        const buffer = await $fetch<ArrayBuffer>(source.src, {
-          responseType: "arrayBuffer",
-          headers: token.value
-            ? { authorization: `Bearer ${token.value}` }
-            : {},
+        const buffer = await fetchFragments(source.src, {
+          token: token.value,
+          signal: abort.signal,
+          onProgress: (progress) => {
+            if (progress.phase === "converting") {
+              statusText.value = `${prefix}Server konvertiert die IFC in Fragments …`;
+              statusDetail.value =
+                progress.elapsedMs !== undefined
+                  ? `läuft seit ${formatElapsed(progress.elapsedMs)} — passiert nur beim ersten Aufruf eines Stands`
+                  : "passiert nur beim ersten Aufruf eines Stands";
+              progressPercent.value = null;
+            } else {
+              const received = progress.received ?? 0;
+              statusText.value = `${prefix}Lade Fragments …`;
+              statusDetail.value = progress.total
+                ? `${formatBytes(received)} von ${formatBytes(progress.total)}`
+                : formatBytes(received);
+              progressPercent.value = progress.total
+                ? Math.min(100, Math.round((received / progress.total) * 100))
+                : null;
+            }
+          },
         });
+        statusText.value = `${prefix}Baue Szene auf …`;
+        statusDetail.value = null;
+        progressPercent.value = null;
         const model = await fragments.core.load(buffer, { modelId: source.key });
         loaded.set(source.key, model as unknown as LoadedModel);
       } catch (error) {
+        if (isAbortError(error)) {
+          return;
+        }
         errors.push(`${source.label ?? source.key}: ${apiErrorMessage(error)}`);
       }
     }
@@ -370,20 +405,27 @@ onMounted(async () => {
     if (loaded.size === 0 && errors.length) {
       status.value = "fehler";
       statusText.value = errors.join(" · ");
+      statusDetail.value = null;
     } else {
       if (errors.length) {
         console.warn("3D-Vorschau: Modelle übersprungen:", errors);
+        skipped.value = errors;
       }
       status.value = "fertig";
       emit("ready");
     }
   } catch (error) {
+    if (isAbortError(error)) {
+      return;
+    }
     status.value = "fehler";
     statusText.value = apiErrorMessage(error);
+    statusDetail.value = null;
   }
 });
 
 onBeforeUnmount(() => {
+  abort?.abort();
   dispose?.();
 });
 </script>
@@ -396,7 +438,31 @@ onBeforeUnmount(() => {
       class="viewer-overlay"
       :class="{ error: status === 'fehler' }"
     >
-      {{ statusText }}
+      <div class="loading-state center">
+        <span
+          v-if="status === 'laden'"
+          class="spinner large"
+          aria-hidden="true"
+        />
+        <span>{{ statusText }}</span>
+        <span v-if="statusDetail" class="muted">{{ statusDetail }}</span>
+        <span
+          v-if="status === 'laden'"
+          class="progress"
+          :class="{ indeterminate: progressPercent === null }"
+          role="progressbar"
+          :aria-valuenow="progressPercent ?? undefined"
+        >
+          <span :style="{ width: progressPercent === null ? undefined : `${progressPercent}%` }" />
+        </span>
+      </div>
+    </div>
+    <div
+      v-if="status === 'fertig' && skipped.length"
+      class="alert error viewer-skipped"
+      role="alert"
+    >
+      Nicht geladen: {{ skipped.join(" · ") }}
     </div>
 
     <!-- Info-Panel zum angeklickten Element -->
