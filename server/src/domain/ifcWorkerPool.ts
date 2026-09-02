@@ -226,7 +226,13 @@ export class IfcWorkerPool {
     if (slot.worker) {
       return slot.worker;
     }
-    const worker = new Worker(new URL("./ifcWorker.ts", import.meta.url));
+    // Bootstrap statt direkt ifcWorker.ts: registriert tsx im Thread selbst
+    // (unter Node 22 erben Worker die Loader-Hooks nicht). execArgv leer,
+    // damit weder --test-Flags noch ein zweites --import tsx mitlaufen;
+    // V8-Flags wie --max-old-space-size gelten prozessweit ohnehin.
+    const worker = new Worker(new URL("./ifcWorkerBoot.mjs", import.meta.url), {
+      execArgv: [],
+    });
     slot.worker = worker;
     slot.cachedIds = new Set();
 
