@@ -246,8 +246,9 @@ export function parseNativeIfcText(
   diagnostics.push(
     `Indexed ${derived.relationships.length.toLocaleString()} relationships.`,
   );
-  diagnostics.push(
-    ...validateNativeDocument(
+  pushAll(
+    diagnostics,
+    validateNativeDocument(
       text,
       schema,
       entities,
@@ -6590,7 +6591,7 @@ function collectOrphanedResources(
   const queue: number[] = [...(extraSeedIds ?? [])];
   for (const entity of document.entities) {
     if (removedIds.has(entity.id)) {
-      queue.push(...readUniqueReferencesFromArgs(entity.args));
+      pushAll(queue, readUniqueReferencesFromArgs(entity.args));
     }
   }
 
@@ -6771,29 +6772,157 @@ function readSchema(headerText: string) {
 
 function readEntities(text: string, diagnostics: string[]) {
   const entities: NativeIfcEntity[] = [];
-  // Quote-sicher: STEP-Strings ('' escaped Apostrophe) werden als Ganzes
+  // Linearer Scanner statt Regex: Die frühere Regex
+  // /#(\d+)\s*=\s*([A-Z0-9_]+)\s*\(((?:'…'|[^';])*)\);/ legt pro Zeichen
+  // einen Backtracking-Eintrag an und sprengt bei einer einzelnen Entity ab
+  // wenigen MB (IFCCARTESIANPOINTLIST3D, IFCTRIANGULATEDFACESET großer Meshes)
+  // den V8-Stack ("Maximum call stack size exceeded"). Semantik bleibt gleich:
+  // Quote-sicher — STEP-Strings ('' = escaped Apostroph) werden als Ganzes
   // übersprungen, sonst zerreißt ein ');' innerhalb eines Namens (z. B.
   // "Wand (Nord);") die Entity beim Reparse — Referenzen gingen verloren.
-  const regex =
-    /#(\d+)\s*=\s*([A-Z0-9_]+)\s*\(((?:'[^']*(?:''[^']*)*'|[^';])*)\);/gi;
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(text))) {
-    const id = Number(match[1]);
-    const type = match[2].toUpperCase();
-    const args = splitTopLevel(match[3]);
+  let position = 0;
+  while (position < text.length) {
+    const start = text.indexOf("#", position);
+    if (start === -1) {
+      break;
+    }
+    const scanned = scanStepEntity(text, start);
+    if (!scanned) {
+      position = start + 1;
+      continue;
+    }
+    const type = scanned.type.toUpperCase();
+    const args = splitTopLevel(scanned.argsText);
     entities.push({
       args,
       description: readEntityDescription(type, args),
       globalId: unquote(args[0]) ?? "",
-      id,
+      id: scanned.id,
       name: readEntityName(type, args),
       type,
     });
+    position = scanned.end;
   }
   if (entities.length === 0) {
     diagnostics.push("No STEP entity lines found.");
   }
   return entities.sort((left, right) => left.id - right.id);
+}
+
+interface ScannedStepEntity {
+  id: number;
+  type: string;
+  argsText: string;
+  /** Index direkt hinter dem abschließenden ';'. */
+  end: number;
+}
+
+function isStepWhitespace(code: number) {
+  // Entspricht \s der bisherigen Regex für die praktisch vorkommenden Zeichen.
+  return (
+    code === 0x20 ||
+    code === 0x0a ||
+    code === 0x0d ||
+    code === 0x09 ||
+    code === 0x0c ||
+    code === 0x0b ||
+    code === 0xa0 ||
+    code === 0xfeff
+  );
+}
+
+function isStepTypeChar(code: number) {
+  return (
+    (code >= 0x30 && code <= 0x39) || // 0-9
+    (code >= 0x41 && code <= 0x5a) || // A-Z
+    (code >= 0x61 && code <= 0x7a) || // a-z
+    code === 0x5f // _
+  );
+}
+
+/**
+ * Liest ab `start` (zeigt auf '#') eine Entity `#id = TYPE ( … );`.
+ * Die Argumentliste endet am ersten ';' außerhalb eines STEP-Strings; direkt
+ * davor muss ')' stehen. Liefert undefined, wenn an dieser Stelle keine
+ * Entity beginnt — der Aufrufer sucht dann ab `start + 1` weiter.
+ */
+function scanStepEntity(
+  text: string,
+  start: number,
+): ScannedStepEntity | undefined {
+  const length = text.length;
+  let index = start + 1;
+  const idStart = index;
+  while (index < length) {
+    const code = text.charCodeAt(index);
+    if (code < 0x30 || code > 0x39) {
+      break;
+    }
+    index += 1;
+  }
+  if (index === idStart) {
+    return undefined;
+  }
+  const id = Number(text.slice(idStart, index));
+  while (index < length && isStepWhitespace(text.charCodeAt(index))) {
+    index += 1;
+  }
+  if (text.charCodeAt(index) !== 0x3d /* = */) {
+    return undefined;
+  }
+  index += 1;
+  while (index < length && isStepWhitespace(text.charCodeAt(index))) {
+    index += 1;
+  }
+  const typeStart = index;
+  while (index < length && isStepTypeChar(text.charCodeAt(index))) {
+    index += 1;
+  }
+  if (index === typeStart) {
+    return undefined;
+  }
+  const type = text.slice(typeStart, index);
+  while (index < length && isStepWhitespace(text.charCodeAt(index))) {
+    index += 1;
+  }
+  if (text.charCodeAt(index) !== 0x28 /* ( */) {
+    return undefined;
+  }
+  index += 1;
+  const argsStart = index;
+  while (index < length) {
+    const code = text.charCodeAt(index);
+    if (code === 0x27 /* ' */) {
+      // STEP-String überspringen; '' ist ein escaped Apostroph.
+      let cursor = index + 1;
+      for (;;) {
+        const close = text.indexOf("'", cursor);
+        if (close === -1) {
+          return undefined;
+        }
+        if (text.charCodeAt(close + 1) === 0x27) {
+          cursor = close + 2;
+          continue;
+        }
+        index = close + 1;
+        break;
+      }
+      continue;
+    }
+    if (code === 0x3b /* ; */) {
+      if (index === argsStart || text.charCodeAt(index - 1) !== 0x29 /* ) */) {
+        return undefined;
+      }
+      return {
+        id,
+        type,
+        argsText: text.slice(argsStart, index - 1),
+        end: index + 1,
+      };
+    }
+    index += 1;
+  }
+  return undefined;
 }
 
 function readEntityName(type: string, args: string[]) {
@@ -7340,8 +7469,8 @@ function validateNativeDocument(
       "Warning: IFCPROJECT UnitsInContext does not point to an IFCUNITASSIGNMENT.",
     );
   }
-  diagnostics.push(...validateUnitAssignments(unitAssignments, entityById));
-  diagnostics.push(...validatePhysicalProducts(entities, entityById));
+  pushAll(diagnostics, validateUnitAssignments(unitAssignments, entityById));
+  pushAll(diagnostics, validatePhysicalProducts(entities, entityById));
 
   const containmentParents = new Map<number, number[]>();
   for (const relationship of relationships) {
@@ -7691,7 +7820,7 @@ function readRelationshipResourceIds(entity: NativeIfcEntity) {
 function readReferencesFromArgs(args: string[], startIndex = 0) {
   const refs: number[] = [];
   for (let index = startIndex; index < args.length; index += 1) {
-    refs.push(...readReferences(args[index]));
+    pushAll(refs, readReferences(args[index]));
   }
   return refs;
 }
@@ -7723,9 +7852,20 @@ function pushMapValues<K, V>(map: Map<K, V[]>, key: K, values: V[]) {
   }
   const current = map.get(key);
   if (current) {
-    current.push(...values);
+    pushAll(current, values);
   } else {
     map.set(key, [...values]);
+  }
+}
+
+/**
+ * `target.push(...values)` ohne Spread: Spread-Argumente landen auf dem
+ * Call-Stack und überlaufen ab ~100k Einträgen (große Punktlisten,
+ * Diagnose-Listen großer Modelle).
+ */
+function pushAll<T>(target: T[], values: readonly T[]) {
+  for (let index = 0; index < values.length; index += 1) {
+    target.push(values[index]);
   }
 }
 
