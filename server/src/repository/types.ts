@@ -234,7 +234,9 @@ export type ActionRunStatus =
   | "running"
   | "success"
   | "failed"
-  | "error";
+  | "error"
+  /** Vom Benutzer abgebrochen (wartend oder laufend). */
+  | "cancelled";
 
 /** Eine Ausführung einer Action gegen einen konkreten Commit. */
 export interface ActionRun {
@@ -397,6 +399,8 @@ export interface Repository {
     projectId: string,
     filter?: { actionId?: string; modelId?: string; commitId?: string },
   ): Promise<ActionRun[]>;
+  /** Alle Runs mit Status queued/running (projektübergreifend, älteste zuerst) — für die Recovery beim Start. */
+  listUnfinishedActionRuns(): Promise<ActionRun[]>;
   updateActionRun(
     runId: string,
     patch: Partial<

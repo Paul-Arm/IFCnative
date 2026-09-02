@@ -11,7 +11,9 @@ const { data, refresh, status } = useAsyncData(
   () => api<{ files: LibraryFile[] }>("/library"),
   { lazy: true },
 );
-const pending = computed(() => status.value === "pending" || status.value === "idle");
+const pending = computed(
+  () => (status.value === "pending" || status.value === "idle") && !data.value,
+);
 
 const error = ref<string | null>(null);
 const notice = ref<string | null>(null);

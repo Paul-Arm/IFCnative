@@ -2126,3 +2126,15 @@ details.menu > summary::-webkit-details-marker {
 .cg-wrap.refreshing .cg-rows {
   opacity: 0.5;
 }
+
+/* Run-Details: Live-Protokoll + Aktionen */
+.run-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.run-log.live {
+  border-left: 3px solid var(--accent);
+}

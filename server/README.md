@@ -43,6 +43,15 @@ damit exakt einig, was „geändert“ bedeutet.
   (`?wait=1` liefert die blockierende Variante für Skripte). Der
   Fragments-Worker der Web-UI wird versionsgleich aus dem Paket synchronisiert
   (`web/scripts/sync-fragments-worker.mjs`).
+- **Action-Runner** (`src/domain/actionRunner.ts`) — sequenzielle In-Process-
+  Queue für IDS- und Python-Prüfungen; die DB ist die Wahrheit über den
+  Run-Zustand. Beim Start räumt `recover()` auf: Runs, die ein Neustart
+  mitten in der Ausführung erwischt hat, enden als Fehler („Vom
+  Server-Neustart unterbrochen“), wartende werden neu eingereiht — kein Run
+  bleibt mehr ewig auf „running“. Runs lassen sich abbrechen (Kindprozess
+  wird beendet, Status `cancelled`) und wiederholen; Skript-Ausgabe wandert
+  sekündlich in die DB und sofort als Server-Sent Events an die UI
+  (Live-Protokoll, Statuswechsel ohne Reload).
 - **Worker-Pool** — STEP-Parsing, Manifest-Hashing, Feld-Diffs,
   IDS-Validierung und die Fragments-Konvertierung laufen in
   Worker-Threads (`src/domain/ifcWorkerPool.ts` + `ifcWorker.ts`), nicht im
@@ -246,6 +255,9 @@ Auth: `Authorization: Bearer <JWT>` aus `/api/auth/login`. Fehler kommen als
 | GET | `/api/projects/:slug/actions/:id/file` | hinterlegte IDS/Skript-Datei herunterladen |
 | POST | `…/commits/:id/validate` | Commit prüfen `{actionIds?}` (Default: alle Actions) → `{runs}` (write) |
 | GET | `/api/projects/:slug/runs?commit=&action=&model=` | Runs (ohne Log) mit Action/Modell/Auslöser |
+| GET | `/api/projects/:slug/runs/:runId/events` | Server-Sent Events: `status` (Run inkl. Log, sofort als Snapshot), `log` (`{chunk}` je Ausgabe), `done` — endet mit dem Run; per fetch mit Bearer-Header lesen |
+| POST | `/api/projects/:slug/runs/:runId/cancel` | Run abbrechen (wartend/laufend; 409 wenn schon beendet) (write) |
+| POST | `/api/projects/:slug/runs/:runId/retry` | Neuer Run für dieselbe Action und denselben Commit (write) |
 | GET | `/api/projects/:slug/runs/:runId` | Run-Detail inklusive Protokoll |
 | GET/POST | `/api/library` | zentrale Bibliothek auflisten (mit `usageCount`, `owner`) / Datei ablegen `{name, kind, content, fileName?}` (jeder Angemeldete) |
 | PATCH/DELETE | `/api/library/:id` | Name/Inhalt aktualisieren bzw. löschen (Eigentümer/Admin; DELETE 409 solange referenziert) |

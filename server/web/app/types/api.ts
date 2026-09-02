@@ -193,7 +193,8 @@ export type ActionRunStatus =
   | "running"
   | "success"
   | "failed"
-  | "error";
+  | "error"
+  | "cancelled";
 
 export interface ActionRun {
   id: string;

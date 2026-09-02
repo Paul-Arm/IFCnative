@@ -455,10 +455,19 @@ export class MemoryRepository implements Repository {
       .sort((a, b) => b.number - a.number);
   }
 
+  async listUnfinishedActionRuns(): Promise<ActionRun[]> {
+    return [...this.actionRuns.values()]
+      .filter((run) => run.status === "queued" || run.status === "running")
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
   async updateActionRun(
     runId: string,
     patch: Partial<
-      Pick<ActionRun, "status" | "summary" | "log" | "startedAt" | "finishedAt">
+      Pick<
+        ActionRun,
+        "status" | "summary" | "log" | "failedGuids" | "startedAt" | "finishedAt"
+      >
     >,
   ): Promise<ActionRun | null> {
     const run = this.actionRuns.get(runId);

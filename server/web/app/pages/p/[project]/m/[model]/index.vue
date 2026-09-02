@@ -760,7 +760,7 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
       </div>
 
       <SkeletonRows
-        v-if="issuesStatus === 'pending' || issuesStatus === 'idle'"
+        v-if="(issuesStatus === 'pending' || issuesStatus === 'idle') && !issuesData"
         :rows="3"
         dots
       />

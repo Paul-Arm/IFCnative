@@ -10,6 +10,7 @@ import {
   type GuidChangeStatus,
   type GuidDiffEntry,
   type Model,
+  type Role,
 } from "~/types/api";
 
 const route = useRoute();
@@ -244,6 +245,15 @@ const { data: modelData } = useAsyncData(
   () => api<{ model: Model }>(base),
   { lazy: true },
 );
+// Rolle im Projekt — nur Schreibende dürfen Runs abbrechen/wiederholen.
+const { data: projectRole } = useAsyncData(
+  `project-role-${slug}`,
+  () => api<{ role: Role | null }>(`/projects/${slug}`),
+  { lazy: true },
+);
+const canWrite = computed(() =>
+  ["owner", "maintainer", "contributor"].includes(projectRole.value?.role ?? ""),
+);
 
 /** Nur Actions, deren Geltungsbereich dieses Modell abdeckt. */
 const applicableActions = computed(() => {
@@ -278,6 +288,7 @@ const RUN_STATUS: Record<
   success: { label: "Bestanden", cls: "success" },
   failed: { label: "Fehlgeschlagen", cls: "danger" },
   error: { label: "Fehler", cls: "warn" },
+  cancelled: { label: "Abgebrochen", cls: "" },
 };
 
 const validateBusy = ref(false);
@@ -326,23 +337,30 @@ async function validateCommit(): Promise<void> {
   }
 }
 
-// Run-Log wird erst beim Aufklappen geladen.
-const runLogs = reactive(new Map<string, string | "loading">());
+// Run-Details (Protokoll, Live-Stream, Abbrechen) erst beim Aufklappen mounten.
+const openRuns = reactive(new Set<string>());
 
-async function loadRunLog(run: ActionRun): Promise<void> {
-  if (runLogs.has(run.id)) return;
-  runLogs.set(run.id, "loading");
-  try {
-    const result = await api<{ run: ActionRun }>(
-      `/projects/${slug}/runs/${run.id}`,
-    );
-    runLogs.set(run.id, result.run.log ?? "");
-  } catch {
-    runLogs.delete(run.id);
+function onRunToggle(event: Event, run: ActionRun): void {
+  if ((event.target as HTMLDetailsElement).open) {
+    openRuns.add(run.id);
+  } else {
+    openRuns.delete(run.id);
   }
 }
 
-// Solange Runs laufen, alle 3 s nachladen.
+/** Statuswechsel aus dem Live-Stream direkt in die Liste übernehmen. */
+function applyRunUpdate(updated: ActionRun): void {
+  const current = runsData.value?.runs.find((run) => run.id === updated.id);
+  if (current) {
+    Object.assign(current, updated);
+  }
+}
+
+async function onRunRetried(): Promise<void> {
+  await refreshRuns();
+}
+
+// Solange Runs laufen, alle 3 s nachladen (Fallback zum Live-Stream).
 const hasPendingRuns = computed(() =>
   (runsData.value?.runs ?? []).some(
     (run) => run.status === "queued" || run.status === "running",
@@ -352,11 +370,6 @@ let runsTimer: ReturnType<typeof setInterval> | undefined;
 onMounted(() => {
   runsTimer = setInterval(() => {
     if (hasPendingRuns.value) {
-      for (const run of runsData.value?.runs ?? []) {
-        if (run.status === "queued" || run.status === "running") {
-          runLogs.delete(run.id);
-        }
-      }
       void refreshRuns();
     }
   }, 3000);
@@ -545,7 +558,7 @@ const searchSections = computed(() => {
         <div class="alert error" style="margin: 0">{{ validateError }}</div>
       </div>
       <LoadingState
-        v-if="!actionsReady || runsStatus === 'pending' || runsStatus === 'idle'"
+        v-if="!actionsReady || ((runsStatus === 'pending' || runsStatus === 'idle') && !runsData)"
         text="Lade Prüfungen …"
       />
       <div v-else-if="!actionCount" class="empty">
@@ -561,7 +574,7 @@ const searchSections = computed(() => {
           v-for="run in runsData.runs"
           :key="run.id"
           class="tree-group"
-          @toggle="(e: Event) => (e.target as HTMLDetailsElement).open && loadRunLog(run)"
+          @toggle="onRunToggle($event, run)"
         >
           <summary>
             <span class="muted small">#{{ run.number }}</span>
@@ -582,30 +595,29 @@ const searchSections = computed(() => {
             </span>
           </summary>
           <div class="tree-children">
-            <p v-if="run.summary" class="small" style="margin: 0.5rem 0">
-              {{ run.summary }}
-            </p>
-            <p
-              v-if="run.status === 'failed' || run.status === 'error'"
-              style="margin: 0.5rem 0"
+            <RunDetails
+              v-if="openRuns.has(run.id)"
+              :slug="slug"
+              :run="run"
+              :can-write="canWrite"
+              @updated="applyRunUpdate"
+              @retried="onRunRetried"
             >
-              <NuxtLink
-                class="btn small"
-                :to="`/p/${slug}?tab=issues&fromRun=${run.id}`"
-                title="Issue mit Prüfbericht, Modell-Verknüpfung und den GUIDs der Verstöße anlegen"
-              >
-                Issue aus Run erstellen
-              </NuxtLink>
-              <span v-if="run.failedGuids.length" class="muted small">
-                {{ run.failedGuids.length }} betroffene Objekte werden verlinkt
-              </span>
-            </p>
-            <LoadingState
-              v-if="runLogs.get(run.id) === 'loading'"
-              text="Lade Protokoll …"
-            />
-            <pre v-else-if="runLogs.get(run.id)" class="run-log">{{ runLogs.get(run.id) }}</pre>
-            <div v-else class="muted small">Kein Protokoll vorhanden.</div>
+              <template #actions>
+                <template v-if="run.status === 'failed' || run.status === 'error'">
+                  <NuxtLink
+                    class="btn small"
+                    :to="`/p/${slug}?tab=issues&fromRun=${run.id}`"
+                    title="Issue mit Prüfbericht, Modell-Verknüpfung und den GUIDs der Verstöße anlegen"
+                  >
+                    Issue aus Run erstellen
+                  </NuxtLink>
+                  <span v-if="run.failedGuids.length" class="muted small">
+                    {{ run.failedGuids.length }} betroffene Objekte werden verlinkt
+                  </span>
+                </template>
+              </template>
+            </RunDetails>
           </div>
         </details>
       </div>

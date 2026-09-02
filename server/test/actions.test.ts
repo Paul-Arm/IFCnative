@@ -586,3 +586,164 @@ test("actions require write access; viewers can read runs", async () => {
 
   await app.close();
 });
+
+test("recover(): unterbrochene Runs werden abgeschlossen, wartende neu eingereiht", async () => {
+  const { app, runner, repo } = await makeApp();
+  const token = await register(app);
+  const commitId = await setupProjectWithCommit(app, token);
+  const projectId = (await repo.getProjectBySlug("acme"))!.id;
+  const modelId = (await repo.listModels(projectId))[0]!.id;
+  const userId = (await repo.getUserByEmail("user@example.com"))!.id;
+  const base = {
+    projectId,
+    actionId: "00000000-0000-0000-0000-000000000000", // Action existiert nicht mehr
+    modelId,
+    commitId,
+    summary: "",
+    log: "Zeile 1",
+    failedGuids: [],
+    triggeredById: userId,
+    startedAt: null,
+    finishedAt: null,
+  };
+  // Zustand nach einem Absturz: ein Run war mittendrin, einer wartete noch.
+  const running = await repo.createActionRun({ ...base, status: "running", startedAt: new Date().toISOString() });
+  const queued = await repo.createActionRun({ ...base, status: "queued" });
+
+  const result = await runner.recover();
+  assert.deepEqual(result, { interrupted: 1, requeued: 1 });
+  await runner.idle();
+
+  const afterRunning = (await repo.getActionRun(running.id))!;
+  assert.equal(afterRunning.status, "error");
+  assert.match(afterRunning.summary, /Neustart/);
+  assert.match(afterRunning.log, /^Zeile 1\n/);
+  assert.ok(afterRunning.finishedAt);
+  // Der wartende Run wurde verarbeitet (hier: Action fehlt -> Fehler, aber abgeschlossen).
+  const afterQueued = (await repo.getActionRun(queued.id))!;
+  assert.equal(afterQueued.status, "error");
+  assert.match(afterQueued.summary, /nicht mehr vorhanden/);
+
+  // Ein zweites recover() findet nichts mehr.
+  assert.deepEqual(await runner.recover(), { interrupted: 0, requeued: 0 });
+  await app.close();
+});
+
+test("cancel + retry: laufendes Skript wird beendet, Status cancelled, Retry legt neuen Run an", async () => {
+  const { app, runner, repo } = await makeApp();
+  const token = await register(app);
+  const commitId = await setupProjectWithCommit(app, token);
+  // Skript, das erst nach 20 s endet — wird vorher abgebrochen.
+  const create = await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/actions",
+    headers: auth(token),
+    payload: {
+      name: "Langläufer",
+      kind: "python",
+      fileName: "slow.py",
+      content: 'console.log("start"); setTimeout(() => console.log("ende"), 20000);',
+    },
+  });
+  assert.equal(create.statusCode, 201);
+  const actionId = JSON.parse(create.body).action.id as string;
+  const validate = await app.inject({
+    method: "POST",
+    url: `/api/projects/acme/models/tower/commits/${commitId}/validate`,
+    headers: auth(token),
+    payload: { actionIds: [actionId] },
+  });
+  assert.equal(validate.statusCode, 201);
+  const runId = JSON.parse(validate.body).runs[0].id as string;
+
+  // Warten, bis der Kindprozess läuft und etwas ausgegeben hat.
+  for (let i = 0; i < 200; i += 1) {
+    const run = (await repo.getActionRun(runId))!;
+    if (run.status === "running" && run.log.includes("start")) break;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  const cancel = await app.inject({
+    method: "POST",
+    url: `/api/projects/acme/runs/${runId}/cancel`,
+    headers: auth(token),
+  });
+  assert.equal(cancel.statusCode, 200);
+  await runner.idle();
+  const cancelled = (await repo.getActionRun(runId))!;
+  assert.equal(cancelled.status, "cancelled");
+  assert.match(cancelled.summary, /abgebrochen/i);
+  assert.ok(cancelled.finishedAt);
+
+  // Abgeschlossene Runs lassen sich nicht erneut abbrechen …
+  const again = await app.inject({
+    method: "POST",
+    url: `/api/projects/acme/runs/${runId}/cancel`,
+    headers: auth(token),
+  });
+  assert.equal(again.statusCode, 409);
+  // … aber wiederholen: neuer Run, gleiche Action, gleicher Commit.
+  const retry = await app.inject({
+    method: "POST",
+    url: `/api/projects/acme/runs/${runId}/retry`,
+    headers: auth(token),
+  });
+  assert.equal(retry.statusCode, 201);
+  const retried = JSON.parse(retry.body).run;
+  assert.notEqual(retried.id, runId);
+  assert.equal(retried.commitId, commitId);
+  assert.equal(retried.action.id, actionId);
+  await runner.cancel(retried.id);
+  await runner.idle();
+  await app.close();
+});
+
+test("events: SSE liefert Log-Chunks während des Laufs und den Endstatus", async () => {
+  const { app, runner } = await makeApp();
+  const token = await register(app);
+  const commitId = await setupProjectWithCommit(app, token);
+  const create = await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/actions",
+    headers: auth(token),
+    payload: {
+      name: "Sprecher",
+      kind: "python",
+      fileName: "talk.py",
+      content: 'setTimeout(() => { console.log("erste Zeile"); setTimeout(() => { console.log("zweite Zeile"); }, 200); }, 400);',
+    },
+  });
+  const actionId = JSON.parse(create.body).action.id as string;
+  const validate = await app.inject({
+    method: "POST",
+    url: `/api/projects/acme/models/tower/commits/${commitId}/validate`,
+    headers: auth(token),
+    payload: { actionIds: [actionId] },
+  });
+  const runId = JSON.parse(validate.body).runs[0].id as string;
+
+  // Der Stream endet mit dem Run — inject liefert dann den kompletten Body.
+  const stream = await app.inject({
+    method: "GET",
+    url: `/api/projects/acme/runs/${runId}/events`,
+    headers: auth(token),
+  });
+  assert.equal(stream.statusCode, 200);
+  assert.match(stream.headers["content-type"] as string, /text\/event-stream/);
+  const events = stream.body
+    .split("\n\n")
+    .filter((block) => block.startsWith("event:"))
+    .map((block) => {
+      const [eventLine, dataLine] = block.split("\n");
+      return { event: eventLine!.slice(7), data: JSON.parse(dataLine!.slice(6)) };
+    });
+  assert.equal(events[0]!.event, "status");
+  const logs = events.filter((e) => e.event === "log").map((e) => e.data.chunk as string).join("");
+  assert.match(logs, /erste Zeile/);
+  assert.match(logs, /zweite Zeile/);
+  const final = [...events].reverse().find((e) => e.event === "status")!;
+  assert.equal(final.data.status, "success");
+  assert.match(final.data.log, /erste Zeile\nzweite Zeile/);
+  assert.equal(events[events.length - 1]!.event, "done");
+  await runner.idle();
+  await app.close();
+});

@@ -9,7 +9,11 @@ import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 
 import { hashPassword, verifyPassword } from "../auth/passwords";
-import { ActionRunner } from "../domain/actionRunner";
+import {
+  ActionRunner,
+  isTerminalRunStatus,
+  type RunEvent,
+} from "../domain/actionRunner";
 import {
   buildBcfZip,
   parseBcfZip,
@@ -134,6 +138,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   }
 
   const app = Fastify({ logger: false, bodyLimit: 512 * 1024 * 1024 });
+
+  // Beim Start liegengebliebene Runs aufräumen: "running" kann nach einem
+  // Neustart nie mehr fertig werden, "queued" wird neu eingereiht.
+  app.addHook("onReady", async () => {
+    const { interrupted, requeued } = await runner.recover();
+    if (interrupted || requeued) {
+      console.log(
+        `Action-Runs nach Neustart: ${interrupted} unterbrochen markiert, ${requeued} neu eingereiht`,
+      );
+    }
+  });
 
   // The API is consumed cross-origin by the editor (Vite dev server / Tauri
   // webview) and the Nuxt dev server. Auth is via Bearer tokens, not cookies,
@@ -2352,6 +2367,142 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     }
     const [enriched] = await enrichRuns(project.id, [run]);
     return reply.send({ run: { ...enriched, log: run.log } });
+  });
+
+  /**
+   * Live-Status + Log eines Runs als Server-Sent Events: sofort der aktuelle
+   * Stand (inkl. Log), dann jede Ausgabezeile und jeder Statuswechsel, zum
+   * Schluss `done`. Der Client liest den Stream per fetch (Bearer-Header
+   * statt EventSource, das keine Header kann).
+   */
+  app.get(`${api}/projects/:slug/runs/:runId/events`, async (request, reply) => {
+    const { slug, runId } = request.params as { slug: string; runId: string };
+    const project = await resolveProject(slug, reply);
+    if (!project) return reply;
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    if (!(await requireMember(project, user, reply, "read"))) return reply;
+    const exists = await repo.getActionRun(runId);
+    if (!exists || exists.projectId !== project.id) {
+      return reply.code(404).send({ error: "Run not found" });
+    }
+
+    reply.hijack();
+    const raw = reply.raw;
+    raw.writeHead(200, {
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-store",
+      connection: "keep-alive",
+      "x-accel-buffering": "no",
+    });
+    let closed = false;
+    // Bis der Erst-Snapshot raus ist, werden Ereignisse zurückgehalten —
+    // sonst überschreibt der (ältere) Snapshot beim Client bereits
+    // empfangene Log-Chunks.
+    let snapshotSent = false;
+    const backlog: string[] = [];
+    const frameOf = (event: string, data: unknown) =>
+      `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+    const send = (event: string, data: unknown) => {
+      if (closed) return;
+      if (snapshotSent) {
+        raw.write(frameOf(event, data));
+      } else {
+        backlog.push(frameOf(event, data));
+      }
+    };
+    const finishStream = () => {
+      if (closed) return;
+      closed = true;
+      runner.off("run", listener);
+      clearInterval(heartbeat);
+      raw.end();
+    };
+    const sendStatus = async (run: ActionRun, snapshot = false) => {
+      const [enriched] = await enrichRuns(project.id, [run]);
+      if (snapshot) {
+        // Erst-Snapshot: Live-Puffer des Runners ist aktueller als die DB
+        // (die nur sekündlich nachgeführt wird). Danach den Rückstau lösen.
+        const log = runner.getLiveLog(run.id) ?? run.log;
+        if (!closed) raw.write(frameOf("status", { ...enriched, log }));
+        snapshotSent = true;
+        for (const frame of backlog.splice(0)) {
+          if (!closed) raw.write(frame);
+        }
+      } else {
+        send("status", { ...enriched, log: run.log });
+      }
+      if (isTerminalRunStatus(run.status)) {
+        send("done", { status: run.status });
+        finishStream();
+      }
+    };
+    const listener = (event: RunEvent) => {
+      if (event.type === "log" && event.runId === runId) {
+        send("log", { chunk: event.chunk });
+      } else if (event.type === "status" && event.run.id === runId) {
+        void sendStatus(event.run);
+      }
+    };
+    // Erst abonnieren, dann den Stand lesen — sonst geht ein Statuswechsel
+    // zwischen Lesen und Abonnieren verloren.
+    runner.on("run", listener);
+    const heartbeat = setInterval(() => {
+      if (!closed) raw.write(": ping\n\n");
+    }, 15_000);
+    request.raw.on("close", finishStream);
+    const current = await repo.getActionRun(runId);
+    if (current) {
+      await sendStatus(current, true);
+    } else {
+      finishStream();
+    }
+    return reply;
+  });
+
+  /** Run abbrechen (wartend oder laufend). */
+  app.post(`${api}/projects/:slug/runs/:runId/cancel`, async (request, reply) => {
+    const { slug, runId } = request.params as { slug: string; runId: string };
+    const project = await resolveProject(slug, reply);
+    if (!project) return reply;
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    if (!(await requireMember(project, user, reply, "write"))) return reply;
+    const run = await repo.getActionRun(runId);
+    if (!run || run.projectId !== project.id) {
+      return reply.code(404).send({ error: "Run not found" });
+    }
+    if (isTerminalRunStatus(run.status)) {
+      return reply.code(409).send({ error: "Run ist bereits abgeschlossen" });
+    }
+    const cancelled = (await runner.cancel(runId)) ?? run;
+    const [enriched] = await enrichRuns(project.id, [cancelled]);
+    return reply.send({ run: enriched });
+  });
+
+  /** Run erneut ausführen: neuer Run für dieselbe Action und denselben Commit. */
+  app.post(`${api}/projects/:slug/runs/:runId/retry`, async (request, reply) => {
+    const { slug, runId } = request.params as { slug: string; runId: string };
+    const project = await resolveProject(slug, reply);
+    if (!project) return reply;
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    if (!(await requireMember(project, user, reply, "write"))) return reply;
+    const run = await repo.getActionRun(runId);
+    if (!run || run.projectId !== project.id) {
+      return reply.code(404).send({ error: "Run not found" });
+    }
+    if (!isTerminalRunStatus(run.status)) {
+      return reply.code(409).send({ error: "Run läuft noch" });
+    }
+    const action = await repo.getAction(run.actionId);
+    const model = (await repo.listModels(project.id)).find((m) => m.id === run.modelId);
+    if (!action || !model) {
+      return reply.code(410).send({ error: "Action oder Modell existiert nicht mehr" });
+    }
+    const [created] = await queueRuns(project, model, run.commitId, [action], user.id);
+    const [enriched] = await enrichRuns(project.id, [created!]);
+    return reply.code(201).send({ run: enriched });
   });
 
   // ---- semantic diff ---------------------------------------------------

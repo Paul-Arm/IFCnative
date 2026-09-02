@@ -9,7 +9,9 @@ const { data, refresh, status, error: loadError } = useAsyncData(
   () => api<{ projects: Project[] }>("/projects"),
   { lazy: true },
 );
-const pending = computed(() => status.value === "pending" || status.value === "idle");
+const pending = computed(
+  () => (status.value === "pending" || status.value === "idle") && !data.value,
+);
 
 // Projektbilder (Szenen-Screenshots) mit Auth laden -> Object-URLs.
 // Parallel statt nacheinander — sonst wartet das letzte Bild auf alle davor.
