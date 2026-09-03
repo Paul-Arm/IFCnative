@@ -15,6 +15,7 @@ export type MosaicViewId =
   | "builder"
   | "catalog"
   | "catalog-review"
+  | "attribution"
   | "pset-batch"
   | "resource-references"
   | "resource-controls"

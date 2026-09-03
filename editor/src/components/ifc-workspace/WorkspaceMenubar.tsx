@@ -43,7 +43,7 @@ const WINDOW_MENU_CATEGORIES: {
   { label: "Modell", ids: ["viewer", "structure", "inspector"] },
   {
     label: "Bauen",
-    ids: ["builder", "catalog", "catalog-review", "pset-batch"],
+    ids: ["attribution", "builder", "catalog", "catalog-review", "pset-batch"],
   },
   {
     label: "Prüfen",

@@ -143,6 +143,9 @@ import { recordDiagnostic } from "../diagnostics/watchdog";
 import { ChildWindow } from "./child-window";
 import { registerEmergencySave } from "./error-boundary";
 import { BuilderPanel } from "./ifc-workspace/BuilderPanel";
+import { AttributionHeaderChip, AttributionOverlay, type AttributionMode, type AttributionStatus } from "@/components/ifc-workspace/AttributionOverlay";
+import { AttributionPanel, unwrapMutation, type AttributionPick } from "./ifc-workspace/AttributionPanel";
+import { readBauteilId, writeBauteilReference } from "@/ifc/attribution/recipes";
 import { CatalogPanel, CatalogReviewPanel } from "./ifc-workspace/CatalogPanel";
 import {
     BUILT_IN_WORKSPACES,
@@ -474,6 +477,10 @@ export default function IfcWorkspace() {
   const [idsModel, setIdsModel] = useState<IdsDocumentModel | null>(null);
   const [idsImporting, setIdsImporting] = useState(false);
   const [selectedCatalogObjectId, setSelectedCatalogObjectId] = useState("");
+  const [attributionPick, setAttributionPick] = useState<AttributionPick | null>(null);
+  // IFC-Attribuierung läuft als großes Fenster über dem Layout, eingeklappt als Chip in der Kopfzeile (Zustand bleibt gemountet).
+  const [attributionMode, setAttributionMode] = useState<AttributionMode>("closed");
+  const [attributionStatus, setAttributionStatus] = useState<AttributionStatus | null>(null);
   const [recentIfcFiles, setRecentIfcFiles] = useState(loadRecentIfcFiles);
   const [notes, setNotes] = useState(loadNotes);
   const [portalSettings, setPortalSettings] = useState(loadPortalSettings);
@@ -701,8 +708,8 @@ export default function IfcWorkspace() {
   );
   const closedMosaicIds = useMemo(() => {
     const visibleIds = new Set(getMosaicLeaves(mosaicValue));
-    return MOSAIC_VIEW_IDS.filter((id) => !visibleIds.has(id));
-  }, [mosaicValue]);
+    return MOSAIC_VIEW_IDS.filter((id) => (id === "attribution" ? attributionMode === "closed" : !visibleIds.has(id)));
+  }, [attributionMode, mosaicValue]);
 
   const normalizedSearch = search.trim().toLowerCase();
   const searchMatchedEntities = useMemo(() => {
@@ -786,6 +793,11 @@ export default function IfcWorkspace() {
   };
 
   const toggleMosaicView = (id: MosaicViewId, open: boolean) => {
+    if (id === "attribution") {
+      setAttributionMode(open ? "open" : "closed");
+      logAction(`ui.attribution({ mode: '${open ? "open" : "closed"}' });`);
+      return;
+    }
     if (open) {
       restoreMosaicView(id);
       return;
@@ -1222,6 +1234,32 @@ export default function IfcWorkspace() {
           )?.id;
     if (!resolvedId || !selectionDocument.entityById.has(resolvedId)) {
       return;
+    }
+    if (
+      attributionPick &&
+      documentId === attributionPick.sessionId &&
+      documentId !== activeSession.id
+    ) {
+      const componentId = readBauteilId(selectionDocument, resolvedId);
+      if (componentId) {
+        const next = writeBauteilReference(
+          document,
+          attributionPick.entityId,
+          componentId,
+          attributionPick.importart,
+        );
+        if (next !== document) {
+          commitDocument(
+            next,
+            selectedId,
+            `BauteilID ${componentId} auf #${attributionPick.entityId}`,
+            `attribution.pickBauteil({ id: ${attributionPick.entityId}, bauteil: ${JSON.stringify(componentId)} });`,
+          );
+        }
+        setAttributionPick(null);
+        setAttributionMode("open");
+        return;
+      }
     }
     if (fromViewer) {
       setStructureMode("tree");
@@ -4353,6 +4391,17 @@ export default function IfcWorkspace() {
             />
           </TileContent>
         );
+      case "attribution":
+        return (
+          <TileContent>
+            <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-xs text-muted-foreground">
+              <p>Die IFC-Attribuierung läuft als großes Fenster über dem Layout.</p>
+              <Button size="sm" variant="outline" onClick={() => setAttributionMode("open")}>
+                Fenster öffnen
+              </Button>
+            </div>
+          </TileContent>
+        );
       case "check":
         return (
           <TileContent>
@@ -4759,6 +4808,7 @@ export default function IfcWorkspace() {
         </div>
         <div className="flex items-center bg-muted/50 px-1.5 py-1">
           {renderDocumentTabs()}
+          <AttributionHeaderChip mode={attributionMode} status={attributionStatus} onToggle={() => setAttributionMode((current) => (current === "open" ? "collapsed" : "open"))} />
         </div>
       </header>
 
@@ -4782,6 +4832,51 @@ export default function IfcWorkspace() {
           onChange={setMosaicValue}
         />
       </main>
+
+      {attributionMode !== "closed" ? (
+        <AttributionOverlay collapsed={attributionMode === "collapsed"} status={attributionStatus} onCollapse={() => setAttributionMode("collapsed")} onClose={() => setAttributionMode("closed")}>
+          <AttributionPanel
+              activeSessionId={activeSession.id}
+              coordinateClipboard={coordinateClipboard}
+              document={viewerDocument}
+              selectedId={selectedId}
+              sessions={documentSessions.map((session) => ({
+                id: session.id,
+                fileName: session.document.fileName,
+                document: session.document,
+              }))}
+              onSelectEntity={selectEntity}
+              bauteilPick={attributionPick}
+              onStartBauteilPick={(pick) => {
+                setAttributionPick(pick);
+                // Zum Klicken im Viewer muss das Fenster aus dem Weg; nach dem Treffer öffnet es sich wieder.
+                if (pick) setAttributionMode("collapsed");
+              }}
+              onShowInViewer={(id) => {
+                selectEntity(id);
+                setAttributionMode("collapsed");
+              }}
+              onStatus={setAttributionStatus}
+              onCommit={(mutate, summary, log) => {
+                const { document: next, createdEntityIds: created, movedEntityIds: moved } = unwrapMutation(mutate(document));
+                if (next === document) return;
+                if (!created.length && !moved.length) {
+                  commitDocument(next, selectedId, summary, log);
+                  return;
+                }
+                // Neue oder verschobene Marker sofort im Viewer zeigen: exakte Geometrie als Mini-IFC nachkonvertieren (wie der Baukasten).
+                const affected = [...created, ...moved];
+                const subset = extractNativeSubsetIfc(next, affected);
+                commitDocument(next, created[0] ?? selectedId, summary, log, undefined, {
+                  reloadViewer: true,
+                  viewerMirror: subset
+                    ? { entityIds: affected, kind: "reconvert-subset", replacedEntityIds: moved, subsetIfcText: subset.text }
+                    : undefined,
+                });
+              }}
+            />
+        </AttributionOverlay>
+      ) : null}
 
       <DeleteEntityDialog
         entity={deleteRequest?.entity ?? null}
