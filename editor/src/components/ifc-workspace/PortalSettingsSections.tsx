@@ -1,3 +1,10 @@
+/**
+ * Portal-Abschnitte der zentralen Einstellungen (SettingsDialog): Verbindung,
+ * Import-Mapping und Property-Sets. Ersetzt das frühere Panel
+ * "Portal-Einstellungen" — der Inhalt ist unverändert, nur in Abschnitte
+ * zerlegt, die der Einstellungs-Dialog einzeln anzeigt.
+ */
+
 import { Download, RotateCcw, Upload, Wand2 } from "lucide-react";
 import { useRef, useState } from "react";
 
@@ -25,7 +32,6 @@ import {
 } from "@/portal/types";
 
 import {
-  Badge,
   Button,
   CheckboxField,
   CommitInput,
@@ -35,14 +41,12 @@ import {
   InfoSection,
   InlineAlert,
   LabeledInput,
-  PanelHeader,
-  PanelShell,
   Toolbar,
   ToolbarGroup,
   type DataTableColumn,
 } from "./ui";
 
-export interface PortalSettingsPanelProps {
+export interface PortalSettingsSectionProps {
   settings: PortalSettings;
   onSettingsChange: (settings: PortalSettings) => void;
 }
@@ -107,10 +111,101 @@ const MAPPING_GROUPS: { title: string; models: string[]; hint?: string }[] = [
 
 const CUSTOM_IFC_CLASS_VALUE = "__andere__";
 
-export function PortalSettingsPanel({
+/** Verbindung: API-URLs, Keycloak-Client und Mock-Modus. */
+export function PortalConnectionSettings({
   settings,
   onSettingsChange,
-}: PortalSettingsPanelProps) {
+}: PortalSettingsSectionProps) {
+  const update = (patch: Partial<PortalSettings>) => {
+    onSettingsChange({ ...settings, ...patch });
+  };
+
+  /** Nur die Verbindungsfelder zurücksetzen — Mapping und Auswahl bleiben. */
+  const resetConnection = () => {
+    const defaults = createDefaultPortalSettings();
+    onSettingsChange({
+      ...settings,
+      assetBaseUrl: defaults.assetBaseUrl,
+      bwdBaseUrl: defaults.bwdBaseUrl,
+      clientId: defaults.clientId,
+      monitoringBaseUrl: defaults.monitoringBaseUrl,
+      tokenUrl: defaults.tokenUrl,
+    });
+  };
+
+  return (
+    <>
+      <InfoSection title="API-Endpunkte">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2.5">
+          <LabeledInput
+            label="BWD-API (bwdBaseUrl)"
+            mono
+            value={settings.bwdBaseUrl}
+            onChangeText={(value) => update({ bwdBaseUrl: value })}
+          />
+          <LabeledInput
+            label="Assetverwaltung-API (assetBaseUrl)"
+            mono
+            value={settings.assetBaseUrl}
+            onChangeText={(value) => update({ assetBaseUrl: value })}
+          />
+          <LabeledInput
+            label="Monitoring-API (monitoringBaseUrl)"
+            mono
+            value={settings.monitoringBaseUrl}
+            onChangeText={(value) => update({ monitoringBaseUrl: value })}
+          />
+          <LabeledInput
+            label="Token-URL (Keycloak)"
+            mono
+            value={settings.tokenUrl}
+            onChangeText={(value) => update({ tokenUrl: value })}
+          />
+          <LabeledInput
+            label="Client-ID"
+            mono
+            value={settings.clientId}
+            onChangeText={(value) => update({ clientId: value })}
+          />
+        </div>
+        <p className="text-[11px] leading-relaxed text-muted-foreground">
+          Die Standardpfade (/mkp/…) laufen im Dev-Server über den Vite-Proxy
+          (siehe vite.config.mts) und umgehen so CORS. Direkte URLs zum Portal
+          oder zu einem lokalen Backend erfordern passende CORS-Freigaben im
+          Backend.
+        </p>
+      </InfoSection>
+
+      <InfoSection title="Datenquelle">
+        <CheckboxField
+          checked={settings.useMockData}
+          description="Alle Portal-Abrufe liefern lokale Demo-Daten (kein Netzwerk, keine Anmeldung nötig)."
+          label="Mock-Daten verwenden"
+          onCheckedChange={(checked) => update({ useMockData: checked })}
+        />
+      </InfoSection>
+
+      <Toolbar>
+        <ToolbarGroup>
+          <Button
+            title="URLs und Client-ID auf Standardwerte zurücksetzen"
+            variant="outline"
+            onClick={resetConnection}
+          >
+            <RotateCcw aria-hidden className="size-3.5" />
+            Zurücksetzen
+          </Button>
+        </ToolbarGroup>
+      </Toolbar>
+    </>
+  );
+}
+
+/** Import-Mapping: pro API-Modell Ziel, IFC-Klasse und ObjectType. */
+export function PortalMappingSettings({
+  settings,
+  onSettingsChange,
+}: PortalSettingsSectionProps) {
   const [mappingError, setMappingError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -176,21 +271,6 @@ export function PortalSettingsPanel({
     }
   };
 
-  const resetToDefaults = () => {
-    // "Zurücksetzen" = Preset + Default-URLs; Bauwerk-/Projekt-Auswahl,
-    // Mock-Schalter und Pset-Optionen bleiben erhalten.
-    const defaults = createDefaultPortalSettings();
-    onSettingsChange({
-      ...settings,
-      assetBaseUrl: defaults.assetBaseUrl,
-      bwdBaseUrl: defaults.bwdBaseUrl,
-      clientId: defaults.clientId,
-      mapping: defaults.mapping,
-      monitoringBaseUrl: defaults.monitoringBaseUrl,
-      tokenUrl: defaults.tokenUrl,
-    });
-  };
-
   const rowsByModel = new Map(
     settings.mapping.mappings.map((row) => [row.model.toLowerCase(), row]),
   );
@@ -202,159 +282,60 @@ export function PortalSettingsPanel({
   );
 
   return (
-    <PanelShell>
-      <PanelHeader
-        title="Portal-Einstellungen"
-        description="Verbindung, Import-Mapping und Pset-Optionen für das MKP-Portal."
-        meta={
-          settings.useMockData ? <Badge tone="info">Mock-Daten</Badge> : null
+    <>
+      <InfoSection title="Modus">
+        <div className="flex flex-wrap items-end gap-3">
+          <DropdownField
+            label="Modus"
+            options={MODE_OPTIONS}
+            value={settings.mapping.mode}
+            onChange={handleModeChange}
+          />
+          <DropdownField
+            label="Diagnostik-Verfahren (Bulk)"
+            options={BULK_VERFAHREN_OPTIONS}
+            value=""
+            onChange={handleBulkVerfahren}
+          />
+        </div>
+        <p className="text-[11px] leading-relaxed text-muted-foreground">
+          {settings.mapping.mode === "custom"
+            ? "Benutzerdefiniert: pro API-Modell frei einstellbar."
+            : "Preset entspricht den Beispiel-IFCs; jede Änderung wechselt automatisch zu Benutzerdefiniert."}{" "}
+          Ziele: <strong>Element</strong> = eigenes IFC-Element ·{" "}
+          <strong>Pset am Host</strong> = nur Property-Sets am übergeordneten
+          Element · <strong>Durchreichen</strong> = Ebene überspringen, Kinder
+          importieren · <strong>Ignorieren</strong> = Ebene samt Unterbaum nicht
+          importieren. <strong>Werte</strong> abgewählt = nur leere Pset-Hüllen
+          ohne Properties anlegen.
+        </p>
+      </InfoSection>
+
+      {MAPPING_GROUPS.map((group) => {
+        const rows = group.models
+          .map((model) => rowsByModel.get(model.toLowerCase()))
+          .filter((row): row is PortalModelMapping => row !== undefined);
+        if (rows.length === 0) {
+          return null;
         }
-      />
-
-      <PanelShell scroll>
-        <InfoSection title="Verbindung">
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2.5">
-            <LabeledInput
-              label="BWD-API (bwdBaseUrl)"
-              mono
-              value={settings.bwdBaseUrl}
-              onChangeText={(value) => update({ bwdBaseUrl: value })}
-            />
-            <LabeledInput
-              label="Assetverwaltung-API (assetBaseUrl)"
-              mono
-              value={settings.assetBaseUrl}
-              onChangeText={(value) => update({ assetBaseUrl: value })}
-            />
-            <LabeledInput
-              label="Monitoring-API (monitoringBaseUrl)"
-              mono
-              value={settings.monitoringBaseUrl}
-              onChangeText={(value) => update({ monitoringBaseUrl: value })}
-            />
-            <LabeledInput
-              label="Token-URL (Keycloak)"
-              mono
-              value={settings.tokenUrl}
-              onChangeText={(value) => update({ tokenUrl: value })}
-            />
-            <LabeledInput
-              label="Client-ID"
-              mono
-              value={settings.clientId}
-              onChangeText={(value) => update({ clientId: value })}
-            />
-          </div>
-          <CheckboxField
-            checked={settings.useMockData}
-            description="Alle Portal-Abrufe liefern lokale Demo-Daten (kein Netzwerk, keine Anmeldung nötig)."
-            label="Mock-Daten verwenden"
-            onCheckedChange={(checked) => update({ useMockData: checked })}
-          />
-          <p className="text-[11px] leading-relaxed text-muted-foreground">
-            Die Standardpfade (/mkp/…) laufen im Dev-Server über den
-            Vite-Proxy (siehe vite.config.mts) und umgehen so CORS. Direkte
-            URLs zum Portal oder zu einem lokalen Backend erfordern passende
-            CORS-Freigaben im Backend.
-          </p>
-        </InfoSection>
-
-        <InfoSection title="Import-Mapping">
-          <div className="flex flex-wrap items-end gap-3">
-            <DropdownField
-              label="Modus"
-              options={MODE_OPTIONS}
-              value={settings.mapping.mode}
-              onChange={handleModeChange}
-            />
-            <DropdownField
-              label="Diagnostik-Verfahren (Bulk)"
-              options={BULK_VERFAHREN_OPTIONS}
-              value=""
-              onChange={handleBulkVerfahren}
-            />
-          </div>
-          <p className="text-[11px] leading-relaxed text-muted-foreground">
-            {settings.mapping.mode === "custom"
-              ? "Benutzerdefiniert: pro API-Modell frei einstellbar."
-              : "Preset entspricht den Beispiel-IFCs; jede Änderung wechselt automatisch zu Benutzerdefiniert."}{" "}
-            Ziele: <strong>Element</strong> = eigenes IFC-Element ·{" "}
-            <strong>Pset am Host</strong> = nur Property-Sets am übergeordneten
-            Element · <strong>Durchreichen</strong> = Ebene überspringen, Kinder
-            importieren · <strong>Ignorieren</strong> = Ebene samt Unterbaum
-            nicht importieren. <strong>Werte</strong> abgewählt = nur leere
-            Pset-Hüllen ohne Properties anlegen.
-          </p>
-        </InfoSection>
-
-        {MAPPING_GROUPS.map((group) => {
-          const rows = group.models
-            .map((model) => rowsByModel.get(model.toLowerCase()))
-            .filter((row): row is PortalModelMapping => row !== undefined);
-          if (rows.length === 0) {
-            return null;
-          }
-          return (
-            <InfoSection key={group.title} title={`Mapping: ${group.title}`}>
-              {group.hint ? (
-                <p className="text-[11px] text-muted-foreground">{group.hint}</p>
-              ) : null}
-              <MappingTable rows={rows} onPatchRow={patchMappingRows} />
-            </InfoSection>
-          );
-        })}
-        {extraRows.length > 0 ? (
-          <InfoSection title="Mapping: Weitere Modelle">
-            <MappingTable rows={extraRows} onPatchRow={patchMappingRows} />
+        return (
+          <InfoSection key={group.title} title={group.title}>
+            {group.hint ? (
+              <p className="text-[11px] text-muted-foreground">{group.hint}</p>
+            ) : null}
+            <MappingTable rows={rows} onPatchRow={patchMappingRows} />
           </InfoSection>
-        ) : null}
-
-        {mappingError ? (
-          <InlineAlert tone="danger">{mappingError}</InlineAlert>
-        ) : null}
-
-        <InfoSection title="Pset-Optionen">
-          <CheckboxField
-            checked={settings.psetOptions.writeLinkPset}
-            description="Pset_MarxKrontalBWD mit ExternalId, Quellsystem und API-Metadaten am verknüpften Element. Auch ohne Link-Pset bleiben Re-Importe über die deterministische GlobalId erkennbar (keine Duplikate)."
-            label="Link-Pset schreiben"
-            onCheckedChange={(checked) =>
-              update({
-                psetOptions: {
-                  ...settings.psetOptions,
-                  writeLinkPset: checked,
-                },
-              })
-            }
-          />
-          <CheckboxField
-            checked={settings.psetOptions.writeCatalogPsets}
-            description="ePset_* nach Objektkatalog BWD/MON, z. B. ePset_Objektinformationen oder ePset_Sensor."
-            label="Katalog-Psets schreiben"
-            onCheckedChange={(checked) =>
-              update({
-                psetOptions: {
-                  ...settings.psetOptions,
-                  writeCatalogPsets: checked,
-                },
-              })
-            }
-          />
-          <CheckboxField
-            checked={settings.psetOptions.writeRecordPsets}
-            description="Pset_MarxKrontalBWD_<Modell> mit allen rohen Datenbankfeldern des Portal-Datensatzes."
-            label="Rohdaten-Psets schreiben"
-            onCheckedChange={(checked) =>
-              update({
-                psetOptions: {
-                  ...settings.psetOptions,
-                  writeRecordPsets: checked,
-                },
-              })
-            }
-          />
+        );
+      })}
+      {extraRows.length > 0 ? (
+        <InfoSection title="Weitere Modelle">
+          <MappingTable rows={extraRows} onPatchRow={patchMappingRows} />
         </InfoSection>
-      </PanelShell>
+      ) : null}
+
+      {mappingError ? (
+        <InlineAlert tone="danger">{mappingError}</InlineAlert>
+      ) : null}
 
       <Toolbar>
         <ToolbarGroup>
@@ -382,14 +363,6 @@ export function PortalSettingsPanel({
             <Upload aria-hidden className="size-3.5" />
             Importieren
           </Button>
-          <Button
-            title="URLs, Client-ID und Mapping auf Standardwerte zurücksetzen"
-            variant="outline"
-            onClick={resetToDefaults}
-          >
-            <RotateCcw aria-hidden className="size-3.5" />
-            Zurücksetzen
-          </Button>
         </ToolbarGroup>
       </Toolbar>
       <input
@@ -406,7 +379,47 @@ export function PortalSettingsPanel({
           }
         }}
       />
-    </PanelShell>
+    </>
+  );
+}
+
+/** Welche Property-Sets der Portal-Import ans IFC schreibt. */
+export function PortalPsetSettings({
+  settings,
+  onSettingsChange,
+}: PortalSettingsSectionProps) {
+  const updatePsetOptions = (patch: Partial<PortalSettings["psetOptions"]>) => {
+    onSettingsChange({
+      ...settings,
+      psetOptions: { ...settings.psetOptions, ...patch },
+    });
+  };
+
+  return (
+    <InfoSection title="Beim Import schreiben">
+      <CheckboxField
+        checked={settings.psetOptions.writeLinkPset}
+        description="Pset_MarxKrontalBWD mit ExternalId, Quellsystem und API-Metadaten am verknüpften Element. Auch ohne Link-Pset bleiben Re-Importe über die deterministische GlobalId erkennbar (keine Duplikate)."
+        label="Link-Pset schreiben"
+        onCheckedChange={(checked) => updatePsetOptions({ writeLinkPset: checked })}
+      />
+      <CheckboxField
+        checked={settings.psetOptions.writeCatalogPsets}
+        description="ePset_* nach Objektkatalog BWD/MON, z. B. ePset_Objektinformationen oder ePset_Sensor."
+        label="Katalog-Psets schreiben"
+        onCheckedChange={(checked) =>
+          updatePsetOptions({ writeCatalogPsets: checked })
+        }
+      />
+      <CheckboxField
+        checked={settings.psetOptions.writeRecordPsets}
+        description="Pset_MarxKrontalBWD_<Modell> mit allen rohen Datenbankfeldern des Portal-Datensatzes."
+        label="Rohdaten-Psets schreiben"
+        onCheckedChange={(checked) =>
+          updatePsetOptions({ writeRecordPsets: checked })
+        }
+      />
+    </InfoSection>
   );
 }
 
@@ -498,9 +511,8 @@ function targetLabel(target: PortalMappingTarget): string {
 
 function matchedIfcClassChoice(value: string): string | null {
   return (
-    IFC_CLASS_CHOICES.find(
-      (choice) => normalizeIfcClass(choice) === value,
-    ) ?? null
+    IFC_CLASS_CHOICES.find((choice) => normalizeIfcClass(choice) === value) ??
+    null
   );
 }
 
@@ -582,7 +594,11 @@ function IfcClassCell({
           onChange(normalizeIfcClass(next));
         }}
       >
-        <SelectTrigger className="h-7 w-full min-w-0" size="sm" disabled={disabled}>
+        <SelectTrigger
+          className="h-7 w-full min-w-0"
+          size="sm"
+          disabled={disabled}
+        >
           <SelectValue className="truncate text-xs">
             {custom ? "Andere…" : (matched ?? value)}
           </SelectValue>

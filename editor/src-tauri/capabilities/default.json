@@ -12,7 +12,8 @@
         { "url": "https://portal.dev.marxkrontal.com/*" },
         { "url": "http://localhost:8000/*" },
         { "url": "http://localhost:8787/*" },
-        { "url": "http://127.0.0.1:8787/*" }
+        { "url": "http://127.0.0.1:8787/*" },
+        { "url": "http://ifc-hub.dokploy.local/*" }
       ]
     }
   ]

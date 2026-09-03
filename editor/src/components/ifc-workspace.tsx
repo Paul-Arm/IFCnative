@@ -13,6 +13,7 @@ import {
     PanelTopOpen,
     Plus,
     Redo2,
+    Settings,
     Undo2,
     X,
 } from "lucide-react";
@@ -34,7 +35,10 @@ import {
     type MosaicPath,
 } from "react-mosaic-component";
 
-import { readDesktopStartupIfcAssets } from "@/desktop/startupIfc";
+import {
+  readDesktopIfcAsset,
+  readDesktopStartupIfcAssets,
+} from "@/desktop/startupIfc";
 import {
     addNativeApproval,
     addNativeBodyElement,
@@ -167,6 +171,7 @@ import {
 } from "./ifc-workspace/documentRecovery";
 import { GraphPanel } from "./ifc-workspace/GraphPanel";
 import { GroupManagerDialog } from "./ifc-workspace/GroupManagerDialog";
+import { HubAddDialog } from "./ifc-workspace/HubAddDialog";
 import { GroupsPanel } from "./ifc-workspace/GroupsPanel";
 import {
     INSPECTOR_MODES,
@@ -177,6 +182,10 @@ import {
 import { CheckPanel } from "./ifc-workspace/CheckPanel";
 import { PortalPanel } from "./ifc-workspace/PortalPanel";
 import { SaveDialog } from "./ifc-workspace/SaveDialog";
+import {
+    SettingsDialog,
+    type SettingsSectionId,
+} from "./ifc-workspace/SettingsDialog";
 import { SpatialStructureDialog } from "./ifc-workspace/SpatialStructureDialog";
 import {
     StartPage,
@@ -184,10 +193,8 @@ import {
 } from "./ifc-workspace/StartPage";
 import { VcsOriginStatus } from "./ifc-workspace/VcsOriginStatus";
 import { VcsPanel } from "./ifc-workspace/VcsPanel";
-import { PortalSettingsPanel } from "./ifc-workspace/PortalSettingsPanel";
 import { PsetBatchPanel } from "./ifc-workspace/PsetBatchPanel";
 import { StructurePanel } from "./ifc-workspace/StructurePanel";
-import { ThemeToggle } from "./ifc-workspace/ThemeToggle";
 import type {
     BodyElementDraft,
     CoordinateClipboard,
@@ -514,8 +521,18 @@ export default function IfcWorkspace() {
   >([]);
   const [recoveryBusy, setRecoveryBusy] = useState(false);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [hubAddOpen, setHubAddOpen] = useState(false);
   const [structureDialogOpen, setStructureDialogOpen] = useState(false);
+  // Zentrale Einstellungen (Modal): ersetzt die früheren Einstellungs-Panels.
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] =
+    useState<SettingsSectionId>("appearance");
   const { scale: uiScale, setScale: setUiScale } = useUiScale();
+  /** Öffnet die zentralen Einstellungen, optional in einem Abschnitt. */
+  const openSettings = (section: SettingsSectionId = "appearance") => {
+    setSettingsSection(section);
+    setSettingsOpen(true);
+  };
   const allWorkspaces = useMemo(
     () => [...BUILT_IN_WORKSPACES, ...customWorkspaces],
     [customWorkspaces],
@@ -1830,6 +1847,52 @@ export default function IfcWorkspace() {
     } finally {
       setLoadingIfcName("");
     }
+  };
+
+  // Startseite: kürzlich verwendete Datei erneut öffnen. Nur im Desktop-Build
+  // mit gespeichertem Pfad direkt lesbar — sonst bleibt der Datei-Picker.
+  const openRecentIfcFile = async (entry: RecentIfcFileEntry) => {
+    if (!entry.path || !("__TAURI_INTERNALS__" in globalThis)) {
+      void openIfc();
+      return;
+    }
+    try {
+      setLoadingIfcName(entry.name);
+      const asset = await readDesktopIfcAsset(entry.path);
+      const parsed = await parseNativeIfcFileInWorker(asset.file, asset.name);
+      const session = createWorkspaceDocumentSession(parsed.document, {
+        bytes: parsed.bytes,
+        file: asset.file,
+      });
+      startTransition(() => {
+        setDocumentSessions([session]);
+        setActiveDocumentId(session.id);
+      });
+      rememberRecentIfc(session, "opened", asset.file);
+      setStatusAlert({ message: `${asset.name} geöffnet.`, tone: "success" });
+      logAction(`ui.startPage.recent({ file: '${asset.name}' });`);
+    } catch (error) {
+      reportFailure(`${entry.name} konnte nicht erneut geöffnet werden`, error);
+    } finally {
+      setLoadingIfcName("");
+    }
+  };
+
+  // "Vom IFC Hub hinzufügen"-Dialog: Stände als ZUSÄTZLICHE Tabs öffnen,
+  // offene Dokumente bleiben erhalten.
+  const addHubDocuments = async (hubDocuments: StartPageHubDocument[]) => {
+    for (const entry of hubDocuments) {
+      await openIfcTextFromVcs(entry.text, entry.fileName, entry.origin);
+    }
+    setHubAddOpen(false);
+    setStatusAlert({
+      message:
+        hubDocuments.length === 1
+          ? `${hubDocuments[0].fileName} vom IFC Hub hinzugefügt.`
+          : `${hubDocuments.length} Modelle vom IFC Hub hinzugefügt.`,
+      tone: "success",
+    });
+    logAction(`ui.menubar.hubAdd({ files: ${hubDocuments.length} });`);
   };
 
   // Startseite: vom Hub geladene Stände (einzelnes Modell oder ganzer
@@ -3925,6 +3988,11 @@ export default function IfcWorkspace() {
         }
         return;
       }
+      if (commandKey && key === ",") {
+        event.preventDefault();
+        openSettings();
+        return;
+      }
       if (!commandKey && !event.shiftKey && event.key === "Delete") {
         event.preventDefault();
         requestDeleteEntity(selectedId, "keyboard");
@@ -4488,15 +4556,6 @@ export default function IfcWorkspace() {
             />
           </TileContent>
         );
-      case "portal-settings":
-        return (
-          <TileContent>
-            <PortalSettingsPanel
-              settings={portalSettings}
-              onSettingsChange={setPortalSettings}
-            />
-          </TileContent>
-        );
       case "vcs":
         return (
           <TileContent>
@@ -4505,7 +4564,9 @@ export default function IfcWorkspace() {
               documentFileName={activeSession ? document.fileName : null}
               getIfcText={getVcsIfcText}
               hasDocument={Boolean(activeSession)}
+              origin={activeSession?.vcsOrigin ?? null}
               settings={vcsSettings}
+              onAddFromHub={() => setHubAddOpen(true)}
               onAuthChange={setVcsAuth}
               onLoadIfc={openIfcTextFromVcs}
               onSelectGuids={(guids) => {
@@ -4529,7 +4590,7 @@ export default function IfcWorkspace() {
                 }
                 return ids.length;
               }}
-              onSettingsChange={setVcsSettings}
+              onOpenSettings={() => openSettings("hub")}
             />
           </TileContent>
         );
@@ -4725,6 +4786,29 @@ export default function IfcWorkspace() {
       <div className="flex min-h-screen flex-col bg-background text-foreground">
         {recoveryBanner}
         {statusAlertBar}
+        {/* Ohne Menüleiste: Einstellungen (inkl. Farbschema) oben rechts. */}
+        <div className="flex shrink-0 items-center justify-end gap-0.5 px-3 pt-3">
+          <IconButton
+            aria-label="Einstellungen"
+            size="icon-sm"
+            title="Einstellungen · Strg+,"
+            variant="ghost"
+            onClick={() => openSettings()}
+          >
+            <Settings aria-hidden className="size-4" />
+          </IconButton>
+        </div>
+        <SettingsDialog
+          defaultSection={settingsSection}
+          open={settingsOpen}
+          portalSettings={portalSettings}
+          vcsAuth={vcsAuth}
+          vcsSettings={vcsSettings}
+          onOpenChange={setSettingsOpen}
+          onPortalSettingsChange={setPortalSettings}
+          onVcsAuthChange={setVcsAuth}
+          onVcsSettingsChange={setVcsSettings}
+        />
         <StartPage
           auth={vcsAuth}
           loadingName={loadingIfcName}
@@ -4732,8 +4816,10 @@ export default function IfcWorkspace() {
           onAuthChange={setVcsAuth}
           onCreateNewIfc={(draft) => void createNewIfcDocument(draft)}
           onOpenDroppedFiles={(files) => void openDroppedIfcFiles(files)}
+          recentFiles={recentIfcFiles}
           onOpenFilePicker={() => void openIfc()}
           onOpenHubDocuments={openHubDocuments}
+          onOpenRecentFile={(entry) => void openRecentIfcFile(entry)}
           onSettingsChange={setVcsSettings}
         />
       </div>
@@ -4761,11 +4847,13 @@ export default function IfcWorkspace() {
             redoSummary={redoStack.at(-1)?.summary}
             undoSummary={undoStack.at(-1)?.summary}
             onAddIfcFiles={() => void addIfcFiles()}
+            onAddIfcFromHub={() => setHubAddOpen(true)}
             onCloseActiveDocument={() => closeDocumentSession(activeSession.id)}
             onCreateWorkspace={createWorkspaceFromCurrentLayout}
             onDeleteWorkspace={deleteActiveWorkspace}
             onExportIfc={saveActiveDocument}
             onOpenIfc={() => void openIfc()}
+            onOpenSettings={() => openSettings()}
             onRedo={redoDocument}
             onResetLayout={resetMosaicLayout}
             onSaveWorkspace={saveActiveWorkspace}
@@ -4803,7 +4891,15 @@ export default function IfcWorkspace() {
               <Redo2 aria-hidden className="size-3.5" />
             </IconButton>
             <div className="mx-1 h-4 w-px bg-border/70" />
-            <ThemeToggle />
+            <IconButton
+              aria-label="Einstellungen"
+              size="icon-sm"
+              title="Einstellungen · Strg+,"
+              variant="ghost"
+              onClick={() => openSettings()}
+            >
+              <Settings aria-hidden className="size-4" />
+            </IconButton>
           </div>
         </div>
         <div className="flex items-center bg-muted/50 px-1.5 py-1">
@@ -4904,6 +5000,29 @@ export default function IfcWorkspace() {
         onCommit={commitActiveDocumentToHub}
         onExportLocal={() => void exportIfc()}
         onOpenChange={setSaveDialogOpen}
+      />
+
+      <SettingsDialog
+        defaultSection={settingsSection}
+        open={settingsOpen}
+        portalSettings={portalSettings}
+        vcsAuth={vcsAuth}
+        vcsSettings={vcsSettings}
+        onOpenChange={setSettingsOpen}
+        onPortalSettingsChange={setPortalSettings}
+        onVcsAuthChange={setVcsAuth}
+        onVcsSettingsChange={setVcsSettings}
+      />
+
+      <HubAddDialog
+        auth={vcsAuth}
+        busy={Boolean(loadingIfcName)}
+        open={hubAddOpen}
+        settings={vcsSettings}
+        onAddDocuments={addHubDocuments}
+        onAuthChange={setVcsAuth}
+        onOpenChange={setHubAddOpen}
+        onSettingsChange={setVcsSettings}
       />
 
       <GroupManagerDialog

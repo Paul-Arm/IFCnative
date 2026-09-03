@@ -238,6 +238,55 @@ export function savePortalTokens(tokens: PortalTokens | null) {
 
 const VCS_SETTINGS_STORAGE_KEY = "ifcnative:vcs-settings:v1";
 const VCS_AUTH_STORAGE_KEY = "ifcnative:vcs-auth:v1";
+const VCS_CREDENTIALS_STORAGE_KEY = "ifcnative:vcs-credentials:v1";
+
+/**
+ * Gemerkte Anmeldedaten für den IFC Hub, damit nach Ablauf des Tokens nicht
+ * alles neu getippt werden muss. E-Mail und Name sind unkritisch und werden
+ * immer behalten; das Passwort NUR bei aktivem `remember` — es liegt dann im
+ * Klartext im LocalStorage. Die Anmeldemaske weist darauf hin und bietet das
+ * Löschen an.
+ */
+export interface VcsCredentials {
+  email: string;
+  name: string;
+  password: string;
+  remember: boolean;
+}
+
+export function createEmptyVcsCredentials(): VcsCredentials {
+  return { email: "", name: "", password: "", remember: true };
+}
+
+export function loadVcsCredentials(): VcsCredentials {
+  const defaults = createEmptyVcsCredentials();
+  const parsed = readJson<unknown>(VCS_CREDENTIALS_STORAGE_KEY, null);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return defaults;
+  }
+  const candidate = parsed as Record<string, unknown>;
+  const remember = readBooleanOr(candidate.remember, defaults.remember);
+  return {
+    email: readStringOr(candidate.email, defaults.email),
+    name: readStringOr(candidate.name, defaults.name),
+    // Ohne "remember" gilt ein doch gespeichertes Passwort als ungültig.
+    password: remember ? readStringOr(candidate.password, "") : "",
+    remember,
+  };
+}
+
+export function saveVcsCredentials(credentials: VcsCredentials) {
+  writeJson(VCS_CREDENTIALS_STORAGE_KEY, {
+    email: credentials.email,
+    name: credentials.name,
+    password: credentials.remember ? credentials.password : "",
+    remember: credentials.remember,
+  });
+}
+
+export function clearVcsCredentials() {
+  removeLocalStorage(VCS_CREDENTIALS_STORAGE_KEY);
+}
 
 export function loadVcsSettings(): VcsSettings {
   const defaults = createDefaultVcsSettings();
@@ -365,14 +414,19 @@ function sanitizeMosaicNode(
     second: unknown;
     splitPercentage: number;
   }>;
+  if (candidate.direction !== "row" && candidate.direction !== "column") {
+    return undefined;
+  }
   const first = sanitizeMosaicNode(candidate.first);
   const second = sanitizeMosaicNode(candidate.second);
-  if (
-    (candidate.direction !== "row" && candidate.direction !== "column") ||
-    first == null ||
-    second == null
-  ) {
-    return undefined;
+  // Entfällt ein Panel (z. B. die früheren "Portal-Einstellungen"), rückt der
+  // Geschwisterknoten nach — sonst würde ein einzelnes unbekanntes Blatt das
+  // ganze gespeicherte Layout verwerfen.
+  if (first == null) {
+    return second ?? undefined;
+  }
+  if (second == null) {
+    return first;
   }
   return {
     direction: candidate.direction,

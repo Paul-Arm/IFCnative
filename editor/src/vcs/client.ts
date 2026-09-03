@@ -146,6 +146,15 @@ export class VcsApiClient {
     return body.project;
   }
 
+  /** Explizit angelegte Ordnerpfade eines Projekts (auch leere Ordner). */
+  async listFolders(project: string): Promise<string[]> {
+    const body = await this.request<{ folders?: string[] }>(
+      `/projects/${encodeURIComponent(project)}`,
+      { headers: this.headers() },
+    );
+    return body.folders ?? [];
+  }
+
   async listModels(project: string): Promise<VcsModel[]> {
     const body = await this.request<{ models: VcsModel[] }>(
       `/projects/${encodeURIComponent(project)}/models`,

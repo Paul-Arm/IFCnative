@@ -9,7 +9,7 @@ export interface VcsSettings {
 }
 
 export function createDefaultVcsSettings(): VcsSettings {
-  return { baseUrl: "http://localhost:8787" };
+  return { baseUrl: "http://ifc-hub.dokploy.local" };
 }
 
 export interface VcsUser {

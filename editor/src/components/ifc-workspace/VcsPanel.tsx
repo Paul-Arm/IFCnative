@@ -7,24 +7,22 @@ import {
   LogIn,
   LogOut,
   RefreshCw,
+  Settings,
   ShieldCheck,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { Input } from "@/components/ui/input";
 import { VcsApiClient, VcsApiError } from "@/vcs/client";
 import { vcsActionAppliesTo } from "@/vcs/types";
 import type {
   VcsAction,
   VcsActionRun,
   VcsAuth,
-  VcsBranch,
   VcsCommit,
   VcsDiffSummary,
   VcsDocumentOrigin,
   VcsIssue,
   VcsModel,
-  VcsProject,
   VcsRunStatus,
   VcsSettings,
 } from "@/vcs/types";
@@ -32,8 +30,6 @@ import type {
 import {
   Badge,
   Button,
-  CollapsibleSection,
-  DropdownField,
   EmptyState,
   InlineAlert,
   LabeledInput,
@@ -48,8 +44,18 @@ export interface VcsPanelProps {
   /** Ob gerade ein Dokument im Editor offen ist (Voraussetzung fürs Committen). */
   hasDocument: boolean;
   documentFileName: string | null;
+  /**
+   * Hub-Herkunft des aktiven Dokuments. Sie bestimmt Projekt, Modell und
+   * Branch — das Panel bietet bewusst KEINE eigene Auswahl an, sonst könnte
+   * der Kontext vom offenen Dokument abweichen. Ohne Herkunft (lokale Datei)
+   * zeigt das Panel nur den Einstieg zum Laden.
+   */
+  origin: VcsDocumentOrigin | null;
+  /** Öffnet den Dialog „IFC vom Hub hinzufügen“. */
+  onAddFromHub?: () => void;
   settings: VcsSettings;
-  onSettingsChange: (settings: VcsSettings) => void;
+  /** Öffnet die zentralen Einstellungen im Abschnitt „IFC Hub“. */
+  onOpenSettings: () => void;
   auth: VcsAuth | null;
   onAuthChange: (auth: VcsAuth | null) => void;
   /** Serialisiert den aktuellen Editor-Stand als IFC-Text (Export-Regel). */
@@ -78,6 +84,9 @@ const RUN_STATUS: Record<VcsRunStatus, { label: string; tone: "neutral" | "succe
   error: { label: "Fehler", tone: "warning" },
 };
 
+/** Reiter des Panels unterhalb der Commit-Box. */
+type PanelTab = "history" | "checks" | "issues";
+
 function errorMessage(error: unknown): string {
   if (error instanceof VcsApiError) {
     return error.message;
@@ -99,8 +108,10 @@ function formatDate(iso: string): string {
 export function VcsPanel({
   hasDocument,
   documentFileName,
+  origin,
+  onAddFromHub,
   settings,
-  onSettingsChange,
+  onOpenSettings,
   auth,
   onAuthChange,
   getIfcText,
@@ -114,128 +125,47 @@ export function VcsPanel({
 
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [tab, setTab] = useState<PanelTab>("history");
 
-  // ---- Login -----------------------------------------------------------
+  // Anmeldung und Server-URL liegen zentral in den Einstellungen; das Panel
+  // verlinkt nur dorthin (siehe settingsButton weiter unten).
 
-  const [authMode, setAuthMode] = useState<"login" | "register">("login");
-  const [email, setEmail] = useState("");
-  const [name, setName] = useState("");
-  const [password, setPassword] = useState("");
-  const [authBusy, setAuthBusy] = useState(false);
+  // ---- Kontext aus der Hub-Herkunft des Dokuments -----------------------
+  //
+  // Projekt, Modell und Branch sind durch das geöffnete Dokument festgelegt;
+  // das Panel liest sie nur aus (keine Auswahl, siehe VcsPanelProps.origin).
 
-  const handleLogin = async () => {
-    setError(null);
-    setAuthBusy(true);
-    try {
-      const nextAuth =
-        authMode === "login"
-          ? await client.login(email.trim(), password)
-          : await client.register(email.trim(), name.trim() || email.trim(), password);
-      onAuthChange(nextAuth);
-      setPassword("");
-    } catch (loginError) {
-      setError(errorMessage(loginError));
-    } finally {
-      setAuthBusy(false);
-    }
-  };
+  const projectSlug = origin?.projectSlug ?? "";
+  const modelSlug = origin?.modelSlug ?? "";
+  const branch = origin?.branch ?? "";
 
-  // ---- Katalog: Projekte -> Modelle -> Branch -> Commits ---------------
-
-  const [projects, setProjects] = useState<VcsProject[]>([]);
-  const [projectSlug, setProjectSlug] = useState("");
-  const [models, setModels] = useState<VcsModel[]>([]);
-  const [modelSlug, setModelSlug] = useState("");
-  const [branches, setBranches] = useState<VcsBranch[]>([]);
-  const [branch, setBranch] = useState("");
+  const [selectedModel, setSelectedModel] = useState<VcsModel | null>(null);
   const [commits, setCommits] = useState<VcsCommit[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const selectedModel = models.find((model) => model.slug === modelSlug) ?? null;
-
-  const refreshProjects = useCallback(async () => {
-    if (!auth) {
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const list = await client.listProjects();
-      setProjects(list);
-      setProjectSlug((current) =>
-        list.some((project) => project.slug === current)
-          ? current
-          : (list[0]?.slug ?? ""),
-      );
-    } catch (listError) {
-      if (listError instanceof VcsApiError && listError.status === 401) {
-        onAuthChange(null);
-      }
-      setError(errorMessage(listError));
-    } finally {
-      setLoading(false);
-    }
-  }, [auth, client, onAuthChange]);
-
-  useEffect(() => {
-    void refreshProjects();
-  }, [refreshProjects]);
-
-  useEffect(() => {
-    if (!auth || !projectSlug) {
-      setModels([]);
-      setModelSlug("");
-      return;
-    }
-    let cancelled = false;
-    void client
-      .listModels(projectSlug)
-      .then((all) => {
-        if (cancelled) return;
-        // Markdown-Dokumente sind Hub-only; im Editor zählen nur IFC-Modelle.
-        const list = all.filter((model) => model.kind === "ifc");
-        setModels(list);
-        setModelSlug((current) =>
-          list.some((model) => model.slug === current)
-            ? current
-            : (list[0]?.slug ?? ""),
-        );
-      })
-      .catch((listError) => {
-        if (!cancelled) setError(errorMessage(listError));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [auth, client, projectSlug]);
-
   const refreshCommits = useCallback(async () => {
-    if (!auth || !projectSlug || !modelSlug) {
-      setBranches([]);
+    if (!auth || !projectSlug || !modelSlug || !branch) {
+      setSelectedModel(null);
       setCommits([]);
       return;
     }
     setLoading(true);
     setError(null);
     try {
+      // getModel liefert die Modell-Id, die für Runs und den Geltungsbereich
+      // der Actions gebraucht wird.
       const detail = await client.getModel(projectSlug, modelSlug);
-      setBranches(detail.branches);
-      const effectiveBranch =
-        branch && detail.branches.some((b) => b.name === branch)
-          ? branch
-          : detail.model.defaultBranch;
-      if (effectiveBranch !== branch) {
-        setBranch(effectiveBranch);
-      }
-      setCommits(
-        await client.listCommits(projectSlug, modelSlug, effectiveBranch),
-      );
+      setSelectedModel(detail.model);
+      setCommits(await client.listCommits(projectSlug, modelSlug, branch));
     } catch (commitError) {
+      if (commitError instanceof VcsApiError && commitError.status === 401) {
+        onAuthChange(null);
+      }
       setError(errorMessage(commitError));
     } finally {
       setLoading(false);
     }
-  }, [auth, client, projectSlug, modelSlug, branch]);
+  }, [auth, client, projectSlug, modelSlug, branch, onAuthChange]);
 
   useEffect(() => {
     void refreshCommits();
@@ -263,12 +193,15 @@ export function VcsPanel({
       ]);
       setActions(actionList);
       setIssues(issueList);
-      const model = models.find((entry) => entry.slug === modelSlug);
-      setRuns(model ? await client.listRuns(projectSlug, { model: model.id }) : []);
+      setRuns(
+        selectedModel
+          ? await client.listRuns(projectSlug, { model: selectedModel.id })
+          : [],
+      );
     } catch {
       // Prüfungen/Issues sind Zusatzinfo — Fehler nicht in den Vordergrund.
     }
-  }, [auth, client, projectSlug, modelSlug, models]);
+  }, [auth, client, projectSlug, selectedModel]);
 
   useEffect(() => {
     void refreshChecksAndIssues();
@@ -378,15 +311,14 @@ export function VcsPanel({
         modelSlug,
         commit.id,
       );
-      const fileName = `${selectedModel?.name ?? modelSlug}-${commit.id.slice(0, 8)}.ifc`;
+      const modelName = selectedModel?.name ?? origin?.modelName ?? modelSlug;
+      const fileName = `${modelName}-${commit.id.slice(0, 8)}.ifc`;
       await onLoadIfc(text, fileName, {
         branch: commit.branchName || branch,
         commitId: commit.id,
-        modelName: selectedModel?.name ?? modelSlug,
+        modelName,
         modelSlug,
-        projectName:
-          projects.find((project) => project.slug === projectSlug)?.name ??
-          projectSlug,
+        projectName: origin?.projectName ?? projectSlug,
         projectSlug,
       });
       setNotice(`${fileName} als neuer Tab geöffnet.`);
@@ -429,26 +361,18 @@ export function VcsPanel({
 
   // ---- Render ------------------------------------------------------------
 
-  const connectionSection = (
-    <CollapsibleSection title="Verbindung" meta={settings.baseUrl}>
-      <LabeledInput
-        label="Server-URL"
-        mono
-        value={settings.baseUrl}
-        onChangeText={(baseUrl) => onSettingsChange({ ...settings, baseUrl })}
-      />
-      <p className="text-xs text-muted-foreground">
-        Web-Oberfläche des Servers:{" "}
-        <a
-          className="text-primary underline-offset-2 hover:underline"
-          href={settings.baseUrl}
-          rel="noreferrer"
-          target="_blank"
-        >
-          {settings.baseUrl}
-        </a>
-      </p>
-    </CollapsibleSection>
+  /**
+   * Server-URL und Anmeldung liegen zentral in den Einstellungen; das Panel
+   * zeigt den Stand nur an und verlinkt dorthin.
+   */
+  const settingsButton = (
+    <Button
+      title={`Verbindung und Anmeldung in den Einstellungen (${settings.baseUrl})`}
+      onClick={onOpenSettings}
+    >
+      <Settings aria-hidden className="size-3.5" />
+      Einstellungen
+    </Button>
   );
 
   if (!auth) {
@@ -458,126 +382,97 @@ export function VcsPanel({
           title="IFC Hub"
           eyebrow="Server"
           description="Zentrale Ablage mit Projekten, Versionsständen und Commits."
+          meta={
+            <span className="truncate text-[11px] text-muted-foreground">
+              {settings.baseUrl}
+            </span>
+          }
+          actions={settingsButton}
         />
-        {connectionSection}
         {error ? <InlineAlert tone="danger">{error}</InlineAlert> : null}
-        <div className="grid gap-2 rounded-lg border border-border/60 bg-card p-3">
-          {/* Moduswechsel als Tabs — bewusst KEIN Button, damit er nicht mit
-              dem Absenden-Button darunter verwechselt wird. */}
-          <SegmentedControl
-            options={[
-              { label: "Anmelden", value: "login" },
-              { label: "Registrieren", value: "register" },
-            ]}
-            value={authMode}
-            onChange={(mode) => setAuthMode(mode as "login" | "register")}
-          />
-          <LabeledInput label="E-Mail" value={email} onChangeText={setEmail} />
-          {authMode === "register" ? (
-            <LabeledInput label="Name" value={name} onChangeText={setName} />
-          ) : null}
-          <label className="grid min-w-0 gap-1.5 text-xs text-muted-foreground">
-            Passwort
-            <Input
-              className="text-foreground"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.currentTarget.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  void handleLogin();
-                }
-              }}
-            />
-          </label>
-          <div>
-            <Button
-              disabled={authBusy || !email.trim() || !password}
-              variant="default"
-              onClick={() => void handleLogin()}
-            >
-              {authBusy ? (
-                <Loader2 aria-hidden className="size-3.5 animate-spin" />
-              ) : (
-                <LogIn aria-hidden className="size-3.5" />
-              )}
-              {authMode === "login" ? "Anmelden" : "Konto erstellen"}
+        <EmptyState
+          title="Nicht am IFC Hub angemeldet"
+          description="Anmeldung, Registrierung und Server-URL stehen zentral in den Einstellungen unter „IFC Hub“."
+          action={
+            <Button variant="default" onClick={onOpenSettings}>
+              <LogIn aria-hidden className="size-3.5" />
+              Anmelden…
             </Button>
-          </div>
-        </div>
+          }
+        />
       </PanelShell>
     );
   }
 
-  return (
-    <PanelShell scroll>
-      <PanelHeader
-        title="IFC Hub"
-        eyebrow="Server"
-        description="Zentrale Ablage mit Projekten, Versionsständen und Commits."
-        meta={<Badge tone="info">{auth.user.name}</Badge>}
-        actions={
+  const header = (
+    <PanelHeader
+      title="IFC Hub"
+      eyebrow="Server"
+      description="Zentrale Ablage mit Projekten, Versionsständen und Commits."
+      meta={<Badge tone="info">{auth.user.name}</Badge>}
+      actions={
+        <>
+          {settingsButton}
           <Button
             title="Abmelden"
             onClick={() => {
               onAuthChange(null);
-              setProjects([]);
               setCommits([]);
             }}
           >
             <LogOut aria-hidden className="size-3.5" />
             Abmelden
           </Button>
-        }
-      />
+        </>
+      }
+    />
+  );
 
-      {connectionSection}
+  // Ohne Hub-Herkunft fehlt der Bezug zu Projekt/Modell/Branch — das Panel
+  // bietet dann nur den Einstieg an, statt eine Auswahl aufzumachen.
+  if (!origin) {
+    return (
+      <PanelShell scroll>
+        {header}
+        {error ? <InlineAlert tone="danger">{error}</InlineAlert> : null}
+        <EmptyState
+          title="Das aktive Dokument stammt nicht aus dem Hub"
+          description="Projekt, Modell und Branch ergeben sich aus dem geöffneten Dokument. Lade einen Stand aus dem Hub, um Historie, Prüfungen und Issues dazu zu sehen."
+          action={
+            onAddFromHub ? (
+              <Button variant="default" onClick={onAddFromHub}>
+                <FolderDown aria-hidden className="size-3.5" />
+                Vom IFC Hub laden…
+              </Button>
+            ) : null
+          }
+        />
+      </PanelShell>
+    );
+  }
+
+  return (
+    <PanelShell scroll>
+      {header}
+
       {error ? <InlineAlert tone="danger">{error}</InlineAlert> : null}
       {notice ? <InlineAlert tone="info">{notice}</InlineAlert> : null}
 
+      {/* Kontext des aktiven Dokuments — nur Anzeige, keine Auswahl. */}
       <Toolbar>
         <ToolbarGroup>
-          <div className="min-w-44">
-            <DropdownField
-              label="Projekt"
-              options={projects.map((project) => ({
-                value: project.slug,
-                label: project.name,
-                detail: project.slug,
-              }))}
-              value={projectSlug}
-              onChange={setProjectSlug}
-            />
-          </div>
-          <div className="min-w-44">
-            <DropdownField
-              label="Modell"
-              options={models.map((model) => ({
-                value: model.slug,
-                label: model.folder ? `${model.folder}/${model.name}` : model.name,
-                detail:
-                  model.visibility === "public" ? "öffentlich" : "privat",
-              }))}
-              value={modelSlug}
-              onChange={setModelSlug}
-            />
-          </div>
-          <div className="min-w-32">
-            <DropdownField
-              label="Branch"
-              options={branches.map((entry) => entry.name)}
-              value={branch}
-              onChange={setBranch}
-            />
-          </div>
+          <span className="min-w-0 truncate text-xs font-medium text-foreground">
+            {origin.projectName} / {origin.modelName}
+          </span>
+          <Badge tone="neutral">{origin.branch}</Badge>
         </ToolbarGroup>
         <ToolbarGroup>
           <Button
             disabled={loading}
-            title="Neu laden"
+            title="Commits, Prüfungen und Issues neu laden"
             onClick={() => {
-              void refreshProjects();
               void refreshCommits();
+              void refreshChecksAndIssues();
             }}
           >
             <RefreshCw
@@ -631,16 +526,28 @@ export function VcsPanel({
         )}
       </div>
 
-      {/* ---- Prüfungen (Actions gegen den Head-Commit) ----------------- */}
-      {modelSlug ? (
-        <CollapsibleSection
-          title="Prüfungen"
-          meta={
-            applicableActions.length
-              ? `${applicableActions.length} Action(s) für dieses Modell · ${headRuns.length} Run(s) am Head`
-              : "keine passenden Actions"
-          }
-        >
+      {/* ---- Historie / Prüfungen / Issues als Tabs -------------------- */}
+      <SegmentedControl
+        options={[
+          {
+            label: commits.length ? `Historie (${commits.length})` : "Historie",
+            value: "history",
+          },
+          {
+            label: headRuns.length ? `Prüfungen (${headRuns.length})` : "Prüfungen",
+            value: "checks",
+          },
+          {
+            label: modelIssues.length ? `Issues (${modelIssues.length})` : "Issues",
+            value: "issues",
+          },
+        ]}
+        value={tab}
+        onChange={(next) => setTab(next as PanelTab)}
+      />
+
+      {tab === "checks" ? (
+        <div className="grid gap-2">
           {applicableActions.length ? (
             <>
               <div>
@@ -711,15 +618,11 @@ export function VcsPanel({
               „Bibliothek“) verwaltet.
             </p>
           )}
-        </CollapsibleSection>
+        </div>
       ) : null}
 
-      {/* ---- Issues des Modells ---------------------------------------- */}
-      {modelSlug ? (
-        <CollapsibleSection
-          title="Issues"
-          meta={`${modelIssues.length} offen zu diesem Modell`}
-        >
+      {tab === "issues" ? (
+        <div className="grid gap-2">
           {modelIssues.length ? (
             <ul className="grid gap-1.5">
               {modelIssues.map((issue) => (
@@ -779,12 +682,12 @@ export function VcsPanel({
               Keine offenen Issues zu diesem Modell.
             </p>
           )}
-        </CollapsibleSection>
+        </div>
       ) : null}
 
-      {/* ---- Historie ------------------------------------------------- */}
-      {commits.length ? (
-        <ul className="grid gap-1.5">
+      {tab === "history" ? (
+        commits.length ? (
+          <ul className="grid gap-1.5">
           {commits.map((commit) => (
             <li
               key={commit.id}
@@ -819,19 +722,14 @@ export function VcsPanel({
               </Button>
             </li>
           ))}
-        </ul>
-      ) : (
-        <EmptyState
-          title={
-            projectSlug && modelSlug
-              ? "Noch keine Commits auf diesem Branch."
-              : projects.length
-                ? "Kein Modell ausgewählt."
-                : "Noch keine Projekte auf dem Server."
-          }
-          description="Projekte und Modelle lassen sich in der Web-Oberfläche des Servers anlegen; committet wird direkt hier aus dem Editor."
-        />
-      )}
+          </ul>
+        ) : (
+          <EmptyState
+            title={`Noch keine Commits auf „${origin.branch}“.`}
+            description="Committe den aktuellen Stand oben, um die Historie zu starten."
+          />
+        )
+      ) : null}
     </PanelShell>
   );
 }

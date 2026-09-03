@@ -1,55 +1,28 @@
 /**
  * Startseite des Editors: erscheint, solange noch kein Dokument geöffnet
- * wurde. Bietet die drei Einstiege an — IFC-Datei öffnen (Picker),
- * Drag-&-Drop und (bei erreichbarem Server) das Laden einzelner Modelle
- * oder ganzer Ordner aus einem IFC-Hub-Projekt.
+ * wurde. Bietet die Einstiege an — IFC-Datei öffnen (Picker), Drag-&-Drop,
+ * kürzlich verwendete Dateien und (bei erreichbarem Server) das Laden
+ * einzelner Modelle oder ganzer Ordner aus einem IFC-Hub-Projekt.
  */
 
 import {
-  CloudOff,
   FilePlus2,
   FileUp,
-  FolderDown,
   FolderOpen,
+  History,
   Loader2,
-  LogIn,
-  LogOut,
-  RefreshCw,
 } from "lucide-react";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  type DragEvent,
-} from "react";
+import { useState, type DragEvent } from "react";
 
-import { Input } from "@/components/ui/input";
-import { VcsApiClient, VcsApiError } from "@/vcs/client";
-import type {
-  VcsAuth,
-  VcsDocumentOrigin,
-  VcsModel,
-  VcsProject,
-  VcsSettings,
-} from "@/vcs/types";
+import type { VcsAuth, VcsSettings } from "@/vcs/types";
 
+import { HubBrowser, type HubDocument } from "./HubBrowser";
 import { NewIfcDialog, type NewIfcDraft } from "./NewIfcDialog";
-import {
-  Badge,
-  Button,
-  DropdownField,
-  InlineAlert,
-  LabeledInput,
-  SegmentedControl,
-} from "./ui";
+import { Button, InlineAlert } from "./ui";
+import type { RecentIfcFileEntry } from "./workspaceStorage";
 
 /** Ein vom Hub geladener IFC-Stand, den der Editor als Tab öffnet. */
-export interface StartPageHubDocument {
-  text: string;
-  fileName: string;
-  origin: VcsDocumentOrigin;
-}
+export type StartPageHubDocument = HubDocument;
 
 export interface StartPageProps {
   /** Name der gerade ladenden Datei (leer = nichts lädt). */
@@ -66,17 +39,38 @@ export interface StartPageProps {
   onOpenHubDocuments: (documents: StartPageHubDocument[]) => Promise<void>;
   /** Erstellt eine neue IFC-Datei aus den abgefragten Startwerten. */
   onCreateNewIfc: (draft: NewIfcDraft) => void;
+  /** Kürzlich geöffnete IFC-Dateien (neueste zuerst). */
+  recentFiles: RecentIfcFileEntry[];
+  /** Öffnet einen Eintrag aus der Liste der zuletzt verwendeten Dateien. */
+  onOpenRecentFile: (entry: RecentIfcFileEntry) => void;
 }
 
-function errorMessage(error: unknown): string {
-  if (error instanceof VcsApiError) {
-    return error.message;
+/** Relative Zeitangabe ("vor 3 Minuten", "gestern"). */
+function formatRelative(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) {
+    return iso;
   }
-  return error instanceof Error ? error.message : String(error);
-}
-
-function ifcFileName(name: string): string {
-  return /\.ifc$/i.test(name) ? name : `${name}.ifc`;
+  const diffSeconds = Math.round((then - Date.now()) / 1000);
+  const elapsed = Math.abs(diffSeconds);
+  const rtf = new Intl.RelativeTimeFormat("de", { numeric: "auto" });
+  const steps: {
+    limit: number;
+    seconds: number;
+    unit: Intl.RelativeTimeFormatUnit;
+  }[] = [
+    { limit: 60, seconds: 1, unit: "second" },
+    { limit: 3_600, seconds: 60, unit: "minute" },
+    { limit: 86_400, seconds: 3_600, unit: "hour" },
+    { limit: 604_800, seconds: 86_400, unit: "day" },
+    { limit: 2_629_800, seconds: 604_800, unit: "week" },
+    { limit: 31_557_600, seconds: 2_629_800, unit: "month" },
+    { limit: Number.POSITIVE_INFINITY, seconds: 31_557_600, unit: "year" },
+  ];
+  const step =
+    steps.find((candidate) => elapsed < candidate.limit) ??
+    steps[steps.length - 1];
+  return rtf.format(Math.trunc(diffSeconds / step.seconds), step.unit);
 }
 
 export function StartPage({
@@ -89,186 +83,11 @@ export function StartPage({
   onOpenDroppedFiles,
   onOpenHubDocuments,
   onCreateNewIfc,
+  recentFiles,
+  onOpenRecentFile,
 }: StartPageProps) {
-  const client = useMemo(
-    () => new VcsApiClient(settings, auth),
-    [settings, auth],
-  );
-
   const [dragActive, setDragActive] = useState(false);
   const [newIfcOpen, setNewIfcOpen] = useState(false);
-
-  // ---- Hub-Erreichbarkeit ------------------------------------------------
-  //
-  // null = Prüfung läuft; false = Server (oder Internet) nicht erreichbar.
-  // Der Hub-Bereich erscheint nur bei erfolgreichem Health-Check.
-  const [hubReachable, setHubReachable] = useState<boolean | null>(null);
-  const [healthNonce, setHealthNonce] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    setHubReachable(null);
-    client
-      .health()
-      .then(() => {
-        if (!cancelled) setHubReachable(true);
-      })
-      .catch(() => {
-        if (!cancelled) setHubReachable(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-    // healthNonce: manueller "Erneut prüfen"-Klick.
-  }, [client, healthNonce]);
-
-  // ---- Login -------------------------------------------------------------
-
-  const [authMode, setAuthMode] = useState<"login" | "register">("login");
-  const [email, setEmail] = useState("");
-  const [name, setName] = useState("");
-  const [password, setPassword] = useState("");
-  const [authBusy, setAuthBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const handleLogin = async () => {
-    setError(null);
-    setAuthBusy(true);
-    try {
-      const nextAuth =
-        authMode === "login"
-          ? await client.login(email.trim(), password)
-          : await client.register(
-              email.trim(),
-              name.trim() || email.trim(),
-              password,
-            );
-      onAuthChange(nextAuth);
-      setPassword("");
-    } catch (loginError) {
-      setError(errorMessage(loginError));
-    } finally {
-      setAuthBusy(false);
-    }
-  };
-
-  // ---- Projekte + Modelle ------------------------------------------------
-
-  const [projects, setProjects] = useState<VcsProject[]>([]);
-  const [projectSlug, setProjectSlug] = useState("");
-  const [models, setModels] = useState<VcsModel[]>([]);
-  const [listBusy, setListBusy] = useState(false);
-  /** Slug des Modells bzw. "folder:<pfad>" des Ordners, der gerade lädt. */
-  const [downloadKey, setDownloadKey] = useState<string | null>(null);
-
-  const refreshProjects = useCallback(async () => {
-    if (!auth || !hubReachable) {
-      setProjects([]);
-      return;
-    }
-    setListBusy(true);
-    setError(null);
-    try {
-      const list = await client.listProjects();
-      setProjects(list);
-      setProjectSlug((current) =>
-        list.some((project) => project.slug === current)
-          ? current
-          : (list[0]?.slug ?? ""),
-      );
-    } catch (listError) {
-      if (listError instanceof VcsApiError && listError.status === 401) {
-        onAuthChange(null);
-      }
-      setError(errorMessage(listError));
-    } finally {
-      setListBusy(false);
-    }
-  }, [auth, client, hubReachable, onAuthChange]);
-
-  useEffect(() => {
-    void refreshProjects();
-  }, [refreshProjects]);
-
-  useEffect(() => {
-    if (!auth || !hubReachable || !projectSlug) {
-      setModels([]);
-      return;
-    }
-    let cancelled = false;
-    void client
-      .listModels(projectSlug)
-      .then((all) => {
-        if (cancelled) return;
-        // Markdown-Dokumente sind Hub-only; im Editor zählen nur IFC-Modelle.
-        setModels(all.filter((model) => model.kind === "ifc"));
-      })
-      .catch((listError) => {
-        if (!cancelled) setError(errorMessage(listError));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [auth, client, hubReachable, projectSlug]);
-
-  const selectedProject =
-    projects.find((project) => project.slug === projectSlug) ?? null;
-
-  /** Modelle nach Ordner gruppiert ("" = Projektwurzel), Ordner sortiert. */
-  const folders = useMemo(() => {
-    const byFolder = new Map<string, VcsModel[]>();
-    for (const model of models) {
-      const key = model.folder || "";
-      const entry = byFolder.get(key);
-      if (entry) {
-        entry.push(model);
-      } else {
-        byFolder.set(key, [model]);
-      }
-    }
-    return [...byFolder.entries()].sort(([a], [b]) => a.localeCompare(b));
-  }, [models]);
-
-  /** Head-Commits der Modelle herunterladen und als Tabs öffnen. */
-  const loadHubModels = async (list: VcsModel[], busyKey: string) => {
-    const withHead = list.filter((model) => model.head);
-    if (!withHead.length) {
-      setError("Noch keine Commits — es gibt keinen Stand zum Laden.");
-      return;
-    }
-    setError(null);
-    setDownloadKey(busyKey);
-    try {
-      const documents: StartPageHubDocument[] = [];
-      for (const model of withHead) {
-        const head = model.head as NonNullable<VcsModel["head"]>;
-        const text = await client.downloadCommitText(
-          projectSlug,
-          model.slug,
-          head.id,
-        );
-        documents.push({
-          fileName: ifcFileName(model.name),
-          origin: {
-            branch: model.defaultBranch,
-            commitId: head.id,
-            modelName: model.name,
-            modelSlug: model.slug,
-            projectName: selectedProject?.name ?? projectSlug,
-            projectSlug,
-          },
-          text,
-        });
-      }
-      await onOpenHubDocuments(documents);
-    } catch (downloadError) {
-      setError(errorMessage(downloadError));
-    } finally {
-      setDownloadKey(null);
-    }
-  };
-
-  // ---- Drag & Drop -------------------------------------------------------
 
   const handleDrop = (event: DragEvent<HTMLElement>) => {
     event.preventDefault();
@@ -281,9 +100,7 @@ export function StartPage({
     }
   };
 
-  // ---- Render ------------------------------------------------------------
-
-  const busy = Boolean(loadingName) || downloadKey !== null;
+  const busy = Boolean(loadingName);
 
   return (
     <main
@@ -301,279 +118,135 @@ export function StartPage({
       }}
       onDrop={handleDrop}
     >
-      <div className="grid w-full max-w-5xl gap-6 py-8 lg:grid-cols-[1fr_1.2fr]">
-        {/* ---- Lokal: Öffnen + Drop-Zone --------------------------------- */}
-        <section className="flex flex-col gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">IFCnative</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              IFC-Dateien nativ ansehen, bearbeiten und versionieren.
-            </p>
-          </div>
-
-          <div
-            className={`grid gap-3 rounded-xl border-2 border-dashed p-6 text-center transition-colors ${
-              dragActive
-                ? "border-primary bg-primary/10"
-                : "border-border/70 bg-card/50"
-            }`}
-          >
-            <FileUp
-              aria-hidden
-              className="mx-auto size-8 text-muted-foreground/70"
-            />
-            <div className="text-sm text-foreground">
-              IFC-Dateien hierher ziehen
-            </div>
-            <div className="text-xs text-muted-foreground">
-              oder über den Datei-Picker öffnen
-            </div>
-            <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
-              <Button
-                disabled={busy}
-                variant="default"
-                onClick={onOpenFilePicker}
-              >
-                <FolderOpen aria-hidden className="size-3.5" />
-                IFC-Datei öffnen…
-              </Button>
-              <Button disabled={busy} onClick={() => setNewIfcOpen(true)}>
-                <FilePlus2 aria-hidden className="size-3.5" />
-                Neue IFC erstellen
-              </Button>
-            </div>
-          </div>
-
-          {loadingName ? (
-            <InlineAlert tone="info">
-              <span className="inline-flex items-center gap-2">
-                <Loader2 aria-hidden className="size-3.5 animate-spin" />
-                Lädt {loadingName}…
-              </span>
-            </InlineAlert>
-          ) : null}
-        </section>
-
-        {/* ---- IFC Hub ---------------------------------------------------- */}
-        <section className="flex min-w-0 flex-col gap-3 rounded-xl border border-border/60 bg-card p-4">
-          <div className="flex items-center justify-between gap-2">
+      <div className="my-auto grid w-full max-w-6xl gap-6 px-2 py-6">
+        <div className="grid items-stretch gap-6 md:grid-cols-2">
+          {/* ---- Lokal: Öffnen + Drop-Zone ------------------------------- */}
+          <section className="flex min-w-0 flex-col gap-4 rounded-2xl border border-border/60 bg-card p-6">
             <div>
-              <div className="text-sm font-semibold text-foreground">
-                IFC Hub
+              <div className="text-base font-semibold text-foreground">
+                Lokal arbeiten
               </div>
               <div className="text-xs text-muted-foreground">
-                {settings.baseUrl}
+                Dateien von diesem Rechner öffnen oder neu anlegen
               </div>
             </div>
-            {auth && hubReachable ? (
-              <div className="flex items-center gap-2">
-                <Badge tone="info">{auth.user.name}</Badge>
-                <Button
-                  title="Abmelden"
-                  onClick={() => {
-                    onAuthChange(null);
-                    setProjects([]);
-                    setModels([]);
-                  }}
-                >
-                  <LogOut aria-hidden className="size-3.5" />
-                </Button>
-              </div>
-            ) : null}
-          </div>
 
-          {error ? <InlineAlert tone="danger">{error}</InlineAlert> : null}
-
-          {hubReachable === null ? (
-            <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
-              <Loader2 aria-hidden className="size-4 animate-spin" />
-              Prüfe Server-Verbindung…
-            </div>
-          ) : hubReachable === false ? (
-            <div className="grid gap-3 py-4">
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <CloudOff aria-hidden className="size-4" />
-                IFC Hub nicht erreichbar — offline weiterarbeiten oder
-                Server-URL prüfen.
-              </div>
-              <LabeledInput
-                label="Server-URL"
-                mono
-                value={settings.baseUrl}
-                onChangeText={(baseUrl) =>
-                  onSettingsChange({ ...settings, baseUrl })
-                }
+            <div
+              className={`flex flex-1 flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-8 text-center transition-colors ${
+                dragActive
+                  ? "border-primary bg-primary/10"
+                  : "border-border/70 bg-background/60"
+              }`}
+            >
+              <FileUp
+                aria-hidden
+                className="size-10 text-muted-foreground/70"
               />
-              <div>
-                <Button onClick={() => setHealthNonce((n) => n + 1)}>
-                  <RefreshCw aria-hidden className="size-3.5" />
-                  Erneut prüfen
-                </Button>
+              <div className="text-sm text-foreground">
+                IFC-Dateien hierher ziehen
               </div>
-            </div>
-          ) : !auth ? (
-            <div className="grid gap-2">
-              {/* Moduswechsel als Tabs — bewusst KEIN Button, damit er nicht
-                  mit dem Absenden-Button darunter verwechselt wird. */}
-              <SegmentedControl
-                options={[
-                  { label: "Anmelden", value: "login" },
-                  { label: "Registrieren", value: "register" },
-                ]}
-                value={authMode}
-                onChange={(mode) => setAuthMode(mode as "login" | "register")}
-              />
-              <LabeledInput label="E-Mail" value={email} onChangeText={setEmail} />
-              {authMode === "register" ? (
-                <LabeledInput label="Name" value={name} onChangeText={setName} />
-              ) : null}
-              <label className="grid min-w-0 gap-1.5 text-xs text-muted-foreground">
-                Passwort
-                <Input
-                  className="text-foreground"
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.currentTarget.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      void handleLogin();
-                    }
-                  }}
-                />
-              </label>
-              <div>
+              <div className="text-xs text-muted-foreground">
+                oder über den Datei-Picker öffnen
+              </div>
+              <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
                 <Button
-                  disabled={authBusy || !email.trim() || !password}
+                  disabled={busy}
                   variant="default"
-                  onClick={() => void handleLogin()}
+                  onClick={onOpenFilePicker}
                 >
-                  {authBusy ? (
-                    <Loader2 aria-hidden className="size-3.5 animate-spin" />
-                  ) : (
-                    <LogIn aria-hidden className="size-3.5" />
-                  )}
-                  {authMode === "login" ? "Anmelden" : "Konto erstellen"}
+                  <FolderOpen aria-hidden className="size-3.5" />
+                  IFC-Datei öffnen…
+                </Button>
+                <Button disabled={busy} onClick={() => setNewIfcOpen(true)}>
+                  <FilePlus2 aria-hidden className="size-3.5" />
+                  Neue IFC erstellen
                 </Button>
               </div>
             </div>
-          ) : (
-            <>
-              <div className="flex flex-wrap items-end gap-2">
-                <div className="min-w-48 flex-1">
-                  <DropdownField
-                    label="Projekt"
-                    options={projects.map((project) => ({
-                      value: project.slug,
-                      label: project.name,
-                      detail: project.slug,
-                    }))}
-                    value={projectSlug}
-                    onChange={setProjectSlug}
-                  />
-                </div>
-                <Button
-                  disabled={listBusy}
-                  title="Projekte neu laden"
-                  onClick={() => void refreshProjects()}
-                >
-                  <RefreshCw
-                    aria-hidden
-                    className={listBusy ? "size-3.5 animate-spin" : "size-3.5"}
-                  />
-                </Button>
-              </div>
 
-              {folders.length ? (
-                <div className="grid max-h-96 gap-3 overflow-y-auto pr-1">
-                  {folders.map(([folder, folderModels]) => {
-                    const folderKey = `folder:${folder}`;
-                    const loadable = folderModels.filter((model) => model.head);
-                    return (
-                      <div key={folderKey} className="grid gap-1.5">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="text-xs font-medium text-muted-foreground">
-                            {folder || "Projektwurzel"} ·{" "}
-                            {folderModels.length}{" "}
-                            {folderModels.length === 1 ? "Modell" : "Modelle"}
-                          </div>
-                          {loadable.length > 1 ? (
-                            <Button
-                              disabled={busy}
-                              title={`Alle ${loadable.length} Modelle dieses Ordners als Tabs laden`}
-                              onClick={() =>
-                                void loadHubModels(folderModels, folderKey)
-                              }
-                            >
-                              {downloadKey === folderKey ? (
-                                <Loader2
-                                  aria-hidden
-                                  className="size-3.5 animate-spin"
-                                />
-                              ) : (
-                                <FolderDown aria-hidden className="size-3.5" />
-                              )}
-                              Ordner laden
-                            </Button>
-                          ) : null}
-                        </div>
-                        <ul className="grid gap-1.5">
-                          {folderModels.map((model) => (
-                            <li
-                              key={model.id}
-                              className="flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-background px-3 py-2"
-                            >
-                              <div className="min-w-0 flex-1">
-                                <div className="truncate text-sm text-foreground">
-                                  {model.name}
-                                </div>
-                                <div className="truncate text-[0.7rem] text-muted-foreground">
-                                  {model.head
-                                    ? `${model.head.id.slice(0, 8)} · ${
-                                        model.head.message || "(ohne Nachricht)"
-                                      } · ${model.head.entityCount.toLocaleString("de-DE")} Entitäten`
-                                    : "noch keine Commits"}
-                                </div>
-                              </div>
-                              <Button
-                                disabled={busy || !model.head}
-                                title={
-                                  model.head
-                                    ? `Aktuellen Stand von ${model.name} laden`
-                                    : "Noch kein Commit vorhanden"
-                                }
-                                onClick={() =>
-                                  void loadHubModels([model], model.slug)
-                                }
-                              >
-                                {downloadKey === model.slug ? (
-                                  <Loader2
-                                    aria-hidden
-                                    className="size-3.5 animate-spin"
-                                  />
-                                ) : (
-                                  <FolderDown
-                                    aria-hidden
-                                    className="size-3.5"
-                                  />
-                                )}
-                                Laden
-                              </Button>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    );
-                  })}
+            {loadingName ? (
+              <InlineAlert tone="info">
+                <span className="inline-flex items-center gap-2">
+                  <Loader2 aria-hidden className="size-3.5 animate-spin" />
+                  Lädt {loadingName}…
+                </span>
+              </InlineAlert>
+            ) : null}
+          </section>
+
+          {/* ---- Kürzlich verwendet -------------------------------------- */}
+          <section className="flex min-w-0 flex-col gap-4 rounded-2xl border border-border/60 bg-card p-6">
+            <div>
+              <div className="text-base font-semibold text-foreground">
+                Kürzlich verwendet
+              </div>
+              <div className="text-xs text-muted-foreground">
+                Zuletzt geöffnete IFC-Dateien
+              </div>
+            </div>
+
+            {recentFiles.length ? (
+              <ul className="grid max-h-72 min-w-0 content-start gap-1.5 overflow-y-auto pr-1">
+                {recentFiles.map((entry) => (
+                  <li key={entry.id} className="min-w-0">
+                    <button
+                      className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border/60 bg-background px-3 py-2 text-left transition-colors hover:border-primary/40 hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={busy}
+                      title={entry.path ?? entry.name}
+                      type="button"
+                      onClick={() => onOpenRecentFile(entry)}
+                    >
+                      <History
+                        aria-hidden
+                        className="size-4 shrink-0 text-muted-foreground/70"
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm text-foreground">
+                          {entry.name}
+                        </span>
+                        <span className="block truncate text-[0.7rem] text-muted-foreground">
+                          {[
+                            formatRelative(entry.openedAt),
+                            entry.schema || null,
+                            entry.entityCount != null
+                              ? `${entry.entityCount.toLocaleString("de-DE")} Entitäten`
+                              : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-border/50 bg-background/60 p-6 text-center">
+                <History
+                  aria-hidden
+                  className="size-8 text-muted-foreground/50"
+                />
+                <div className="text-sm text-muted-foreground">
+                  Noch keine kürzlich verwendeten Dateien
                 </div>
-              ) : (
-                <p className="py-2 text-xs text-muted-foreground">
-                  {projects.length
-                    ? "Dieses Projekt enthält noch keine IFC-Modelle."
-                    : "Noch keine Projekte auf dem Server — Projekte werden in der Web-Oberfläche angelegt."}
-                </p>
-              )}
-            </>
-          )}
+                <div className="text-xs text-muted-foreground/80">
+                  Geöffnete IFC-Dateien erscheinen hier.
+                </div>
+              </div>
+            )}
+          </section>
+        </div>
+
+        {/* ---- IFC Hub ----------------------------------------------------- */}
+        <section className="mx-auto w-full max-w-3xl min-w-0 rounded-2xl border border-border/60 bg-card p-6">
+          <HubBrowser
+            auth={auth}
+            busy={busy}
+            settings={settings}
+            onAuthChange={onAuthChange}
+            onOpenHubDocuments={onOpenHubDocuments}
+            onSettingsChange={onSettingsChange}
+          />
         </section>
       </div>
 

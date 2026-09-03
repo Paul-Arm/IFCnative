@@ -13,6 +13,7 @@ import {
   MenubarTrigger,
 } from "@/components/ui/menubar";
 import {
+  CloudDownload,
   FilePlus2,
   FolderOpen,
   HardDriveDownload,
@@ -20,6 +21,7 @@ import {
   Plus,
   Redo2,
   Save,
+  Settings,
   Trash2,
   Undo2,
   X,
@@ -33,13 +35,27 @@ import {
 import type { MosaicViewId } from "./types";
 
 /**
- * Kategorien für das Fenster-Menü. Muss alle MOSAIC_VIEW_IDS abdecken —
- * ein Panel ohne Kategorie wäre über die Menüleiste nicht mehr erreichbar.
+ * Nimmt die Kategorien des Fenster-Menüs ab und erzwingt dabei zur
+ * Compile-Zeit, dass jede MosaicViewId einer Kategorie zugeordnet ist: ein
+ * Panel ohne Kategorie wäre über die Menüleiste nicht mehr erreichbar. Fehlt
+ * eines, passt das Argument nicht mehr auf den Parametertyp — der Fehlertext
+ * nennt die fehlende Id unter `missing`.
  */
-const WINDOW_MENU_CATEGORIES: {
-  label: string;
-  ids: MosaicViewId[];
-}[] = [
+function defineWindowMenuCategories<
+  const T extends readonly { label: string; ids: readonly MosaicViewId[] }[],
+>(
+  categories: [Exclude<MosaicViewId, T[number]["ids"][number]>] extends [never]
+    ? T
+    : {
+        error: "Panel ohne Kategorie im Fenster-Menü";
+        missing: Exclude<MosaicViewId, T[number]["ids"][number]>;
+      },
+): T {
+  return categories as T;
+}
+
+/** Kategorien für das Fenster-Menü (Vollständigkeit oben erzwungen). */
+const WINDOW_MENU_CATEGORIES = defineWindowMenuCategories([
   { label: "Modell", ids: ["viewer", "structure", "inspector"] },
   {
     label: "Bauen",
@@ -49,9 +65,10 @@ const WINDOW_MENU_CATEGORIES: {
     label: "Prüfen",
     ids: ["check", "diagnostics", "resource-references", "resource-controls"],
   },
-  { label: "Portal", ids: ["portal", "portal-settings"] },
+  { label: "Portal", ids: ["portal"] },
+  { label: "Ablage", ids: ["vcs"] },
   { label: "Weitere", ids: ["recent", "notes"] },
-];
+]);
 
 export function WorkspaceMenubar({
   activeFileName,
@@ -63,11 +80,13 @@ export function WorkspaceMenubar({
   redoSummary,
   undoSummary,
   onAddIfcFiles,
+  onAddIfcFromHub,
   onCloseActiveDocument,
   onCreateWorkspace,
   onDeleteWorkspace,
   onExportIfc,
   onOpenIfc,
+  onOpenSettings,
   onRedo,
   onResetLayout,
   onSaveWorkspace,
@@ -84,11 +103,13 @@ export function WorkspaceMenubar({
   redoSummary?: string;
   undoSummary?: string;
   onAddIfcFiles(): void;
+  onAddIfcFromHub(): void;
   onCloseActiveDocument(): void;
   onCreateWorkspace(): void;
   onDeleteWorkspace(): void;
   onExportIfc(): void;
   onOpenIfc(): void;
+  onOpenSettings(): void;
   onRedo(): void;
   onResetLayout(): void;
   onSaveWorkspace(): void;
@@ -114,6 +135,14 @@ export function WorkspaceMenubar({
           <MenubarItem disabled={loading} onClick={onAddIfcFiles}>
             <FilePlus2 aria-hidden className="size-3.5" />
             IFC hinzufügen…
+          </MenubarItem>
+          <MenubarItem
+            disabled={loading}
+            title="Modelle aus einem IFC-Hub-Projekt als zusätzliche Tabs laden"
+            onClick={onAddIfcFromHub}
+          >
+            <CloudDownload aria-hidden className="size-3.5" />
+            Vom IFC Hub hinzufügen…
           </MenubarItem>
           <MenubarSeparator />
           <MenubarItem
@@ -163,6 +192,15 @@ export function WorkspaceMenubar({
             <Redo2 aria-hidden className="size-3.5" />
             Wiederholen
             <MenubarShortcut>Strg+Umschalt+Z</MenubarShortcut>
+          </MenubarItem>
+          <MenubarSeparator />
+          <MenubarItem
+            title="Zentrale Einstellungen öffnen"
+            onClick={onOpenSettings}
+          >
+            <Settings aria-hidden className="size-3.5" />
+            Einstellungen…
+            <MenubarShortcut>Strg+,</MenubarShortcut>
           </MenubarItem>
         </MenubarContent>
       </MenubarMenu>
@@ -279,7 +317,7 @@ function MenubarMenuCategory({
   withSeparator,
   onToggleView,
 }: {
-  category: { label: string; ids: MosaicViewId[] };
+  category: { label: string; ids: readonly MosaicViewId[] };
   closedIds: Set<MosaicViewId>;
   withSeparator: boolean;
   onToggleView(id: MosaicViewId, open: boolean): void;

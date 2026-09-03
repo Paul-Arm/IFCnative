@@ -20,7 +20,6 @@ export const MOSAIC_VIEW_IDS: MosaicViewId[] = [
   "recent",
   "notes",
   "portal",
-  "portal-settings",
   "vcs",
 ];
 
@@ -189,7 +188,6 @@ export const MOSAIC_TITLES: Record<MosaicViewId, string> = {
   inspector: "Inspector",
   notes: "Notizen",
   portal: "MKP Portal",
-  "portal-settings": "Portal-Einstellungen",
   "pset-batch": "Pset Batch",
   recent: "Kürzlich verwendet",
   "resource-references": "Klassifikation & Dokumente",
