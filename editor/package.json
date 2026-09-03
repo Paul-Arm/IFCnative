@@ -21,7 +21,8 @@
     "patch-thatopen-fragments": "node ./scripts/patch-thatopen-fragments.js",
     "patch-react-dnd-react19": "node ./scripts/patch-react-dnd-react19.js",
     "lint": "eslint . --max-warnings=0",
-    "test:ifc": "tsx --test tests/ifc.test.ts tests/catalog.test.ts tests/versioning.test.ts tests/portal.test.ts tests/ids.test.ts"
+    "test:ifc": "tsx --test tests/ifc.test.ts tests/catalog.test.ts tests/versioning.test.ts tests/portal.test.ts tests/ids.test.ts tests/attribution.test.ts",
+    "schema:generate": "tsx scripts/generate-fachmodell-schema.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

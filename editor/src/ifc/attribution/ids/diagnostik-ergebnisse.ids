@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  IDS (Information Delivery Specification, buildingSMART) fuer das
+  MKP-Portal-Fachmodell "Diagnostik - Untersuchungsergebnisse (UE)".
+
+  Modellierer koennen ihre IFC-Datei damit VOR dem Upload pruefen,
+  z. B. mit ifctester (IfcOpenShell), BIMcollab Zoom, Solibri oder usBIM.
+
+  Nicht in IDS abbildbar und weiterhin vom Portal geprueft:
+  - Eindeutigkeit der IDs (keine Duplikate)
+  - genau EINE Bauwerksmodell-Referenz pro Ergebnis (IDS prueft: mindestens eine)
+  - Aufloesung der Referenzen gegen das importierte Bauwerksmodell und Projekt
+-->
+<ids xmlns="http://standards.buildingsmart.org/IDS"
+     xmlns:xs="http://www.w3.org/2001/XMLSchema"
+     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+     xsi:schemaLocation="http://standards.buildingsmart.org/IDS http://standards.buildingsmart.org/IDS/1.0/ids.xsd">
+  <info>
+    <title>MKP-Portal Diagnostik Untersuchungsergebnisse</title>
+    <version>1.0.0</version>
+    <description>Anforderungen an Diagnostik-Ergebnis-IFC-Dateien (UE) fuer den Import in das MKP-Portal.</description>
+    <date>2026-08-28</date>
+  </info>
+  <specifications>
+
+    <specification name="Bauwerksbezug am IfcBuilding" identifier="DIA-UE-01" ifcVersion="IFC4"
+        description="Die Bauwerksnummer stellt den Bezug zum bereits importierten Bauwerksmodell her.">
+      <applicability minOccurs="1" maxOccurs="unbounded">
+        <entity>
+          <name><simpleValue>IFCBUILDING</simpleValue></name>
+        </entity>
+      </applicability>
+      <requirements>
+        <property cardinality="required" instructions="Muss der Bauwerksnummer des importierten Bauwerksmodells entsprechen.">
+          <propertySet>
+            <xs:restriction base="xs:string"><xs:pattern value="(Pset_|ePset_|ePSet_)?Bauwerk"/></xs:restriction>
+          </propertySet>
+          <baseName>
+            <xs:restriction base="xs:string"><xs:pattern value="_?Bauwerksnummer"/></xs:restriction>
+          </baseName>
+        </property>
+      </requirements>
+    </specification>
+
+    <specification name="Diagnostik-Projekt am IfcBuilding" identifier="DIA-UE-02" ifcVersion="IFC4"
+        description="Das Projekt-PSet identifiziert das Diagnostik-Projekt, dem die Ergebnisse zugeordnet werden.">
+      <applicability minOccurs="1" maxOccurs="unbounded">
+        <entity>
+          <name><simpleValue>IFCBUILDING</simpleValue></name>
+        </entity>
+      </applicability>
+      <requirements>
+        <property cardinality="required" instructions="Projekt-ID; muss zum bereits importierten Diagnostik-Projekt passen (Planung/Einzelergebnisse zuerst importieren).">
+          <propertySet>
+            <xs:restriction base="xs:string"><xs:pattern value="(Pset_|ePset_|ePSet_)?(Diagnostik ?)?Projekt"/></xs:restriction>
+          </propertySet>
+          <baseName>
+            <xs:restriction base="xs:string"><xs:pattern value="_?ID"/></xs:restriction>
+          </baseName>
+        </property>
+        <property cardinality="required" instructions="Projektbezeichnung ('Bezeichnung' oder 'BezeichnungProjekt').">
+          <propertySet>
+            <xs:restriction base="xs:string"><xs:pattern value="(Pset_|ePset_|ePSet_)?(Diagnostik ?)?Projekt"/></xs:restriction>
+          </propertySet>
+          <baseName>
+            <xs:restriction base="xs:string"><xs:pattern value="_?Bezeichnung(Projekt)?"/></xs:restriction>
+          </baseName>
+        </property>
+      </requirements>
+    </specification>
+
+    <specification name="Jedes 3D-Element ist ein Untersuchungsergebnis" identifier="DIA-UE-03" ifcVersion="IFC4"
+        description="In einer Ergebnis-Datei muss jedes Element das PSet 'Untersuchungsergebnisse' tragen; andere Elemente kann das Portal der Importart nicht zuordnen.">
+      <applicability minOccurs="1" maxOccurs="unbounded">
+        <entity>
+          <name><simpleValue>IFCBUILDINGELEMENTPROXY</simpleValue></name>
+        </entity>
+      </applicability>
+      <requirements>
+        <property cardinality="required" instructions="Das PSet 'Untersuchungsergebnisse' kennzeichnet ein Element als Untersuchungsergebnis (UE).">
+          <propertySet>
+            <xs:restriction base="xs:string"><xs:pattern value="(Pset_|ePset_|ePSet_)?Untersuchungsergebnisse"/></xs:restriction>
+          </propertySet>
+          <baseName>
+            <xs:restriction base="xs:string"><xs:pattern value=".*"/></xs:restriction>
+          </baseName>
+        </property>
+      </requirements>
+    </specification>
+
+    <specification name="Bauwerksmodell-Referenz je Ergebnis" identifier="DIA-UE-04" ifcVersion="IFC4"
+        description="Jedes Untersuchungsergebnis referenziert genau ein Objekt des Bauwerksmodells ueber eine ...ID_UE-Property in 'Objektinformation'.">
+      <applicability minOccurs="1" maxOccurs="unbounded">
+        <entity>
+          <name><simpleValue>IFCBUILDINGELEMENTPROXY</simpleValue></name>
+        </entity>
+        <property>
+          <propertySet>
+            <xs:restriction base="xs:string"><xs:pattern value="(Pset_|ePset_|ePSet_)?Untersuchungsergebnisse"/></xs:restriction>
+          </propertySet>
+          <baseName>
+            <xs:restriction base="xs:string"><xs:pattern value=".*"/></xs:restriction>
+          </baseName>
+        </property>
+      </applicability>
+      <requirements>
+        <property cardinality="required"
+            instructions="Genau EINE Referenz angeben, z. B. 'BauteilID1_UE', 'TeilbauwerkID_UE' (Format 'Bauwerk.Teilbauwerk') oder 'RaumID_UE'. Der Wert muss exakt einer ID im importierten Bauwerksmodell entsprechen; Eindeutigkeit und Existenz prueft das Portal.">
+          <propertySet>
+            <xs:restriction base="xs:string"><xs:pattern value="(Pset_|ePset_|ePSet_)?Objektinformation"/></xs:restriction>
+          </propertySet>
+          <baseName>
+            <xs:restriction base="xs:string"><xs:pattern value="_?(Bauwerksmodell|Bauwerk|Teilbauwerk|Bauteilgruppe|Bauteiltyp|Bauteilvariante|Bauteil|Raum|Objekt)ID[0-9]*_UE"/></xs:restriction>
+          </baseName>
+        </property>
+      </requirements>
+    </specification>
+
+  </specifications>
+</ids>

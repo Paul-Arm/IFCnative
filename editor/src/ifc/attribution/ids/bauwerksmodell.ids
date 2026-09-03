@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  IDS (Information Delivery Specification, buildingSMART) fuer das
+  MKP-Portal-Fachmodell "Bauwerksmodell".
+
+  Modellierer koennen ihre IFC-Datei damit VOR dem Upload pruefen,
+  z. B. mit ifctester (IfcOpenShell), BIMcollab Zoom, Solibri oder usBIM.
+
+  Hinweis: Die Namensmuster erlauben die in der Praxis vorkommenden
+  PSet-Praefixe (Pset_/ePset_/ePSet_) und das "_"-Praefix an Properties.
+  Nicht in IDS abbildbar und weiterhin vom Portal geprueft:
+  - Eindeutigkeit der IDs (keine Duplikate)
+  - genau ein IfcBuilding pro Datei
+  - Abgleich mit bereits importierten Daten (z. B. Bauwerksnummer)
+  - Bauteile werden ueber das Vorhandensein von 'IDEbene1' erkannt;
+    verschachtelte Kind-Elemente ohne Ebenen-Angaben ignoriert der Import
+    (ihre Geometrie wird dem Eltern-Bauteil zugeordnet) und sie werden
+    deshalb auch hier nicht geprueft.
+-->
+<ids xmlns="http://standards.buildingsmart.org/IDS"
+     xmlns:xs="http://www.w3.org/2001/XMLSchema"
+     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+     xsi:schemaLocation="http://standards.buildingsmart.org/IDS http://standards.buildingsmart.org/IDS/1.0/ids.xsd">
+  <info>
+    <title>MKP-Portal Bauwerksmodell</title>
+    <version>1.0.0</version>
+    <description>Anforderungen an Bauwerksmodell-IFC-Dateien fuer den Import in das MKP-Portal.</description>
+    <date>2026-08-28</date>
+  </info>
+  <specifications>
+
+    <specification name="Bauwerksdaten am IfcBuilding" identifier="BWM-01" ifcVersion="IFC4"
+        description="Das IfcBuilding traegt die Kennungen von Bauwerk und Teilbauwerk im PSet 'Bauwerk'.">
+      <applicability minOccurs="1" maxOccurs="unbounded">
+        <entity>
+          <name><simpleValue>IFCBUILDING</simpleValue></name>
+        </entity>
+      </applicability>
+      <requirements>
+        <property cardinality="required" instructions="Eindeutige Bauwerksnummer, z. B. '5692001'.">
+          <propertySet>
+            <xs:restriction base="xs:string"><xs:pattern value="(Pset_|ePset_|ePSet_)?Bauwerk"/></xs:restriction>
+          </propertySet>
+          <baseName>
+            <xs:restriction base="xs:string"><xs:pattern value="_?Bauwerksnummer"/></xs:restriction>
+          </baseName>
+        </property>
+        <property cardinality="required" instructions="Name des Bauwerks.">
+          <propertySet>
+            <xs:restriction base="xs:string"><xs:pattern value="(Pset_|ePset_|ePSet_)?Bauwerk"/></xs:restriction>
+          </propertySet>
+          <baseName>
+            <xs:restriction base="xs:string"><xs:pattern value="_?Bauwerksname"/></xs:restriction>
+          </baseName>
+        </property>
+        <property cardinality="required" instructions="Nummer des Teilbauwerks, z. B. '1'. Pro IFC-Datei wird ein Teilbauwerk importiert.">
+          <propertySet>
+            <xs:restriction base="xs:string"><xs:pattern value="(Pset_|ePset_|ePSet_)?Bauwerk"/></xs:restriction>
+          </propertySet>
+          <baseName>
+            <xs:restriction base="xs:string"><xs:pattern value="_?Teilbauwerksnummer"/></xs:restriction>
+          </baseName>
+        </property>
+      </requirements>
+    </specification>
+
+    <specification name="Bauteil-Kennung" identifier="BWM-02" ifcVersion="IFC4"
+        description="Jedes als Bauteil ausgezeichnete Element (IDEbene1 vorhanden) braucht die 6-teilige Bauteil-ID und alle Ebenen-Bezeichnungen.">
+      <applicability minOccurs="1" maxOccurs="unbounded">
+        <entity>
+          <name><simpleValue>IFCBUILDINGELEMENTPROXY</simpleValue></name>
+        </entity>
+        <property>
+          <propertySet>
+            <xs:restriction base="xs:string"><xs:pattern value="(Pset_|ePset_|ePSet_)?Objektinformation"/></xs:restriction>
+          </propertySet>
+          <baseName>
+            <xs:restriction base="xs:string"><xs:pattern value="_?IDEbene1"/></xs:restriction>
+          </baseName>
+        </property>
+      </applicability>
+      <requirements>
+        <property cardinality="required"
+            instructions="Format: Bauwerksnummer.Teilbauwerksnummer.IDEbene1.IDEbene2.IDEbene3.Nummer, z. B. '5692001.1.Unterbau.Widerlager.Auflagerbank.2'. Die ID muss im Modell eindeutig sein (Eindeutigkeit prueft das Portal).">
+          <propertySet>
+            <xs:restriction base="xs:string"><xs:pattern value="(Pset_|ePset_|ePSet_)?Objektinformation"/></xs:restriction>
+          </propertySet>
+          <baseName>
+            <xs:restriction base="xs:string"><xs:pattern value="_?ID"/></xs:restriction>
+          </baseName>
+          <value>
+            <xs:restriction base="xs:string"><xs:pattern value="([^.]+\.){5}[^.]+"/></xs:restriction>
+          </value>
+        </property>
+        <property cardinality="required" instructions="Bezeichnung des Bauteiltyps (Ebene 2), z. B. 'Widerlager'.">
+          <propertySet>
+            <xs:restriction base="xs:string"><xs:pattern value="(Pset_|ePset_|ePSet_)?Objektinformation"/></xs:restriction>
+          </propertySet>
+          <baseName>
+            <xs:restriction base="xs:string"><xs:pattern value="_?IDEbene2"/></xs:restriction>
+          </baseName>
+        </property>
+        <property cardinality="required" instructions="Bezeichnung der Bauteilvariante (Ebene 3), z. B. 'Auflagerbank'.">
+          <propertySet>
+            <xs:restriction base="xs:string"><xs:pattern value="(Pset_|ePset_|ePSet_)?Objektinformation"/></xs:restriction>
+          </propertySet>
+          <baseName>
+            <xs:restriction base="xs:string"><xs:pattern value="_?IDEbene3"/></xs:restriction>
+          </baseName>
+        </property>
+      </requirements>
+    </specification>
+
+    <specification name="Geschoss-Struktur vorhanden" identifier="BWM-04" ifcVersion="IFC4"
+        description="Der Import sammelt Bauteile unterhalb von IfcBuildingStorey ein; mindestens ein Geschoss muss vorhanden sein.">
+      <applicability minOccurs="1" maxOccurs="unbounded">
+        <entity>
+          <name><simpleValue>IFCBUILDINGSTOREY</simpleValue></name>
+        </entity>
+      </applicability>
+      <requirements/>
+    </specification>
+
+    <specification name="Raeume (IfcSpace)" identifier="BWM-03" ifcVersion="IFC4"
+        description="Raeume brauchen dieselbe ID-Systematik wie Bauteile.">
+      <applicability minOccurs="0" maxOccurs="unbounded">
+        <entity>
+          <name><simpleValue>IFCSPACE</simpleValue></name>
+        </entity>
+      </applicability>
+      <requirements>
+        <property cardinality="required"
+            instructions="Format: Bauwerksnummer.Teilbauwerksnummer.IDEbene1.IDEbene2.IDEbene3.Nummer, z. B. '5692001.1.Feld.Feld.Feld.1'.">
+          <propertySet>
+            <xs:restriction base="xs:string"><xs:pattern value="(Pset_|ePset_|ePSet_)?Objektinformation"/></xs:restriction>
+          </propertySet>
+          <baseName>
+            <xs:restriction base="xs:string"><xs:pattern value="_?ID"/></xs:restriction>
+          </baseName>
+          <value>
+            <xs:restriction base="xs:string"><xs:pattern value="([^.]+\.){5}[^.]+"/></xs:restriction>
+          </value>
+        </property>
+        <property cardinality="required">
+          <propertySet>
+            <xs:restriction base="xs:string"><xs:pattern value="(Pset_|ePset_|ePSet_)?Objektinformation"/></xs:restriction>
+          </propertySet>
+          <baseName>
+            <xs:restriction base="xs:string"><xs:pattern value="_?IDEbene1"/></xs:restriction>
+          </baseName>
+        </property>
+        <property cardinality="required">
+          <propertySet>
+            <xs:restriction base="xs:string"><xs:pattern value="(Pset_|ePset_|ePSet_)?Objektinformation"/></xs:restriction>
+          </propertySet>
+          <baseName>
+            <xs:restriction base="xs:string"><xs:pattern value="_?IDEbene2"/></xs:restriction>
+          </baseName>
+        </property>
+        <property cardinality="required">
+          <propertySet>
+            <xs:restriction base="xs:string"><xs:pattern value="(Pset_|ePset_|ePSet_)?Objektinformation"/></xs:restriction>
+          </propertySet>
+          <baseName>
+            <xs:restriction base="xs:string"><xs:pattern value="_?IDEbene3"/></xs:restriction>
+          </baseName>
+        </property>
+      </requirements>
+    </specification>
+
+  </specifications>
+</ids>
