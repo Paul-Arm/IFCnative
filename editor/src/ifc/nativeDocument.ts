@@ -5391,7 +5391,8 @@ export function updateNativePropertyValue(
         updates.valueType ?? readPropertyValueTypeSpec(updatedProperty);
       const nextProperty = createNativePropertyEntity(
         updatedProperty.id,
-        updatedProperty.name,
+        // Property-Entities tragen ihren Namen in args[0]; entity.name ist dort leer.
+        updates.name ?? unquote(updatedProperty.args[0]) ?? updatedProperty.name,
         updates.value,
         propertyValueType,
       );
@@ -8592,14 +8593,14 @@ function numericStepNumber(
   value: number | string | undefined,
   fallback: number,
 ) {
+  // Fehlende Angabe = Achse unverändert (vorher wurde "" zu 0 und der Fallback nie benutzt).
+  if (value === undefined || value === null || String(value).trim() === "") {
+    return formatDecimal(fallback);
+  }
   const numeric =
     typeof value === "number"
       ? value
-      : Number(
-          String(value ?? "")
-            .trim()
-            .replace(",", "."),
-        );
+      : Number(String(value).trim().replace(",", "."));
   return formatDecimal(Number.isFinite(numeric) ? numeric : fallback);
 }
 
