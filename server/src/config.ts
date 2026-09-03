@@ -10,6 +10,8 @@ export interface ServerConfig {
   /** Fest verdrahtetes Admin-Konto, wird beim Start sichergestellt. */
   adminEmail: string;
   adminPassword: string;
+  /** Jede Anfrage auf stdout protokollieren (LOG_REQUESTS=0 schaltet ab). */
+  logRequests: boolean;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
@@ -29,5 +31,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     databaseUrl: env.DATABASE_URL,
     adminEmail: env.ADMIN_EMAIL ?? "admin@ifc-hub.local",
     adminPassword: env.ADMIN_PASSWORD ?? "ifc-hub-admin",
+    logRequests: env.LOG_REQUESTS !== "0" && env.LOG_REQUESTS !== "false",
   };
 }

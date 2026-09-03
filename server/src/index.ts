@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { hashPassword } from "./auth/passwords";
 import { loadConfig } from "./config";
 import { buildApp } from "./http/app";
+import { installProcessErrorLog } from "./http/requestLog";
 import { createPgClient } from "./repository/sql/pgClient";
 import { SqliteClient } from "./repository/sql/sqliteClient";
 import { SqlRepository } from "./repository/sqlRepository";
@@ -12,6 +13,7 @@ import { FilesystemObjectStore } from "./storage/filesystemObjectStore";
 import type { ObjectStore } from "./storage/objectStore";
 
 async function main(): Promise<void> {
+  installProcessErrorLog();
   const config = loadConfig();
 
   let store: ObjectStore;
@@ -70,11 +72,12 @@ async function main(): Promise<void> {
     store,
     jwtSecret: config.jwtSecret,
     storageMode: config.storage,
+    logRequests: config.logRequests,
   });
 
   await app.listen({ port: config.port, host: config.host });
   console.log(
-    `IFC Hub listening on http://${config.host}:${config.port} (storage: ${config.storage})`,
+    `IFC Hub listening on http://${config.host}:${config.port} (storage: ${config.storage}, request log: ${config.logRequests ? "on" : "off"})`,
   );
 }
 

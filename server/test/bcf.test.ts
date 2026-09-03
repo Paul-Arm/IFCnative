@@ -17,6 +17,7 @@ async function makeApp() {
     repo: new MemoryRepository(),
     store: new FilesystemObjectStore(dir),
     jwtSecret: "test-secret",
+    logRequests: false,
   });
 }
 

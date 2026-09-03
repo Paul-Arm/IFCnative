@@ -19,6 +19,7 @@ test("issue model links carry found/fixed commit references", async () => {
     repo: new MemoryRepository(),
     store: new FilesystemObjectStore(dir),
     jwtSecret: "test-secret",
+    logRequests: false,
   });
   const register = await app.inject({
     method: "POST",
