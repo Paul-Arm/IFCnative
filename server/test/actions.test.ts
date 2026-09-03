@@ -24,7 +24,8 @@ async function makeApp() {
     pythonBin: process.execPath,
     timeoutMs: 30_000,
   });
-  const app = buildApp({ repo, store, jwtSecret: "test-secret", runner });
+  const app = buildApp({ repo, store, jwtSecret: "test-secret",
+    logRequests: false, runner });
   return { app, runner, repo };
 }
 

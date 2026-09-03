@@ -16,6 +16,7 @@ async function makeApp() {
     repo: new MemoryRepository(),
     store: new FilesystemObjectStore(dir),
     jwtSecret: "test-secret",
+    logRequests: false,
   });
   return app;
 }
@@ -886,6 +887,7 @@ test("global admin: full project access + user management", async () => {
     repo,
     store: new FilesystemObjectStore(dir),
     jwtSecret: "test-secret",
+    logRequests: false,
   });
   const owner = await register(app, "owner@example.com", "Owner");
 

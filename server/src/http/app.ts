@@ -28,6 +28,7 @@ import {
 import { FragmentsService } from "../domain/fragmentsService";
 import { IfcWorkerPool, defaultIfcWorkerPool } from "../domain/ifcWorkerPool";
 import type { ObjectStore } from "../storage/objectStore";
+import { registerRequestLog } from "./requestLog";
 import {
   actionAppliesTo,
   ADMIN_ROLES,
@@ -57,6 +58,8 @@ export interface AppDeps {
   runner?: ActionRunner;
   /** Worker-Pool für Parsing/Konvertierung; Standard: prozessweiter Pool. */
   workers?: IfcWorkerPool;
+  /** Jede Anfrage als Zeile auf stdout protokollieren (Default: an). */
+  logRequests?: boolean;
 }
 
 interface JwtPayload {
@@ -137,7 +140,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     );
   }
 
-  const app = Fastify({ logger: false, bodyLimit: 512 * 1024 * 1024 });
+  // Hinter Traefik/Dokploy steht die Client-IP in X-Forwarded-For; mit
+  // trustProxy liefert request.ip diese statt der Proxy-Adresse.
+  const app = Fastify({
+    logger: false,
+    trustProxy: true,
+    bodyLimit: 512 * 1024 * 1024,
+  });
+  registerRequestLog(app, { requests: deps.logRequests ?? true });
 
   // Beim Start liegengebliebene Runs aufräumen: "running" kann nach einem
   // Neustart nie mehr fertig werden, "queued" wird neu eingereiht.
