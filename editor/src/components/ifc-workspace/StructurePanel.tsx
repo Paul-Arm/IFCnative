@@ -839,8 +839,11 @@ function buildStructureTreeModel(
     const folderPath = `${FREE_OBJECTS_FOLDER}/`;
     model.paths.push(folderPath);
     model.expandedPaths.push(folderPath);
+    // Freie Objekte sind untereinander Geschwister im virtuellen Ordner und
+    // brauchen daher ein eigenes Segment-Set für die Kollisionsprüfung.
+    const freeSegments = new Set<string>();
     for (const entity of freeObjects) {
-      const basePath = `${FREE_OBJECTS_FOLDER}/${formatTreeSegment(entity)}`;
+      const basePath = `${FREE_OBJECTS_FOLDER}/${treeSegment(entity, freeSegments)}`;
       model.paths.push(basePath);
       model.idByPath.set(basePath, entity.id);
       model.pathById.set(entity.id, basePath);
@@ -861,14 +864,7 @@ function addTreeNode(
   const entity = document.entityById.get(node.id);
   if (!entity) return;
 
-  // "#id" hängt nur noch bei Namenskollision unter Geschwistern am Segment —
-  // die ID steht sichtbar in der Decoration-Zeile; der Pfad muss aber
-  // eindeutig bleiben (Selektion, Reveal, ID-Suche laufen über Pfade).
-  const label = sanitizeSegment(entity.name || entity.type);
-  const segment = usedSiblingSegments.has(label)
-    ? `${label} #${entity.id}`
-    : label;
-  usedSiblingSegments.add(segment);
+  const segment = treeSegment(entity, usedSiblingSegments);
   const basePath = parentPath ? `${parentPath}/${segment}` : segment;
   const hasChildren = node.children.length > 0;
   const canonicalPath = hasChildren ? `${basePath}/` : basePath;
@@ -887,6 +883,22 @@ function addTreeNode(
       addTreeNode(child, basePath, document, model, childSegments),
     );
   }
+}
+
+/**
+ * Pfad-Segment einer Entität, eindeutig unter ihren Geschwistern. "#id" hängt
+ * nur bei Namenskollision am Segment — die ID steht sichtbar in der
+ * Decoration-Zeile; der Pfad muss aber eindeutig bleiben (Selektion, Reveal
+ * und ID-Suche laufen über Pfade). Das übergebene Set sammelt die bereits
+ * vergebenen Segmente einer Geschwisterebene und wird dabei ergänzt.
+ */
+function treeSegment(entity: NativeIfcEntity, usedSiblingSegments: Set<string>) {
+  const label = sanitizeSegment(entity.name || entity.type);
+  const segment = usedSiblingSegments.has(label)
+    ? `${label} #${entity.id}`
+    : label;
+  usedSiblingSegments.add(segment);
+  return segment;
 }
 
 function sanitizeSegment(value: string) {
