@@ -50,3 +50,27 @@ test("IFC -> Fragments: Konvertierung in Node + Cache im Object Store", async ()
   const second = await service.getFragments(commit);
   assert.equal(second.toString("utf8"), "CACHED");
 });
+
+test("start(): Konvertierung im Hintergrund, status() ohne Nebenwirkung", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "ifc-frag-"));
+  const store = new FilesystemObjectStore(dir);
+  const blobKey = "models/m1/commits/c2.ifc";
+  await store.put(blobKey, ifcModelWithGeometry());
+  const service = new FragmentsService(store);
+  const commit = { ...fakeCommit(blobKey), id: "c2" };
+
+  // Vorher: nichts läuft, status() startet auch nichts.
+  assert.deepEqual(await service.status(commit), { state: "idle" });
+
+  const first = await service.start(commit);
+  assert.equal(first.state, "converting");
+  // Zweiter Start hängt sich an denselben Lauf.
+  const second = await service.start(commit);
+  assert.equal(second.state, "converting");
+
+  // Warten, bis fertig; dann liefert status() ready und die Datei liegt im Store.
+  const bytes = await service.getFragments(commit);
+  assert.ok(bytes.length > 0);
+  assert.deepEqual(await service.status(commit), { state: "ready" });
+  assert.deepEqual(await service.start(commit), { state: "ready" });
+});

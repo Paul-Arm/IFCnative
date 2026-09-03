@@ -11,8 +11,13 @@ if (!me.value?.isAdmin) {
   await navigateTo("/");
 }
 
-const { data, refresh } = await useAsyncData("admin-users", () =>
-  api<{ users: AdminUser[] }>("/admin/users"),
+const { data, refresh, status } = useAsyncData(
+  "admin-users",
+  () => api<{ users: AdminUser[] }>("/admin/users"),
+  { lazy: true },
+);
+const pending = computed(
+  () => (status.value === "pending" || status.value === "idle") && !data.value,
 );
 
 const error = ref<string | null>(null);
@@ -152,6 +157,9 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" });
             </tr>
           </thead>
           <tbody>
+            <tr v-if="pending">
+              <td colspan="5"><LoadingState text="Lade Benutzer …" /></td>
+            </tr>
             <tr v-for="entry in data?.users ?? []" :key="entry.id">
               <td>
                 {{ entry.name }}

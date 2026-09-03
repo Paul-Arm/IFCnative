@@ -193,7 +193,8 @@ export type ActionRunStatus =
   | "running"
   | "success"
   | "failed"
-  | "error";
+  | "error"
+  | "cancelled";
 
 export interface ActionRun {
   id: string;
@@ -248,4 +249,31 @@ export interface EntityFieldDiff {
   name: string | null;
   present: { before: boolean; after: boolean };
   changes: EntityFieldChange[];
+}
+
+/** Diff-Übersicht (GET …/diff): nur Zähler je Status und IFC-Typ. */
+export interface DiffTypeCount {
+  type: string;
+  count: number;
+}
+
+export interface DiffStatusOverview {
+  count: number;
+  types: DiffTypeCount[];
+}
+
+export interface DiffOverview {
+  identical: boolean;
+  unchanged: number;
+  added: DiffStatusOverview;
+  modified: DiffStatusOverview;
+  removed: DiffStatusOverview;
+}
+
+/** Seite von Diff-Einträgen (GET …/diff/entries). */
+export interface DiffPage {
+  entries: GuidDiffEntry[];
+  total: number;
+  offset: number;
+  limit: number;
 }

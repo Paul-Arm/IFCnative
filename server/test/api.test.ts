@@ -100,7 +100,24 @@ test("end-to-end: register, project, model, two commits, diff, download", async 
     headers: auth(token),
   });
   assert.equal(diff.statusCode, 200);
-  assert.equal(JSON.parse(diff.body).diff.modified.length, 1);
+  // Übersicht: nur Zähler je Status/Typ …
+  const overview = JSON.parse(diff.body).diff;
+  assert.equal(overview.modified.count, 1);
+  assert.equal(overview.modified.types.length, 1);
+  assert.equal(overview.added.count, 0);
+  // … die Einträge kommen seitenweise.
+  const page = await app.inject({
+    method: "GET",
+    url:
+      `/api/projects/acme/models/tower/diff/entries?from=${c1Body.commit.id}` +
+      `&to=${c2Body.commit.id}&status=modified&limit=50`,
+    headers: auth(token),
+  });
+  assert.equal(page.statusCode, 200);
+  const pageBody = JSON.parse(page.body).page;
+  assert.equal(pageBody.total, 1);
+  assert.equal(pageBody.entries.length, 1);
+  assert.equal(pageBody.entries[0].status, "modified");
 
   const file = await app.inject({
     method: "GET",

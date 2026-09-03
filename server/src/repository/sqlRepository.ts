@@ -1172,6 +1172,15 @@ export class SqlRepository implements Repository {
     return rows.map(toActionRun);
   }
 
+  async listUnfinishedActionRuns(): Promise<ActionRun[]> {
+    const { rows } = await this.sql.query<ActionRunRow>(
+      `select * from action_runs where status in ('queued', 'running')
+       order by created_at asc`,
+      [],
+    );
+    return rows.map(toActionRun);
+  }
+
   async updateActionRun(
     runId: string,
     patch: Partial<

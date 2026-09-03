@@ -1,18 +1,15 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import {
-  buildVersionManifest,
-  diffEntityFields,
   diffManifests,
-  parseNativeIfcText,
   type EntityFieldDiff,
   type GuidDiffSummary,
-  type NativeIfcDocument,
   type VersionManifest,
   type VersionManifestEntry,
 } from "../ifc";
 import type { ObjectStore } from "../storage/objectStore";
 import type { Commit, Model, Repository } from "../repository/types";
+import { IfcWorkerPool, defaultIfcWorkerPool } from "./ifcWorkerPool";
 
 /**
  * The versioning core: turns an uploaded IFC file into a content-addressable
@@ -22,6 +19,9 @@ import type { Commit, Model, Repository } from "../repository/types";
  * - Version manifest {globalId -> entityHash} -> repository, where entity
  *   payloads are deduped across commits (entity_objects).
  * - Diffs are cached in the repository (commits are immutable).
+ *
+ * STEP-Parsing, Hashing und Feld-Diffs laufen im IfcWorkerPool — ein
+ * 270-MB-Modell hält sonst den ganzen Server 30 s und länger an.
  */
 
 const EMPTY_MANIFEST: VersionManifest = {
@@ -50,8 +50,11 @@ function manifestFromEntries(
 export interface CreateCommitInput {
   model: Model;
   branchName: string;
-  /** Dateiinhalt: STEP-Text bei kind "ifc", Markdown bei kind "md". */
-  text: string;
+  /**
+   * Dateiinhalt: STEP bei kind "ifc", Markdown bei kind "md". Große IFCs
+   * bitte als Buffer übergeben — das erspart eine 100-MB-String-Kopie.
+   */
+  text: string | Buffer;
   authorId: string;
   message: string;
 }
@@ -63,48 +66,43 @@ export interface CreateCommitResult {
 }
 
 export class CommitService {
+  private readonly workers: IfcWorkerPool;
+
   constructor(
     private readonly repo: Repository,
     private readonly store: ObjectStore,
-  ) {}
+    workers?: IfcWorkerPool,
+  ) {
+    this.workers = workers ?? defaultIfcWorkerPool();
+  }
 
   /**
-   * Small LRU of parsed documents keyed by commit id. Commits are immutable, so
-   * a parsed doc is valid forever; expanding several entities of one diff reuses
-   * the same two parses instead of re-reading and re-parsing per entity.
+   * Kleiner LRU der vollständigen Diff-Summaries (Commit-Paar -> Summary).
+   * Die Web-UI blättert seitenweise durch ein Diff; ohne Cache würde jede
+   * Seite das (bei 150k Entities ~30 MB große) JSON aus der DB neu parsen.
    */
-  private readonly parseCache = new Map<string, NativeIfcDocument>();
-  private static readonly PARSE_CACHE_LIMIT = 8;
+  private readonly diffCache = new Map<string, GuidDiffSummary>();
+  private static readonly DIFF_CACHE_LIMIT = 8;
 
   private blobKey(modelId: string, commitId: string): string {
     return `models/${modelId}/commits/${commitId}.ifc`;
-  }
-
-  private async loadDocument(commit: Commit): Promise<NativeIfcDocument> {
-    const cached = this.parseCache.get(commit.id);
-    if (cached) {
-      return cached;
-    }
-    const buffer = await this.store.get(commit.blobKey);
-    const doc = parseNativeIfcText(buffer.toString("utf8"));
-    if (this.parseCache.size >= CommitService.PARSE_CACHE_LIMIT) {
-      const oldest = this.parseCache.keys().next().value;
-      if (oldest !== undefined) {
-        this.parseCache.delete(oldest);
-      }
-    }
-    this.parseCache.set(commit.id, doc);
-    return doc;
   }
 
   async createCommit(input: CreateCommitInput): Promise<CreateCommitResult> {
     if (input.model.kind === "md") {
       return this.createMarkdownCommit(input);
     }
-    const { model, branchName, text: ifcText, authorId, message } = input;
+    const { model, branchName, authorId, message } = input;
+    const bytes =
+      typeof input.text === "string" ? Buffer.from(input.text, "utf8") : input.text;
 
-    const doc = parseNativeIfcText(ifcText);
-    const manifest = buildVersionManifest(doc);
+    const analysis = await this.workers.analyze(bytes);
+    const manifest: VersionManifest = {
+      manifestHash: analysis.manifestHash,
+      entries: new Map(analysis.entries.map((entry) => [entry.globalId, entry])),
+      duplicateGlobalIds: analysis.duplicateGlobalIds,
+      entityCount: analysis.entityCount,
+    };
 
     let branch = await this.repo.getBranch(model.id, branchName);
     if (!branch) {
@@ -131,7 +129,7 @@ export class CommitService {
     const blobKey = this.blobKey(model.id, commitId);
     // Blob zuerst: schlägt die DB-Transaktion fehl, bleibt höchstens ein
     // harmloser verwaister Blob zurück — nie ein Commit ohne Datei.
-    await this.store.put(blobKey, ifcText, "application/x-step");
+    await this.store.put(blobKey, bytes, "application/x-step");
 
     const commit: Commit = {
       id: commitId,
@@ -140,7 +138,7 @@ export class CommitService {
       parentCommitId: parentCommit?.id ?? null,
       manifestHash: manifest.manifestHash,
       blobKey,
-      schema: doc.schema,
+      schema: analysis.schema,
       authorId,
       message,
       createdAt: new Date().toISOString(),
@@ -153,9 +151,15 @@ export class CommitService {
     // Commit + Manifest + Branch-Head atomar — kein halber Commit bei Crash.
     await this.repo.transaction(async () => {
       await this.repo.createCommit(commit);
-      await this.repo.saveManifest(commitId, [...manifest.entries.values()]);
+      await this.repo.saveManifest(commitId, analysis.entries);
       await this.repo.setBranchHead(branch.id, commit.id);
     });
+
+    if (parentCommit) {
+      // Der Diff zum Vorgänger ist gleich der erste, den die UI anfragt.
+      await this.repo.saveCachedDiff(parentCommit.id, commit.id, diff);
+      this.rememberDiff(parentCommit.id, commit.id, diff);
+    }
 
     return { commit, diff };
   }
@@ -168,7 +172,9 @@ export class CommitService {
   private async createMarkdownCommit(
     input: CreateCommitInput,
   ): Promise<CreateCommitResult> {
-    const { model, branchName, text, authorId, message } = input;
+    const { model, branchName, authorId, message } = input;
+    const text =
+      typeof input.text === "string" ? input.text : input.text.toString("utf8");
     const contentHash = createHash("sha256").update(text, "utf8").digest("hex");
 
     let branch = await this.repo.getBranch(model.id, branchName);
@@ -223,9 +229,28 @@ export class CommitService {
     return { commit, diff };
   }
 
+  private rememberDiff(fromId: string, toId: string, diff: GuidDiffSummary): void {
+    const key = `${fromId}:${toId}`;
+    this.diffCache.delete(key);
+    if (this.diffCache.size >= CommitService.DIFF_CACHE_LIMIT) {
+      const oldest = this.diffCache.keys().next().value;
+      if (oldest !== undefined) {
+        this.diffCache.delete(oldest);
+      }
+    }
+    this.diffCache.set(key, diff);
+  }
+
   async getDiff(from: Commit, to: Commit): Promise<GuidDiffSummary> {
+    const key = `${from.id}:${to.id}`;
+    const inMemory = this.diffCache.get(key);
+    if (inMemory) {
+      this.rememberDiff(from.id, to.id, inMemory);
+      return inMemory;
+    }
     const cached = await this.repo.getCachedDiff(from.id, to.id);
     if (cached) {
+      this.rememberDiff(from.id, to.id, cached);
       return cached;
     }
     const [fromEntries, toEntries] = await Promise.all([
@@ -237,24 +262,31 @@ export class CommitService {
       manifestFromEntries(toEntries, to.manifestHash),
     );
     await this.repo.saveCachedDiff(from.id, to.id, summary);
+    this.rememberDiff(from.id, to.id, summary);
     return summary;
   }
 
   /**
    * Field-level "what changed" detail for a single GlobalId between two commits.
-   * Loads (and caches) both raw IFC versions, then compares the entity's
-   * attributes, placement, geometry and property/quantity sets.
+   * Der Worker parst (und cacht) beide Stände und vergleicht Attribute,
+   * Placement, Geometrie und Property-/Quantity-Sets.
    */
   async getEntityDiff(
     from: Commit,
     to: Commit,
     globalId: string,
   ): Promise<EntityFieldDiff> {
-    const [beforeDoc, afterDoc] = await Promise.all([
-      this.loadDocument(from),
-      this.loadDocument(to),
+    const blobKeys = new Map<string, string>([
+      [from.id, from.blobKey],
+      [to.id, to.blobKey],
     ]);
-    return diffEntityFields(beforeDoc, afterDoc, globalId);
+    return this.workers.entityDiff(from.id, to.id, globalId, async (id) => {
+      const blobKey = blobKeys.get(id);
+      if (!blobKey) {
+        throw new Error(`Unbekannter Commit ${id}`);
+      }
+      return new Uint8Array(await this.store.get(blobKey));
+    });
   }
 
   async downloadIfc(commit: Commit): Promise<Buffer> {

@@ -1314,7 +1314,9 @@ function readMaterialNames(
         continue;
       }
       for (const arg of entity.args) {
-        next.push(...readRefs(arg));
+        for (const ref of readRefs(arg)) {
+          next.push(ref);
+        }
       }
     }
     frontier = next;

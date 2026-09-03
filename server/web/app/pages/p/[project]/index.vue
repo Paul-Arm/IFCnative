@@ -46,7 +46,14 @@ const { api } = useApi();
 const { user } = useAuth();
 const slug = route.params.project as string;
 
-const { data: projectData, refresh: refreshProject } = await useAsyncData(
+// Alle Daten laden "lazy": Die Seite rendert sofort und füllt sich Tab für
+// Tab, statt bis zur langsamsten der sieben Antworten leer zu bleiben.
+const {
+  data: projectData,
+  refresh: refreshProject,
+  status: projectStatus,
+  error: projectError,
+} = useAsyncData(
   `project-${slug}`,
   () =>
     api<{
@@ -55,10 +62,21 @@ const { data: projectData, refresh: refreshProject } = await useAsyncData(
       role: Role | null;
       folders: string[];
     }>(`/projects/${slug}`),
+  { lazy: true },
 );
-const { data: modelsData, refresh: refreshModels } = await useAsyncData(
+const {
+  data: modelsData,
+  refresh: refreshModels,
+  status: modelsStatus,
+} = useAsyncData(
   `models-${slug}`,
   () => api<{ models: Model[] }>(`/projects/${slug}/models`),
+  { lazy: true },
+);
+const modelsPending = computed(
+  () =>
+    (modelsStatus.value === "pending" || modelsStatus.value === "idle") &&
+    !modelsData.value,
 );
 
 const isAdmin = computed(
@@ -439,16 +457,27 @@ function downloadSceneImage(): void {
 
 // ---- Issues ------------------------------------------------------------
 
-const { data: issuesData, refresh: refreshIssues } = await useAsyncData(
+const {
+  data: issuesData,
+  refresh: refreshIssues,
+  status: issuesStatus,
+} = useAsyncData(
   `issues-${slug}`,
   () =>
     api<{ issues: Issue[]; openCount: number; closedCount: number }>(
       `/projects/${slug}/issues`,
     ),
+  { lazy: true },
 );
-const { data: labelsData, refresh: refreshLabels } = await useAsyncData(
+const issuesPending = computed(
+  () =>
+    (issuesStatus.value === "pending" || issuesStatus.value === "idle") &&
+    !issuesData.value,
+);
+const { data: labelsData, refresh: refreshLabels } = useAsyncData(
   `labels-${slug}`,
   () => api<{ labels: Label[] }>(`/projects/${slug}/labels`),
+  { lazy: true },
 );
 
 const issueFilter = ref<"open" | "closed">("open");
@@ -757,17 +786,39 @@ const roles: Role[] = ["owner", "maintainer", "contributor", "viewer"];
 
 // ---- Actions (Prüf-Workflows wie bei GitHub) ---------------------------
 
-const { data: actionsData, refresh: refreshActions } = await useAsyncData(
+const {
+  data: actionsData,
+  refresh: refreshActions,
+  status: actionsStatus,
+} = useAsyncData(
   `actions-${slug}`,
   () => api<{ actions: Action[] }>(`/projects/${slug}/actions`),
+  { lazy: true },
+);
+const actionsPending = computed(
+  () =>
+    (actionsStatus.value === "pending" || actionsStatus.value === "idle") &&
+    !actionsData.value,
 );
 // Zentrale Bibliothek für den "Aus Bibliothek"-Picker im Anlege-Formular.
-const { data: libraryData } = await useAsyncData("library", () =>
-  api<{ files: LibraryFile[] }>("/library"),
+const { data: libraryData } = useAsyncData(
+  "library",
+  () => api<{ files: LibraryFile[] }>("/library"),
+  { lazy: true },
 );
-const { data: runsData, refresh: refreshRuns } = await useAsyncData(
+const {
+  data: runsData,
+  refresh: refreshRuns,
+  status: runsStatus,
+} = useAsyncData(
   `runs-${slug}`,
   () => api<{ runs: ActionRun[] }>(`/projects/${slug}/runs`),
+  { lazy: true },
+);
+const runsPending = computed(
+  () =>
+    (runsStatus.value === "pending" || runsStatus.value === "idle") &&
+    !runsData.value,
 );
 
 const RUN_STATUS: Record<
@@ -779,6 +830,7 @@ const RUN_STATUS: Record<
   success: { label: "Bestanden", cls: "success" },
   failed: { label: "Fehlgeschlagen", cls: "danger" },
   error: { label: "Fehler", cls: "warn" },
+  cancelled: { label: "Abgebrochen", cls: "" },
 };
 
 const showActionForm = ref(false);
@@ -1008,24 +1060,32 @@ async function downloadActionFile(action: Action): Promise<void> {
   URL.revokeObjectURL(url);
 }
 
-// Run-Log wird erst beim Aufklappen geladen (kann groß sein).
-const runLogs = reactive(new Map<string, string | "loading">());
+// Run-Details (Protokoll, Live-Stream, Abbrechen) erst beim Aufklappen
+// mounten — sonst würde die Liste sofort alle Protokolle laden.
+const openRuns = reactive(new Set<string>());
 
-async function loadRunLog(run: ActionRun): Promise<void> {
-  if (runLogs.has(run.id)) return;
-  runLogs.set(run.id, "loading");
-  try {
-    const result = await api<{ run: ActionRun }>(
-      `/projects/${slug}/runs/${run.id}`,
-    );
-    runLogs.set(run.id, result.run.log ?? "");
-  } catch {
-    runLogs.delete(run.id);
+function onRunToggle(event: Event, run: ActionRun): void {
+  if ((event.target as HTMLDetailsElement).open) {
+    openRuns.add(run.id);
+  } else {
+    openRuns.delete(run.id);
   }
 }
 
-// Solange Runs laufen, den Stand alle 3 s nachladen (und fertige Logs
-// verwerfen, damit sie beim nächsten Aufklappen frisch kommen).
+/** Statuswechsel aus dem Live-Stream direkt in die Liste übernehmen. */
+function applyRunUpdate(updated: ActionRun): void {
+  const current = runsData.value?.runs.find((run) => run.id === updated.id);
+  if (current) {
+    Object.assign(current, updated);
+  }
+}
+
+async function onRunRetried(): Promise<void> {
+  await refreshRuns();
+}
+
+// Solange Runs laufen, die Liste alle 3 s nachladen (Fallback zum
+// Live-Stream der aufgeklappten Runs).
 const hasPendingRuns = computed(() =>
   (runsData.value?.runs ?? []).some(
     (run) => run.status === "queued" || run.status === "running",
@@ -1035,11 +1095,6 @@ let runsTimer: ReturnType<typeof setInterval> | undefined;
 onMounted(() => {
   runsTimer = setInterval(() => {
     if (hasPendingRuns.value) {
-      for (const run of runsData.value?.runs ?? []) {
-        if (run.status === "queued" || run.status === "running") {
-          runLogs.delete(run.id);
-        }
-      }
       void refreshRuns();
     }
   }, 3000);
@@ -1093,7 +1148,16 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
 </script>
 
 <template>
-  <div v-if="projectData">
+  <div v-if="projectError" class="alert error">
+    Projekt konnte nicht geladen werden: {{ apiErrorMessage(projectError) }}
+  </div>
+  <div v-else-if="!projectData" class="card">
+    <div class="card-header">
+      <span class="skeleton" style="width: 30%; height: 1.2em" />
+    </div>
+    <SkeletonRows :rows="5" dots />
+  </div>
+  <div v-else>
     <nav class="breadcrumbs">
       <NuxtLink to="/">Projekte</NuxtLink>
       <span>/</span>
@@ -1105,7 +1169,9 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
       <button :class="{ active: tab === 'modelle' }" @click="goTo('modelle')">
         <PhFolders :size="16" aria-hidden="true" />
         Modelle
-        <span class="counter">{{ modelsData?.models.length ?? 0 }}</span>
+        <span class="counter" :class="{ pending: modelsPending }">{{
+          modelsPending ? "" : (modelsData?.models.length ?? 0)
+        }}</span>
       </button>
       <button :class="{ active: tab === '3d' }" @click="goTo('3d')">
         <PhCubeTransparent :size="16" aria-hidden="true" />
@@ -1115,12 +1181,16 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
       <button :class="{ active: tab === 'issues' }" @click="goTo('issues')">
         <PhRecord :size="16" aria-hidden="true" />
         Issues
-        <span class="counter">{{ issuesData?.openCount ?? 0 }}</span>
+        <span class="counter" :class="{ pending: issuesPending }">{{
+          issuesPending ? "" : (issuesData?.openCount ?? 0)
+        }}</span>
       </button>
       <button :class="{ active: tab === 'actions' }" @click="goTo('actions')">
         <PhPlayCircle :size="16" aria-hidden="true" />
         Actions
-        <span class="counter">{{ actionsData?.actions.length ?? 0 }}</span>
+        <span class="counter" :class="{ pending: actionsPending }">{{
+          actionsPending ? "" : (actionsData?.actions.length ?? 0)
+        }}</span>
       </button>
       <button :class="{ active: tab === 'mitglieder' }" @click="goTo('mitglieder')">
         <PhUsers :size="16" aria-hidden="true" />
@@ -1663,7 +1733,8 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
           </form>
         </div>
 
-        <ul v-if="filteredIssues.length" class="list">
+        <SkeletonRows v-if="issuesPending" :rows="4" dots />
+        <ul v-else-if="filteredIssues.length" class="list">
           <li
             v-for="issue in filteredIssues"
             :key="issue.id"
@@ -1925,7 +1996,8 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
           </form>
         </div>
 
-        <div v-if="!actionsData?.actions.length" class="empty empty-rich">
+        <SkeletonRows v-if="actionsPending" :rows="3" />
+        <div v-else-if="!actionsData?.actions.length" class="empty empty-rich">
           <PhShieldCheck :size="30" aria-hidden="true" class="empty-icon" />
           <div class="empty-title">Noch keine Actions konfiguriert</div>
           <p>
@@ -1996,7 +2068,8 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
           <h2>Runs</h2>
           <span v-if="hasPendingRuns" class="badge accent">läuft …</span>
         </div>
-        <div v-if="!runsData?.runs.length" class="empty empty-rich">
+        <SkeletonRows v-if="runsPending" :rows="3" />
+        <div v-else-if="!runsData?.runs.length" class="empty empty-rich">
           <PhPlayCircle :size="30" aria-hidden="true" class="empty-icon" />
           <div class="empty-title">Noch keine Runs</div>
           <p>
@@ -2010,11 +2083,16 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
             v-for="run in runsData.runs"
             :key="run.id"
             class="tree-group"
-            @toggle="(e: Event) => (e.target as HTMLDetailsElement).open && loadRunLog(run)"
+            @toggle="onRunToggle($event, run)"
           >
             <summary>
               <span class="muted small">#{{ run.number }}</span>
               <span class="badge" :class="RUN_STATUS[run.status].cls">
+                <span
+                  v-if="run.status === 'running' || run.status === 'queued'"
+                  class="spinner"
+                  aria-hidden="true"
+                />
                 {{ RUN_STATUS[run.status].label }}
               </span>
               <strong>{{ run.action?.name ?? "(gelöschte Action)" }}</strong>
@@ -2032,32 +2110,29 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
               </span>
             </summary>
             <div class="tree-children">
-              <p v-if="run.summary" class="small" style="margin: 0.5rem 0">
-                {{ run.summary }}
-              </p>
-              <p
-                v-if="run.status === 'failed' || run.status === 'error'"
-                style="margin: 0.5rem 0"
+              <RunDetails
+                v-if="openRuns.has(run.id)"
+                :slug="slug"
+                :run="run"
+                :can-write="canWrite"
+                @updated="applyRunUpdate"
+                @retried="onRunRetried"
               >
-                <button
-                  class="btn small"
-                  title="Issue mit Prüfbericht, Modell-Verknüpfung und den GUIDs der Verstöße anlegen"
-                  @click="prefillIssueFromRun(run.id)"
-                >
-                  Issue aus Run erstellen
-                </button>
-                <span v-if="run.failedGuids.length" class="muted small">
-                  {{ run.failedGuids.length }} betroffene Objekte werden verlinkt
-                </span>
-              </p>
-              <div v-if="runLogs.get(run.id) === 'loading'" class="muted small">
-                Lade Protokoll …
-              </div>
-              <pre
-                v-else-if="runLogs.get(run.id)"
-                class="run-log"
-              >{{ runLogs.get(run.id) }}</pre>
-              <div v-else class="muted small">Kein Protokoll vorhanden.</div>
+                <template #actions>
+                  <template v-if="run.status === 'failed' || run.status === 'error'">
+                    <button
+                      class="btn small"
+                      title="Issue mit Prüfbericht, Modell-Verknüpfung und den GUIDs der Verstöße anlegen"
+                      @click="prefillIssueFromRun(run.id)"
+                    >
+                      Issue aus Run erstellen
+                    </button>
+                    <span v-if="run.failedGuids.length" class="muted small">
+                      {{ run.failedGuids.length }} betroffene Objekte werden verlinkt
+                    </span>
+                  </template>
+                </template>
+              </RunDetails>
             </div>
           </details>
         </div>
