@@ -126,6 +126,7 @@ test("SQLite: Issues + Labels + Zuordnungen", async () => {
     state: "open",
     kind: "bcf",
     authorId: user.id,
+    parentId: null,
   });
   assert.equal(first.number, 1);
   const second = await repo.createIssue({
@@ -135,10 +136,19 @@ test("SQLite: Issues + Labels + Zuordnungen", async () => {
     state: "open",
     kind: "virtual",
     authorId: user.id,
+    parentId: null,
   });
   assert.equal(second.number, 2);
   assert.equal(first.kind, "bcf");
   assert.equal(second.kind, "virtual");
+  // Unter-Issue: parentId setzen, lesen, wieder lösen (explizites null).
+  const nested = await repo.updateIssue(second.id, { parentId: first.id });
+  assert.equal(nested?.parentId, first.id);
+  assert.equal((await repo.getIssueById(second.id))?.parentId, first.id);
+  const untouched = await repo.updateIssue(second.id, { title: "Zweites!" });
+  assert.equal(untouched?.parentId, first.id);
+  const detached = await repo.updateIssue(second.id, { parentId: null });
+  assert.equal(detached?.parentId, null);
 
   await repo.createCommit({
     id: "ic1",
@@ -244,6 +254,7 @@ test("SQLite: Transaktionen rollen bei Fehlern zurueck; Nummern bleiben eindeuti
         state: "open",
         kind: "virtual",
         authorId: user.id,
+        parentId: null,
       },
       {
         models: [
@@ -318,6 +329,7 @@ test("SQLite: Transaktionen rollen bei Fehlern zurueck; Nummern bleiben eindeuti
         state: "open",
         kind: "virtual",
         authorId: user.id,
+        parentId: null,
       }),
     ),
   );

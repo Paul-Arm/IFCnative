@@ -76,10 +76,29 @@ damit exakt einig, was „geändert“ bedeutet.
   „Issue aus Run erstellen“ legt BCF als Art vor. Umgekehrt lassen sich
   BCF-Dateien **importieren** (`POST …/issues/bcf`, Body = Zip mit
   `Content-Type: application/zip`; Button „BCF-Import“ im Issues-Tab):
-  jedes Topic wird ein BCF-Issue mit Beschreibung, Status, Kommentaren
-  (Original-Autor/-Datum im Text) und den Viewpoint-GUIDs; Header-Dateinamen
-  werden auf gleichnamige Modelle gematcht, bereits importierte Topics
-  (gleiche Topic-Guid) übersprungen.
+  alle Topics einer Datei landen als **Unter-Issues** unter EINEM
+  virtuellen **Sammel-Issue** (Titel „BCF-Import: <Datei>“, Beschreibung
+  mit Zusammenfassung); jedes Topic wird ein BCF-Issue mit Beschreibung,
+  Status, Kommentaren (Original-Autor/-Datum im Text) und den
+  Viewpoint-GUIDs. Header-Dateinamen werden auf gleichnamige Modelle
+  gematcht (mit/ohne `.ifc`, Pfad ignoriert; bei genau einem IFC-Modell im
+  Projekt wird dieses angenommen), der Head-Commit wird als „aufgefallen
+  in“ gesetzt. Topics ohne Viewpoint werden trotzdem verortet: GlobalIds
+  hinter `GUID:` im Beschreibungstext und Objektnamen aus „Betroffenes
+  IFC-Objekt: '…'“ (MKP-Portal-Befunde) werden über das Manifest des
+  Head-Stands zu GlobalIds aufgelöst. Bereits importierte Topics (gleiche
+  Topic-Guid) werden übersprungen. Antwort:
+  `{imported, skipped, located, parent: {id, number}}`.
+- **Unter-Issues** — jedes Issue kann ein übergeordnetes Issue haben
+  (`parentId`, gleiches Projekt, keine Zyklen; Sidebar der Detailseite).
+  Listen und Details liefern `parent` (Kurzinfo) und
+  `subIssueCount`/`openSubIssueCount`, das Detail zusätzlich `subIssues`.
+  Im Issues-Tab klappen Unter-Issues unter ihrem Eltern-Issue auf; die
+  Detailseite des Eltern-Issues zeigt sie als Liste und markiert die
+  Objekte ALLER Unter-Issues gesammelt im 3D-Viewer — je Unter-Issue ein
+  Chip, der nur dessen Objekte hervorhebt (ThatOpen
+  `FragmentsManager.guidsToModelIdMap` + Highlight + `fitToItems`), auf
+  Wunsch mit `OBC.Hider` isoliert („Nur betroffene Objekte“).
 - **Issues aus Prüfungen + 3D-Verortung** — fehlgeschlagene Runs sammeln die
   **GlobalIds der Verstöße** (`failedGuids`; IDS automatisch aus den
   Verstoßobjekten, Python-Skripte per stdout-Konvention `GUID: <GlobalId>`
@@ -229,11 +248,11 @@ Auth: `Authorization: Bearer <JWT>` aus `/api/auth/login`. Fehler kommen als
 | DELETE | `/api/projects/:slug` | Projekt löschen (nur Owner; inkl. Blobs) |
 | PUT/GET | `/api/projects/:slug/image` | Projektbild (PNG, z. B. Szenen-Screenshot aus dem 3D-Tab) setzen (write) / abrufen (Mitglied) |
 | GET/POST | `/api/projects/:slug/labels` | Labels auflisten / anlegen `{name, color}` (write) |
-| GET/POST | `/api/projects/:slug/issues` | Issues (`?state=open\|closed`, mit Zählern) / eröffnen `{title, body?, kind?: "virtual"\|"bcf", assigneeIds?, modelLinks?: [{modelId, foundCommitId?, fixedCommitId?}], labelIds?, guids?}` — `modelLinks` trägt den Versionsbezug (in welchem Commit aufgefallen/behoben) (jedes Mitglied) |
+| GET/POST | `/api/projects/:slug/issues` | Issues (`?state=open\|closed`, mit Zählern) / eröffnen `{title, body?, kind?: "virtual"\|"bcf", parentId?, assigneeIds?, modelLinks?: [{modelId, foundCommitId?, fixedCommitId?}], labelIds?, guids?}` — `modelLinks` trägt den Versionsbezug (in welchem Commit aufgefallen/behoben), `parentId` macht das Issue zum Unter-Issue (jedes Mitglied) |
 | GET | `/api/projects/:slug/issues/bcf` | alle BCF-Issues als `.bcfzip` (BCF 2.1) |
-| POST | `/api/projects/:slug/issues/bcf` | `.bcfzip` importieren (Body = Zip, `application/zip`) → `{imported, skipped}` (write) |
+| POST | `/api/projects/:slug/issues/bcf` | `.bcfzip` importieren (Body = Zip, `application/zip`, `?name=` Dateiname für den Titel des Sammel-Issues) → `{imported, skipped, located, parent}` — Topics werden Unter-Issues eines virtuellen Sammel-Issues (write) |
 | GET | `/api/projects/:slug/issues/:number/bcf` | einzelnes BCF-Issue als `.bcfzip` (400 bei virtuellen Issues) |
-| GET/PATCH | `/api/projects/:slug/issues/:number` | Issue-Detail (inkl. `comments`) / ändern (Titel, Body, State, Zuordnungen — Autor oder write-Rolle) |
+| GET/PATCH | `/api/projects/:slug/issues/:number` | Issue-Detail (inkl. `comments`, `subIssues`) / ändern (Titel, Body, State, `parentId`, Zuordnungen — Autor oder write-Rolle) |
 | POST/DELETE | `/api/projects/:slug/issues/:number/comments(/:id)` | kommentieren (jedes Mitglied) / löschen (Autor oder write-Rolle) |
 | POST | `/api/projects/:slug/members` | Mitglied hinzufügen/Rolle ändern `{email, role}` (admin) |
 | DELETE | `/api/projects/:slug/members/:userId` | Mitglied entfernen (admin; Owner geschützt) |

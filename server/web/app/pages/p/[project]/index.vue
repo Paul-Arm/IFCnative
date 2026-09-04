@@ -8,15 +8,15 @@ import {
   PhCaretRight,
   PhCheckCircle,
   PhCrosshairSimple,
+  PhCube,
   PhCubeTransparent,
   PhDownloadSimple,
-  PhImage,
-  PhCube,
   PhFileMd,
   PhFolder,
   PhFolderPlus,
   PhFolders,
   PhGear,
+  PhImage,
   PhPlayCircle,
   PhPlus,
   PhRecord,
@@ -481,11 +481,45 @@ const { data: labelsData, refresh: refreshLabels } = useAsyncData(
 );
 
 const issueFilter = ref<"open" | "closed">("open");
-const filteredIssues = computed(() =>
-  (issuesData.value?.issues ?? []).filter(
+/**
+ * Zeilen der Liste: Issues im gewählten Zustand. Unter-Issues bekommen nur
+ * dann eine eigene Zeile, wenn ihr Eltern-Issue nicht selbst in der Liste
+ * steht — sonst klappen sie unter dem Eltern-Issue auf.
+ */
+const filteredIssues = computed(() => {
+  const matching = (issuesData.value?.issues ?? []).filter(
     (issue) => issue.state === issueFilter.value,
-  ),
-);
+  );
+  const visibleIds = new Set(matching.map((issue) => issue.id));
+  return matching.filter(
+    (issue) => !issue.parentId || !visibleIds.has(issue.parentId),
+  );
+});
+/** Unter-Issues je Eltern-Issue (alle Zustände, nach Nummer aufsteigend). */
+const childrenByParent = computed(() => {
+  const map = new Map<string, Issue[]>();
+  for (const issue of issuesData.value?.issues ?? []) {
+    if (!issue.parentId) continue;
+    const list = map.get(issue.parentId) ?? [];
+    list.push(issue);
+    map.set(issue.parentId, list);
+  }
+  for (const list of map.values()) {
+    list.sort((a, b) => a.number - b.number);
+  }
+  return map;
+});
+/** Aufgeklappte Eltern-Issues (Unter-Issues sichtbar). */
+const expandedIssues = reactive(new Set<string>());
+/** Vorschau-Zeilen je Eltern-Issue; der Rest lebt im Explorer der Detailseite. */
+const CHILD_PREVIEW = 8;
+function toggleChildren(issueId: string): void {
+  if (expandedIssues.has(issueId)) {
+    expandedIssues.delete(issueId);
+  } else {
+    expandedIssues.add(issueId);
+  }
+}
 
 const showIssueForm = ref(false);
 const issueTitle = ref("");
@@ -604,9 +638,15 @@ const hasBcfIssues = computed(() =>
   (issuesData.value?.issues ?? []).some((issue) => issue.kind === "bcf"),
 );
 const issueNotice = ref<string | null>(null);
+/** Sammel-Issue des letzten BCF-Imports (Link in der Erfolgsmeldung). */
+const bcfParent = ref<{ id: string; number: number } | null>(null);
 const bcfImportBusy = ref(false);
 
-/** .bcfzip hochladen — jedes Topic wird ein BCF-Issue. */
+/**
+ * .bcfzip hochladen — alle Topics werden Unter-Issues eines virtuellen
+ * Sammel-Issues (Titel aus dem Dateinamen), jedes mit 3D-Verortung, soweit
+ * der Server die Objekte über Viewpoint, GUID oder Objektname findet.
+ */
 async function importBcf(event: Event): Promise<void> {
   const input = event.target as HTMLInputElement;
   const file = input.files?.[0];
@@ -614,24 +654,32 @@ async function importBcf(event: Event): Promise<void> {
   if (!file) return;
   issueError.value = null;
   issueNotice.value = null;
+  bcfParent.value = null;
   bcfImportBusy.value = true;
   try {
-    const result = await $fetch<{ imported: number; skipped: number }>(
-      `/api/projects/${slug}/issues/bcf`,
-      {
-        method: "POST",
-        body: await file.arrayBuffer(),
-        headers: {
-          "content-type": "application/zip",
-          ...(token.value ? { authorization: `Bearer ${token.value}` } : {}),
-        },
+    const result = await $fetch<{
+      imported: number;
+      skipped: number;
+      located: number;
+      parent: { id: string; number: number } | null;
+    }>(`/api/projects/${slug}/issues/bcf?name=${encodeURIComponent(file.name)}`, {
+      method: "POST",
+      body: await file.arrayBuffer(),
+      headers: {
+        "content-type": "application/zip",
+        ...(token.value ? { authorization: `Bearer ${token.value}` } : {}),
       },
-    );
-    issueNotice.value =
-      `BCF-Import: ${result.imported} Issue(s) importiert` +
-      (result.skipped
-        ? `, ${result.skipped} übersprungen (bereits vorhanden).`
-        : ".");
+    });
+    bcfParent.value = result.parent;
+    issueNotice.value = result.parent
+      ? `BCF-Import: ${result.imported} Unter-Issue(s) angelegt, ${result.located} davon mit 3D-Verortung` +
+        (result.skipped
+          ? `, ${result.skipped} übersprungen (bereits vorhanden).`
+          : ".")
+      : `BCF-Import: nichts importiert — ${result.skipped} Topic(s) bereits vorhanden.`;
+    if (result.parent) {
+      expandedIssues.add(result.parent.id);
+    }
     await refreshIssues();
   } catch (e) {
     issueError.value = apiErrorMessage(e);
@@ -1540,7 +1588,12 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
     <!-- ================= Tab: Issues ================= -->
     <template v-else-if="tab === 'issues'">
       <div v-if="issueError" class="alert error">{{ issueError }}</div>
-      <div v-if="issueNotice" class="alert success">{{ issueNotice }}</div>
+      <div v-if="issueNotice" class="alert success">
+        {{ issueNotice }}
+        <NuxtLink v-if="bcfParent" :to="`/p/${slug}/i/${bcfParent.number}`">
+          Sammel-Issue #{{ bcfParent.number }} öffnen
+        </NuxtLink>
+      </div>
       <div class="card">
         <div class="card-header">
           <div class="tabs">
@@ -1564,7 +1617,7 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
             v-if="canWrite"
             class="btn"
             :style="bcfImportBusy ? 'opacity: 0.6; pointer-events: none' : ''"
-            title=".bcfzip importieren — jedes Topic wird ein IFC-Issue (BCF) mit Kommentaren und 3D-Verortung"
+            title=".bcfzip importieren — alle Topics werden Unter-Issues eines Sammel-Issues, jedes mit Kommentaren und 3D-Verortung"
           >
             {{ bcfImportBusy ? "Importiere …" : "BCF-Import" }}
             <input
@@ -1756,6 +1809,24 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
                 class="badge accent"
                 title="Echtes IFC-Issue — als BCF exportierbar"
               >BCF</span>
+              <button
+                v-if="issue.subIssueCount"
+                type="button"
+                class="issue-progress"
+                :title="`${issue.subIssueCount - issue.openSubIssueCount} von ${issue.subIssueCount} Unter-Issues erledigt — ${expandedIssues.has(issue.id) ? 'zuklappen' : 'aufklappen'}`"
+                @click="toggleChildren(issue.id)"
+              >
+                <PhCaretDown v-if="expandedIssues.has(issue.id)" :size="12" aria-hidden="true" />
+                <PhCaretRight v-else :size="12" aria-hidden="true" />
+                <span class="issue-progress-bar" aria-hidden="true">
+                  <span
+                    :style="{
+                      width: `${Math.round(((issue.subIssueCount - issue.openSubIssueCount) / issue.subIssueCount) * 100)}%`,
+                    }"
+                  />
+                </span>
+                {{ issue.subIssueCount - issue.openSubIssueCount }}/{{ issue.subIssueCount }}
+              </button>
               <span
                 v-for="label in issue.labels"
                 :key="label.id"
@@ -1771,11 +1842,60 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
                 <template v-if="issue.models.length">
                   · {{ issue.models.map((m) => m.name).join(", ") }}
                 </template>
+                <template v-if="issue.parent">
+                  · Unter-Issue von
+                  <NuxtLink :to="`/p/${slug}/i/${issue.parent.number}`">
+                    #{{ issue.parent.number }}
+                  </NuxtLink>
+                </template>
               </div>
             </div>
             <span v-if="issue.assignees.length" class="muted small">
               &rarr; {{ issue.assignees.map((a) => a.name).join(", ") }}
             </span>
+
+            <!-- Unter-Issues (aufgeklappt): kompakte Vorschau, Rest im Explorer -->
+            <ul
+              v-if="issue.subIssueCount && expandedIssues.has(issue.id)"
+              class="issue-children"
+            >
+              <li
+                v-for="child in (childrenByParent.get(issue.id) ?? []).slice(0, CHILD_PREVIEW)"
+                :key="child.id"
+                class="list-item"
+              >
+                <span class="issue-state" :class="child.state">
+                  <PhRecord v-if="child.state === 'open'" :size="14" />
+                  <PhCheckCircle v-else :size="14" weight="fill" />
+                </span>
+                <div class="list-item-main">
+                  <span class="mono muted small">#{{ child.number }}</span>
+                  <NuxtLink :to="`/p/${slug}/i/${child.number}`" :title="child.title">
+                    {{ issueTitleCore(child.title) }}
+                  </NuxtLink>
+                  <span
+                    v-if="issueObjectName(child.body)"
+                    class="sie-object"
+                  >{{ issueObjectName(child.body) }}</span>
+                  <span
+                    v-if="child.guids.length"
+                    class="sie-located"
+                    :title="`${child.guids.length} Objekt(e) im 3D-Viewer verortet`"
+                  >
+                    <PhCube :size="12" aria-hidden="true" />
+                    {{ child.guids.length }}
+                  </span>
+                </div>
+              </li>
+              <li
+                v-if="(childrenByParent.get(issue.id)?.length ?? 0) > CHILD_PREVIEW"
+                class="issue-children-more"
+              >
+                <NuxtLink :to="`/p/${slug}/i/${issue.number}`">
+                  Alle {{ issue.subIssueCount }} Unter-Issues mit Suche, Fehlerarten und 3D-Verortung öffnen &rarr;
+                </NuxtLink>
+              </li>
+            </ul>
           </li>
         </ul>
         <div v-else class="empty">

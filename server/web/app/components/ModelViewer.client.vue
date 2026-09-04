@@ -11,7 +11,17 @@ export interface ViewerSource {
 }
 
 const props = defineProps<{ sources: ViewerSource[] }>();
-const emit = defineEmits<{ (e: "ready"): void }>();
+/** Angeklicktes Element (null = ins Leere geklickt). */
+export interface ViewerPick {
+  globalId: string;
+  name: string;
+  category: string;
+}
+
+const emit = defineEmits<{
+  (e: "ready"): void;
+  (e: "select", pick: ViewerPick | null): void;
+}>();
 
 const container = ref<HTMLDivElement | null>(null);
 const status = ref<"laden" | "fertig" | "fehler">("laden");
@@ -116,6 +126,8 @@ function captureImage(): string | null {
 let highlightGuidsImpl:
   | ((guids: string[], zoom: boolean) => Promise<number>)
   | null = null;
+let isolateGuidsImpl: ((guids: string[]) => Promise<number>) | null = null;
+let showAllImpl: (() => Promise<void>) | null = null;
 
 /**
  * Markiert die Objekte mit den gegebenen GlobalIds (über alle geladenen
@@ -126,7 +138,28 @@ async function highlightGuids(guids: string[], zoom = true): Promise<number> {
   return (await highlightGuidsImpl?.(guids, zoom)) ?? 0;
 }
 
-defineExpose({ setVisible, focusModel, captureImage, highlightGuids });
+/**
+ * Blendet alles außer den Objekten mit den gegebenen GlobalIds aus
+ * (ThatOpen Hider.isolate). Gibt die Zahl der gefundenen Objekte zurück;
+ * bei 0 bleibt die Szene unverändert sichtbar.
+ */
+async function isolateGuids(guids: string[]): Promise<number> {
+  return (await isolateGuidsImpl?.(guids)) ?? 0;
+}
+
+/** Alle Objekte wieder einblenden (nach isolateGuids). */
+async function showAll(): Promise<void> {
+  await showAllImpl?.();
+}
+
+defineExpose({
+  setVisible,
+  focusModel,
+  captureImage,
+  highlightGuids,
+  isolateGuids,
+  showAll,
+});
 
 onMounted(async () => {
   try {
@@ -200,12 +233,23 @@ onMounted(async () => {
       renderedFaces: FRAGS.RenderedFaces.TWO,
       transparent: false,
     };
+    // Klick-Selektion (gelb) und Issue-Markierung (rot) sind getrennte
+    // Highlights: jedes setzt nur seine eigenen Elemente zurück, damit ein
+    // Klick ins Leere die Verortung nicht löscht.
+    let selectionItems: Record<string, Set<number>> | null = null;
+    let markItems: Record<string, Set<number>> | null = null;
     clearSelection = async () => {
-      await fragments.resetHighlight().catch(() => undefined);
+      if (selectionItems) {
+        await fragments.resetHighlight(selectionItems).catch(() => undefined);
+        selectionItems = null;
+      }
       await fragments.core.update(true).catch(() => undefined);
     };
 
     // GUID-Markierung (Issue-Verortung): rote Hervorhebung + Kamerafahrt.
+    // GlobalIds -> ModelIdMap übernimmt der FragmentsManager (ThatOpen
+    // guidsToModelIdMap, dieselbe Auflösung wie BCF-Viewpoints); leere
+    // Modelle werden entfernt, damit fitToItems nicht ins Leere zoomt.
     const markMaterial = {
       color: new THREE.Color(0xf85149),
       customId: "ifc-hub-issue-mark",
@@ -213,27 +257,32 @@ onMounted(async () => {
       renderedFaces: FRAGS.RenderedFaces.TWO,
       transparent: false,
     };
-    highlightGuidsImpl = async (guids, zoom) => {
+    const hider = components.get(OBC.Hider);
+    const resolveGuids = async (
+      guids: string[],
+    ): Promise<{ items: Record<string, Set<number>>; found: number }> => {
       const items: Record<string, Set<number>> = {};
       let found = 0;
-      for (const model of loaded.values()) {
-        try {
-          const localIds = await model.getLocalIdsByGuids(guids);
-          const set = new Set<number>();
-          for (const id of localIds ?? []) {
-            if (typeof id === "number") {
-              set.add(id);
-            }
-          }
+      if (!guids.length) return { items, found };
+      try {
+        const map = await fragments.guidsToModelIdMap(guids);
+        for (const [modelId, set] of Object.entries(map)) {
           if (set.size) {
-            items[model.modelId] = set;
+            items[modelId] = set;
             found += set.size;
           }
-        } catch {
-          // Modell ohne GUID-Index überspringen.
         }
+      } catch {
+        // Modelle ohne GUID-Index — nichts gefunden.
       }
-      await fragments.resetHighlight().catch(() => undefined);
+      return { items, found };
+    };
+    highlightGuidsImpl = async (guids, zoom) => {
+      const { items, found } = await resolveGuids(guids);
+      if (markItems) {
+        await fragments.resetHighlight(markItems).catch(() => undefined);
+      }
+      markItems = found ? items : null;
       if (found) {
         await fragments.highlight(markMaterial, items).catch(() => undefined);
       }
@@ -242,6 +291,18 @@ onMounted(async () => {
         await world.camera.fitToItems(items).catch(() => undefined);
       }
       return found;
+    };
+    isolateGuidsImpl = async (guids) => {
+      const { items, found } = await resolveGuids(guids);
+      if (found) {
+        await hider.isolate(items).catch(() => undefined);
+        await fragments.core.update(true).catch(() => undefined);
+      }
+      return found;
+    };
+    showAllImpl = async () => {
+      await hider.set(true).catch(() => undefined);
+      await fragments.core.update(true).catch(() => undefined);
     };
     const labelByKey = new Map(
       props.sources.map((source) => [source.key, source.label ?? source.key]),
@@ -275,12 +336,16 @@ onMounted(async () => {
           const localId = result?.localId;
           if (!localId || !Number.isFinite(localId)) {
             await closeSelection();
+            emit("select", null);
             return;
           }
           const modelId = result.fragments.modelId;
-          await fragments.resetHighlight().catch(() => undefined);
+          if (selectionItems) {
+            await fragments.resetHighlight(selectionItems).catch(() => undefined);
+          }
+          selectionItems = { [modelId]: new Set([localId]) };
           await fragments
-            .highlight(selectionMaterial, { [modelId]: new Set([localId]) })
+            .highlight(selectionMaterial, selectionItems)
             .catch(() => undefined);
           await fragments.core.update(true).catch(() => undefined);
 
@@ -337,6 +402,11 @@ onMounted(async () => {
             attributes,
             psets,
           };
+          emit("select", {
+            globalId: selection.value.globalId,
+            name: selection.value.name,
+            category: selection.value.category,
+          });
         } catch {
           // Auswahl darf den Viewer nie zum Absturz bringen.
         } finally {

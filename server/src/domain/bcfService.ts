@@ -154,10 +154,65 @@ export interface ParsedBcfTopic {
   status: "open" | "closed";
   creationAuthor: string;
   comments: ParsedBcfComment[];
-  /** IfcGuids aller Viewpoint-Komponenten des Topics. */
+  /**
+   * IfcGuids aller Viewpoint-Komponenten des Topics — plus GlobalIds, die
+   * im Beschreibungstext hinter "GUID:" stehen (MKP-Portal-Befunde).
+   */
   guids: string[];
+  /**
+   * Objektnamen aus dem Beschreibungstext ("Betroffenes IFC-Objekt:
+   * 'US.04'") — für Topics ohne Viewpoint; der Importer löst sie über den
+   * Head-Stand des Modells zu GlobalIds auf.
+   */
+  objectNames: string[];
   /** Dateinamen aus dem Markup-Header (zum Modell-Matching). */
   fileNames: string[];
+}
+
+/** IFC-GlobalId (22 Zeichen im IFC-Base64-Alphabet) hinter "GUID:" im Text. */
+const GUID_IN_TEXT = /\bGUID:\s*([0-3][0-9A-Za-z_$]{21})(?![0-9A-Za-z_$])/g;
+
+/** Objektangabe der Portal-Befunde: "Betroffenes IFC-Objekt: 'US.04'". */
+const OBJECT_NAME_IN_TEXT =
+  /Betroffenes IFC-Objekt:\s*['\u2018\u201a\u201e"\u201c]([^'\u2019\u201c\u201d"\n]+)['\u2019\u201c\u201d"]/g;
+
+/** Dateiendungen, die beim Modell-Matching der BCF-Header ignoriert werden. */
+const MODEL_FILE_EXT = /\.(ifc|ifczip|ifcxml|ifcjson|bcf|bcfzip|zip)$/i;
+
+/** ".ifc"/".bcfzip" usw. am Ende abschneiden (für Titel und Matching). */
+export function stripModelFileExt(name: string): string {
+  return name.trim().replace(MODEL_FILE_EXT, "");
+}
+
+/**
+ * Dateiname aus einem BCF-Header auf einen Vergleichsschlüssel bringen:
+ * nur der Basisname (ohne Pfad), ohne IFC-Endung, kleingeschrieben — so
+ * matcht "C:\\Export\\Tower.ifc" das Modell "Tower".
+ */
+export function normalizeModelFileName(name: string): string {
+  const base = name.replace(/\\/g, "/").split("/").pop() ?? "";
+  return stripModelFileExt(base).toLowerCase();
+}
+
+/** GlobalIds aus Freitext (z. B. Topic-Beschreibungen) — dedupliziert. */
+export function extractGuidsFromText(text: string): string[] {
+  const guids = new Set<string>();
+  for (const match of text.matchAll(GUID_IN_TEXT)) {
+    guids.add(match[1]!);
+  }
+  return [...guids];
+}
+
+/** Objektnamen ("Betroffenes IFC-Objekt: '…'") aus Freitext — dedupliziert. */
+export function extractObjectNames(text: string): string[] {
+  const names = new Set<string>();
+  for (const match of text.matchAll(OBJECT_NAME_IN_TEXT)) {
+    const name = match[1]!.trim();
+    if (name) {
+      names.add(name);
+    }
+  }
+  return [...names];
 }
 
 const TOPIC_LIMIT = 200;
@@ -181,8 +236,9 @@ export function parseBcfZip(zip: Uint8Array): ParsedBcfTopic[] {
     const folder = path.replace(/\\/g, "/").split("/")[0] ?? "";
     try {
       const topic = parseMarkup(parser, strFromU8(data), folder);
-      // Alle Viewpoints des Topic-Ordners einsammeln (typisch viewpoint.bcfv).
-      const guids = new Set<string>();
+      // Alle Viewpoints des Topic-Ordners einsammeln (typisch viewpoint.bcfv);
+      // dazu GlobalIds, die nur im Beschreibungstext stehen.
+      const guids = new Set<string>(extractGuidsFromText(topic.description));
       for (const [vpPath, vpData] of Object.entries(files)) {
         const normalized = vpPath.replace(/\\/g, "/");
         if (
@@ -245,6 +301,9 @@ function parseMarkup(
       childByName(topicEl, "creationauthor")?.textContent?.trim() ?? "",
     comments,
     guids: [],
+    objectNames: extractObjectNames(
+      childByName(topicEl, "description")?.textContent ?? "",
+    ),
     fileNames,
   };
 }

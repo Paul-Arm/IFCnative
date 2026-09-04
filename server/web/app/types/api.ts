@@ -108,6 +108,14 @@ export interface IssueModelRef {
   fixedCommit: IssueCommitRef | null;
 }
 
+/** Kurzinfo eines übergeordneten Issues. */
+export interface IssueParentRef {
+  id: string;
+  number: number;
+  title: string;
+  state: IssueState;
+}
+
 export interface Issue {
   id: string;
   projectId: string;
@@ -117,6 +125,12 @@ export interface Issue {
   state: IssueState;
   kind: IssueKind;
   authorId: string;
+  /** Übergeordnetes Issue (Unter-Issue), null = Top-Level. */
+  parentId: string | null;
+  parent: IssueParentRef | null;
+  /** Zahl der direkten Unter-Issues (gesamt / davon offen). */
+  subIssueCount: number;
+  openSubIssueCount: number;
   createdAt: string;
   updatedAt: string;
   author: ApiUser | null;

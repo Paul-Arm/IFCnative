@@ -116,6 +116,7 @@ create table if not exists issues (
   state text not null default 'open',
   kind text not null default 'virtual',
   author_id uuid not null references users(id),
+  parent_id uuid references issues(id),
   created_at text not null,
   updated_at text not null,
   unique (project_id, number)
@@ -202,6 +203,24 @@ create table if not exists action_runs (
 create index if not exists action_runs_project_idx on action_runs(project_id);
 create index if not exists action_runs_commit_idx on action_runs(commit_id);
 `;
+
+/**
+ * Spalten, die nach dem ersten Release dazukamen: werden per ALTER TABLE
+ * nachgezogen, wenn sie in einer bestehenden DB fehlen (SQLite kennt kein
+ * ADD COLUMN IF NOT EXISTS, daher separat statt im CREATE-Block).
+ */
+export const COLUMN_MIGRATIONS: {
+  table: string;
+  column: string;
+  definition: string;
+}[] = [
+  { table: "issues", column: "parent_id", definition: "uuid references issues(id)" },
+];
+
+/** Indizes auf nachgezogenen Spalten — erst nach COLUMN_MIGRATIONS anlegen. */
+export const POST_MIGRATION_SQL: string[] = [
+  "create index if not exists issues_parent_idx on issues(parent_id)",
+];
 
 export function schemaStatements(): string[] {
   return SCHEMA_SQL.split(";")

@@ -129,6 +129,12 @@ export interface Issue {
   state: IssueState;
   kind: IssueKind;
   authorId: string;
+  /**
+   * Übergeordnetes Issue (Unter-Issue wie bei GitHub "sub-issues"), null =
+   * Top-Level. Der BCF-Import hängt alle Topics einer Datei unter ein
+   * virtuelles Sammel-Issue.
+   */
+  parentId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -350,7 +356,9 @@ export interface Repository {
   listIssues(projectId: string): Promise<Issue[]>;
   updateIssue(
     issueId: string,
-    patch: Partial<Pick<Issue, "title" | "body" | "state" | "kind">>,
+    patch: Partial<
+      Pick<Issue, "title" | "body" | "state" | "kind" | "parentId">
+    >,
   ): Promise<Issue | null>;
   /** Ersetzt die jeweils übergebenen Zuordnungs-Mengen komplett. */
   setIssueLinks(issueId: string, links: Partial<IssueLinks>): Promise<void>;

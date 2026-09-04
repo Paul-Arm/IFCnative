@@ -32,7 +32,7 @@ const {
 } = useAsyncData(
   `issue-${slug}-${number}`,
   () =>
-    api<{ issue: Issue; comments: IssueComment[] }>(
+    api<{ issue: Issue; comments: IssueComment[]; subIssues: Issue[] }>(
       `/projects/${slug}/issues/${number}`,
     ),
   { lazy: true },
@@ -78,6 +78,27 @@ async function createProjectLabel(
 
 const issue = computed(() => issueData.value?.issue ?? null);
 const comments = computed(() => issueData.value?.comments ?? []);
+/** Direkte Unter-Issues (z. B. die Topics eines BCF-Imports). */
+const subIssues = computed(() => issueData.value?.subIssues ?? []);
+
+// ---- Übergeordnetes Issue (Sidebar) ------------------------------------
+
+/** Alle Issues des Projekts — Kandidaten für "Übergeordnetes Issue". */
+const { data: allIssuesData } = useAsyncData(
+  `issues-${slug}`,
+  () =>
+    api<{ issues: Issue[]; openCount: number; closedCount: number }>(
+      `/projects/${slug}/issues`,
+    ),
+  { lazy: true },
+);
+/** Weder das Issue selbst noch eines seiner Unter-Issues (Zyklus). */
+const parentCandidates = computed(() => {
+  const childIds = new Set(subIssues.value.map((sub) => sub.id));
+  return (allIssuesData.value?.issues ?? [])
+    .filter((entry) => entry.id !== issue.value?.id && !childIds.has(entry.id))
+    .sort((a, b) => a.number - b.number);
+});
 
 const hasWriteRole = computed(() => {
   const role = projectData.value?.role;
@@ -203,21 +224,42 @@ async function downloadBcf(): Promise<void> {
 }
 
 // ---- 3D-Verortung (betroffene GlobalIds im ThatOpen-Viewer) ------------
+//
+// Ein Eltern-Issue (z. B. Sammel-Issue eines BCF-Imports) zeigt die
+// Objekte ALLER Unter-Issues; je Unter-Issue ein Chip, der nur dessen
+// Objekte hervorhebt. Optional werden die markierten Objekte isoliert
+// (ThatOpen Hider), damit sie in dichten Modellen nicht untergehen.
 
 interface ViewerHandle {
   highlightGuids(guids: string[], zoom?: boolean): Promise<number>;
+  isolateGuids(guids: string[]): Promise<number>;
+  showAll(): Promise<void>;
 }
 
 const viewerRef = ref<ViewerHandle | null>(null);
 const show3d = ref(false);
-/** Wie viele der Issue-GUIDs im geladenen Stand gefunden wurden. */
+/** Wie viele der markierten GUIDs im geladenen Stand gefunden wurden. */
 const foundCount = ref<number | null>(null);
 const activeGuid = ref<string | null>(null);
+/** Nur die markierten Objekte zeigen (Rest ausblenden). */
+const isolateOnly = ref(false);
+/** Zuletzt markierte GUIDs — für das Umschalten der Isolation. */
+let currentGuids: string[] = [];
 
-/** Verknüpfte IFC-Modelle mit Head-Commit als Viewer-Quellen. */
+/** GUIDs des Issues plus die aller Unter-Issues (dedupliziert). */
+const allGuids = computed(() => {
+  const set = new Set(issue.value?.guids ?? []);
+  for (const sub of subIssues.value) {
+    for (const guid of sub.guids) set.add(guid);
+  }
+  return [...set];
+});
+
+/** Verknüpfte IFC-Modelle (Issue + Unter-Issues) mit Head als Viewer-Quellen. */
 const viewerSources = computed(() => {
   const linked = new Set(
-    (issue.value?.models ?? [])
+    [issue.value, ...subIssues.value]
+      .flatMap((entry) => entry?.models ?? [])
       .filter((model) => model.kind === "ifc")
       .map((model) => model.id),
   );
@@ -230,15 +272,46 @@ const viewerSources = computed(() => {
     }));
 });
 
+/**
+ * Eigene 3D-Karte nur für Issues OHNE Unter-Issues; ein Eltern-Issue zeigt
+ * stattdessen den Unter-Issue-Explorer (Liste + Viewer, skaliert auf
+ * hunderte Einträge).
+ */
 const canLocate = computed(() =>
-  Boolean(issue.value?.guids.length && viewerSources.value.length),
+  Boolean(
+    !subIssues.value.length &&
+      allGuids.value.length &&
+      viewerSources.value.length,
+  ),
 );
+/** GUID-Chips: nur eine Handvoll direkt, der Rest auf Klick. */
+const GUID_PREVIEW = 12;
+const showAllGuids = ref(false);
+const guidChips = computed(() =>
+  showAllGuids.value
+    ? (issue.value?.guids ?? [])
+    : (issue.value?.guids ?? []).slice(0, GUID_PREVIEW),
+);
+
+async function applyIsolation(): Promise<void> {
+  if (!viewerRef.value) return;
+  if (isolateOnly.value && currentGuids.length) {
+    await viewerRef.value.isolateGuids(currentGuids);
+  } else {
+    await viewerRef.value.showAll();
+  }
+}
+
+async function mark(guids: string[]): Promise<number> {
+  currentGuids = guids;
+  const found = (await viewerRef.value?.highlightGuids(guids, true)) ?? 0;
+  await applyIsolation();
+  return found;
+}
 
 async function markAll(): Promise<void> {
   activeGuid.value = null;
-  foundCount.value =
-    (await viewerRef.value?.highlightGuids(issue.value?.guids ?? [], true)) ??
-    0;
+  foundCount.value = await mark(allGuids.value);
 }
 
 /** Erst-Markierung nach dem Laden: kurz warten, bis die Szene steht. */
@@ -248,12 +321,14 @@ function onViewerReady(): void {
 
 async function markOne(guid: string): Promise<void> {
   activeGuid.value = guid;
-  const found = await viewerRef.value?.highlightGuids([guid], true);
+  const found = await mark([guid]);
   if (!found) {
     // Objekt existiert im aktuellen Stand nicht (mehr) — alle markieren.
     await markAll();
   }
 }
+
+watch(isolateOnly, () => void applyIsolation());
 
 // ---- Kommentare --------------------------------------------------------
 
@@ -334,6 +409,15 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
       <NuxtLink :to="{ path: `/p/${slug}`, query: { tab: 'issues' } }">
         Issues
       </NuxtLink>
+      <template v-if="issue.parent">
+        <span>/</span>
+        <NuxtLink
+          :to="`/p/${slug}/i/${issue.parent.number}`"
+          :title="issue.parent.title"
+        >
+          #{{ issue.parent.number }}
+        </NuxtLink>
+      </template>
       <span>/</span>
       <strong>#{{ issue.number }}</strong>
     </nav>
@@ -374,8 +458,26 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
         {{ dateFmt.format(new Date(issue.createdAt)) }}
         · {{ comments.length }}
         {{ comments.length === 1 ? "Kommentar" : "Kommentare" }}
+        <template v-if="issue.parent">
+          · Unter-Issue von
+          <NuxtLink :to="`/p/${slug}/i/${issue.parent.number}`">
+            #{{ issue.parent.number }} {{ issue.parent.title }}
+          </NuxtLink>
+        </template>
+        <template v-else-if="issue.subIssueCount">
+          · {{ issue.subIssueCount - issue.openSubIssueCount }} von
+          {{ issue.subIssueCount }} Unter-Issues erledigt
+        </template>
       </span>
     </div>
+
+    <!-- ============ Unter-Issue-Explorer (Sammel-Issue) ============ -->
+    <SubIssueExplorer
+      v-if="subIssues.length"
+      :slug="slug"
+      :sub-issues="subIssues"
+      :sources="viewerSources"
+    />
 
     <div class="issue-layout">
       <!-- ============ Hauptspalte: Body + Kommentare ============ -->
@@ -414,13 +516,21 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
           <div class="card-header">
             <h2 style="margin: 0">3D-Verortung</h2>
             <span class="badge accent">
-              {{ issue!.guids.length }}
-              {{ issue!.guids.length === 1 ? "Objekt" : "Objekte" }}
+              {{ allGuids.length }}
+              {{ allGuids.length === 1 ? "Objekt" : "Objekte" }}
             </span>
             <span v-if="foundCount !== null" class="muted small">
-              {{ foundCount }} im aktuellen Stand gefunden
+              · {{ foundCount }} im aktuellen Stand gefunden
             </span>
             <span class="topbar-spacer" />
+            <label
+              v-if="show3d"
+              class="muted small"
+              style="display: inline-flex; align-items: center; gap: 0.35rem; white-space: nowrap"
+            >
+              <input v-model="isolateOnly" type="checkbox" />
+              Nur betroffene Objekte
+            </label>
             <button @click="show3d = !show3d">
               {{ show3d ? "3D ausblenden" : "In 3D anzeigen" }}
             </button>
@@ -429,7 +539,7 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
             <div class="issue-guid-bar">
               <button class="btn small" @click="markAll">Alle markieren</button>
               <button
-                v-for="guid in issue!.guids"
+                v-for="guid in guidChips"
                 :key="guid"
                 class="guid-chip"
                 :class="{ active: activeGuid === guid }"
@@ -437,6 +547,13 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
                 @click="markOne(guid)"
               >
                 {{ guid }}
+              </button>
+              <button
+                v-if="issue!.guids.length > GUID_PREVIEW"
+                class="guid-chip"
+                @click="showAllGuids = !showAllGuids"
+              >
+                {{ showAllGuids ? "weniger" : `+${issue!.guids.length - GUID_PREVIEW} weitere` }}
               </button>
             </div>
             <ModelViewer
@@ -523,6 +640,38 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
           >
             Als BCF exportieren
           </button>
+        </section>
+
+        <section class="issue-side-section">
+          <h4>Übergeordnetes Issue</h4>
+          <select
+            v-if="canEdit"
+            :value="issue.parentId ?? ''"
+            title="Dieses Issue einem anderen Issue unterordnen (Unter-Issue)"
+            @change="
+              patchIssue({
+                parentId:
+                  ($event.target as HTMLSelectElement).value || null,
+              })
+            "
+          >
+            <option value="">— keines (Top-Level) —</option>
+            <option
+              v-for="candidate in parentCandidates"
+              :key="candidate.id"
+              :value="candidate.id"
+            >
+              #{{ candidate.number }} {{ candidate.title }}
+            </option>
+          </select>
+          <p v-if="issue.parent" class="small" style="margin: 0.35rem 0 0">
+            <NuxtLink :to="`/p/${slug}/i/${issue.parent.number}`">
+              #{{ issue.parent.number }} {{ issue.parent.title }}
+            </NuxtLink>
+          </p>
+          <p v-else-if="!canEdit" class="muted small" style="margin: 0">
+            Keines
+          </p>
         </section>
 
         <section class="issue-side-section">

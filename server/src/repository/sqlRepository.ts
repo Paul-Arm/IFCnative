@@ -4,7 +4,11 @@ import type {
   GuidDiffSummary,
   VersionManifestEntry,
 } from "../ifc";
-import { schemaStatements } from "./sql/schema";
+import {
+  COLUMN_MIGRATIONS,
+  POST_MIGRATION_SQL,
+  schemaStatements,
+} from "./sql/schema";
 import type { SqlClient } from "./sql/sqlClient";
 import type {
   Action,
@@ -267,6 +271,31 @@ export class SqlRepository implements Repository {
   async migrate(): Promise<void> {
     for (const statement of schemaStatements()) {
       await this.sql.query(statement);
+    }
+    for (const { table, column, definition } of COLUMN_MIGRATIONS) {
+      await this.ensureColumn(table, column, definition);
+    }
+    for (const statement of POST_MIGRATION_SQL) {
+      await this.sql.query(statement);
+    }
+  }
+
+  /** Spalte nachziehen, falls sie fehlt (idempotent auf pg + SQLite). */
+  private async ensureColumn(
+    table: string,
+    column: string,
+    definition: string,
+  ): Promise<void> {
+    try {
+      await this.sql.query(
+        `alter table ${table} add column ${column} ${definition}`,
+      );
+    } catch (error) {
+      const message = String((error as { message?: string })?.message ?? error);
+      // pg: 42701 "column … already exists"; SQLite: "duplicate column name".
+      if (!/already exists|duplicate column/i.test(message)) {
+        throw error;
+      }
     }
   }
 
@@ -675,6 +704,7 @@ export class SqlRepository implements Repository {
     state: IssueState;
     kind: IssueKind;
     author_id: string;
+    parent_id?: string | null;
     created_at: string;
     updated_at: string;
   }): Issue {
@@ -687,6 +717,7 @@ export class SqlRepository implements Repository {
       state: row.state,
       kind: row.kind,
       authorId: row.author_id,
+      parentId: row.parent_id ?? null,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -729,8 +760,8 @@ export class SqlRepository implements Repository {
       updatedAt: now,
     };
     await this.sql.query(
-      `insert into issues (id, project_id, number, title, body, state, kind, author_id, created_at, updated_at)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      `insert into issues (id, project_id, number, title, body, state, kind, author_id, parent_id, created_at, updated_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
       [
         issue.id,
         issue.projectId,
@@ -740,6 +771,7 @@ export class SqlRepository implements Repository {
         issue.state,
         issue.kind,
         issue.authorId,
+        issue.parentId,
         issue.createdAt,
         issue.updatedAt,
       ],
@@ -794,14 +826,20 @@ export class SqlRepository implements Repository {
 
   async updateIssue(
     issueId: string,
-    patch: Partial<Pick<Issue, "title" | "body" | "state" | "kind">>,
+    patch: Partial<
+      Pick<Issue, "title" | "body" | "state" | "kind" | "parentId">
+    >,
   ): Promise<Issue | null> {
+    // parentId darf explizit auf null gesetzt werden (Unter-Issue lösen) —
+    // daher kein coalesce, sondern ein "Setzen?"-Flag.
+    const setParent = patch.parentId !== undefined ? 1 : 0;
     const { rows } = await this.sql.query<Parameters<SqlRepository["toIssue"]>[0]>(
       `update issues set
          title = coalesce($2, title),
          body = coalesce($3, body),
          state = coalesce($4, state),
          kind = coalesce($5, kind),
+         parent_id = case when $7 = 1 then $8 else parent_id end,
          updated_at = $6
        where id = $1
        returning *`,
@@ -812,6 +850,8 @@ export class SqlRepository implements Repository {
         patch.state ?? null,
         patch.kind ?? null,
         this.now(),
+        setParent,
+        patch.parentId ?? null,
       ],
     );
     return rows[0] ? this.toIssue(rows[0]) : null;

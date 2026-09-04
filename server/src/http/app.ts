@@ -16,8 +16,11 @@ import {
 } from "../domain/actionRunner";
 import {
   buildBcfZip,
+  normalizeModelFileName,
   parseBcfZip,
+  stripModelFileExt,
   type BcfTopicInput,
+  type ParsedBcfTopic,
 } from "../domain/bcfService";
 import { CommitService } from "../domain/commitService";
 import {
@@ -655,11 +658,37 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }
         : null;
     };
+    // Unter-Issues: Eltern-Kurzinfo + Zähler (offen/gesamt) je Issue.
+    const allIssues = await repo.listIssues(projectId);
+    const issueById = new Map(allIssues.map((entry) => [entry.id, entry]));
+    const childCounts = new Map<string, { total: number; open: number }>();
+    for (const entry of allIssues) {
+      if (!entry.parentId) continue;
+      const counts = childCounts.get(entry.parentId) ?? { total: 0, open: 0 };
+      counts.total += 1;
+      if (entry.state === "open") counts.open += 1;
+      childCounts.set(entry.parentId, counts);
+    }
+    const parentRef = (id: string | null) => {
+      const parent = id ? issueById.get(id) : undefined;
+      return parent
+        ? {
+            id: parent.id,
+            number: parent.number,
+            title: parent.title,
+            state: parent.state,
+          }
+        : null;
+    };
     return issues.map((issue) => {
       const link = links.get(issue.id);
       const author = users.get(issue.authorId);
+      const counts = childCounts.get(issue.id) ?? { total: 0, open: 0 };
       return {
         ...issue,
+        parent: parentRef(issue.parentId),
+        subIssueCount: counts.total,
+        openSubIssueCount: counts.open,
         author: author ? publicUser(author) : null,
         assignees: (link?.assigneeIds ?? [])
           .map((id) => users.get(id))
@@ -773,6 +802,46 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return links;
   }
 
+  /**
+   * Übergeordnetes Issue aus dem Request prüfen: muss im selben Projekt
+   * liegen, darf nicht das Issue selbst sein und keinen Zyklus bilden.
+   * null = Top-Level. Gibt undefined zurück, wenn die Antwort schon
+   * gesendet wurde.
+   */
+  async function resolveParentId(
+    project: Project,
+    raw: unknown,
+    selfId: string | null,
+    reply: FastifyReply,
+  ): Promise<string | null | undefined> {
+    if (raw === null) return null;
+    if (typeof raw !== "string") {
+      reply.code(400).send({ error: "parentId must be an issue id or null" });
+      return undefined;
+    }
+    const parent = await repo.getIssueById(raw);
+    if (!parent || parent.projectId !== project.id) {
+      reply.code(400).send({ error: "Unknown parent issue" });
+      return undefined;
+    }
+    if (selfId && parent.id === selfId) {
+      reply
+        .code(400)
+        .send({ error: "Issue kann nicht sein eigenes Unter-Issue sein" });
+      return undefined;
+    }
+    // Zyklus: Vorfahren des gewünschten Elternteils dürfen nicht das Issue sein.
+    let cursor: Issue | null = parent;
+    for (let depth = 0; cursor?.parentId && depth < 100; depth += 1) {
+      if (selfId && cursor.parentId === selfId) {
+        reply.code(400).send({ error: "Zyklus in Unter-Issues" });
+        return undefined;
+      }
+      cursor = await repo.getIssueById(cursor.parentId);
+    }
+    return parent.id;
+  }
+
   app.get(`${api}/projects/:slug/issues`, async (request, reply) => {
     const { slug } = request.params as { slug: string };
     const project = await resolveProject(slug, reply);
@@ -805,6 +874,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       title?: string;
       body?: string;
       kind?: string;
+      parentId?: string | null;
     } & IssueLinksBody;
     const title = body.title?.trim();
     if (!title || title.length > 200) {
@@ -813,6 +883,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (body.kind !== undefined && !["virtual", "bcf"].includes(body.kind)) {
       return reply.code(400).send({ error: "kind must be 'virtual' or 'bcf'" });
     }
+    const parentId =
+      body.parentId === undefined
+        ? null
+        : await resolveParentId(project, body.parentId, null, reply);
+    if (parentId === undefined) return reply;
     const links = await validateIssueLinks(project, body, reply);
     if (!links) return reply;
     // Issue + Zuordnungen atomar (inkl. Retry bei Nummern-Races).
@@ -824,6 +899,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         state: "open",
         kind: (body.kind as Issue["kind"] | undefined) ?? "virtual",
         authorId: user.id,
+        parentId,
       },
       links,
     );
@@ -853,8 +929,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       return reply.code(404).send({ error: "Issue not found" });
     }
     const [enriched] = await enrichIssues(project.id, [issue]);
+    const children = (await repo.listIssues(project.id))
+      .filter((entry) => entry.parentId === issue.id)
+      .sort((a, b) => a.number - b.number);
     return reply.send({
       issue: enriched,
+      subIssues: await enrichIssues(project.id, children),
       comments: await enrichComments(issue.id),
     });
   });
@@ -945,6 +1025,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       body?: string;
       state?: string;
       kind?: string;
+      parentId?: string | null;
     } & IssueLinksBody;
     if (body.state && !["open", "closed"].includes(body.state)) {
       return reply.code(400).send({ error: "Invalid state" });
@@ -955,6 +1036,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (body.title !== undefined && !body.title.trim()) {
       return reply.code(400).send({ error: "Title must not be empty" });
     }
+    const parentId =
+      body.parentId === undefined
+        ? undefined
+        : await resolveParentId(project, body.parentId, issue.id, reply);
+    if (body.parentId !== undefined && parentId === undefined) return reply;
     const links = await validateIssueLinks(project, body, reply);
     if (!links) return reply;
     const updated = await repo.updateIssue(issue.id, {
@@ -962,6 +1048,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       body: body.body,
       state: body.state as "open" | "closed" | undefined,
       kind: body.kind as Issue["kind"] | undefined,
+      parentId,
     });
     await repo.setIssueLinks(issue.id, links);
     const [enriched] = await enrichIssues(project.id, [updated ?? issue]);
@@ -1059,20 +1146,75 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         .code(400)
         .send({ error: "Kein BCF-Topic in der Datei gefunden" });
     }
-    // Modell-Matching über die Header-Dateinamen (Name bzw. Name + .ifc).
+    // Modell-Matching über die Header-Dateinamen: Name oder Slug, mit oder
+    // ohne Endung, Pfadanteile ignoriert. Ohne Treffer und bei genau einem
+    // IFC-Modell im Projekt wird dieses angenommen (Portal-BCFs nennen die
+    // Datei meist ohne Endung).
     const models = await repo.listModels(project.id);
+    const ifcModels = models.filter((model) => model.kind === "ifc");
     const modelIdByName = new Map<string, string>();
     for (const model of models) {
-      modelIdByName.set(model.name.toLowerCase(), model.id);
-      modelIdByName.set(`${model.name.toLowerCase()}.ifc`, model.id);
-      modelIdByName.set(`${model.slug.toLowerCase()}.ifc`, model.id);
+      modelIdByName.set(normalizeModelFileName(model.name), model.id);
+      modelIdByName.set(normalizeModelFileName(model.slug), model.id);
     }
+    const fallbackModelId = ifcModels.length === 1 ? ifcModels[0]!.id : null;
+    const unmatchedFileNames = new Set<string>();
+    const matchModels = (fileNames: string[]): string[] => {
+      const ids = new Set<string>();
+      for (const name of fileNames) {
+        const id = modelIdByName.get(normalizeModelFileName(name));
+        if (id) {
+          ids.add(id);
+        } else {
+          unmatchedFileNames.add(name);
+        }
+      }
+      if (!ids.size && fallbackModelId) {
+        ids.add(fallbackModelId);
+      }
+      return [...ids];
+    };
+
+    // Head-Stand je Modell: Commit-Bezug ("aufgefallen in") und ein
+    // Name→GlobalId-Index aus dem Manifest, damit Topics ohne Viewpoint
+    // ("Betroffenes IFC-Objekt: 'US.04'") trotzdem verortet werden.
+    interface HeadInfo {
+      commitId: string | null;
+      guidsByName: Map<string, string[]>;
+    }
+    const headInfoCache = new Map<string, Promise<HeadInfo>>();
+    const headInfo = (modelId: string): Promise<HeadInfo> => {
+      let cached = headInfoCache.get(modelId);
+      if (!cached) {
+        cached = (async () => {
+          const model = models.find((entry) => entry.id === modelId);
+          const branch = model
+            ? await repo.getBranch(model.id, model.defaultBranch)
+            : null;
+          const commitId = branch?.headCommitId ?? null;
+          const guidsByName = new Map<string, string[]>();
+          if (commitId) {
+            for (const entry of await repo.getManifest(commitId)) {
+              const key = entry.name.trim().toLowerCase();
+              if (!key) continue;
+              const list = guidsByName.get(key) ?? [];
+              list.push(entry.globalId);
+              guidsByName.set(key, list);
+            }
+          }
+          return { commitId, guidsByName };
+        })();
+        headInfoCache.set(modelId, cached);
+      }
+      return cached;
+    };
+
+    // Dedupe vorab: Topic-Guid als Issue-Id übernehmen (stabiler Re-Import);
+    // bei Kollision im selben Projekt überspringen, sonst neue Id.
     const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    let imported = 0;
+    const pending: { topic: ParsedBcfTopic; id: string | undefined }[] = [];
     let skipped = 0;
     for (const topic of topics) {
-      // Topic-Guid als Issue-Id übernehmen (stabiler Re-Import); bei
-      // Kollision im selben Projekt überspringen, sonst neue Id.
       const existing = UUID.test(topic.guid)
         ? await repo.getIssueById(topic.guid)
         : null;
@@ -1080,31 +1222,78 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         skipped += 1;
         continue;
       }
-      const modelIds = [
-        ...new Set(
-          topic.fileNames
-            .map((name) => modelIdByName.get(name.toLowerCase()))
-            .filter((id): id is string => Boolean(id)),
-        ),
-      ];
+      pending.push({
+        topic,
+        id: UUID.test(topic.guid) && !existing ? topic.guid : undefined,
+      });
+    }
+    if (!pending.length) {
+      return reply
+        .code(201)
+        .send({ imported: 0, skipped, located: 0, parent: null });
+    }
+
+    // Alle Topics einer Datei hängen unter EINEM virtuellen Sammel-Issue —
+    // das bündelt den Import (wie ein Prüfbericht) und zeigt die Objekte
+    // aller Unter-Issues gesammelt im 3D-Viewer.
+    const query = (request.query ?? {}) as { name?: string };
+    const sourceName =
+      (query.name ?? "").trim().slice(0, 120) ||
+      topics.find((topic) => topic.fileNames.length)?.fileNames[0] ||
+      null;
+    const importedAt = new Date();
+    const parent = await repo.createIssueWithLinks(
+      {
+        projectId: project.id,
+        title: (sourceName
+          ? `BCF-Import: ${stripModelFileExt(sourceName)}`
+          : `BCF-Import vom ${importedAt.toLocaleDateString("de-DE")}`
+        ).slice(0, 200),
+        body: "",
+        state: "open",
+        kind: "virtual",
+        authorId: user.id,
+        parentId: null,
+      },
+      {},
+    );
+
+    const parentModelIds = new Set<string>();
+    let imported = 0;
+    let located = 0;
+    for (const { topic, id } of pending) {
+      const modelIds = matchModels(topic.fileNames);
+      const guids = new Set(topic.guids);
+      const modelLinks: IssueLinks["models"] = [];
+      for (const modelId of modelIds) {
+        const head = await headInfo(modelId);
+        parentModelIds.add(modelId);
+        modelLinks.push({
+          modelId,
+          foundCommitId: head.commitId,
+          fixedCommitId: null,
+        });
+        for (const name of topic.objectNames) {
+          for (const guid of head.guidsByName.get(name.toLowerCase()) ?? []) {
+            guids.add(guid);
+          }
+        }
+      }
+      if (guids.size) {
+        located += 1;
+      }
       const issue = await repo.createIssueWithLinks(
         {
-          id: UUID.test(topic.guid) && !existing ? topic.guid : undefined,
+          id,
           projectId: project.id,
           title: topic.title.slice(0, 200),
           body: topic.description,
           state: topic.status,
           kind: "bcf",
           authorId: user.id,
+          parentId: parent.id,
         },
-        {
-          guids: topic.guids,
-          models: modelIds.map((modelId) => ({
-            modelId,
-            foundCommitId: null,
-            fixedCommitId: null,
-          })),
-        },
+        { guids: [...guids].slice(0, 500), models: modelLinks },
       );
       for (const comment of topic.comments) {
         // Fremde Autoren gibt es hier nicht als Benutzer — Original-Autor
@@ -1118,7 +1307,57 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       }
       imported += 1;
     }
-    return reply.code(201).send({ imported, skipped });
+
+    // Sammel-Issue: Modelle aller Unter-Issues verknüpfen (Viewer-Quellen)
+    // und die Zusammenfassung als Beschreibung nachtragen.
+    const parentModelLinks: IssueLinks["models"] = [];
+    const modelLines: string[] = [];
+    for (const modelId of parentModelIds) {
+      const head = await headInfo(modelId);
+      const model = models.find((entry) => entry.id === modelId);
+      parentModelLinks.push({
+        modelId,
+        foundCommitId: head.commitId,
+        fixedCommitId: null,
+      });
+      if (model) {
+        modelLines.push(
+          head.commitId
+            ? `${model.name} (Stand \`${head.commitId.slice(0, 8)}\`)`
+            : model.name,
+        );
+      }
+    }
+    const authors = new Set(
+      pending
+        .map(({ topic }) => topic.creationAuthor.trim())
+        .filter((author) => author.length > 0),
+    );
+    const summary = [
+      `BCF-2.1-Import${sourceName ? ` aus **${sourceName}**` : ""} am ${importedAt.toLocaleDateString("de-DE")} durch ${user.name}.`,
+      `Jedes Topic ist ein Unter-Issue dieses Issues; die betroffenen Objekte aller Unter-Issues lassen sich hier gesammelt im 3D-Viewer markieren.`,
+      ``,
+      `- **Topics:** ${imported} importiert${skipped ? `, ${skipped} übersprungen (bereits vorhanden)` : ""}`,
+      `- **3D-Verortung:** ${located} von ${imported} Unter-Issues mit Objekt-GUIDs`,
+      authors.size ? `- **Erstellt von:** ${[...authors].join(", ")}` : null,
+      modelLines.length
+        ? `- **Modelle:** ${modelLines.join(", ")}`
+        : `- **Modelle:** keines zugeordnet — Modell in der Sidebar verknüpfen, dann greift die 3D-Verortung der Unter-Issues`,
+      unmatchedFileNames.size
+        ? `- **Nicht zugeordnete Dateinamen:** ${[...unmatchedFileNames].map((name) => `\`${name}\``).join(", ")}${fallbackModelId ? " (einziges IFC-Modell des Projekts angenommen)" : ""}`
+        : null,
+    ]
+      .filter((line): line is string => line !== null)
+      .join("\n");
+    await repo.updateIssue(parent.id, { body: summary });
+    await repo.setIssueLinks(parent.id, { models: parentModelLinks });
+
+    return reply.code(201).send({
+      imported,
+      skipped,
+      located,
+      parent: { id: parent.id, number: parent.number },
+    });
   });
 
   app.get(
