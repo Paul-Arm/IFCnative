@@ -1,0 +1,140 @@
+.start-page-shell {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.start-page-background {
+  /* Span the entire start workspace, including the settings toolbar. */
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  background: radial-gradient(ellipse at 50% 30%, transparent 25%, color-mix(in oklch, var(--primary) 5%, transparent));
+}
+
+.start-page-glow {
+  position: absolute;
+  width: min(80vw, 1000px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  animation: start-page-drift 24s ease-in-out infinite alternate;
+}
+
+.start-page-glow--teal {
+  top: -55%;
+  left: -15%;
+  background: radial-gradient(circle, color-mix(in oklch, var(--primary) 22%, transparent), transparent 68%);
+}
+
+.start-page-glow--blue {
+  right: -20%;
+  bottom: -65%;
+  background: radial-gradient(circle, color-mix(in oklch, var(--chart-2) 20%, transparent), transparent 68%);
+  animation-duration: 30s;
+  animation-delay: -12s;
+  animation-direction: alternate-reverse;
+}
+
+.start-page-grid {
+  position: absolute;
+  inset: 35% -50% -85%;
+  background-image:
+    linear-gradient(color-mix(in oklch, var(--primary) 12%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in oklch, var(--primary) 12%, transparent) 1px, transparent 1px);
+  background-size: 64px 64px;
+  transform: perspective(650px) rotateX(58deg);
+  transform-origin: center top;
+  mask-image: radial-gradient(ellipse at 50% 38%, black, transparent 68%);
+}
+
+.start-page-geometry {
+  --start-cube-top-light: var(--card);
+  --start-cube-top-shade: color-mix(in oklch, var(--card) 96%, var(--primary));
+  --start-cube-left-light: color-mix(in oklch, var(--background) 97%, var(--primary));
+  --start-cube-left-shade: var(--card);
+  --start-cube-right-light: color-mix(in oklch, var(--background) 94%, var(--primary));
+  --start-cube-right-shade: color-mix(in oklch, var(--background) 89%, var(--primary));
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  color: var(--primary);
+  stroke: currentColor;
+  stroke-width: 1;
+  stroke-linejoin: round;
+}
+
+.start-page-solid {
+  --start-cube-edge-opacity: 0.22;
+  --start-cube-detail-opacity: 0.07;
+  animation: start-page-float 18s ease-in-out infinite;
+}
+
+.start-page-solid--right {
+  animation-delay: -7s;
+  animation-duration: 23s;
+}
+
+.start-page-solid--top {
+  --start-cube-edge-opacity: 0.16;
+  animation-delay: -12s;
+  animation-duration: 21s;
+}
+
+.start-page-solid-base {
+  fill: var(--background);
+  stroke: none;
+  filter: drop-shadow(0 12px 18px color-mix(in oklch, var(--primary) 8%, transparent));
+}
+
+.start-page-solid-face {
+  stroke: none;
+}
+
+.start-page-solid-outline {
+  stroke-opacity: var(--start-cube-edge-opacity);
+}
+
+.start-page-solid-detail {
+  stroke-opacity: var(--start-cube-detail-opacity);
+}
+
+.start-page-solid-highlight {
+  stroke: var(--card);
+  stroke-opacity: 0.8;
+  stroke-width: 1.5;
+}
+
+.start-page-content .start-page-card {
+  background: color-mix(in oklch, var(--card) 90%, transparent);
+  border-color: color-mix(in oklch, var(--primary) 13%, var(--border));
+  box-shadow: 0 8px 36px -20px color-mix(in oklch, var(--primary) 22%, transparent);
+}
+
+@keyframes start-page-drift {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(8%, 10%, 0) scale(1.12); }
+}
+
+@keyframes start-page-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-24px); }
+}
+
+@media (max-width: 767px) {
+  .start-page-solid {
+    --start-cube-edge-opacity: 0.12;
+    --start-cube-detail-opacity: 0.04;
+  }
+  .start-page-glow { width: 140vw; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .start-page-glow,
+  .start-page-solid {
+    animation: none;
+  }
+}

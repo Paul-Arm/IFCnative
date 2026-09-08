@@ -4783,7 +4783,7 @@ export default function IfcWorkspace() {
 
   if (showStartPage) {
     return (
-      <div className="flex min-h-screen flex-col bg-background text-foreground">
+      <div className="start-page-workspace relative isolate flex min-h-screen flex-col overflow-hidden bg-background text-foreground">
         {recoveryBanner}
         {statusAlertBar}
         {/* Ohne Menüleiste: Einstellungen (inkl. Farbschema) oben rechts. */}

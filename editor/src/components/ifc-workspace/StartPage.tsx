@@ -12,7 +12,7 @@ import {
   History,
   Loader2,
 } from "lucide-react";
-import { useState, type DragEvent } from "react";
+import { useId, useState, type DragEvent } from "react";
 
 import type { VcsAuth, VcsSettings } from "@/vcs/types";
 
@@ -20,6 +20,7 @@ import { HubBrowser, type HubDocument } from "./HubBrowser";
 import { NewIfcDialog, type NewIfcDraft } from "./NewIfcDialog";
 import { Button, InlineAlert } from "./ui";
 import type { RecentIfcFileEntry } from "./workspaceStorage";
+import "./StartPage.css";
 
 /** Ein vom Hub geladener IFC-Stand, den der Editor als Tab öffnet. */
 export type StartPageHubDocument = HubDocument;
@@ -73,6 +74,83 @@ function formatRelative(iso: string): string {
   return rtf.format(Math.trunc(diffSeconds / step.seconds), step.unit);
 }
 
+type CubePoint = readonly [number, number, number];
+
+/** Project every edge from the same unit cube; all three axes have equal scale. */
+function IsometricCube({
+  x,
+  y,
+  size,
+  variant,
+}: {
+  x: number;
+  y: number;
+  size: number;
+  variant: "left" | "right" | "top";
+}) {
+  const materialId = useId();
+  const path = (...points: CubePoint[]) =>
+    points.map(([px, py, pz], index) => {
+      const sx = (px - py) * Math.sqrt(3) / 2 * size;
+      const sy = ((px + py) / 2 - pz) * size;
+      return `${index ? "L" : "M"}${sx} ${sy}`;
+    }).join(" ");
+
+  const subdivisions = [1 / 3, 2 / 3].map((t) => [
+    // Both directions on the top, continuing down the matching side face.
+    path([t, 0, 1], [t, 1, 1], [t, 1, 0]),
+    path([0, t, 1], [1, t, 1], [1, t, 0]),
+    // Equal storey heights across both visible sides.
+    path([0, 1, t], [1, 1, t], [1, 0, t]),
+  ].join(" ")).join(" ");
+  const silhouette = `${path([0, 0, 1], [1, 0, 1], [1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 1, 1])}Z`;
+
+  return (
+    <g transform={`translate(${x} ${y})`}>
+      <defs>
+        {(["top", "left", "right"] as const).map((face) => (
+          <linearGradient key={face} id={`${materialId}-${face}`} x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor={`var(--start-cube-${face}-light)`} />
+            <stop offset="100%" stopColor={`var(--start-cube-${face}-shade)`} />
+          </linearGradient>
+        ))}
+      </defs>
+      <g className={`start-page-solid start-page-solid--${variant}`}>
+        {/* Opaque, softly shaded material keeps the floor grid behind the cube. */}
+        <path className="start-page-solid-base" d={silhouette} />
+        <path
+          className="start-page-solid-face"
+          fill={`url(#${materialId}-top)`}
+          d={`${path([0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1])}Z`}
+        />
+        <path
+          className="start-page-solid-face"
+          fill={`url(#${materialId}-left)`}
+          d={`${path([0, 1, 1], [1, 1, 1], [1, 1, 0], [0, 1, 0])}Z`}
+        />
+        <path
+          className="start-page-solid-face"
+          fill={`url(#${materialId}-right)`}
+          d={`${path([1, 1, 1], [1, 0, 1], [1, 0, 0], [1, 1, 0])}Z`}
+        />
+        <path
+          className="start-page-solid-outline"
+          d={[
+            silhouette,
+            path([0, 1, 1], [1, 1, 1], [1, 0, 1]),
+            path([1, 1, 1], [1, 1, 0]),
+          ].join(" ")}
+        />
+        <path className="start-page-solid-detail" d={subdivisions} />
+        <path
+          className="start-page-solid-highlight"
+          d={path([0, 1, 1], [0, 0, 1], [1, 0, 1])}
+        />
+      </g>
+    </g>
+  );
+}
+
 export function StartPage({
   loadingName,
   settings,
@@ -103,158 +181,175 @@ export function StartPage({
   const busy = Boolean(loadingName);
 
   return (
-    <main
-      className={`flex min-h-0 flex-1 items-start justify-center overflow-y-auto p-6 transition-colors ${
-        dragActive ? "bg-primary/5" : ""
-      }`}
-      onDragLeave={(event) => {
-        if (event.currentTarget === event.target) {
-          setDragActive(false);
-        }
-      }}
-      onDragOver={(event) => {
-        event.preventDefault();
-        setDragActive(true);
-      }}
-      onDrop={handleDrop}
-    >
-      <div className="my-auto grid w-full max-w-6xl gap-6 px-2 py-6">
-        <div className="grid items-stretch gap-6 md:grid-cols-2">
-          {/* ---- Lokal: Öffnen + Drop-Zone ------------------------------- */}
-          <section className="flex min-w-0 flex-col gap-4 rounded-2xl border border-border/60 bg-card p-6">
-            <div>
-              <div className="text-base font-semibold text-foreground">
-                Lokal arbeiten
+    <div className="start-page-shell">
+      <div aria-hidden="true" className="start-page-background">
+        <div className="start-page-glow start-page-glow--teal" />
+        <div className="start-page-glow start-page-glow--blue" />
+        <div className="start-page-grid" />
+        <svg
+          className="start-page-geometry"
+          viewBox="0 0 1440 900"
+          preserveAspectRatio="xMidYMid slice"
+          fill="none"
+        >
+          <IsometricCube x={192} y={320} size={140} variant="left" />
+          <IsometricCube x={1275} y={620} size={156} variant="right" />
+          <IsometricCube x={1020} y={145} size={81} variant="top" />
+        </svg>
+      </div>
+      <main
+        className={`start-page-content relative flex min-h-0 flex-1 items-start justify-center overflow-y-auto p-6 transition-colors ${
+          dragActive ? "bg-primary/5" : ""
+        }`}
+        onDragLeave={(event) => {
+          if (event.currentTarget === event.target) {
+            setDragActive(false);
+          }
+        }}
+        onDragOver={(event) => {
+          event.preventDefault();
+          setDragActive(true);
+        }}
+        onDrop={handleDrop}
+      >
+        <div className="my-auto grid w-full max-w-6xl gap-6 px-2 py-6">
+          <div className="grid items-stretch gap-6 md:grid-cols-2">
+            {/* ---- Lokal: Öffnen + Drop-Zone ------------------------------- */}
+            <section className="start-page-card flex min-w-0 flex-col gap-4 rounded-2xl border border-border/60 bg-card p-6">
+              <div>
+                <div className="text-base font-semibold text-foreground">
+                  Lokal arbeiten
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  Dateien von diesem Rechner öffnen oder neu anlegen
+                </div>
               </div>
-              <div className="text-xs text-muted-foreground">
-                Dateien von diesem Rechner öffnen oder neu anlegen
-              </div>
-            </div>
 
-            <div
-              className={`flex flex-1 flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-8 text-center transition-colors ${
-                dragActive
-                  ? "border-primary bg-primary/10"
-                  : "border-border/70 bg-background/60"
-              }`}
-            >
-              <FileUp
-                aria-hidden
-                className="size-10 text-muted-foreground/70"
-              />
-              <div className="text-sm text-foreground">
-                IFC-Dateien hierher ziehen
-              </div>
-              <div className="text-xs text-muted-foreground">
-                oder über den Datei-Picker öffnen
-              </div>
-              <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
-                <Button
-                  disabled={busy}
-                  variant="default"
-                  onClick={onOpenFilePicker}
-                >
-                  <FolderOpen aria-hidden className="size-3.5" />
-                  IFC-Datei öffnen…
-                </Button>
-                <Button disabled={busy} onClick={() => setNewIfcOpen(true)}>
-                  <FilePlus2 aria-hidden className="size-3.5" />
-                  Neue IFC erstellen
-                </Button>
-              </div>
-            </div>
-
-            {loadingName ? (
-              <InlineAlert tone="info">
-                <span className="inline-flex items-center gap-2">
-                  <Loader2 aria-hidden className="size-3.5 animate-spin" />
-                  Lädt {loadingName}…
-                </span>
-              </InlineAlert>
-            ) : null}
-          </section>
-
-          {/* ---- Kürzlich verwendet -------------------------------------- */}
-          <section className="flex min-w-0 flex-col gap-4 rounded-2xl border border-border/60 bg-card p-6">
-            <div>
-              <div className="text-base font-semibold text-foreground">
-                Kürzlich verwendet
-              </div>
-              <div className="text-xs text-muted-foreground">
-                Zuletzt geöffnete IFC-Dateien
-              </div>
-            </div>
-
-            {recentFiles.length ? (
-              <ul className="grid max-h-72 min-w-0 content-start gap-1.5 overflow-y-auto pr-1">
-                {recentFiles.map((entry) => (
-                  <li key={entry.id} className="min-w-0">
-                    <button
-                      className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border/60 bg-background px-3 py-2 text-left transition-colors hover:border-primary/40 hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-60"
-                      disabled={busy}
-                      title={entry.path ?? entry.name}
-                      type="button"
-                      onClick={() => onOpenRecentFile(entry)}
-                    >
-                      <History
-                        aria-hidden
-                        className="size-4 shrink-0 text-muted-foreground/70"
-                      />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm text-foreground">
-                          {entry.name}
-                        </span>
-                        <span className="block truncate text-[0.7rem] text-muted-foreground">
-                          {[
-                            formatRelative(entry.openedAt),
-                            entry.schema || null,
-                            entry.entityCount != null
-                              ? `${entry.entityCount.toLocaleString("de-DE")} Entitäten`
-                              : null,
-                          ]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </span>
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-border/50 bg-background/60 p-6 text-center">
-                <History
+              <div
+                className={`flex flex-1 flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-8 text-center transition-colors ${
+                  dragActive
+                    ? "border-primary bg-primary/10"
+                    : "border-border/70 bg-background/60"
+                }`}
+              >
+                <FileUp
                   aria-hidden
-                  className="size-8 text-muted-foreground/50"
+                  className="size-10 text-muted-foreground/70"
                 />
-                <div className="text-sm text-muted-foreground">
-                  Noch keine kürzlich verwendeten Dateien
+                <div className="text-sm text-foreground">
+                  IFC-Dateien hierher ziehen
                 </div>
-                <div className="text-xs text-muted-foreground/80">
-                  Geöffnete IFC-Dateien erscheinen hier.
+                <div className="text-xs text-muted-foreground">
+                  oder über den Datei-Picker öffnen
+                </div>
+                <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
+                  <Button
+                    disabled={busy}
+                    variant="default"
+                    onClick={onOpenFilePicker}
+                  >
+                    <FolderOpen aria-hidden className="size-3.5" />
+                    IFC-Datei öffnen…
+                  </Button>
+                  <Button disabled={busy} onClick={() => setNewIfcOpen(true)}>
+                    <FilePlus2 aria-hidden className="size-3.5" />
+                    Neue IFC erstellen
+                  </Button>
                 </div>
               </div>
-            )}
+
+              {loadingName ? (
+                <InlineAlert tone="info">
+                  <span className="inline-flex items-center gap-2">
+                    <Loader2 aria-hidden className="size-3.5 animate-spin" />
+                    Lädt {loadingName}…
+                  </span>
+                </InlineAlert>
+              ) : null}
+            </section>
+
+            {/* ---- Kürzlich verwendet -------------------------------------- */}
+            <section className="start-page-card flex min-w-0 flex-col gap-4 rounded-2xl border border-border/60 bg-card p-6">
+              <div>
+                <div className="text-base font-semibold text-foreground">
+                  Kürzlich verwendet
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  Zuletzt geöffnete IFC-Dateien
+                </div>
+              </div>
+
+              {recentFiles.length ? (
+                <ul className="grid max-h-72 min-w-0 content-start gap-1.5 overflow-y-auto pr-1">
+                  {recentFiles.map((entry) => (
+                    <li key={entry.id} className="min-w-0">
+                      <button
+                        className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border/60 bg-background px-3 py-2 text-left transition-colors hover:border-primary/40 hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={busy}
+                        title={entry.path ?? entry.name}
+                        type="button"
+                        onClick={() => onOpenRecentFile(entry)}
+                      >
+                        <History
+                          aria-hidden
+                          className="size-4 shrink-0 text-muted-foreground/70"
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm text-foreground">
+                            {entry.name}
+                          </span>
+                          <span className="block truncate text-[0.7rem] text-muted-foreground">
+                            {[
+                              formatRelative(entry.openedAt),
+                              entry.schema || null,
+                              entry.entityCount != null
+                                ? `${entry.entityCount.toLocaleString("de-DE")} Entitäten`
+                                : null,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </span>
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-border/50 bg-background/60 p-6 text-center">
+                  <History
+                    aria-hidden
+                    className="size-8 text-muted-foreground/50"
+                  />
+                  <div className="text-sm text-muted-foreground">
+                    Noch keine kürzlich verwendeten Dateien
+                  </div>
+                  <div className="text-xs text-muted-foreground/80">
+                    Geöffnete IFC-Dateien erscheinen hier.
+                  </div>
+                </div>
+              )}
+            </section>
+          </div>
+
+          {/* ---- IFC Hub ----------------------------------------------------- */}
+          <section className="start-page-card mx-auto w-full max-w-3xl min-w-0 rounded-2xl border border-border/60 bg-card p-6">
+            <HubBrowser
+              auth={auth}
+              busy={busy}
+              settings={settings}
+              onAuthChange={onAuthChange}
+              onOpenHubDocuments={onOpenHubDocuments}
+              onSettingsChange={onSettingsChange}
+            />
           </section>
         </div>
 
-        {/* ---- IFC Hub ----------------------------------------------------- */}
-        <section className="mx-auto w-full max-w-3xl min-w-0 rounded-2xl border border-border/60 bg-card p-6">
-          <HubBrowser
-            auth={auth}
-            busy={busy}
-            settings={settings}
-            onAuthChange={onAuthChange}
-            onOpenHubDocuments={onOpenHubDocuments}
-            onSettingsChange={onSettingsChange}
-          />
-        </section>
-      </div>
-
-      <NewIfcDialog
-        open={newIfcOpen}
-        onCreate={onCreateNewIfc}
-        onOpenChange={setNewIfcOpen}
-      />
-    </main>
+        <NewIfcDialog
+          open={newIfcOpen}
+          onCreate={onCreateNewIfc}
+          onOpenChange={setNewIfcOpen}
+        />
+      </main>
+    </div>
   );
 }
