@@ -33,8 +33,8 @@ export interface Point {
 
 export interface EntityEditDraft {
   type: string;
-  name: string;
-  description: string;
+  name?: string;
+  description?: string;
   rawArgs: string;
 }
 

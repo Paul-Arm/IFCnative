@@ -1,5 +1,6 @@
+import type { NativeIfcDocument } from "@/ifc/nativeDocument";
 import { ChevronDown, ChevronUp, X } from "lucide-react";
-import type { ReactNode } from "react";
+import { Activity, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -11,6 +12,9 @@ export interface AttributionStatus {
   /** Kurzbeschreibung: Importart und Objektzahlen. */
   importart: string;
   importErrors: number;
+  document?: NativeIfcDocument;
+  pending?: boolean;
+  error?: string | null;
   complete: number | null;
 }
 
@@ -19,8 +23,8 @@ export type AttributionMode = "closed" | "open" | "collapsed";
 export function AttributionStatusBadges({ status }: { status: AttributionStatus }) {
   return (
     <span className="flex items-center gap-1">
-      {status.importErrors ? <Badge tone="danger">Import: {status.importErrors.toLocaleString("de-DE")}</Badge> : <Badge tone="success">Importfähig</Badge>}
-      {status.complete != null ? <Badge tone={status.complete === 100 ? "success" : "neutral"}>Vollständig {status.complete} %</Badge> : null}
+      {status.pending ? <Badge tone="neutral">Prüfung läuft…</Badge> : status.error ? <Badge tone="danger">Prüfung fehlgeschlagen</Badge> : null}
+      {!status.pending && !status.error && status.complete != null ? <Badge tone={status.complete === 100 ? "success" : "neutral"}>Vollständig {status.complete} %</Badge> : null}
     </span>
   );
 }
@@ -47,13 +51,13 @@ export function AttributionOverlay({
     <div
       aria-label="IFC-Attribuierung"
       aria-modal="false"
-      className={cn("fixed inset-x-4 bottom-3 top-[5.25rem] z-30 flex flex-col overflow-hidden rounded-lg border border-border bg-card shadow-2xl", collapsed && "hidden")}
+      className={cn("fixed inset-x-3 bottom-3 top-[5.25rem] z-30 flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl", collapsed && "hidden")}
       role="dialog"
     >
       <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border/70 bg-muted/60 px-2 text-xs">
         <span className="font-medium text-foreground">IFC-Attribuierung</span>
         {status ? <AttributionStatusBadges status={status} /> : null}
-        <span className="text-muted-foreground">{status?.importart}</span>
+        <span className="hidden min-w-0 truncate text-muted-foreground lg:inline">{status?.importart}</span>
         <span className="ml-auto flex items-center gap-1">
           <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" title="Einklappen — bleibt in der Kopfzeile erreichbar, Zustand bleibt erhalten" onClick={onCollapse}>
             <ChevronUp className="size-3.5" />
@@ -64,7 +68,7 @@ export function AttributionOverlay({
           </Button>
         </span>
       </div>
-      <div className="min-h-0 flex-1 overflow-hidden p-2">{children}</div>
+      <Activity mode={collapsed ? "hidden" : "visible"}><div className="min-h-0 flex-1 overflow-hidden p-3">{children}</div></Activity>
     </div>
   );
 }

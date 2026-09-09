@@ -1,0 +1,62 @@
+# Untersuchungsstelle: das zentrale 3D-Fachobjekt der Diagnostik.
+objektart: Untersuchungsstelle
+entity: { klasse: IfcBuildingElementProxy }
+# so erkennt das Portal eine Stelle (create_db_models.py::_extract_measurement_point_candidate)
+erkennung: { merkmal: Objektinformation.BauteilID, nichtLeer: true }
+
+id:
+  merkmal: Objektinformation.ID
+  grammatik: FACHOBJEKT # {Projekt.ID}.{Bezeichnung}
+  eindeutig: { scope: datei, befund: duplicate_ifc_id }
+  herleitungPruefung: { stufe: warnung, befund: editor_id_prefix_mismatch }
+  # Konvention für die Bezeichnung: {Untersuchungsbereich.Bezeichnung}_{Verfahrenskürzel}{NN}
+  bezeichnung:
+    {
+      muster: '^{Untersuchungsbereich.Bezeichnung}_[A-Z]{2,4}\d{2}$',
+      stufe: warnung,
+      befund: editor_bezeichnung_convention,
+    }
+
+phasen:
+  planung: &basis
+    psets:
+      Objektinformation:
+        pflicht: [ID, Bezeichnung, BauteilID, UntersuchungsbereichID]
+        referenz:
+          BauteilID: { ziel: [Bauteil, Raum], quelle: bauwerksmodell }
+          UntersuchungsbereichID: { ziel: Untersuchungsbereich, quelle: datei }
+          UntersuchungszielID:
+            {
+              ziel: Untersuchungsziel,
+              quelle: datei,
+              optional: true,
+              rolle: fallbackFuerVerfahren,
+            }
+          MessfeldID:
+            {
+              ziel: Messfeld,
+              quelle: gleichesElement,
+              optional: true,
+              rolle: fallbackNurBeiEinemVerfahren,
+            }
+        # aus BauteilID herleitbar, Editor füllt sie aus dem Bauwerksmodell nach
+        abgeleitet:
+          { IDEbene1: BauteilID, IDEbene2: BauteilID, IDEbene3: BauteilID }
+        nichtAnwendbar: [ProbeID, MessanlageID]
+      Untersuchungsstelle: {} # Pflicht/optional kommt aus psets/untersuchungsstelle.yaml + LoI
+      Messfeld: { anzahl: { min: 0 } } # Familie, beliebig viele
+    verfahren:
+      # jedes Pset mit art: verfahren darf hier hängen; erweiterte nur mit ihrem Hauptverfahren
+      anzahl: { min: 0 }
+      erweitertNurMitHaupt: { befund: unassigned_extended_property_set }
+    # Konvention: Objektinformation.UntersuchungszielID ODER an jedem Verfahren — nicht IDS-fähig, Portal prüft es
+    entwederOder:
+      - {
+          a: Objektinformation.UntersuchungszielID,
+          b: "verfahren.*.UntersuchungszielID",
+          befund: missing_required_property,
+        }
+
+  einzelergebnisse:
+    <<: *basis
+    # in der Ausführung gelten zusätzlich die Merkmale mit phasen: [einzelergebnisse] der Psets

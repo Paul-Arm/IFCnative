@@ -1,6 +1,9 @@
+import { readIfcBytes, toExactArrayBuffer } from "./ifcBytes";
+
 import { IfcImporter } from "@thatopen/fragments";
 
 import { readFragmentCoordination } from "./fragmentCoordination";
+import { configureFragmentImporter } from "./fragmentImporter";
 
 import type {
     ConvertIfcToFragmentsWorkerRequest,
@@ -26,19 +29,7 @@ async function convertIfcToFragments(
 ) {
   try {
     const importer = new IfcImporter();
-    importer.wasm = {
-      absolute: true,
-      path: request.wasmPath,
-    };
-    importer.webIfcSettings = {
-      // Rebase far-from-origin (georeferenced) models so vertex data stays
-      // within float32 precision. The scene stays rebased; the stored
-      // transform is extracted below so picks/writes can be converted to
-      // real IFC world coordinates explicitly.
-      COORDINATE_TO_ORIGIN: true,
-    };
-    importer.addAllAttributes();
-    importer.addAllRelations();
+    configureFragmentImporter(importer, request.wasmPath);
 
     let lastProgress = -1;
     const bytes = await readIfcBytes(request);
@@ -85,32 +76,8 @@ async function convertIfcToFragments(
   }
 }
 
-async function readIfcBytes(request: ConvertIfcToFragmentsWorkerRequest) {
-  if (request.file) {
-    return new Uint8Array(await request.file.arrayBuffer());
-  }
-  if (request.bytes) {
-    return new Uint8Array(request.bytes);
-  }
-  return new TextEncoder().encode(request.text ?? "");
-}
-
-function toExactArrayBuffer(bytes: Uint8Array): ArrayBuffer {
-  if (
-    bytes.buffer instanceof ArrayBuffer &&
-    bytes.byteOffset === 0 &&
-    bytes.byteLength === bytes.buffer.byteLength
-  ) {
-    return bytes.buffer;
-  }
-  const buffer = new ArrayBuffer(bytes.byteLength);
-  new Uint8Array(buffer).set(bytes);
-  return buffer;
-}
-
 function stringifyError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
 export { };
-

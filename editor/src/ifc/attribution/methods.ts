@@ -8,7 +8,7 @@
 import type { NativeIfcPropertySet } from "../nativeDocument";
 
 import { findProperties, psetMatches } from "./normalize";
-import { classifyMethodPset, fachmodellSchema } from "./schema";
+import { activeSchema, classifyMethodPset, schemaRevision } from "./schema";
 
 export function normalizeMethodName(text: string): string {
   return text
@@ -21,12 +21,17 @@ export function normalizeMethodName(text: string): string {
 }
 
 const labelCache = new Map<string, string>();
+let labelCacheRevision = schemaRevision();
 
 /** Lesbarer Verfahrensname zu einem Haupt-Pset: Katalogklasse (BWD), sonst der Pset-Name ohne Index. */
 export function methodLabelForPset(psetName: string): string {
+  if (labelCacheRevision !== schemaRevision()) {
+    labelCache.clear();
+    labelCacheRevision = schemaRevision();
+  }
   const cached = labelCache.get(psetName);
   if (cached) return cached;
-  const klasse = fachmodellSchema.katalog.bwd.objektklassen.find((entry) => entry.psets.some((pset) => psetMatches(psetName, pset.familie ?? pset.portalName)));
+  const klasse = activeSchema().katalog.bwd.objektklassen.find((entry) => entry.psets.some((pset) => psetMatches(psetName, pset.familie ?? pset.portalName)));
   const label = klasse?.name ?? psetName.replace(/\d+$/, "");
   labelCache.set(psetName, label);
   return label;

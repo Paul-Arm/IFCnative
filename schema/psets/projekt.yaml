@@ -1,0 +1,29 @@
+# Pset am IfcBuilding: das Diagnostik-Projekt.
+# Ehem. Katalogklasse BWD - DP (ePset_Diagnostik Projekt). Das Portal akzeptiert `Projekt` und
+# `Diagnostik Projekt`; kanonisch ist `Projekt`.
+pset: Projekt
+aliase: [Diagnostik Projekt]
+katalog: { kuerzel: DP, code: BWD - DP }
+traeger: IfcBuilding
+phasen: [planung, einzelergebnisse, ergebnisse]
+
+merkmale:
+  ID: { typ: IfcLabel, loi: 100, grammatik: PROJEKT }
+  Bezeichnung: { typ: IfcLabel, loi: 100, aliase: [BezeichnungProjekt] }
+  AuftraggeberIn: { typ: IfcLabel, loi: 200 }
+  AuftragnehmerIn: { typ: IfcLabel, loi: 200 }
+  KontaktAuftraggeberIn: { typ: IfcLabel, loi: 300 }
+  ProjektleitendePerson: { typ: IfcLabel, loi: 200 }
+  ProjektnummerAG: { typ: IfcLabel, loi: 200 }
+  ProjektnummerAN: { typ: IfcLabel, loi: 200 }
+  Leistungsbestandteil: { typ: IfcLabel, loi: 200 }
+  Laufzeit: { typ: IfcLabel, loi: 200 }
+  DatumArbeitenBeginn: { typ: IfcLabel, loi: 200, format: datum }
+  DatumArbeitenEnde: { typ: IfcLabel, loi: 200, format: datum }
+  DiaBericht:
+    {
+      typ: IfcLabel,
+      loi: 300,
+      format: datei,
+      phasen: [einzelergebnisse, ergebnisse],
+    }

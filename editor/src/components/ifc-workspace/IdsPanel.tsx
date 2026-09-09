@@ -1,3 +1,4 @@
+import { SummaryStat } from "./SummaryStat";
 import { FileCheck2, Search, Upload, X } from "lucide-react";
 import { useMemo, useState } from "react";
 
@@ -14,10 +15,13 @@ import {
     type IdsFacet,
     type IdsSpecificationResult,
     type IdsSpecificationStatus,
+} from "@/ifc/ids";
+import {
     type NativeIfcDocument,
+} from "@/ifc/nativeDocument";
+import {
     type ObjectInfoIndex,
-} from "@/ifc";
-import { cn } from "@/lib/utils";
+} from "@/ifc/objectInfoValidation";
 
 import { IdCheckSection } from "./IdCheckSection";
 import {
@@ -548,56 +552,5 @@ function hasIdsInfo(ids: IdsDocumentModel) {
       info.date ||
       info.version ||
       info.copyright,
-  );
-}
-
-type StatTone = "danger" | "success" | "neutral";
-
-const STAT_TONE_STYLES: Record<StatTone, { number: string; surface: string }> =
-  {
-    danger: {
-      number: "text-destructive",
-      surface: "border-destructive/30 bg-destructive/10",
-    },
-    neutral: {
-      number: "text-foreground",
-      surface: "border-border/60 bg-card",
-    },
-    success: {
-      number: "text-success",
-      surface: "border-success/25 bg-success/10",
-    },
-  };
-
-function SummaryStat({
-  label,
-  tone,
-  value,
-}: {
-  label: string;
-  tone: StatTone;
-  value: number;
-}) {
-  const active = value > 0;
-  const styles = STAT_TONE_STYLES[tone];
-  return (
-    <div
-      className={cn(
-        "min-w-0 rounded-md border px-2.5 py-2",
-        active ? styles.surface : "border-border/60 bg-card",
-      )}
-    >
-      <div
-        className={cn(
-          "text-lg font-semibold leading-tight tabular-nums",
-          active ? styles.number : "text-muted-foreground",
-        )}
-      >
-        {value.toLocaleString("de-DE")}
-      </div>
-      <div className="truncate text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-        {label}
-      </div>
-    </div>
   );
 }

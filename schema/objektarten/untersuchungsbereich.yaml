@@ -1,0 +1,15 @@
+# Container am IfcBuilding: ein Untersuchungsbereich je Pset Untersuchungsbereich<n>.
+objektart: Untersuchungsbereich
+entity: { pset: Untersuchungsbereich, am: Bauwerk }
+kardinalitaet: { proDatei: { min: 1 } }
+
+id:
+  merkmal: Untersuchungsbereich.ID
+  grammatik: CONTAINER
+  eindeutig: { scope: datei, befund: duplicate_ifc_id }
+
+phasen:
+  planung: &alle
+    psets:
+      Untersuchungsbereich: { pflicht: [ID] }
+  einzelergebnisse: *alle

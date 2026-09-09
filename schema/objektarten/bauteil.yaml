@@ -1,0 +1,32 @@
+# Bauteil des Bauwerksmodells. Jedes Element unterhalb eines IfcBuildingStorey (auch IfcFooting);
+# Kinder ohne IDEbene1 liefern nur Geometrie und werden nicht als Bauteil gelesen.
+objektart: Bauteil
+entity: { klasse: IfcElement, unterhalb: IfcBuildingStorey } # IfcSpace ist eigene Objektart Raum
+erkennung: { merkmal: Objektinformation.IDEbene1, nichtLeer: true }
+
+id:
+  merkmal: Objektinformation.ID
+  grammatik: BAUTEIL
+  eindeutig: { scope: bauwerk, befund: duplicate_ifc_id } # über alle Teilbauwerk-Dateien eines Bauwerks
+  # Portal prüft nur die Form (sechs Segmente); die Herleitung aus Ebenen + Laufnummer ist Editor-Konvention
+  formPruefung: { regex: '([^.]+\.){5}[^.]+', stufe: fehler }
+  herleitungPruefung: { stufe: warnung, befund: editor_invalid_component_id }
+
+phasen:
+  bauwerksmodell:
+    psets:
+      Objektinformation:
+        pflicht: [ID, IDEbene1, IDEbene2, IDEbene3]
+        befund: component_missing_attributes
+        nichtAnwendbar:
+          [
+            BauteilID,
+            UntersuchungsbereichID,
+            UntersuchungszielID,
+            ProbeID,
+            MessfeldID,
+            MessanlageID,
+          ]
+
+# Präfixe der ID sind selbst referenzierbar (Ergebnisse dürfen auf Gruppe/Typ/Variante zeigen).
+referenzierbarAls: [Bauteil, Bauteilvariante, Bauteiltyp, Bauteilgruppe]

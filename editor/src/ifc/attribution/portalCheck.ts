@@ -1,8 +1,9 @@
 /**
  * Importvorschau: bildet die Regeln des MKP-Portal-Importers nach, die nicht
  * in den IDS-Dateien stehen — Zuordenbarkeit je Importart, Pflichtfelder,
- * Eindeutigkeit, Referenzauflösung (in der Datei und gegen ein geladenes
- * Bauwerksmodell), erweiterte Verfahrens-Psets, Ergebnis-Referenzen,
+ * Eindeutigkeit, Referenzauflösung (in der Datei und gegen die geladenen
+ * Bauwerksmodelle — ein Fachmodell darf Bauteile mehrerer Teilbauwerke
+ * referenzieren), erweiterte Verfahrens-Psets, Ergebnis-Referenzen,
  * ID-Präfixe bei Monitoring, Datumsformat.
  *
  * Quellen: mkp-portal packages/mkp-portal-diagnostics/.../create_db_models.py,
@@ -39,19 +40,59 @@ export interface PortalFinding extends PortalIssueFields {
   message: string;
 }
 
-export interface BauwerksmodellIndex {
+/** Ein geladenes Bauwerksmodell im Index. */
+export interface BauwerksmodellEntry {
+  /** Position in der Reihenfolge, in der die Modelle übergeben wurden. */
+  index: number;
+  fileName: string;
   bauwerksnummer: string;
   teilbauwerk: string;
+  /** Anzahl der Bauteile/Räume mit `IDEbene1` und `ID`. */
+  components: number;
+}
+
+/** Ziel einer `BauteilID`: Entity und das Modell, in dem sie liegt. */
+export interface BauwerksmodellComponent {
+  entityId: number;
+  /** Index in `modelle`. */
+  model: number;
+}
+
+/**
+ * Referenzierbare IDs aller geladenen Bauwerksmodelle in einem Index. Ein
+ * Fachmodell (z. B. Diagnostik am Überbau) kann Bauteile aus mehreren
+ * Bauwerks-IFCs referenzieren — je Teilbauwerk eine Datei.
+ */
+export interface BauwerksmodellIndex {
+  /** Bauwerksnummer/Teilbauwerk des ersten Modells (Kurzform für Einzelfälle). */
+  bauwerksnummer: string;
+  teilbauwerk: string;
+  modelle: BauwerksmodellEntry[];
+  /** Alle Bauwerksnummern der Modelle — das Fachmodell muss eine davon nennen. */
+  bauwerksnummern: Set<string>;
   /** Alle referenzierbaren IDs: Bauwerk, Teilbauwerk, Gruppe, Typ, Variante, Bauteil, Raum. */
   all: Set<string>;
-  /** Nur Bauteile und Räume (Ziel von `BauteilID`). */
-  components: Map<string, number>;
+  /** Nur Bauteile und Räume (Ziel von `BauteilID`); bei Dubletten gewinnt das zuerst übergebene Modell. */
+  components: Map<string, BauwerksmodellComponent>;
+  /** Bauteil-IDs, die in mehr als einem Modell vorkommen → Modell-Indizes. */
+  duplicates: Map<string, number[]>;
 }
 
 export interface PortalCheckOptions {
   importart: Importart;
-  /** Geladenes Bauwerksmodell zur Auflösung von `BauteilID`; ohne es bleiben diese Referenzen ungeprüft. */
+  /** Ein geladenes Bauwerksmodell zur Auflösung von `BauteilID` (Kurzform von `bauwerksmodelle`). */
   bauwerksmodell?: NativeIfcDocument | null;
+  /** Alle geladenen Bauwerksmodelle; ohne sie bleiben Bauteil-Referenzen ungeprüft. */
+  bauwerksmodelle?: NativeIfcDocument[] | null;
+}
+
+/** Alle Bauwerksmodelle aus den Optionen, in Übergabereihenfolge, ohne Dubletten. */
+export function bauwerksmodelleOf(options: Pick<PortalCheckOptions, "bauwerksmodell" | "bauwerksmodelle">): NativeIfcDocument[] {
+  const models: NativeIfcDocument[] = [];
+  for (const document of [options.bauwerksmodell, ...(options.bauwerksmodelle ?? [])]) {
+    if (document && !models.includes(document)) models.push(document);
+  }
+  return models;
 }
 
 export interface PortalCheckResult {
@@ -90,32 +131,61 @@ export function runPortalCheck(document: NativeIfcDocument, options: PortalCheck
       context.checkErgebnisse();
       break;
   }
+  if (options.importart !== "bauwerksmodell") context.checkBauwerksmodellDuplicates();
   return context.result();
 }
 
-/** Referenzierbare IDs eines Bauwerksmodells (Portal: StructureComponent, -Group, -Type, -Variant, Space, StructurePart, Structure). */
-export function buildBauwerksmodellIndex(document: NativeIfcDocument): BauwerksmodellIndex {
-  const building = document.entitiesByType.get("IFCBUILDING")?.[0];
-  const bauwerk = building ? findPset(document, building.id, "Bauwerk") : undefined;
-  const bauwerksnummer = getValue(bauwerk, "Bauwerksnummer");
-  const teilbauwerk = getValue(bauwerk, "Teilbauwerksnummer");
+/**
+ * Referenzierbare IDs eines oder mehrerer Bauwerksmodelle (Portal:
+ * StructureComponent, -Group, -Type, -Variant, Space, StructurePart, Structure).
+ */
+export function buildBauwerksmodellIndex(documents: NativeIfcDocument | NativeIfcDocument[]): BauwerksmodellIndex {
+  const list = Array.isArray(documents) ? documents : [documents];
   const all = new Set<string>();
-  const components = new Map<string, number>();
-  if (bauwerksnummer) all.add(bauwerksnummer);
-  if (bauwerksnummer && teilbauwerk) all.add(`${bauwerksnummer}.${teilbauwerk}`);
-  for (const entity of document.entities) {
-    const info = findPset(document, entity.id, "Objektinformation");
-    if (!info || !getValue(info, "IDEbene1")) continue;
-    const id = getValue(info, "ID");
-    if (!id) continue;
-    components.set(id, entity.id);
-    const segments = id.split(".");
-    for (const length of [3, 4, 5]) {
-      if (segments.length > length) all.add(segments.slice(0, length).join("."));
+  const components = new Map<string, BauwerksmodellComponent>();
+  const duplicates = new Map<string, number[]>();
+  const bauwerksnummern = new Set<string>();
+  const modelle: BauwerksmodellEntry[] = [];
+  for (const [index, document] of list.entries()) {
+    const building = document.entitiesByType.get("IFCBUILDING")?.[0];
+    const bauwerk = building ? findPset(document, building.id, "Bauwerk") : undefined;
+    const bauwerksnummer = getValue(bauwerk, "Bauwerksnummer");
+    const teilbauwerk = getValue(bauwerk, "Teilbauwerksnummer");
+    if (bauwerksnummer) {
+      all.add(bauwerksnummer);
+      bauwerksnummern.add(bauwerksnummer);
     }
-    all.add(id);
+    if (bauwerksnummer && teilbauwerk) all.add(`${bauwerksnummer}.${teilbauwerk}`);
+    let count = 0;
+    for (const entity of document.entities) {
+      const info = findPset(document, entity.id, "Objektinformation");
+      if (!info || !getValue(info, "IDEbene1")) continue;
+      const id = getValue(info, "ID");
+      if (!id) continue;
+      count += 1;
+      const existing = components.get(id);
+      if (existing) {
+        if (existing.model !== index) duplicates.set(id, [...(duplicates.get(id) ?? [existing.model]), index]);
+      } else {
+        components.set(id, { entityId: entity.id, model: index });
+      }
+      const segments = id.split(".");
+      for (const length of [3, 4, 5]) {
+        if (segments.length > length) all.add(segments.slice(0, length).join("."));
+      }
+      all.add(id);
+    }
+    modelle.push({ index, fileName: document.fileName, bauwerksnummer, teilbauwerk, components: count });
   }
-  return { bauwerksnummer, teilbauwerk, all, components };
+  return {
+    bauwerksnummer: modelle[0]?.bauwerksnummer ?? "",
+    teilbauwerk: modelle[0]?.teilbauwerk ?? "",
+    modelle,
+    bauwerksnummern,
+    all,
+    components,
+    duplicates,
+  };
 }
 
 /** Portal: difflib.get_close_matches(value, known, n=3, cutoff=0.6). */
@@ -157,7 +227,8 @@ class CheckContext {
     private readonly document: NativeIfcDocument,
     private readonly options: PortalCheckOptions,
   ) {
-    this.bauwerksmodell = options.bauwerksmodell ? buildBauwerksmodellIndex(options.bauwerksmodell) : null;
+    const models = bauwerksmodelleOf(options);
+    this.bauwerksmodell = models.length ? buildBauwerksmodellIndex(models) : null;
     this.roleLabel = importartLabel(options.importart);
   }
 
@@ -272,7 +343,16 @@ class CheckContext {
     this.add({ code: "unknown_reference", ...fields, suggestions: closeMatches(fields.value ?? "", known) }, "error", entityId);
   }
 
-  /** `BauteilID` gegen das geladene Bauwerksmodell; ohne Modell nur ein Hinweis. */
+  /** Bauteil-IDs, die in mehreren geladenen Bauwerksmodellen vorkommen — Referenzen darauf wären mehrdeutig. */
+  checkBauwerksmodellDuplicates(): void {
+    if (!this.bauwerksmodell) return;
+    for (const [id, models] of this.bauwerksmodell.duplicates) {
+      const names = models.map((model) => this.bauwerksmodell!.modelle[model]?.fileName ?? `Modell ${model + 1}`).join(", ");
+      this.add({ code: "editor_bauwerksmodell_duplicate_id", model_name: names, value: id }, "warning");
+    }
+  }
+
+  /** `BauteilID` gegen die geladenen Bauwerksmodelle; ohne Modell nur ein Hinweis. */
   private checkBauteilReference(value: string, entity: NativeIfcEntity, psetName: string, propertyName = "BauteilID"): void {
     if (!value) return;
     if (!this.bauwerksmodell) {
@@ -445,7 +525,7 @@ class CheckContext {
     const building = this.building();
     const bauwerk = this.requirePset(building?.id, "IfcBuilding", "Bauwerk");
     const bauwerksnummer = this.requireProperty(bauwerk, ["Bauwerksnummer"], building, "Bauwerk");
-    if (bauwerksnummer && this.bauwerksmodell?.bauwerksnummer && bauwerksnummer !== this.bauwerksmodell.bauwerksnummer) {
+    if (bauwerksnummer && this.bauwerksmodell?.bauwerksnummern.size && !this.bauwerksmodell.bauwerksnummern.has(bauwerksnummer)) {
       this.add({ code: "data_conflict", model_name: "Bauwerk", value: bauwerksnummer }, "error", building?.id);
     }
     const projekt = this.requirePset(building?.id, "IfcBuilding", ...PROJEKT);

@@ -1,0 +1,37 @@
+# Fachliches Pset der Untersuchungsstelle (neben Objektinformation).
+# Ehem. Katalogklasse BWD - US (ePset_Untersuchungsstelle).
+pset: Untersuchungsstelle
+katalog: { kuerzel: US, code: BWD - US }
+traeger: IfcBuildingElementProxy
+phasen: [planung, einzelergebnisse]
+
+merkmale:
+  # redundant zu Objektinformation.ID/Bezeichnung — Portal liest sie als Alias, Editor füllt sie mit
+  IDUntersuchungsstelle:
+    { typ: IfcLabel, loi: 100, spiegelt: Objektinformation.ID }
+  Untersuchungsbereich:
+    { typ: IfcLabel, loi: 100, spiegelt: Untersuchungsbereich.Bezeichnung }
+  Untersuchungsziel: { typ: IfcLabel, loi: 200 }
+  Untersuchungsverfahren: { typ: IfcLabel, loi: 100 }
+  Bauteilgruppe: { typ: IfcLabel, loi: 200 }
+  Bauteil: { typ: IfcLabel, loi: 200 }
+  ArtDerPruefung: { typ: IfcLabel, loi: 300 }
+  AnzahlProben: { typ: IfcReal, loi: 100 }
+  BaustoffuntersuchungProbe1Typ: { typ: IfcLabel, loi: 100 }
+  BaustoffuntersuchungProbe1Anzahl: { typ: IfcReal, loi: 100 }
+  BaustoffuntersuchungProbe2Typ: { typ: IfcLabel, loi: 100, optional: true }
+  BaustoffuntersuchungProbe2Anzahl: { typ: IfcReal, loi: 100, optional: true }
+  BaustoffuntersuchungProbe3Typ: { typ: IfcLabel, loi: 100, optional: true }
+  BaustoffuntersuchungProbe3Anzahl: { typ: IfcReal, loi: 100, optional: true }
+  VisuelleBestandsaufnahme:
+    { typ: IfcLabel, loi: 200, format: wahrFalsch, phasen: [planung] }
+  Zugaenglichkeit: { typ: IfcLabel, loi: 200, phasen: [planung] }
+  Beschreibung:
+    { typ: IfcText, loi: 400, rolle: beschreibung, aliase: [Bemerkung] }
+  Bemerkung: { typ: IfcText, loi: 200, optional: true }
+  Grundgesamtheit: { typ: IfcLabel, loi: 400, optional: true }
+  Norm: { typ: IfcLabel, loi: 400, optional: true }
+  Merkblatt: { typ: IfcLabel, loi: 400, optional: true }
+  TechnischeVorschrift: { typ: IfcLabel, loi: 400, optional: true }
+  Pruefanweisung: { typ: IfcLabel, loi: 400, optional: true }
+  Foto: { typ: IfcLabel, loi: 400, format: datei, optional: true }

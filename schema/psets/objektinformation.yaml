@@ -1,0 +1,37 @@
+# Gemeinsames Identifikations-Pset aller Elemente (Bauteil, Raum, Untersuchungsstelle, Probe,
+# Ergebnis, Sensor). Welche Merkmale je Objektart Pflicht, abgeleitet oder nicht anwendbar sind,
+# steht in objektarten/*.yaml — hier nur, was es gibt.
+# Ehem. Katalogklassen BWD - OI und MON - OI.
+pset: Objektinformation
+aliase: [Objektinformationen]
+katalog: { kuerzel: OI, code: [BWD - OI, MON - OI] }
+
+merkmale:
+  ID:
+    {
+      typ: IfcLabel,
+      loi: 100,
+      beschreibung: Eindeutige ID nach der Grammatik der Objektart,
+    }
+  Bezeichnung:
+    { typ: IfcLabel, loi: 100, aliase: [BezeichnungUntersuchungsstelle] }
+  # Bauwerksmodell: die drei Hierarchieebenen, aus denen die Bauteil-ID gebildet wird
+  IDEbene1: { typ: IfcLabel, loi: 100 }
+  IDEbene2: { typ: IfcLabel, loi: 100 }
+  IDEbene3: { typ: IfcLabel, loi: 100 }
+  # Fachmodelle: Referenzen
+  BauteilID: { typ: IfcLabel, loi: 100, referenz: Bauteil }
+  UntersuchungsbereichID:
+    { typ: IfcLabel, loi: 100, referenz: Untersuchungsbereich }
+  UntersuchungszielID:
+    {
+      typ: IfcLabel,
+      loi: 100,
+      referenz: Untersuchungsziel,
+      liste: true,
+      aliase: [UntersuchungszielIDs],
+    }
+  ProbeID: { typ: IfcLabel, loi: 100, referenz: Probe }
+  MessfeldID: { typ: IfcLabel, loi: 100, referenz: Messfeld }
+  MessanlageID: { typ: IfcLabel, loi: 100, referenz: Messanlage }
+  Bemerkung: { typ: IfcText, loi: 200 }

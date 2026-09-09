@@ -1,0 +1,42 @@
+# Probe: 3D-Element, entnommen an einer Untersuchungsstelle. Nur in der Ausführung.
+objektart: Probe
+entity: { klasse: IfcBuildingElementProxy }
+# Portal: _is_sample — UntersuchungsstelleID im Probe-Pset (oder notfalls in Objektinformation)
+erkennung:
+  {
+    merkmal:
+      [Probe.UntersuchungsstelleID, Objektinformation.UntersuchungsstelleID],
+    nichtLeer: true,
+  }
+# Ein Element ist Stelle ODER Probe, nie beides (Portal: sample_element)
+ausschliesstMit: [Untersuchungsstelle]
+
+id:
+  merkmal: Probe.ID
+  grammatik: PROBE # {Untersuchungsstelle.ID}.{IDProbe}
+  eindeutig: { scope: datei, befund: duplicate_ifc_id }
+  herleitungPruefung: { stufe: warnung, befund: editor_id_prefix_mismatch }
+
+phasen:
+  einzelergebnisse:
+    psets:
+      Probe:
+        anzahl: { min: 1, max: 1 } # Familie, aber je Element genau ein Probe-Pset
+        pflicht: [ID, IDProbe, UntersuchungsstelleID]
+        referenz:
+          UntersuchungsstelleID: { ziel: Untersuchungsstelle, quelle: datei }
+      Objektinformation:
+        pflicht: [ID, Bezeichnung]
+        spiegelt: { ID: Probe.ID }
+        abgeleitet:
+          {
+            BauteilID: Untersuchungsstelle.BauteilID,
+            IDEbene1: BauteilID,
+            IDEbene2: BauteilID,
+            IDEbene3: BauteilID,
+          }
+        nichtAnwendbar:
+          [UntersuchungsbereichID, ProbeID, MessfeldID, MessanlageID]
+    verfahren:
+      anzahl: { min: 0 }
+      erweitertNurMitHaupt: { befund: unassigned_extended_property_set }

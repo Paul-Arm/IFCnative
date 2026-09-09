@@ -28,7 +28,9 @@ import React, {
     useSyncExternalStore,
 } from "react";
 
-import { relationshipTypesForEndpointTypes } from "@/ifc";
+import {
+    relationshipTypesForEndpointTypes,
+} from "@/ifc/relationshipRules";
 
 import { shortType } from "./ifc-workspace/ui";
 import type {

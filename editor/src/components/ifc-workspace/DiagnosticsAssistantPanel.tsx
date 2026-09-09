@@ -9,16 +9,20 @@ import { Input } from "@/components/ui/input";
 import {
     buildDiagnosticObjectInfoDraft,
     buildDiagnosticSelectionContext,
-    catalogObjectLabel,
     readDiagnosticObjectiveReferences,
     suggestDiagnosticProcedureCatalogObjects,
-    type CatalogObjectType,
     type DiagnosticObjectInfoDraft,
     type DiagnosticObjectRole,
     type DiagnosticObjectiveSummary,
+} from "@/ifc/diagnosticsAssistant";
+import {
+    catalogObjectLabel,
+    type CatalogObjectType,
     type IfcObjectCatalog,
+} from "@/ifc/catalog";
+import {
     type NativeIfcDocument,
-} from "@/ifc";
+} from "@/ifc/nativeDocument";
 import { ChevronDown, PenLine, Plus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 

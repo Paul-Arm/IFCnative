@@ -2,10 +2,14 @@ import { useState } from "react";
 
 import {
     type IdsDocumentModel,
+} from "@/ifc/ids";
+import {
     type NativeIfcDocument,
+} from "@/ifc/nativeDocument";
+import {
     type ObjectInfoIndex,
     type ObjectInfoValidationFinding,
-} from "@/ifc";
+} from "@/ifc/objectInfoValidation";
 
 import { IdsPanel } from "./IdsPanel";
 import { ObjectInfoPanel } from "./ObjectInfoPanel";

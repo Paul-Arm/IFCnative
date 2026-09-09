@@ -1,0 +1,23 @@
+# Nummeriertes Pset am IfcBuilding: ein Untersuchungsbereich je Pset.
+# Ehem. Katalogklasse BWD - UB (ePset_UntersuchungsbereichX).
+pset: Untersuchungsbereich
+familie: 'Untersuchungsbereich\d*'
+katalog: { kuerzel: UB, code: BWD - UB }
+traeger: IfcBuilding
+phasen: [planung, einzelergebnisse]
+
+merkmale:
+  ID: { typ: IfcLabel, loi: 100, grammatik: CONTAINER }
+  Bezeichnung: { typ: IfcLabel, loi: 100 }
+  Bauteilgruppe: { typ: IfcLabel, loi: 200 }
+  Bauteil: { typ: IfcLabel, loi: 200 }
+  Untersuchungsziel: { typ: IfcLabel, loi: 200 }
+  Untersuchungsverfahren1: { typ: IfcLabel, loi: 100 }
+  Untersuchungsverfahren2: { typ: IfcLabel, loi: 100 }
+  Untersuchungsverfahren3: { typ: IfcLabel, loi: 100 }
+  Untersuchungsverfahren4: { typ: IfcLabel, loi: 100 }
+  Untersuchungsverfahren5: { typ: IfcLabel, loi: 100 }
+  Grundgesamtheit: { typ: IfcLabel, loi: 400 }
+  Beschreibung: { typ: IfcText, loi: 200 }
+  Bemerkung: { typ: IfcText, loi: 200 }
+  Foto: { typ: IfcLabel, loi: 400, format: datei }

@@ -1,0 +1,11 @@
+# Modelltyp Bauwerksmodell. Alles, was hier NICHT steht, ergibt sich aus den Objektarten
+# mit einer Regel für phase `bauwerksmodell`: Bauwerk, Bauteil, Raum.
+modell: Bauwerksmodell
+phase: bauwerksmodell
+ids: { datei: bauwerksmodell.ids, praefix: BWM } # Kennungen der generierten IDS-Specs
+
+# Je Teilbauwerk eine Datei; ein Fachmodell darf Bauteile mehrerer Teilbauwerk-Dateien referenzieren.
+einheit: teilbauwerk
+
+# Was mit 3D-Elementen passiert, die keine Objektart treffen
+elementeOhneObjektart: { stufe: hinweis, grund: liefern nur Geometrie }

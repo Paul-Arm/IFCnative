@@ -12,7 +12,7 @@ import {
   History,
   Loader2,
 } from "lucide-react";
-import { useId, useState, type DragEvent } from "react";
+import { useState, type DragEvent } from "react";
 
 import type { VcsAuth, VcsSettings } from "@/vcs/types";
 
@@ -20,6 +20,7 @@ import { HubBrowser, type HubDocument } from "./HubBrowser";
 import { NewIfcDialog, type NewIfcDraft } from "./NewIfcDialog";
 import { Button, InlineAlert } from "./ui";
 import type { RecentIfcFileEntry } from "./workspaceStorage";
+import { StartPageBackground } from "./StartPageBackground";
 import "./StartPage.css";
 
 /** Ein vom Hub geladener IFC-Stand, den der Editor als Tab öffnet. */
@@ -74,83 +75,6 @@ function formatRelative(iso: string): string {
   return rtf.format(Math.trunc(diffSeconds / step.seconds), step.unit);
 }
 
-type CubePoint = readonly [number, number, number];
-
-/** Project every edge from the same unit cube; all three axes have equal scale. */
-function IsometricCube({
-  x,
-  y,
-  size,
-  variant,
-}: {
-  x: number;
-  y: number;
-  size: number;
-  variant: "left" | "right" | "top";
-}) {
-  const materialId = useId();
-  const path = (...points: CubePoint[]) =>
-    points.map(([px, py, pz], index) => {
-      const sx = (px - py) * Math.sqrt(3) / 2 * size;
-      const sy = ((px + py) / 2 - pz) * size;
-      return `${index ? "L" : "M"}${sx} ${sy}`;
-    }).join(" ");
-
-  const subdivisions = [1 / 3, 2 / 3].map((t) => [
-    // Both directions on the top, continuing down the matching side face.
-    path([t, 0, 1], [t, 1, 1], [t, 1, 0]),
-    path([0, t, 1], [1, t, 1], [1, t, 0]),
-    // Equal storey heights across both visible sides.
-    path([0, 1, t], [1, 1, t], [1, 0, t]),
-  ].join(" ")).join(" ");
-  const silhouette = `${path([0, 0, 1], [1, 0, 1], [1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 1, 1])}Z`;
-
-  return (
-    <g transform={`translate(${x} ${y})`}>
-      <defs>
-        {(["top", "left", "right"] as const).map((face) => (
-          <linearGradient key={face} id={`${materialId}-${face}`} x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor={`var(--start-cube-${face}-light)`} />
-            <stop offset="100%" stopColor={`var(--start-cube-${face}-shade)`} />
-          </linearGradient>
-        ))}
-      </defs>
-      <g className={`start-page-solid start-page-solid--${variant}`}>
-        {/* Opaque, softly shaded material keeps the floor grid behind the cube. */}
-        <path className="start-page-solid-base" d={silhouette} />
-        <path
-          className="start-page-solid-face"
-          fill={`url(#${materialId}-top)`}
-          d={`${path([0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1])}Z`}
-        />
-        <path
-          className="start-page-solid-face"
-          fill={`url(#${materialId}-left)`}
-          d={`${path([0, 1, 1], [1, 1, 1], [1, 1, 0], [0, 1, 0])}Z`}
-        />
-        <path
-          className="start-page-solid-face"
-          fill={`url(#${materialId}-right)`}
-          d={`${path([1, 1, 1], [1, 0, 1], [1, 0, 0], [1, 1, 0])}Z`}
-        />
-        <path
-          className="start-page-solid-outline"
-          d={[
-            silhouette,
-            path([0, 1, 1], [1, 1, 1], [1, 0, 1]),
-            path([1, 1, 1], [1, 1, 0]),
-          ].join(" ")}
-        />
-        <path className="start-page-solid-detail" d={subdivisions} />
-        <path
-          className="start-page-solid-highlight"
-          d={path([0, 1, 1], [0, 0, 1], [1, 0, 1])}
-        />
-      </g>
-    </g>
-  );
-}
-
 export function StartPage({
   loadingName,
   settings,
@@ -182,21 +106,7 @@ export function StartPage({
 
   return (
     <div className="start-page-shell">
-      <div aria-hidden="true" className="start-page-background">
-        <div className="start-page-glow start-page-glow--teal" />
-        <div className="start-page-glow start-page-glow--blue" />
-        <div className="start-page-grid" />
-        <svg
-          className="start-page-geometry"
-          viewBox="0 0 1440 900"
-          preserveAspectRatio="xMidYMid slice"
-          fill="none"
-        >
-          <IsometricCube x={192} y={320} size={140} variant="left" />
-          <IsometricCube x={1275} y={620} size={156} variant="right" />
-          <IsometricCube x={1020} y={145} size={81} variant="top" />
-        </svg>
-      </div>
+      <StartPageBackground />
       <main
         className={`start-page-content relative flex min-h-0 flex-1 items-start justify-center overflow-y-auto p-6 transition-colors ${
           dragActive ? "bg-primary/5" : ""

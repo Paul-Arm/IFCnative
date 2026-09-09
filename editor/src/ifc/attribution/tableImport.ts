@@ -4,7 +4,7 @@
  * fehlende Zeilen optional anlegen — erst als Plan (Dry-Run), dann als eine
  * Änderung. Reines Modell ohne React.
  */
-import type { NativeIfcDocument } from "../nativeDocument";
+import { batchNativeDocument, type NativeIfcDocument } from "../nativeDocument";
 
 import { stripPropertyPrefix } from "./normalize";
 import { writeCell } from "./recipes";
@@ -263,7 +263,7 @@ export interface ApplyResult {
 }
 
 /** Plan in einem Durchgang schreiben; `create` legt eine fehlende Zeile an (Wiederholgruppe oder Fachobjekt). */
-export function applyImport(document: NativeIfcDocument, plan: ImportPlan, importart: Importart, create?: CreateRow): ApplyResult {
+function applyImportInDraft(document: NativeIfcDocument, plan: ImportPlan, importart: Importart, create?: CreateRow): ApplyResult {
   let next = document;
   let updated = 0;
   let created = 0;
@@ -287,4 +287,8 @@ export function applyImport(document: NativeIfcDocument, plan: ImportPlan, impor
     }
   }
   return { document: next, updated, created, createdEntityIds, movedEntityIds };
+}
+
+export function applyImport(document: NativeIfcDocument, plan: ImportPlan, importart: Importart, create?: CreateRow): ApplyResult {
+  return batchNativeDocument(document, (draft) => applyImportInDraft(draft, plan, importart, create));
 }

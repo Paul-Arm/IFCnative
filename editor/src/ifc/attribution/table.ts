@@ -5,7 +5,7 @@
  */
 import { getNativeLengthUnitScale, getNativePlacementWorld, type NativeIfcDocument, type NativeIfcPropertySet } from "../nativeDocument";
 
-import { findPset, findPsets, getProperty, getValue, psetMatches, stripPropertyPrefix, stripPsetPrefix } from "./normalize";
+import { findPset, findPsets, getProperty, getValue, isObjectiveIdProperty, psetMatches, splitIdList, stripPropertyPrefix, stripPsetPrefix } from "./normalize";
 import type { BauwerksmodellIndex, PortalFinding } from "./portalCheck";
 import { classifyMethodPset, type Importart, type Katalog, type KatalogKlasse, type KatalogProperty } from "./schema";
 import type { TreeNode, TreeNodeKind } from "./tree";
@@ -21,6 +21,14 @@ export interface Scope {
 export type CellState = "ok" | "import" | "leer" | "typ" | "abgeleitet" | "na" | "neutral" | "unbekannt" | "fehlt";
 
 export type ReferenceKind = "Bauteil" | "Untersuchungsbereich" | "Untersuchungsziel" | "Untersuchungsstelle" | "Messanlage" | "Maßnahme";
+
+/** Foreign keys only; own IDs and hierarchy components (IDEbene1 etc.) remain text. */
+function referenceForProperty(property: string): ReferenceKind | undefined {
+  if (isObjectiveIdProperty(property)) return "Untersuchungsziel";
+  const name = stripPropertyPrefix(property).toLocaleLowerCase("de-DE").split("_")[0];
+  const references: Record<string, ReferenceKind> = { bauteilid: "Bauteil", untersuchungsbereichid: "Untersuchungsbereich", untersuchungsstelleid: "Untersuchungsstelle", messanlageid: "Messanlage", maßnahmeid: "Maßnahme", massnahmeid: "Maßnahme" };
+  return references[name!];
+}
 
 export interface TableColumn {
   key: string;
@@ -248,10 +256,10 @@ export interface BuildTableOptions {
 
 export function buildTable(document: NativeIfcDocument, nodes: TreeNode[], options: BuildTableOptions): TableModel {
   const rowsNodes = nodes.filter((node) => TABLE_KINDS.includes(node.kind) && node.entityId != null);
-  if (!rowsNodes.length) return { objektart: null, groups: [], columns: [], rows: [] };
+  if (!rowsNodes.length && !options.objektart) return { objektart: null, groups: [], columns: [], rows: [] };
   const counts = new Map<TreeNodeKind, number>();
   for (const node of rowsNodes) counts.set(node.kind, (counts.get(node.kind) ?? 0) + 1);
-  const objektart = options.objektart && counts.has(options.objektart) ? options.objektart : [...counts].sort((a, b) => b[1] - a[1])[0]![0];
+  const objektart = options.objektart ?? [...counts].sort((a, b) => b[1] - a[1])[0]![0];
   const rule = OBJEKTART_RULES[objektart] ?? { hard: [], derived: [], nichtAnwendbar: [], katalogklassen: [] };
   const rowNodes = rowsNodes.filter((node) => node.kind === objektart);
   // Pset-Zeilen (Ziel, Bereich, Messanlage, Maßnahme, Kanal) sehen nur ihr eigenes Pset, Entity-Zeilen alle Psets des Objekts.
@@ -298,6 +306,7 @@ export function buildTable(document: NativeIfcDocument, nodes: TreeNode[], optio
     } else {
       Object.assign(column, { ...init, hard: column.hard || Boolean(init.hard), soft: column.soft || Boolean(init.soft), aliase: [...new Set([...column.aliase, ...(init.aliase ?? [])])] });
     }
+    column.reference ??= referenceForProperty(column.property);
     return column;
   };
 
@@ -360,7 +369,7 @@ export function buildTable(document: NativeIfcDocument, nodes: TreeNode[], optio
   }
   // Position: Welt-Koordinaten der Platzierung in Metern — nur für Objekt-Zeilen; Schreiben verschiebt den Marker.
   const scale = getNativeLengthUnitScale(document);
-  if (!rule.familie && rowNodes.some((node) => getNativePlacementWorld(document, node.entityId!))) {
+  if (!rule.familie && (!rowNodes.length || rowNodes.some((node) => getNativePlacementWorld(document, node.entityId!)))) {
     const group = ensureGroup(POSITION_PATTERN, "Position (Welt, m)");
     ensureColumn(group, "X", { position: "x", aliase: ["Rechtswert", "Easting", "Ost", "PositionX", "KoordinateX", "PosX"] });
     ensureColumn(group, "Y", { position: "y", aliase: ["Hochwert", "Northing", "Nord", "PositionY", "KoordinateY", "PosY"] });
@@ -476,13 +485,15 @@ function resolveReference(kind: ReferenceKind, value: string, references: Refere
   switch (kind) {
     case "Bauteil": {
       if (!bauwerksmodell) return { state: "unbekannt" };
-      const entityId = bauwerksmodell.components.get(value);
-      return { state: "ok", target: entityId != null ? value.split(".").slice(-2).join(".") : undefined };
+      const component = bauwerksmodell.components.get(value);
+      return { state: "ok", target: component ? value.split(".").slice(-2).join(".") : undefined };
     }
     case "Untersuchungsbereich":
       return { state: "ok", target: references.untersuchungsbereich.get(value) };
-    case "Untersuchungsziel":
-      return { state: "ok", target: references.untersuchungsziel.get(value) };
+    case "Untersuchungsziel": {
+      const targets = splitIdList(value).map((id) => references.untersuchungsziel.get(id));
+      return { state: "ok", target: targets.length && targets.every(Boolean) ? targets.join("; ") : undefined };
+    }
     case "Untersuchungsstelle":
       return { state: "ok", target: references.untersuchungsstelle.get(value) };
     case "Messanlage":

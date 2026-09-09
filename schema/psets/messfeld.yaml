@@ -1,0 +1,26 @@
+# Nummeriertes Pset an der Untersuchungsstelle: ein Messfeld je Pset (Messfeld0, Messfeld1 …).
+# Ehem. Katalogklasse BWD - MF.
+pset: Messfeld
+familie: 'Messfeld\d*'
+katalog: { kuerzel: MF, code: BWD - MF }
+traeger: IfcBuildingElementProxy
+phasen: [planung, einzelergebnisse]
+
+merkmale:
+  ID: { typ: IfcLabel, loi: 100 }
+  MessfeldName: { typ: IfcLabel, loi: 100, optional: true }
+  Messfeld: { typ: IfcLabel, loi: 100 }
+  MessfeldBeschreibung: { typ: IfcText, loi: 200, optional: true }
+  MessfeldNullpunkt: { typ: IfcLabel, loi: 200 }
+  MessfeldbreiteX_cm: { typ: IfcReal, loi: 200, einheit: cm }
+  MessfeldhoeheY_cm: { typ: IfcReal, loi: 200, einheit: cm }
+  MessrichtungX: { typ: IfcLabel, loi: 200 }
+  MessrichtungY: { typ: IfcLabel, loi: 200 }
+  MessspurenX: { typ: IfcReal, loi: 200 }
+  MessspurenY: { typ: IfcReal, loi: 200 }
+  RasterweiteX_cm: { typ: IfcReal, loi: 200, einheit: cm }
+  RasterweiteY_cm: { typ: IfcReal, loi: 200, einheit: cm }
+  Datum: { typ: IfcLabel, loi: 300, format: datum, phasen: [einzelergebnisse] }
+  Skizze: { typ: IfcLabel, loi: 400, format: datei, optional: true }
+  Foto: { typ: IfcLabel, loi: 400, format: datei, optional: true }
+  Bemerkung: { typ: IfcText, loi: 200, optional: true }

@@ -28,7 +28,7 @@ export interface SaveDialogProps {
   /** Nur mit gültiger Hub-Anmeldung kann committet werden. */
   canCommit: boolean;
   /** Exportiert den Stand als lokale IFC-Datei (schließt den Dialog). */
-  onExportLocal: () => void;
+  onExportLocal: () => Promise<boolean>;
   /** Committet den Stand auf den Hub; wirft bei Fehlern (bleibt offen). */
   onCommit: (message: string) => Promise<void>;
 }
@@ -124,9 +124,11 @@ export function SaveDialog({
         <DialogFooter className="sm:justify-between">
           <Button
             disabled={busy}
-            onClick={() => {
-              onExportLocal();
-              onOpenChange(false);
+            onClick={async () => {
+              setBusy(true);
+              try { if (await onExportLocal()) onOpenChange(false); }
+              catch (error) { setError(errorMessage(error)); }
+              finally { setBusy(false); }
             }}
           >
             <HardDriveDownload aria-hidden className="size-3.5" />

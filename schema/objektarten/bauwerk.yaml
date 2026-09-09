@@ -1,0 +1,34 @@
+# Das Bauwerk: das IfcBuilding mit dem Pset Bauwerk. Existiert in jeder Datei genau einmal.
+# Im Bauwerksmodell wird es angelegt, in Fachmodellen nur referenziert.
+objektart: Bauwerk
+entity: IfcBuilding
+kardinalitaet: { proDatei: { min: 1, max: 1 }, befund: invalid_building_count }
+
+# Der Regelsatz je Phase. Fehlt eine Phase hier, kommt die Objektart in dieser Phase nicht vor.
+phasen:
+  bauwerksmodell:
+    psets:
+      Bauwerk:
+        pflicht: [Bauwerksnummer, Bauwerksname, Teilbauwerksnummer]
+        befund: component_missing_attributes
+    struktur:
+      # unter dem IfcBuilding muss mindestens ein Geschoss hängen; Bauteile liegen in Geschossen
+      kinder: { IfcBuildingStorey: { min: 1 } }
+
+  planung: &fachmodell
+    psets:
+      Bauwerk:
+        pflicht: [Bauwerksnummer]
+        # muss zu einem bereits importierten Bauwerksmodell passen
+        referenz:
+          {
+            Bauwerksnummer:
+              {
+                ziel: Bauwerk,
+                quelle: bauwerksmodell,
+                befund: unknown_reference,
+              },
+          }
+  einzelergebnisse: *fachmodell
+  ergebnisse: *fachmodell
+  monitoring: *fachmodell

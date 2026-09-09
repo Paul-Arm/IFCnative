@@ -1,0 +1,11 @@
+# Nummeriertes Pset am IfcBuilding: ein Untersuchungsziel je Pset (Untersuchungsziel0, Untersuchungsziel1 …).
+# Ehem. Katalogklasse BWD - UZ (ePset_UntersuchungszielX).
+pset: Untersuchungsziel
+familie: 'Untersuchungsziel\d*'
+katalog: { kuerzel: UZ, code: BWD - UZ }
+traeger: IfcBuilding
+phasen: [planung, einzelergebnisse]
+
+merkmale:
+  ID: { typ: IfcLabel, loi: 200, grammatik: CONTAINER }
+  Bezeichnung: { typ: IfcLabel, loi: 200, aliase: [UntersuchungszielName] }

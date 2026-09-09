@@ -16,7 +16,7 @@ import {
 } from "../nativeDocument";
 
 import { findPset, findPsets, getProperty, getValue, stripPsetPrefix } from "./normalize";
-import { classifyMethodPset, fachmodellSchema, katalogFor, type Importart, type KatalogKlasse } from "./schema";
+import { activeSchema, classifyMethodPset, katalogFor, type Importart, type KatalogKlasse } from "./schema";
 import { parseMeters, valueTypeFor, type TableColumn } from "./table";
 import type { TreeNodeKind } from "./tree";
 
@@ -197,7 +197,8 @@ export function addMethodPset(document: NativeIfcDocument, entityId: number, ver
 
 export function katalogklasseForPset(portalName: string): KatalogKlasse | undefined {
   const target = portalName.toLowerCase();
-  for (const katalog of [fachmodellSchema.katalog.bwd, fachmodellSchema.katalog.mon]) {
+  const schema = activeSchema();
+  for (const katalog of [schema.katalog.bwd, schema.katalog.mon]) {
     const klasse = katalog.objektklassen.find((entry) => entry.psets.some((pset) => pset.portalName.toLowerCase() === target || pset.portalName.toLowerCase().replace(/[xn]$/, "") === target.replace(/\d+$/, "")));
     if (klasse) return klasse;
   }

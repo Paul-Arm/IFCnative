@@ -1,0 +1,6656 @@
+{
+  "IFC2X3": {
+    "IFCACTORROLE": [
+      -1,
+      2
+    ],
+    "IFCADDRESS": [
+      -1,
+      1
+    ],
+    "IFCAPPLIEDVALUE": [
+      0,
+      1
+    ],
+    "IFCAPPLIEDVALUERELATIONSHIP": [
+      3,
+      4
+    ],
+    "IFCAPPROVAL": [
+      5,
+      0
+    ],
+    "IFCAPPROVALRELATIONSHIP": [
+      3,
+      2
+    ],
+    "IFCBOUNDARYCONDITION": [
+      0,
+      -1
+    ],
+    "IFCBOUNDARYEDGECONDITION": [
+      0,
+      -1
+    ],
+    "IFCBOUNDARYFACECONDITION": [
+      0,
+      -1
+    ],
+    "IFCBOUNDARYNODECONDITION": [
+      0,
+      -1
+    ],
+    "IFCBOUNDARYNODECONDITIONWARPING": [
+      0,
+      -1
+    ],
+    "IFCCLASSIFICATION": [
+      3,
+      -1
+    ],
+    "IFCCOLOURSPECIFICATION": [
+      0,
+      -1
+    ],
+    "IFCCONSTRAINT": [
+      0,
+      1
+    ],
+    "IFCCONSTRAINTAGGREGATIONRELATIONSHIP": [
+      0,
+      1
+    ],
+    "IFCCONSTRAINTRELATIONSHIP": [
+      0,
+      1
+    ],
+    "IFCCOSTVALUE": [
+      0,
+      1
+    ],
+    "IFCCURVESTYLEFONT": [
+      0,
+      -1
+    ],
+    "IFCCURVESTYLEFONTANDSCALING": [
+      0,
+      -1
+    ],
+    "IFCDOCUMENTINFORMATION": [
+      1,
+      2
+    ],
+    "IFCDRAUGHTINGCALLOUTRELATIONSHIP": [
+      0,
+      1
+    ],
+    "IFCENVIRONMENTALIMPACTVALUE": [
+      0,
+      1
+    ],
+    "IFCEXTERNALREFERENCE": [
+      2,
+      -1
+    ],
+    "IFCEXTERNALLYDEFINEDHATCHSTYLE": [
+      2,
+      -1
+    ],
+    "IFCEXTERNALLYDEFINEDSURFACESTYLE": [
+      2,
+      -1
+    ],
+    "IFCEXTERNALLYDEFINEDSYMBOL": [
+      2,
+      -1
+    ],
+    "IFCEXTERNALLYDEFINEDTEXTFONT": [
+      2,
+      -1
+    ],
+    "IFCLIBRARYINFORMATION": [
+      0,
+      -1
+    ],
+    "IFCLIBRARYREFERENCE": [
+      2,
+      -1
+    ],
+    "IFCMATERIAL": [
+      0,
+      -1
+    ],
+    "IFCMATERIALLAYERSET": [
+      1,
+      -1
+    ],
+    "IFCMETRIC": [
+      0,
+      1
+    ],
+    "IFCOBJECTIVE": [
+      0,
+      1
+    ],
+    "IFCORGANIZATION": [
+      1,
+      2
+    ],
+    "IFCORGANIZATIONRELATIONSHIP": [
+      0,
+      1
+    ],
+    "IFCPHYSICALQUANTITY": [
+      0,
+      1
+    ],
+    "IFCPHYSICALSIMPLEQUANTITY": [
+      0,
+      1
+    ],
+    "IFCPOSTALADDRESS": [
+      -1,
+      1
+    ],
+    "IFCPREDEFINEDITEM": [
+      0,
+      -1
+    ],
+    "IFCPREDEFINEDSYMBOL": [
+      0,
+      -1
+    ],
+    "IFCPREDEFINEDTERMINATORSYMBOL": [
+      0,
+      -1
+    ],
+    "IFCPREDEFINEDTEXTFONT": [
+      0,
+      -1
+    ],
+    "IFCPRESENTATIONLAYERASSIGNMENT": [
+      0,
+      1
+    ],
+    "IFCPRESENTATIONLAYERWITHSTYLE": [
+      0,
+      1
+    ],
+    "IFCPRESENTATIONSTYLE": [
+      0,
+      -1
+    ],
+    "IFCPRODUCTREPRESENTATION": [
+      0,
+      1
+    ],
+    "IFCPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCPROFILEPROPERTIES": [
+      0,
+      -1
+    ],
+    "IFCPROPERTY": [
+      0,
+      1
+    ],
+    "IFCPROPERTYCONSTRAINTRELATIONSHIP": [
+      2,
+      3
+    ],
+    "IFCPROPERTYDEPENDENCYRELATIONSHIP": [
+      2,
+      3
+    ],
+    "IFCPROPERTYENUMERATION": [
+      0,
+      -1
+    ],
+    "IFCQUANTITYAREA": [
+      0,
+      1
+    ],
+    "IFCQUANTITYCOUNT": [
+      0,
+      1
+    ],
+    "IFCQUANTITYLENGTH": [
+      0,
+      1
+    ],
+    "IFCQUANTITYTIME": [
+      0,
+      1
+    ],
+    "IFCQUANTITYVOLUME": [
+      0,
+      1
+    ],
+    "IFCQUANTITYWEIGHT": [
+      0,
+      1
+    ],
+    "IFCREFERENCESVALUEDOCUMENT": [
+      2,
+      3
+    ],
+    "IFCRIBPLATEPROFILEPROPERTIES": [
+      0,
+      -1
+    ],
+    "IFCROOT": [
+      2,
+      3
+    ],
+    "IFCSHAPEASPECT": [
+      1,
+      2
+    ],
+    "IFCSIMPLEPROPERTY": [
+      0,
+      1
+    ],
+    "IFCSTRUCTURALCONNECTIONCONDITION": [
+      0,
+      -1
+    ],
+    "IFCSTRUCTURALLOAD": [
+      0,
+      -1
+    ],
+    "IFCSTRUCTURALLOADSTATIC": [
+      0,
+      -1
+    ],
+    "IFCSTRUCTURALLOADTEMPERATURE": [
+      0,
+      -1
+    ],
+    "IFCSTYLEDITEM": [
+      2,
+      -1
+    ],
+    "IFCSURFACESTYLE": [
+      0,
+      -1
+    ],
+    "IFCSYMBOLSTYLE": [
+      0,
+      -1
+    ],
+    "IFCTELECOMADDRESS": [
+      -1,
+      1
+    ],
+    "IFCTEXTSTYLE": [
+      0,
+      -1
+    ],
+    "IFCTEXTSTYLEFONTMODEL": [
+      0,
+      -1
+    ],
+    "IFCTIMESERIES": [
+      0,
+      1
+    ],
+    "IFCANNOTATIONOCCURRENCE": [
+      2,
+      -1
+    ],
+    "IFCANNOTATIONSURFACEOCCURRENCE": [
+      2,
+      -1
+    ],
+    "IFCANNOTATIONSYMBOLOCCURRENCE": [
+      2,
+      -1
+    ],
+    "IFCANNOTATIONTEXTOCCURRENCE": [
+      2,
+      -1
+    ],
+    "IFCARBITRARYCLOSEDPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCARBITRARYOPENPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCARBITRARYPROFILEDEFWITHVOIDS": [
+      1,
+      -1
+    ],
+    "IFCCENTERLINEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCCLASSIFICATIONREFERENCE": [
+      2,
+      -1
+    ],
+    "IFCCOLOURRGB": [
+      0,
+      -1
+    ],
+    "IFCCOMPLEXPROPERTY": [
+      0,
+      1
+    ],
+    "IFCCOMPOSITEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCCONTEXTDEPENDENTUNIT": [
+      2,
+      -1
+    ],
+    "IFCCONVERSIONBASEDUNIT": [
+      2,
+      -1
+    ],
+    "IFCCURVESTYLE": [
+      0,
+      -1
+    ],
+    "IFCDERIVEDPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCDIMENSIONCALLOUTRELATIONSHIP": [
+      0,
+      1
+    ],
+    "IFCDIMENSIONPAIR": [
+      0,
+      1
+    ],
+    "IFCDOCUMENTREFERENCE": [
+      2,
+      -1
+    ],
+    "IFCDRAUGHTINGPREDEFINEDTEXTFONT": [
+      0,
+      -1
+    ],
+    "IFCEXTENDEDMATERIALPROPERTIES": [
+      3,
+      2
+    ],
+    "IFCFAILURECONNECTIONCONDITION": [
+      0,
+      -1
+    ],
+    "IFCFILLAREASTYLE": [
+      0,
+      -1
+    ],
+    "IFCGENERALPROFILEPROPERTIES": [
+      0,
+      -1
+    ],
+    "IFCIRREGULARTIMESERIES": [
+      0,
+      1
+    ],
+    "IFCLIGHTSOURCE": [
+      0,
+      -1
+    ],
+    "IFCLIGHTSOURCEAMBIENT": [
+      0,
+      -1
+    ],
+    "IFCLIGHTSOURCEDIRECTIONAL": [
+      0,
+      -1
+    ],
+    "IFCLIGHTSOURCEGONIOMETRIC": [
+      0,
+      -1
+    ],
+    "IFCLIGHTSOURCEPOSITIONAL": [
+      0,
+      -1
+    ],
+    "IFCLIGHTSOURCESPOT": [
+      0,
+      -1
+    ],
+    "IFCMATERIALDEFINITIONREPRESENTATION": [
+      0,
+      1
+    ],
+    "IFCOBJECTDEFINITION": [
+      2,
+      3
+    ],
+    "IFCPARAMETERIZEDPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCPHYSICALCOMPLEXQUANTITY": [
+      0,
+      1
+    ],
+    "IFCPREDEFINEDCOLOUR": [
+      0,
+      -1
+    ],
+    "IFCPREDEFINEDCURVEFONT": [
+      0,
+      -1
+    ],
+    "IFCPREDEFINEDDIMENSIONSYMBOL": [
+      0,
+      -1
+    ],
+    "IFCPREDEFINEDPOINTMARKERSYMBOL": [
+      0,
+      -1
+    ],
+    "IFCPRODUCTDEFINITIONSHAPE": [
+      0,
+      1
+    ],
+    "IFCPROPERTYBOUNDEDVALUE": [
+      0,
+      1
+    ],
+    "IFCPROPERTYDEFINITION": [
+      2,
+      3
+    ],
+    "IFCPROPERTYENUMERATEDVALUE": [
+      0,
+      1
+    ],
+    "IFCPROPERTYLISTVALUE": [
+      0,
+      1
+    ],
+    "IFCPROPERTYREFERENCEVALUE": [
+      0,
+      1
+    ],
+    "IFCPROPERTYSETDEFINITION": [
+      2,
+      3
+    ],
+    "IFCPROPERTYSINGLEVALUE": [
+      0,
+      1
+    ],
+    "IFCPROPERTYTABLEVALUE": [
+      0,
+      1
+    ],
+    "IFCRECTANGLEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCREGULARTIMESERIES": [
+      0,
+      1
+    ],
+    "IFCREINFORCEMENTDEFINITIONPROPERTIES": [
+      2,
+      3
+    ],
+    "IFCRELATIONSHIP": [
+      2,
+      3
+    ],
+    "IFCROUNDEDRECTANGLEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCSERVICELIFEFACTOR": [
+      2,
+      3
+    ],
+    "IFCSLIPPAGECONNECTIONCONDITION": [
+      0,
+      -1
+    ],
+    "IFCSOUNDPROPERTIES": [
+      2,
+      3
+    ],
+    "IFCSOUNDVALUE": [
+      2,
+      3
+    ],
+    "IFCSPACETHERMALLOADPROPERTIES": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALLOADLINEARFORCE": [
+      0,
+      -1
+    ],
+    "IFCSTRUCTURALLOADPLANARFORCE": [
+      0,
+      -1
+    ],
+    "IFCSTRUCTURALLOADSINGLEDISPLACEMENT": [
+      0,
+      -1
+    ],
+    "IFCSTRUCTURALLOADSINGLEDISPLACEMENTDISTORTION": [
+      0,
+      -1
+    ],
+    "IFCSTRUCTURALLOADSINGLEFORCE": [
+      0,
+      -1
+    ],
+    "IFCSTRUCTURALLOADSINGLEFORCEWARPING": [
+      0,
+      -1
+    ],
+    "IFCSTRUCTURALPROFILEPROPERTIES": [
+      0,
+      -1
+    ],
+    "IFCSTRUCTURALSTEELPROFILEPROPERTIES": [
+      0,
+      -1
+    ],
+    "IFCTSHAPEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCTERMINATORSYMBOL": [
+      2,
+      -1
+    ],
+    "IFCTRAPEZIUMPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCTYPEOBJECT": [
+      2,
+      3
+    ],
+    "IFCTYPEPRODUCT": [
+      2,
+      3
+    ],
+    "IFCUSHAPEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCWINDOWLININGPROPERTIES": [
+      2,
+      3
+    ],
+    "IFCWINDOWPANELPROPERTIES": [
+      2,
+      3
+    ],
+    "IFCWINDOWSTYLE": [
+      2,
+      3
+    ],
+    "IFCZSHAPEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCANNOTATIONCURVEOCCURRENCE": [
+      2,
+      -1
+    ],
+    "IFCANNOTATIONFILLAREAOCCURRENCE": [
+      2,
+      -1
+    ],
+    "IFCCSHAPEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCCIRCLEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCCRANERAILASHAPEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCCRANERAILFSHAPEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCDIMENSIONCURVE": [
+      2,
+      -1
+    ],
+    "IFCDIMENSIONCURVETERMINATOR": [
+      2,
+      -1
+    ],
+    "IFCDOORLININGPROPERTIES": [
+      2,
+      3
+    ],
+    "IFCDOORPANELPROPERTIES": [
+      2,
+      3
+    ],
+    "IFCDOORSTYLE": [
+      2,
+      3
+    ],
+    "IFCDRAUGHTINGPREDEFINEDCOLOUR": [
+      0,
+      -1
+    ],
+    "IFCDRAUGHTINGPREDEFINEDCURVEFONT": [
+      0,
+      -1
+    ],
+    "IFCELEMENTQUANTITY": [
+      2,
+      3
+    ],
+    "IFCELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCELLIPSEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCENERGYPROPERTIES": [
+      2,
+      3
+    ],
+    "IFCFLUIDFLOWPROPERTIES": [
+      2,
+      3
+    ],
+    "IFCFURNISHINGELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCFURNITURETYPE": [
+      2,
+      3
+    ],
+    "IFCISHAPEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCLSHAPEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCOBJECT": [
+      2,
+      3
+    ],
+    "IFCPERMEABLECOVERINGPROPERTIES": [
+      2,
+      3
+    ],
+    "IFCPROCESS": [
+      2,
+      3
+    ],
+    "IFCPRODUCT": [
+      2,
+      3
+    ],
+    "IFCPROJECT": [
+      2,
+      3
+    ],
+    "IFCPROJECTIONCURVE": [
+      2,
+      -1
+    ],
+    "IFCPROPERTYSET": [
+      2,
+      3
+    ],
+    "IFCPROXY": [
+      2,
+      3
+    ],
+    "IFCRECTANGLEHOLLOWPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCRELASSIGNS": [
+      2,
+      3
+    ],
+    "IFCRELASSIGNSTOACTOR": [
+      2,
+      3
+    ],
+    "IFCRELASSIGNSTOCONTROL": [
+      2,
+      3
+    ],
+    "IFCRELASSIGNSTOGROUP": [
+      2,
+      3
+    ],
+    "IFCRELASSIGNSTOPROCESS": [
+      2,
+      3
+    ],
+    "IFCRELASSIGNSTOPRODUCT": [
+      2,
+      3
+    ],
+    "IFCRELASSIGNSTOPROJECTORDER": [
+      2,
+      3
+    ],
+    "IFCRELASSIGNSTORESOURCE": [
+      2,
+      3
+    ],
+    "IFCRELASSOCIATES": [
+      2,
+      3
+    ],
+    "IFCRELASSOCIATESAPPLIEDVALUE": [
+      2,
+      3
+    ],
+    "IFCRELASSOCIATESAPPROVAL": [
+      2,
+      3
+    ],
+    "IFCRELASSOCIATESCLASSIFICATION": [
+      2,
+      3
+    ],
+    "IFCRELASSOCIATESCONSTRAINT": [
+      2,
+      3
+    ],
+    "IFCRELASSOCIATESDOCUMENT": [
+      2,
+      3
+    ],
+    "IFCRELASSOCIATESLIBRARY": [
+      2,
+      3
+    ],
+    "IFCRELASSOCIATESMATERIAL": [
+      2,
+      3
+    ],
+    "IFCRELASSOCIATESPROFILEPROPERTIES": [
+      2,
+      3
+    ],
+    "IFCRELCONNECTS": [
+      2,
+      3
+    ],
+    "IFCRELCONNECTSELEMENTS": [
+      2,
+      3
+    ],
+    "IFCRELCONNECTSPATHELEMENTS": [
+      2,
+      3
+    ],
+    "IFCRELCONNECTSPORTTOELEMENT": [
+      2,
+      3
+    ],
+    "IFCRELCONNECTSPORTS": [
+      2,
+      3
+    ],
+    "IFCRELCONNECTSSTRUCTURALACTIVITY": [
+      2,
+      3
+    ],
+    "IFCRELCONNECTSSTRUCTURALELEMENT": [
+      2,
+      3
+    ],
+    "IFCRELCONNECTSSTRUCTURALMEMBER": [
+      2,
+      3
+    ],
+    "IFCRELCONNECTSWITHECCENTRICITY": [
+      2,
+      3
+    ],
+    "IFCRELCONNECTSWITHREALIZINGELEMENTS": [
+      2,
+      3
+    ],
+    "IFCRELCONTAINEDINSPATIALSTRUCTURE": [
+      2,
+      3
+    ],
+    "IFCRELCOVERSBLDGELEMENTS": [
+      2,
+      3
+    ],
+    "IFCRELCOVERSSPACES": [
+      2,
+      3
+    ],
+    "IFCRELDECOMPOSES": [
+      2,
+      3
+    ],
+    "IFCRELDEFINES": [
+      2,
+      3
+    ],
+    "IFCRELDEFINESBYPROPERTIES": [
+      2,
+      3
+    ],
+    "IFCRELDEFINESBYTYPE": [
+      2,
+      3
+    ],
+    "IFCRELFILLSELEMENT": [
+      2,
+      3
+    ],
+    "IFCRELFLOWCONTROLELEMENTS": [
+      2,
+      3
+    ],
+    "IFCRELINTERACTIONREQUIREMENTS": [
+      2,
+      3
+    ],
+    "IFCRELNESTS": [
+      2,
+      3
+    ],
+    "IFCRELOCCUPIESSPACES": [
+      2,
+      3
+    ],
+    "IFCRELOVERRIDESPROPERTIES": [
+      2,
+      3
+    ],
+    "IFCRELPROJECTSELEMENT": [
+      2,
+      3
+    ],
+    "IFCRELREFERENCEDINSPATIALSTRUCTURE": [
+      2,
+      3
+    ],
+    "IFCRELSCHEDULESCOSTITEMS": [
+      2,
+      3
+    ],
+    "IFCRELSEQUENCE": [
+      2,
+      3
+    ],
+    "IFCRELSERVICESBUILDINGS": [
+      2,
+      3
+    ],
+    "IFCRELSPACEBOUNDARY": [
+      2,
+      3
+    ],
+    "IFCRELVOIDSELEMENT": [
+      2,
+      3
+    ],
+    "IFCRESOURCE": [
+      2,
+      3
+    ],
+    "IFCSPATIALSTRUCTUREELEMENT": [
+      2,
+      3
+    ],
+    "IFCSPATIALSTRUCTUREELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALACTIVITY": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALITEM": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALMEMBER": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALREACTION": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALSURFACEMEMBER": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALSURFACEMEMBERVARYING": [
+      2,
+      3
+    ],
+    "IFCSYSTEMFURNITUREELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCTASK": [
+      2,
+      3
+    ],
+    "IFCTRANSPORTELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCACTOR": [
+      2,
+      3
+    ],
+    "IFCANNOTATION": [
+      2,
+      3
+    ],
+    "IFCASYMMETRICISHAPEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCBUILDING": [
+      2,
+      3
+    ],
+    "IFCBUILDINGELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCBUILDINGSTOREY": [
+      2,
+      3
+    ],
+    "IFCCIRCLEHOLLOWPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCCOLUMNTYPE": [
+      2,
+      3
+    ],
+    "IFCCONSTRUCTIONRESOURCE": [
+      2,
+      3
+    ],
+    "IFCCONTROL": [
+      2,
+      3
+    ],
+    "IFCCOSTITEM": [
+      2,
+      3
+    ],
+    "IFCCOSTSCHEDULE": [
+      2,
+      3
+    ],
+    "IFCCOVERINGTYPE": [
+      2,
+      3
+    ],
+    "IFCCREWRESOURCE": [
+      2,
+      3
+    ],
+    "IFCCURTAINWALLTYPE": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONFLOWELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCELECTRICALBASEPROPERTIES": [
+      2,
+      3
+    ],
+    "IFCELEMENT": [
+      2,
+      3
+    ],
+    "IFCELEMENTASSEMBLY": [
+      2,
+      3
+    ],
+    "IFCELEMENTCOMPONENT": [
+      2,
+      3
+    ],
+    "IFCELEMENTCOMPONENTTYPE": [
+      2,
+      3
+    ],
+    "IFCENERGYCONVERSIONDEVICETYPE": [
+      2,
+      3
+    ],
+    "IFCEQUIPMENTELEMENT": [
+      2,
+      3
+    ],
+    "IFCEQUIPMENTSTANDARD": [
+      2,
+      3
+    ],
+    "IFCEVAPORATIVECOOLERTYPE": [
+      2,
+      3
+    ],
+    "IFCEVAPORATORTYPE": [
+      2,
+      3
+    ],
+    "IFCFASTENER": [
+      2,
+      3
+    ],
+    "IFCFASTENERTYPE": [
+      2,
+      3
+    ],
+    "IFCFEATUREELEMENT": [
+      2,
+      3
+    ],
+    "IFCFEATUREELEMENTADDITION": [
+      2,
+      3
+    ],
+    "IFCFEATUREELEMENTSUBTRACTION": [
+      2,
+      3
+    ],
+    "IFCFLOWCONTROLLERTYPE": [
+      2,
+      3
+    ],
+    "IFCFLOWFITTINGTYPE": [
+      2,
+      3
+    ],
+    "IFCFLOWMETERTYPE": [
+      2,
+      3
+    ],
+    "IFCFLOWMOVINGDEVICETYPE": [
+      2,
+      3
+    ],
+    "IFCFLOWSEGMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCFLOWSTORAGEDEVICETYPE": [
+      2,
+      3
+    ],
+    "IFCFLOWTERMINALTYPE": [
+      2,
+      3
+    ],
+    "IFCFLOWTREATMENTDEVICETYPE": [
+      2,
+      3
+    ],
+    "IFCFURNISHINGELEMENT": [
+      2,
+      3
+    ],
+    "IFCFURNITURESTANDARD": [
+      2,
+      3
+    ],
+    "IFCGASTERMINALTYPE": [
+      2,
+      3
+    ],
+    "IFCGRID": [
+      2,
+      3
+    ],
+    "IFCGROUP": [
+      2,
+      3
+    ],
+    "IFCHEATEXCHANGERTYPE": [
+      2,
+      3
+    ],
+    "IFCHUMIDIFIERTYPE": [
+      2,
+      3
+    ],
+    "IFCINVENTORY": [
+      2,
+      3
+    ],
+    "IFCJUNCTIONBOXTYPE": [
+      2,
+      3
+    ],
+    "IFCLABORRESOURCE": [
+      2,
+      3
+    ],
+    "IFCLAMPTYPE": [
+      2,
+      3
+    ],
+    "IFCLIGHTFIXTURETYPE": [
+      2,
+      3
+    ],
+    "IFCMECHANICALFASTENER": [
+      2,
+      3
+    ],
+    "IFCMECHANICALFASTENERTYPE": [
+      2,
+      3
+    ],
+    "IFCMEMBERTYPE": [
+      2,
+      3
+    ],
+    "IFCMOTORCONNECTIONTYPE": [
+      2,
+      3
+    ],
+    "IFCMOVE": [
+      2,
+      3
+    ],
+    "IFCOCCUPANT": [
+      2,
+      3
+    ],
+    "IFCOPENINGELEMENT": [
+      2,
+      3
+    ],
+    "IFCORDERACTION": [
+      2,
+      3
+    ],
+    "IFCOUTLETTYPE": [
+      2,
+      3
+    ],
+    "IFCPERFORMANCEHISTORY": [
+      2,
+      3
+    ],
+    "IFCPERMIT": [
+      2,
+      3
+    ],
+    "IFCPIPEFITTINGTYPE": [
+      2,
+      3
+    ],
+    "IFCPIPESEGMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCPLATETYPE": [
+      2,
+      3
+    ],
+    "IFCPORT": [
+      2,
+      3
+    ],
+    "IFCPROCEDURE": [
+      2,
+      3
+    ],
+    "IFCPROJECTORDER": [
+      2,
+      3
+    ],
+    "IFCPROJECTORDERRECORD": [
+      2,
+      3
+    ],
+    "IFCPROJECTIONELEMENT": [
+      2,
+      3
+    ],
+    "IFCPROTECTIVEDEVICETYPE": [
+      2,
+      3
+    ],
+    "IFCPUMPTYPE": [
+      2,
+      3
+    ],
+    "IFCRAILINGTYPE": [
+      2,
+      3
+    ],
+    "IFCRAMPFLIGHTTYPE": [
+      2,
+      3
+    ],
+    "IFCRELAGGREGATES": [
+      2,
+      3
+    ],
+    "IFCRELASSIGNSTASKS": [
+      2,
+      3
+    ],
+    "IFCSANITARYTERMINALTYPE": [
+      2,
+      3
+    ],
+    "IFCSCHEDULETIMECONTROL": [
+      2,
+      3
+    ],
+    "IFCSERVICELIFE": [
+      2,
+      3
+    ],
+    "IFCSITE": [
+      2,
+      3
+    ],
+    "IFCSLABTYPE": [
+      2,
+      3
+    ],
+    "IFCSPACE": [
+      2,
+      3
+    ],
+    "IFCSPACEHEATERTYPE": [
+      2,
+      3
+    ],
+    "IFCSPACEPROGRAM": [
+      2,
+      3
+    ],
+    "IFCSPACETYPE": [
+      2,
+      3
+    ],
+    "IFCSTACKTERMINALTYPE": [
+      2,
+      3
+    ],
+    "IFCSTAIRFLIGHTTYPE": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALACTION": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALCONNECTION": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALCURVECONNECTION": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALCURVEMEMBER": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALCURVEMEMBERVARYING": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALLINEARACTION": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALLINEARACTIONVARYING": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALLOADGROUP": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALPLANARACTION": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALPLANARACTIONVARYING": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALPOINTACTION": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALPOINTCONNECTION": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALPOINTREACTION": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALRESULTGROUP": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALSURFACECONNECTION": [
+      2,
+      3
+    ],
+    "IFCSUBCONTRACTRESOURCE": [
+      2,
+      3
+    ],
+    "IFCSWITCHINGDEVICETYPE": [
+      2,
+      3
+    ],
+    "IFCSYSTEM": [
+      2,
+      3
+    ],
+    "IFCTANKTYPE": [
+      2,
+      3
+    ],
+    "IFCTIMESERIESSCHEDULE": [
+      2,
+      3
+    ],
+    "IFCTRANSFORMERTYPE": [
+      2,
+      3
+    ],
+    "IFCTRANSPORTELEMENT": [
+      2,
+      3
+    ],
+    "IFCTUBEBUNDLETYPE": [
+      2,
+      3
+    ],
+    "IFCUNITARYEQUIPMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCVALVETYPE": [
+      2,
+      3
+    ],
+    "IFCVIRTUALELEMENT": [
+      2,
+      3
+    ],
+    "IFCWALLTYPE": [
+      2,
+      3
+    ],
+    "IFCWASTETERMINALTYPE": [
+      2,
+      3
+    ],
+    "IFCWORKCONTROL": [
+      2,
+      3
+    ],
+    "IFCWORKPLAN": [
+      2,
+      3
+    ],
+    "IFCWORKSCHEDULE": [
+      2,
+      3
+    ],
+    "IFCZONE": [
+      2,
+      3
+    ],
+    "IFCACTIONREQUEST": [
+      2,
+      3
+    ],
+    "IFCAIRTERMINALBOXTYPE": [
+      2,
+      3
+    ],
+    "IFCAIRTERMINALTYPE": [
+      2,
+      3
+    ],
+    "IFCAIRTOAIRHEATRECOVERYTYPE": [
+      2,
+      3
+    ],
+    "IFCASSET": [
+      2,
+      3
+    ],
+    "IFCBEAMTYPE": [
+      2,
+      3
+    ],
+    "IFCBOILERTYPE": [
+      2,
+      3
+    ],
+    "IFCBUILDINGELEMENT": [
+      2,
+      3
+    ],
+    "IFCBUILDINGELEMENTCOMPONENT": [
+      2,
+      3
+    ],
+    "IFCBUILDINGELEMENTPART": [
+      2,
+      3
+    ],
+    "IFCBUILDINGELEMENTPROXY": [
+      2,
+      3
+    ],
+    "IFCBUILDINGELEMENTPROXYTYPE": [
+      2,
+      3
+    ],
+    "IFCCABLECARRIERFITTINGTYPE": [
+      2,
+      3
+    ],
+    "IFCCABLECARRIERSEGMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCCABLESEGMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCCHILLERTYPE": [
+      2,
+      3
+    ],
+    "IFCCOILTYPE": [
+      2,
+      3
+    ],
+    "IFCCOLUMN": [
+      2,
+      3
+    ],
+    "IFCCOMPRESSORTYPE": [
+      2,
+      3
+    ],
+    "IFCCONDENSERTYPE": [
+      2,
+      3
+    ],
+    "IFCCONDITION": [
+      2,
+      3
+    ],
+    "IFCCONDITIONCRITERION": [
+      2,
+      3
+    ],
+    "IFCCONSTRUCTIONEQUIPMENTRESOURCE": [
+      2,
+      3
+    ],
+    "IFCCONSTRUCTIONMATERIALRESOURCE": [
+      2,
+      3
+    ],
+    "IFCCONSTRUCTIONPRODUCTRESOURCE": [
+      2,
+      3
+    ],
+    "IFCCOOLEDBEAMTYPE": [
+      2,
+      3
+    ],
+    "IFCCOOLINGTOWERTYPE": [
+      2,
+      3
+    ],
+    "IFCCOVERING": [
+      2,
+      3
+    ],
+    "IFCCURTAINWALL": [
+      2,
+      3
+    ],
+    "IFCDAMPERTYPE": [
+      2,
+      3
+    ],
+    "IFCDISCRETEACCESSORY": [
+      2,
+      3
+    ],
+    "IFCDISCRETEACCESSORYTYPE": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONCHAMBERELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONCONTROLELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONELEMENT": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONFLOWELEMENT": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONPORT": [
+      2,
+      3
+    ],
+    "IFCDOOR": [
+      2,
+      3
+    ],
+    "IFCDUCTFITTINGTYPE": [
+      2,
+      3
+    ],
+    "IFCDUCTSEGMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCDUCTSILENCERTYPE": [
+      2,
+      3
+    ],
+    "IFCEDGEFEATURE": [
+      2,
+      3
+    ],
+    "IFCELECTRICAPPLIANCETYPE": [
+      2,
+      3
+    ],
+    "IFCELECTRICFLOWSTORAGEDEVICETYPE": [
+      2,
+      3
+    ],
+    "IFCELECTRICGENERATORTYPE": [
+      2,
+      3
+    ],
+    "IFCELECTRICHEATERTYPE": [
+      2,
+      3
+    ],
+    "IFCELECTRICMOTORTYPE": [
+      2,
+      3
+    ],
+    "IFCELECTRICTIMECONTROLTYPE": [
+      2,
+      3
+    ],
+    "IFCELECTRICALCIRCUIT": [
+      2,
+      3
+    ],
+    "IFCELECTRICALELEMENT": [
+      2,
+      3
+    ],
+    "IFCENERGYCONVERSIONDEVICE": [
+      2,
+      3
+    ],
+    "IFCFANTYPE": [
+      2,
+      3
+    ],
+    "IFCFILTERTYPE": [
+      2,
+      3
+    ],
+    "IFCFIRESUPPRESSIONTERMINALTYPE": [
+      2,
+      3
+    ],
+    "IFCFLOWCONTROLLER": [
+      2,
+      3
+    ],
+    "IFCFLOWFITTING": [
+      2,
+      3
+    ],
+    "IFCFLOWINSTRUMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCFLOWMOVINGDEVICE": [
+      2,
+      3
+    ],
+    "IFCFLOWSEGMENT": [
+      2,
+      3
+    ],
+    "IFCFLOWSTORAGEDEVICE": [
+      2,
+      3
+    ],
+    "IFCFLOWTERMINAL": [
+      2,
+      3
+    ],
+    "IFCFLOWTREATMENTDEVICE": [
+      2,
+      3
+    ],
+    "IFCFOOTING": [
+      2,
+      3
+    ],
+    "IFCMEMBER": [
+      2,
+      3
+    ],
+    "IFCPILE": [
+      2,
+      3
+    ],
+    "IFCPLATE": [
+      2,
+      3
+    ],
+    "IFCRAILING": [
+      2,
+      3
+    ],
+    "IFCRAMP": [
+      2,
+      3
+    ],
+    "IFCRAMPFLIGHT": [
+      2,
+      3
+    ],
+    "IFCREINFORCINGELEMENT": [
+      2,
+      3
+    ],
+    "IFCREINFORCINGMESH": [
+      2,
+      3
+    ],
+    "IFCROOF": [
+      2,
+      3
+    ],
+    "IFCROUNDEDEDGEFEATURE": [
+      2,
+      3
+    ],
+    "IFCSENSORTYPE": [
+      2,
+      3
+    ],
+    "IFCSLAB": [
+      2,
+      3
+    ],
+    "IFCSTAIR": [
+      2,
+      3
+    ],
+    "IFCSTAIRFLIGHT": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALANALYSISMODEL": [
+      2,
+      3
+    ],
+    "IFCTENDON": [
+      2,
+      3
+    ],
+    "IFCTENDONANCHOR": [
+      2,
+      3
+    ],
+    "IFCVIBRATIONISOLATORTYPE": [
+      2,
+      3
+    ],
+    "IFCWALL": [
+      2,
+      3
+    ],
+    "IFCWALLSTANDARDCASE": [
+      2,
+      3
+    ],
+    "IFCWINDOW": [
+      2,
+      3
+    ],
+    "IFCACTUATORTYPE": [
+      2,
+      3
+    ],
+    "IFCALARMTYPE": [
+      2,
+      3
+    ],
+    "IFCBEAM": [
+      2,
+      3
+    ],
+    "IFCCHAMFEREDGEFEATURE": [
+      2,
+      3
+    ],
+    "IFCCONTROLLERTYPE": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONCHAMBERELEMENT": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONCONTROLELEMENT": [
+      2,
+      3
+    ],
+    "IFCELECTRICDISTRIBUTIONPOINT": [
+      2,
+      3
+    ],
+    "IFCREINFORCINGBAR": [
+      2,
+      3
+    ]
+  },
+  "IFC4": {
+    "IFCACTORROLE": [
+      -1,
+      2
+    ],
+    "IFCADDRESS": [
+      -1,
+      1
+    ],
+    "IFCAPPLIEDVALUE": [
+      0,
+      1
+    ],
+    "IFCAPPROVAL": [
+      1,
+      2
+    ],
+    "IFCBOUNDARYCONDITION": [
+      0,
+      -1
+    ],
+    "IFCBOUNDARYEDGECONDITION": [
+      0,
+      -1
+    ],
+    "IFCBOUNDARYFACECONDITION": [
+      0,
+      -1
+    ],
+    "IFCBOUNDARYNODECONDITION": [
+      0,
+      -1
+    ],
+    "IFCBOUNDARYNODECONDITIONWARPING": [
+      0,
+      -1
+    ],
+    "IFCCONSTRAINT": [
+      0,
+      1
+    ],
+    "IFCCOORDINATEREFERENCESYSTEM": [
+      0,
+      1
+    ],
+    "IFCCOSTVALUE": [
+      0,
+      1
+    ],
+    "IFCEXTERNALREFERENCE": [
+      2,
+      -1
+    ],
+    "IFCEXTERNALLYDEFINEDHATCHSTYLE": [
+      2,
+      -1
+    ],
+    "IFCEXTERNALLYDEFINEDSURFACESTYLE": [
+      2,
+      -1
+    ],
+    "IFCEXTERNALLYDEFINEDTEXTFONT": [
+      2,
+      -1
+    ],
+    "IFCLIBRARYINFORMATION": [
+      0,
+      5
+    ],
+    "IFCLIBRARYREFERENCE": [
+      2,
+      3
+    ],
+    "IFCMATERIALLAYER": [
+      3,
+      4
+    ],
+    "IFCMATERIALLAYERSET": [
+      1,
+      2
+    ],
+    "IFCMATERIALLAYERWITHOFFSETS": [
+      3,
+      4
+    ],
+    "IFCMATERIALPROFILE": [
+      0,
+      1
+    ],
+    "IFCMATERIALPROFILESET": [
+      0,
+      1
+    ],
+    "IFCMATERIALPROFILEWITHOFFSETS": [
+      0,
+      1
+    ],
+    "IFCMETRIC": [
+      0,
+      1
+    ],
+    "IFCOBJECTIVE": [
+      0,
+      1
+    ],
+    "IFCORGANIZATION": [
+      1,
+      2
+    ],
+    "IFCPHYSICALQUANTITY": [
+      0,
+      1
+    ],
+    "IFCPHYSICALSIMPLEQUANTITY": [
+      0,
+      1
+    ],
+    "IFCPOSTALADDRESS": [
+      -1,
+      1
+    ],
+    "IFCPRESENTATIONLAYERASSIGNMENT": [
+      0,
+      1
+    ],
+    "IFCPRESENTATIONLAYERWITHSTYLE": [
+      0,
+      1
+    ],
+    "IFCPRESENTATIONSTYLE": [
+      0,
+      -1
+    ],
+    "IFCPRODUCTREPRESENTATION": [
+      0,
+      1
+    ],
+    "IFCPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCPROJECTEDCRS": [
+      0,
+      1
+    ],
+    "IFCPROPERTYENUMERATION": [
+      0,
+      -1
+    ],
+    "IFCQUANTITYAREA": [
+      0,
+      1
+    ],
+    "IFCQUANTITYCOUNT": [
+      0,
+      1
+    ],
+    "IFCQUANTITYLENGTH": [
+      0,
+      1
+    ],
+    "IFCQUANTITYTIME": [
+      0,
+      1
+    ],
+    "IFCQUANTITYVOLUME": [
+      0,
+      1
+    ],
+    "IFCQUANTITYWEIGHT": [
+      0,
+      1
+    ],
+    "IFCRESOURCELEVELRELATIONSHIP": [
+      0,
+      1
+    ],
+    "IFCROOT": [
+      2,
+      3
+    ],
+    "IFCSCHEDULINGTIME": [
+      0,
+      -1
+    ],
+    "IFCSHAPEASPECT": [
+      1,
+      2
+    ],
+    "IFCSTRUCTURALCONNECTIONCONDITION": [
+      0,
+      -1
+    ],
+    "IFCSTRUCTURALLOAD": [
+      0,
+      -1
+    ],
+    "IFCSTRUCTURALLOADCONFIGURATION": [
+      0,
+      -1
+    ],
+    "IFCSTRUCTURALLOADORRESULT": [
+      0,
+      -1
+    ],
+    "IFCSTRUCTURALLOADSTATIC": [
+      0,
+      -1
+    ],
+    "IFCSTRUCTURALLOADTEMPERATURE": [
+      0,
+      -1
+    ],
+    "IFCSTYLEDITEM": [
+      2,
+      -1
+    ],
+    "IFCSURFACEREINFORCEMENTAREA": [
+      0,
+      -1
+    ],
+    "IFCSURFACESTYLE": [
+      0,
+      -1
+    ],
+    "IFCTABLE": [
+      0,
+      -1
+    ],
+    "IFCTABLECOLUMN": [
+      1,
+      2
+    ],
+    "IFCTASKTIME": [
+      0,
+      -1
+    ],
+    "IFCTASKTIMERECURRING": [
+      0,
+      -1
+    ],
+    "IFCTELECOMADDRESS": [
+      -1,
+      1
+    ],
+    "IFCTEXTSTYLE": [
+      0,
+      -1
+    ],
+    "IFCTIMESERIES": [
+      0,
+      1
+    ],
+    "IFCWORKTIME": [
+      0,
+      -1
+    ],
+    "IFCAPPROVALRELATIONSHIP": [
+      0,
+      1
+    ],
+    "IFCARBITRARYCLOSEDPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCARBITRARYOPENPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCARBITRARYPROFILEDEFWITHVOIDS": [
+      1,
+      -1
+    ],
+    "IFCCENTERLINEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCCLASSIFICATION": [
+      3,
+      4
+    ],
+    "IFCCLASSIFICATIONREFERENCE": [
+      2,
+      4
+    ],
+    "IFCCOLOURSPECIFICATION": [
+      0,
+      -1
+    ],
+    "IFCCOMPOSITEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCCONTEXTDEPENDENTUNIT": [
+      2,
+      -1
+    ],
+    "IFCCONVERSIONBASEDUNIT": [
+      2,
+      -1
+    ],
+    "IFCCONVERSIONBASEDUNITWITHOFFSET": [
+      2,
+      -1
+    ],
+    "IFCCURRENCYRELATIONSHIP": [
+      0,
+      1
+    ],
+    "IFCCURVESTYLE": [
+      0,
+      -1
+    ],
+    "IFCCURVESTYLEFONT": [
+      0,
+      -1
+    ],
+    "IFCCURVESTYLEFONTANDSCALING": [
+      0,
+      -1
+    ],
+    "IFCDERIVEDPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCDOCUMENTINFORMATION": [
+      1,
+      2
+    ],
+    "IFCDOCUMENTINFORMATIONRELATIONSHIP": [
+      0,
+      1
+    ],
+    "IFCDOCUMENTREFERENCE": [
+      2,
+      3
+    ],
+    "IFCEVENTTIME": [
+      0,
+      -1
+    ],
+    "IFCEXTENDEDPROPERTIES": [
+      0,
+      1
+    ],
+    "IFCEXTERNALREFERENCERELATIONSHIP": [
+      0,
+      1
+    ],
+    "IFCFAILURECONNECTIONCONDITION": [
+      0,
+      -1
+    ],
+    "IFCFILLAREASTYLE": [
+      0,
+      -1
+    ],
+    "IFCIRREGULARTIMESERIES": [
+      0,
+      1
+    ],
+    "IFCLAGTIME": [
+      0,
+      -1
+    ],
+    "IFCLIGHTSOURCE": [
+      0,
+      -1
+    ],
+    "IFCLIGHTSOURCEAMBIENT": [
+      0,
+      -1
+    ],
+    "IFCLIGHTSOURCEDIRECTIONAL": [
+      0,
+      -1
+    ],
+    "IFCLIGHTSOURCEGONIOMETRIC": [
+      0,
+      -1
+    ],
+    "IFCLIGHTSOURCEPOSITIONAL": [
+      0,
+      -1
+    ],
+    "IFCLIGHTSOURCESPOT": [
+      0,
+      -1
+    ],
+    "IFCMATERIAL": [
+      0,
+      1
+    ],
+    "IFCMATERIALCONSTITUENT": [
+      0,
+      1
+    ],
+    "IFCMATERIALCONSTITUENTSET": [
+      0,
+      1
+    ],
+    "IFCMATERIALDEFINITIONREPRESENTATION": [
+      0,
+      1
+    ],
+    "IFCMATERIALPROPERTIES": [
+      0,
+      1
+    ],
+    "IFCMATERIALRELATIONSHIP": [
+      0,
+      1
+    ],
+    "IFCMIRROREDPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCOBJECTDEFINITION": [
+      2,
+      3
+    ],
+    "IFCORGANIZATIONRELATIONSHIP": [
+      0,
+      1
+    ],
+    "IFCPARAMETERIZEDPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCPHYSICALCOMPLEXQUANTITY": [
+      0,
+      1
+    ],
+    "IFCPREDEFINEDITEM": [
+      0,
+      -1
+    ],
+    "IFCPREDEFINEDTEXTFONT": [
+      0,
+      -1
+    ],
+    "IFCPRODUCTDEFINITIONSHAPE": [
+      0,
+      1
+    ],
+    "IFCPROFILEPROPERTIES": [
+      0,
+      1
+    ],
+    "IFCPROPERTY": [
+      0,
+      1
+    ],
+    "IFCPROPERTYDEFINITION": [
+      2,
+      3
+    ],
+    "IFCPROPERTYDEPENDENCYRELATIONSHIP": [
+      0,
+      1
+    ],
+    "IFCPROPERTYSETDEFINITION": [
+      2,
+      3
+    ],
+    "IFCPROPERTYTEMPLATEDEFINITION": [
+      2,
+      3
+    ],
+    "IFCQUANTITYSET": [
+      2,
+      3
+    ],
+    "IFCRECTANGLEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCREGULARTIMESERIES": [
+      0,
+      1
+    ],
+    "IFCRELATIONSHIP": [
+      2,
+      3
+    ],
+    "IFCRESOURCEAPPROVALRELATIONSHIP": [
+      0,
+      1
+    ],
+    "IFCRESOURCECONSTRAINTRELATIONSHIP": [
+      0,
+      1
+    ],
+    "IFCRESOURCETIME": [
+      0,
+      -1
+    ],
+    "IFCROUNDEDRECTANGLEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCSIMPLEPROPERTY": [
+      0,
+      1
+    ],
+    "IFCSLIPPAGECONNECTIONCONDITION": [
+      0,
+      -1
+    ],
+    "IFCSTRUCTURALLOADLINEARFORCE": [
+      0,
+      -1
+    ],
+    "IFCSTRUCTURALLOADPLANARFORCE": [
+      0,
+      -1
+    ],
+    "IFCSTRUCTURALLOADSINGLEDISPLACEMENT": [
+      0,
+      -1
+    ],
+    "IFCSTRUCTURALLOADSINGLEDISPLACEMENTDISTORTION": [
+      0,
+      -1
+    ],
+    "IFCSTRUCTURALLOADSINGLEFORCE": [
+      0,
+      -1
+    ],
+    "IFCSTRUCTURALLOADSINGLEFORCEWARPING": [
+      0,
+      -1
+    ],
+    "IFCTSHAPEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCTEXTSTYLEFONTMODEL": [
+      0,
+      -1
+    ],
+    "IFCTRAPEZIUMPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCTYPEOBJECT": [
+      2,
+      3
+    ],
+    "IFCTYPEPROCESS": [
+      2,
+      3
+    ],
+    "IFCTYPEPRODUCT": [
+      2,
+      3
+    ],
+    "IFCTYPERESOURCE": [
+      2,
+      3
+    ],
+    "IFCUSHAPEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCWINDOWSTYLE": [
+      2,
+      3
+    ],
+    "IFCZSHAPEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCASYMMETRICISHAPEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCCSHAPEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCCIRCLEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCCOLOURRGB": [
+      0,
+      -1
+    ],
+    "IFCCOMPLEXPROPERTY": [
+      0,
+      1
+    ],
+    "IFCCONSTRUCTIONRESOURCETYPE": [
+      2,
+      3
+    ],
+    "IFCCONTEXT": [
+      2,
+      3
+    ],
+    "IFCCREWRESOURCETYPE": [
+      2,
+      3
+    ],
+    "IFCDOORSTYLE": [
+      2,
+      3
+    ],
+    "IFCELEMENTQUANTITY": [
+      2,
+      3
+    ],
+    "IFCELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCELLIPSEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCEVENTTYPE": [
+      2,
+      3
+    ],
+    "IFCFURNISHINGELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCFURNITURETYPE": [
+      2,
+      3
+    ],
+    "IFCGEOGRAPHICELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCISHAPEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCLSHAPEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCLABORRESOURCETYPE": [
+      2,
+      3
+    ],
+    "IFCOBJECT": [
+      2,
+      3
+    ],
+    "IFCPREDEFINEDCOLOUR": [
+      0,
+      -1
+    ],
+    "IFCPREDEFINEDCURVEFONT": [
+      0,
+      -1
+    ],
+    "IFCPREDEFINEDPROPERTYSET": [
+      2,
+      3
+    ],
+    "IFCPROCEDURETYPE": [
+      2,
+      3
+    ],
+    "IFCPROCESS": [
+      2,
+      3
+    ],
+    "IFCPRODUCT": [
+      2,
+      3
+    ],
+    "IFCPROJECT": [
+      2,
+      3
+    ],
+    "IFCPROJECTLIBRARY": [
+      2,
+      3
+    ],
+    "IFCPROPERTYBOUNDEDVALUE": [
+      0,
+      1
+    ],
+    "IFCPROPERTYENUMERATEDVALUE": [
+      0,
+      1
+    ],
+    "IFCPROPERTYLISTVALUE": [
+      0,
+      1
+    ],
+    "IFCPROPERTYREFERENCEVALUE": [
+      0,
+      1
+    ],
+    "IFCPROPERTYSET": [
+      2,
+      3
+    ],
+    "IFCPROPERTYSETTEMPLATE": [
+      2,
+      3
+    ],
+    "IFCPROPERTYSINGLEVALUE": [
+      0,
+      1
+    ],
+    "IFCPROPERTYTABLEVALUE": [
+      0,
+      1
+    ],
+    "IFCPROPERTYTEMPLATE": [
+      2,
+      3
+    ],
+    "IFCPROXY": [
+      2,
+      3
+    ],
+    "IFCRECTANGLEHOLLOWPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCREINFORCEMENTDEFINITIONPROPERTIES": [
+      2,
+      3
+    ],
+    "IFCRELASSIGNS": [
+      2,
+      3
+    ],
+    "IFCRELASSIGNSTOACTOR": [
+      2,
+      3
+    ],
+    "IFCRELASSIGNSTOCONTROL": [
+      2,
+      3
+    ],
+    "IFCRELASSIGNSTOGROUP": [
+      2,
+      3
+    ],
+    "IFCRELASSIGNSTOGROUPBYFACTOR": [
+      2,
+      3
+    ],
+    "IFCRELASSIGNSTOPROCESS": [
+      2,
+      3
+    ],
+    "IFCRELASSIGNSTOPRODUCT": [
+      2,
+      3
+    ],
+    "IFCRELASSIGNSTORESOURCE": [
+      2,
+      3
+    ],
+    "IFCRELASSOCIATES": [
+      2,
+      3
+    ],
+    "IFCRELASSOCIATESAPPROVAL": [
+      2,
+      3
+    ],
+    "IFCRELASSOCIATESCLASSIFICATION": [
+      2,
+      3
+    ],
+    "IFCRELASSOCIATESCONSTRAINT": [
+      2,
+      3
+    ],
+    "IFCRELASSOCIATESDOCUMENT": [
+      2,
+      3
+    ],
+    "IFCRELASSOCIATESLIBRARY": [
+      2,
+      3
+    ],
+    "IFCRELASSOCIATESMATERIAL": [
+      2,
+      3
+    ],
+    "IFCRELCONNECTS": [
+      2,
+      3
+    ],
+    "IFCRELCONNECTSELEMENTS": [
+      2,
+      3
+    ],
+    "IFCRELCONNECTSPATHELEMENTS": [
+      2,
+      3
+    ],
+    "IFCRELCONNECTSPORTTOELEMENT": [
+      2,
+      3
+    ],
+    "IFCRELCONNECTSPORTS": [
+      2,
+      3
+    ],
+    "IFCRELCONNECTSSTRUCTURALACTIVITY": [
+      2,
+      3
+    ],
+    "IFCRELCONNECTSSTRUCTURALMEMBER": [
+      2,
+      3
+    ],
+    "IFCRELCONNECTSWITHECCENTRICITY": [
+      2,
+      3
+    ],
+    "IFCRELCONNECTSWITHREALIZINGELEMENTS": [
+      2,
+      3
+    ],
+    "IFCRELCONTAINEDINSPATIALSTRUCTURE": [
+      2,
+      3
+    ],
+    "IFCRELCOVERSBLDGELEMENTS": [
+      2,
+      3
+    ],
+    "IFCRELCOVERSSPACES": [
+      2,
+      3
+    ],
+    "IFCRELDECLARES": [
+      2,
+      3
+    ],
+    "IFCRELDECOMPOSES": [
+      2,
+      3
+    ],
+    "IFCRELDEFINES": [
+      2,
+      3
+    ],
+    "IFCRELDEFINESBYOBJECT": [
+      2,
+      3
+    ],
+    "IFCRELDEFINESBYPROPERTIES": [
+      2,
+      3
+    ],
+    "IFCRELDEFINESBYTEMPLATE": [
+      2,
+      3
+    ],
+    "IFCRELDEFINESBYTYPE": [
+      2,
+      3
+    ],
+    "IFCRELFILLSELEMENT": [
+      2,
+      3
+    ],
+    "IFCRELFLOWCONTROLELEMENTS": [
+      2,
+      3
+    ],
+    "IFCRELINTERFERESELEMENTS": [
+      2,
+      3
+    ],
+    "IFCRELNESTS": [
+      2,
+      3
+    ],
+    "IFCRELPROJECTSELEMENT": [
+      2,
+      3
+    ],
+    "IFCRELREFERENCEDINSPATIALSTRUCTURE": [
+      2,
+      3
+    ],
+    "IFCRELSEQUENCE": [
+      2,
+      3
+    ],
+    "IFCRELSERVICESBUILDINGS": [
+      2,
+      3
+    ],
+    "IFCRELSPACEBOUNDARY": [
+      2,
+      3
+    ],
+    "IFCRELSPACEBOUNDARY1STLEVEL": [
+      2,
+      3
+    ],
+    "IFCRELSPACEBOUNDARY2NDLEVEL": [
+      2,
+      3
+    ],
+    "IFCRELVOIDSELEMENT": [
+      2,
+      3
+    ],
+    "IFCRESOURCE": [
+      2,
+      3
+    ],
+    "IFCSIMPLEPROPERTYTEMPLATE": [
+      2,
+      3
+    ],
+    "IFCSPATIALELEMENT": [
+      2,
+      3
+    ],
+    "IFCSPATIALELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCSPATIALSTRUCTUREELEMENT": [
+      2,
+      3
+    ],
+    "IFCSPATIALSTRUCTUREELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCSPATIALZONE": [
+      2,
+      3
+    ],
+    "IFCSPATIALZONETYPE": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALACTIVITY": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALITEM": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALMEMBER": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALREACTION": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALSURFACEMEMBER": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALSURFACEMEMBERVARYING": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALSURFACEREACTION": [
+      2,
+      3
+    ],
+    "IFCSUBCONTRACTRESOURCETYPE": [
+      2,
+      3
+    ],
+    "IFCSYSTEMFURNITUREELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCTASK": [
+      2,
+      3
+    ],
+    "IFCTASKTYPE": [
+      2,
+      3
+    ],
+    "IFCTRANSPORTELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCWINDOWLININGPROPERTIES": [
+      2,
+      3
+    ],
+    "IFCWINDOWPANELPROPERTIES": [
+      2,
+      3
+    ],
+    "IFCACTOR": [
+      2,
+      3
+    ],
+    "IFCANNOTATION": [
+      2,
+      3
+    ],
+    "IFCBUILDING": [
+      2,
+      3
+    ],
+    "IFCBUILDINGELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCBUILDINGSTOREY": [
+      2,
+      3
+    ],
+    "IFCCHIMNEYTYPE": [
+      2,
+      3
+    ],
+    "IFCCIRCLEHOLLOWPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCCIVILELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCCOLUMNTYPE": [
+      2,
+      3
+    ],
+    "IFCCOMPLEXPROPERTYTEMPLATE": [
+      2,
+      3
+    ],
+    "IFCCONSTRUCTIONEQUIPMENTRESOURCETYPE": [
+      2,
+      3
+    ],
+    "IFCCONSTRUCTIONMATERIALRESOURCETYPE": [
+      2,
+      3
+    ],
+    "IFCCONSTRUCTIONPRODUCTRESOURCETYPE": [
+      2,
+      3
+    ],
+    "IFCCONSTRUCTIONRESOURCE": [
+      2,
+      3
+    ],
+    "IFCCONTROL": [
+      2,
+      3
+    ],
+    "IFCCOSTITEM": [
+      2,
+      3
+    ],
+    "IFCCOSTSCHEDULE": [
+      2,
+      3
+    ],
+    "IFCCOVERINGTYPE": [
+      2,
+      3
+    ],
+    "IFCCREWRESOURCE": [
+      2,
+      3
+    ],
+    "IFCCURTAINWALLTYPE": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONFLOWELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCDOORLININGPROPERTIES": [
+      2,
+      3
+    ],
+    "IFCDOORPANELPROPERTIES": [
+      2,
+      3
+    ],
+    "IFCDOORTYPE": [
+      2,
+      3
+    ],
+    "IFCDRAUGHTINGPREDEFINEDCOLOUR": [
+      0,
+      -1
+    ],
+    "IFCDRAUGHTINGPREDEFINEDCURVEFONT": [
+      0,
+      -1
+    ],
+    "IFCELEMENT": [
+      2,
+      3
+    ],
+    "IFCELEMENTASSEMBLY": [
+      2,
+      3
+    ],
+    "IFCELEMENTASSEMBLYTYPE": [
+      2,
+      3
+    ],
+    "IFCELEMENTCOMPONENT": [
+      2,
+      3
+    ],
+    "IFCELEMENTCOMPONENTTYPE": [
+      2,
+      3
+    ],
+    "IFCENERGYCONVERSIONDEVICETYPE": [
+      2,
+      3
+    ],
+    "IFCENGINETYPE": [
+      2,
+      3
+    ],
+    "IFCEVAPORATIVECOOLERTYPE": [
+      2,
+      3
+    ],
+    "IFCEVAPORATORTYPE": [
+      2,
+      3
+    ],
+    "IFCEVENT": [
+      2,
+      3
+    ],
+    "IFCEXTERNALSPATIALSTRUCTUREELEMENT": [
+      2,
+      3
+    ],
+    "IFCFASTENER": [
+      2,
+      3
+    ],
+    "IFCFASTENERTYPE": [
+      2,
+      3
+    ],
+    "IFCFEATUREELEMENT": [
+      2,
+      3
+    ],
+    "IFCFEATUREELEMENTADDITION": [
+      2,
+      3
+    ],
+    "IFCFEATUREELEMENTSUBTRACTION": [
+      2,
+      3
+    ],
+    "IFCFLOWCONTROLLERTYPE": [
+      2,
+      3
+    ],
+    "IFCFLOWFITTINGTYPE": [
+      2,
+      3
+    ],
+    "IFCFLOWMETERTYPE": [
+      2,
+      3
+    ],
+    "IFCFLOWMOVINGDEVICETYPE": [
+      2,
+      3
+    ],
+    "IFCFLOWSEGMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCFLOWSTORAGEDEVICETYPE": [
+      2,
+      3
+    ],
+    "IFCFLOWTERMINALTYPE": [
+      2,
+      3
+    ],
+    "IFCFLOWTREATMENTDEVICETYPE": [
+      2,
+      3
+    ],
+    "IFCFOOTINGTYPE": [
+      2,
+      3
+    ],
+    "IFCFURNISHINGELEMENT": [
+      2,
+      3
+    ],
+    "IFCFURNITURE": [
+      2,
+      3
+    ],
+    "IFCGEOGRAPHICELEMENT": [
+      2,
+      3
+    ],
+    "IFCGRID": [
+      2,
+      3
+    ],
+    "IFCGROUP": [
+      2,
+      3
+    ],
+    "IFCHEATEXCHANGERTYPE": [
+      2,
+      3
+    ],
+    "IFCHUMIDIFIERTYPE": [
+      2,
+      3
+    ],
+    "IFCINTERCEPTORTYPE": [
+      2,
+      3
+    ],
+    "IFCINVENTORY": [
+      2,
+      3
+    ],
+    "IFCJUNCTIONBOXTYPE": [
+      2,
+      3
+    ],
+    "IFCLABORRESOURCE": [
+      2,
+      3
+    ],
+    "IFCLAMPTYPE": [
+      2,
+      3
+    ],
+    "IFCLIGHTFIXTURETYPE": [
+      2,
+      3
+    ],
+    "IFCMECHANICALFASTENER": [
+      2,
+      3
+    ],
+    "IFCMECHANICALFASTENERTYPE": [
+      2,
+      3
+    ],
+    "IFCMEDICALDEVICETYPE": [
+      2,
+      3
+    ],
+    "IFCMEMBERTYPE": [
+      2,
+      3
+    ],
+    "IFCMOTORCONNECTIONTYPE": [
+      2,
+      3
+    ],
+    "IFCOCCUPANT": [
+      2,
+      3
+    ],
+    "IFCOPENINGELEMENT": [
+      2,
+      3
+    ],
+    "IFCOPENINGSTANDARDCASE": [
+      2,
+      3
+    ],
+    "IFCOUTLETTYPE": [
+      2,
+      3
+    ],
+    "IFCPERFORMANCEHISTORY": [
+      2,
+      3
+    ],
+    "IFCPERMEABLECOVERINGPROPERTIES": [
+      2,
+      3
+    ],
+    "IFCPERMIT": [
+      2,
+      3
+    ],
+    "IFCPILETYPE": [
+      2,
+      3
+    ],
+    "IFCPIPEFITTINGTYPE": [
+      2,
+      3
+    ],
+    "IFCPIPESEGMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCPLATETYPE": [
+      2,
+      3
+    ],
+    "IFCPORT": [
+      2,
+      3
+    ],
+    "IFCPROCEDURE": [
+      2,
+      3
+    ],
+    "IFCPROJECTORDER": [
+      2,
+      3
+    ],
+    "IFCPROJECTIONELEMENT": [
+      2,
+      3
+    ],
+    "IFCPROTECTIVEDEVICETYPE": [
+      2,
+      3
+    ],
+    "IFCPUMPTYPE": [
+      2,
+      3
+    ],
+    "IFCRAILINGTYPE": [
+      2,
+      3
+    ],
+    "IFCRAMPFLIGHTTYPE": [
+      2,
+      3
+    ],
+    "IFCRAMPTYPE": [
+      2,
+      3
+    ],
+    "IFCREINFORCINGELEMENT": [
+      2,
+      3
+    ],
+    "IFCREINFORCINGELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCREINFORCINGMESH": [
+      2,
+      3
+    ],
+    "IFCREINFORCINGMESHTYPE": [
+      2,
+      3
+    ],
+    "IFCRELAGGREGATES": [
+      2,
+      3
+    ],
+    "IFCROOFTYPE": [
+      2,
+      3
+    ],
+    "IFCSANITARYTERMINALTYPE": [
+      2,
+      3
+    ],
+    "IFCSHADINGDEVICETYPE": [
+      2,
+      3
+    ],
+    "IFCSITE": [
+      2,
+      3
+    ],
+    "IFCSLABTYPE": [
+      2,
+      3
+    ],
+    "IFCSOLARDEVICETYPE": [
+      2,
+      3
+    ],
+    "IFCSPACE": [
+      2,
+      3
+    ],
+    "IFCSPACEHEATERTYPE": [
+      2,
+      3
+    ],
+    "IFCSPACETYPE": [
+      2,
+      3
+    ],
+    "IFCSTACKTERMINALTYPE": [
+      2,
+      3
+    ],
+    "IFCSTAIRFLIGHTTYPE": [
+      2,
+      3
+    ],
+    "IFCSTAIRTYPE": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALACTION": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALCONNECTION": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALCURVEACTION": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALCURVECONNECTION": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALCURVEMEMBER": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALCURVEMEMBERVARYING": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALCURVEREACTION": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALLINEARACTION": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALLOADGROUP": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALPOINTACTION": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALPOINTCONNECTION": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALPOINTREACTION": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALRESULTGROUP": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALSURFACEACTION": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALSURFACECONNECTION": [
+      2,
+      3
+    ],
+    "IFCSUBCONTRACTRESOURCE": [
+      2,
+      3
+    ],
+    "IFCSURFACEFEATURE": [
+      2,
+      3
+    ],
+    "IFCSWITCHINGDEVICETYPE": [
+      2,
+      3
+    ],
+    "IFCSYSTEM": [
+      2,
+      3
+    ],
+    "IFCSYSTEMFURNITUREELEMENT": [
+      2,
+      3
+    ],
+    "IFCTANKTYPE": [
+      2,
+      3
+    ],
+    "IFCTENDON": [
+      2,
+      3
+    ],
+    "IFCTENDONANCHOR": [
+      2,
+      3
+    ],
+    "IFCTENDONANCHORTYPE": [
+      2,
+      3
+    ],
+    "IFCTENDONTYPE": [
+      2,
+      3
+    ],
+    "IFCTRANSFORMERTYPE": [
+      2,
+      3
+    ],
+    "IFCTRANSPORTELEMENT": [
+      2,
+      3
+    ],
+    "IFCTUBEBUNDLETYPE": [
+      2,
+      3
+    ],
+    "IFCUNITARYEQUIPMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCVALVETYPE": [
+      2,
+      3
+    ],
+    "IFCVIBRATIONISOLATOR": [
+      2,
+      3
+    ],
+    "IFCVIBRATIONISOLATORTYPE": [
+      2,
+      3
+    ],
+    "IFCVIRTUALELEMENT": [
+      2,
+      3
+    ],
+    "IFCVOIDINGFEATURE": [
+      2,
+      3
+    ],
+    "IFCWALLTYPE": [
+      2,
+      3
+    ],
+    "IFCWASTETERMINALTYPE": [
+      2,
+      3
+    ],
+    "IFCWINDOWTYPE": [
+      2,
+      3
+    ],
+    "IFCWORKCALENDAR": [
+      2,
+      3
+    ],
+    "IFCWORKCONTROL": [
+      2,
+      3
+    ],
+    "IFCWORKPLAN": [
+      2,
+      3
+    ],
+    "IFCWORKSCHEDULE": [
+      2,
+      3
+    ],
+    "IFCZONE": [
+      2,
+      3
+    ],
+    "IFCACTIONREQUEST": [
+      2,
+      3
+    ],
+    "IFCAIRTERMINALBOXTYPE": [
+      2,
+      3
+    ],
+    "IFCAIRTERMINALTYPE": [
+      2,
+      3
+    ],
+    "IFCAIRTOAIRHEATRECOVERYTYPE": [
+      2,
+      3
+    ],
+    "IFCASSET": [
+      2,
+      3
+    ],
+    "IFCAUDIOVISUALAPPLIANCETYPE": [
+      2,
+      3
+    ],
+    "IFCBEAMTYPE": [
+      2,
+      3
+    ],
+    "IFCBOILERTYPE": [
+      2,
+      3
+    ],
+    "IFCBUILDINGELEMENT": [
+      2,
+      3
+    ],
+    "IFCBUILDINGELEMENTPART": [
+      2,
+      3
+    ],
+    "IFCBUILDINGELEMENTPARTTYPE": [
+      2,
+      3
+    ],
+    "IFCBUILDINGELEMENTPROXY": [
+      2,
+      3
+    ],
+    "IFCBUILDINGELEMENTPROXYTYPE": [
+      2,
+      3
+    ],
+    "IFCBUILDINGSYSTEM": [
+      2,
+      3
+    ],
+    "IFCBURNERTYPE": [
+      2,
+      3
+    ],
+    "IFCCABLECARRIERFITTINGTYPE": [
+      2,
+      3
+    ],
+    "IFCCABLECARRIERSEGMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCCABLEFITTINGTYPE": [
+      2,
+      3
+    ],
+    "IFCCABLESEGMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCCHILLERTYPE": [
+      2,
+      3
+    ],
+    "IFCCHIMNEY": [
+      2,
+      3
+    ],
+    "IFCCIVILELEMENT": [
+      2,
+      3
+    ],
+    "IFCCOILTYPE": [
+      2,
+      3
+    ],
+    "IFCCOLUMN": [
+      2,
+      3
+    ],
+    "IFCCOLUMNSTANDARDCASE": [
+      2,
+      3
+    ],
+    "IFCCOMMUNICATIONSAPPLIANCETYPE": [
+      2,
+      3
+    ],
+    "IFCCOMPRESSORTYPE": [
+      2,
+      3
+    ],
+    "IFCCONDENSERTYPE": [
+      2,
+      3
+    ],
+    "IFCCONSTRUCTIONEQUIPMENTRESOURCE": [
+      2,
+      3
+    ],
+    "IFCCONSTRUCTIONMATERIALRESOURCE": [
+      2,
+      3
+    ],
+    "IFCCONSTRUCTIONPRODUCTRESOURCE": [
+      2,
+      3
+    ],
+    "IFCCOOLEDBEAMTYPE": [
+      2,
+      3
+    ],
+    "IFCCOOLINGTOWERTYPE": [
+      2,
+      3
+    ],
+    "IFCCOVERING": [
+      2,
+      3
+    ],
+    "IFCCURTAINWALL": [
+      2,
+      3
+    ],
+    "IFCDAMPERTYPE": [
+      2,
+      3
+    ],
+    "IFCDISCRETEACCESSORY": [
+      2,
+      3
+    ],
+    "IFCDISCRETEACCESSORYTYPE": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONCHAMBERELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONCONTROLELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONELEMENT": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONFLOWELEMENT": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONPORT": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONSYSTEM": [
+      2,
+      3
+    ],
+    "IFCDOOR": [
+      2,
+      3
+    ],
+    "IFCDOORSTANDARDCASE": [
+      2,
+      3
+    ],
+    "IFCDUCTFITTINGTYPE": [
+      2,
+      3
+    ],
+    "IFCDUCTSEGMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCDUCTSILENCERTYPE": [
+      2,
+      3
+    ],
+    "IFCELECTRICAPPLIANCETYPE": [
+      2,
+      3
+    ],
+    "IFCELECTRICDISTRIBUTIONBOARDTYPE": [
+      2,
+      3
+    ],
+    "IFCELECTRICFLOWSTORAGEDEVICETYPE": [
+      2,
+      3
+    ],
+    "IFCELECTRICGENERATORTYPE": [
+      2,
+      3
+    ],
+    "IFCELECTRICMOTORTYPE": [
+      2,
+      3
+    ],
+    "IFCELECTRICTIMECONTROLTYPE": [
+      2,
+      3
+    ],
+    "IFCENERGYCONVERSIONDEVICE": [
+      2,
+      3
+    ],
+    "IFCENGINE": [
+      2,
+      3
+    ],
+    "IFCEVAPORATIVECOOLER": [
+      2,
+      3
+    ],
+    "IFCEVAPORATOR": [
+      2,
+      3
+    ],
+    "IFCEXTERNALSPATIALELEMENT": [
+      2,
+      3
+    ],
+    "IFCFANTYPE": [
+      2,
+      3
+    ],
+    "IFCFILTERTYPE": [
+      2,
+      3
+    ],
+    "IFCFIRESUPPRESSIONTERMINALTYPE": [
+      2,
+      3
+    ],
+    "IFCFLOWCONTROLLER": [
+      2,
+      3
+    ],
+    "IFCFLOWFITTING": [
+      2,
+      3
+    ],
+    "IFCFLOWINSTRUMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCFLOWMETER": [
+      2,
+      3
+    ],
+    "IFCFLOWMOVINGDEVICE": [
+      2,
+      3
+    ],
+    "IFCFLOWSEGMENT": [
+      2,
+      3
+    ],
+    "IFCFLOWSTORAGEDEVICE": [
+      2,
+      3
+    ],
+    "IFCFLOWTERMINAL": [
+      2,
+      3
+    ],
+    "IFCFLOWTREATMENTDEVICE": [
+      2,
+      3
+    ],
+    "IFCFOOTING": [
+      2,
+      3
+    ],
+    "IFCHEATEXCHANGER": [
+      2,
+      3
+    ],
+    "IFCHUMIDIFIER": [
+      2,
+      3
+    ],
+    "IFCINTERCEPTOR": [
+      2,
+      3
+    ],
+    "IFCJUNCTIONBOX": [
+      2,
+      3
+    ],
+    "IFCLAMP": [
+      2,
+      3
+    ],
+    "IFCLIGHTFIXTURE": [
+      2,
+      3
+    ],
+    "IFCMEDICALDEVICE": [
+      2,
+      3
+    ],
+    "IFCMEMBER": [
+      2,
+      3
+    ],
+    "IFCMEMBERSTANDARDCASE": [
+      2,
+      3
+    ],
+    "IFCMOTORCONNECTION": [
+      2,
+      3
+    ],
+    "IFCOUTLET": [
+      2,
+      3
+    ],
+    "IFCPILE": [
+      2,
+      3
+    ],
+    "IFCPIPEFITTING": [
+      2,
+      3
+    ],
+    "IFCPIPESEGMENT": [
+      2,
+      3
+    ],
+    "IFCPLATE": [
+      2,
+      3
+    ],
+    "IFCPLATESTANDARDCASE": [
+      2,
+      3
+    ],
+    "IFCPROTECTIVEDEVICE": [
+      2,
+      3
+    ],
+    "IFCPROTECTIVEDEVICETRIPPINGUNITTYPE": [
+      2,
+      3
+    ],
+    "IFCPUMP": [
+      2,
+      3
+    ],
+    "IFCRAILING": [
+      2,
+      3
+    ],
+    "IFCRAMP": [
+      2,
+      3
+    ],
+    "IFCRAMPFLIGHT": [
+      2,
+      3
+    ],
+    "IFCREINFORCINGBAR": [
+      2,
+      3
+    ],
+    "IFCREINFORCINGBARTYPE": [
+      2,
+      3
+    ],
+    "IFCROOF": [
+      2,
+      3
+    ],
+    "IFCSANITARYTERMINAL": [
+      2,
+      3
+    ],
+    "IFCSENSORTYPE": [
+      2,
+      3
+    ],
+    "IFCSHADINGDEVICE": [
+      2,
+      3
+    ],
+    "IFCSLAB": [
+      2,
+      3
+    ],
+    "IFCSLABELEMENTEDCASE": [
+      2,
+      3
+    ],
+    "IFCSLABSTANDARDCASE": [
+      2,
+      3
+    ],
+    "IFCSOLARDEVICE": [
+      2,
+      3
+    ],
+    "IFCSPACEHEATER": [
+      2,
+      3
+    ],
+    "IFCSTACKTERMINAL": [
+      2,
+      3
+    ],
+    "IFCSTAIR": [
+      2,
+      3
+    ],
+    "IFCSTAIRFLIGHT": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALANALYSISMODEL": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALLOADCASE": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALPLANARACTION": [
+      2,
+      3
+    ],
+    "IFCSWITCHINGDEVICE": [
+      2,
+      3
+    ],
+    "IFCTANK": [
+      2,
+      3
+    ],
+    "IFCTRANSFORMER": [
+      2,
+      3
+    ],
+    "IFCTUBEBUNDLE": [
+      2,
+      3
+    ],
+    "IFCUNITARYCONTROLELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCUNITARYEQUIPMENT": [
+      2,
+      3
+    ],
+    "IFCVALVE": [
+      2,
+      3
+    ],
+    "IFCWALL": [
+      2,
+      3
+    ],
+    "IFCWALLELEMENTEDCASE": [
+      2,
+      3
+    ],
+    "IFCWALLSTANDARDCASE": [
+      2,
+      3
+    ],
+    "IFCWASTETERMINAL": [
+      2,
+      3
+    ],
+    "IFCWINDOW": [
+      2,
+      3
+    ],
+    "IFCWINDOWSTANDARDCASE": [
+      2,
+      3
+    ],
+    "IFCACTUATORTYPE": [
+      2,
+      3
+    ],
+    "IFCAIRTERMINAL": [
+      2,
+      3
+    ],
+    "IFCAIRTERMINALBOX": [
+      2,
+      3
+    ],
+    "IFCAIRTOAIRHEATRECOVERY": [
+      2,
+      3
+    ],
+    "IFCALARMTYPE": [
+      2,
+      3
+    ],
+    "IFCAUDIOVISUALAPPLIANCE": [
+      2,
+      3
+    ],
+    "IFCBEAM": [
+      2,
+      3
+    ],
+    "IFCBEAMSTANDARDCASE": [
+      2,
+      3
+    ],
+    "IFCBOILER": [
+      2,
+      3
+    ],
+    "IFCBURNER": [
+      2,
+      3
+    ],
+    "IFCCABLECARRIERFITTING": [
+      2,
+      3
+    ],
+    "IFCCABLECARRIERSEGMENT": [
+      2,
+      3
+    ],
+    "IFCCABLEFITTING": [
+      2,
+      3
+    ],
+    "IFCCABLESEGMENT": [
+      2,
+      3
+    ],
+    "IFCCHILLER": [
+      2,
+      3
+    ],
+    "IFCCOIL": [
+      2,
+      3
+    ],
+    "IFCCOMMUNICATIONSAPPLIANCE": [
+      2,
+      3
+    ],
+    "IFCCOMPRESSOR": [
+      2,
+      3
+    ],
+    "IFCCONDENSER": [
+      2,
+      3
+    ],
+    "IFCCONTROLLERTYPE": [
+      2,
+      3
+    ],
+    "IFCCOOLEDBEAM": [
+      2,
+      3
+    ],
+    "IFCCOOLINGTOWER": [
+      2,
+      3
+    ],
+    "IFCDAMPER": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONCHAMBERELEMENT": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONCIRCUIT": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONCONTROLELEMENT": [
+      2,
+      3
+    ],
+    "IFCDUCTFITTING": [
+      2,
+      3
+    ],
+    "IFCDUCTSEGMENT": [
+      2,
+      3
+    ],
+    "IFCDUCTSILENCER": [
+      2,
+      3
+    ],
+    "IFCELECTRICAPPLIANCE": [
+      2,
+      3
+    ],
+    "IFCELECTRICDISTRIBUTIONBOARD": [
+      2,
+      3
+    ],
+    "IFCELECTRICFLOWSTORAGEDEVICE": [
+      2,
+      3
+    ],
+    "IFCELECTRICGENERATOR": [
+      2,
+      3
+    ],
+    "IFCELECTRICMOTOR": [
+      2,
+      3
+    ],
+    "IFCELECTRICTIMECONTROL": [
+      2,
+      3
+    ],
+    "IFCFAN": [
+      2,
+      3
+    ],
+    "IFCFILTER": [
+      2,
+      3
+    ],
+    "IFCFIRESUPPRESSIONTERMINAL": [
+      2,
+      3
+    ],
+    "IFCFLOWINSTRUMENT": [
+      2,
+      3
+    ],
+    "IFCPROTECTIVEDEVICETRIPPINGUNIT": [
+      2,
+      3
+    ],
+    "IFCSENSOR": [
+      2,
+      3
+    ],
+    "IFCUNITARYCONTROLELEMENT": [
+      2,
+      3
+    ],
+    "IFCACTUATOR": [
+      2,
+      3
+    ],
+    "IFCALARM": [
+      2,
+      3
+    ],
+    "IFCCONTROLLER": [
+      2,
+      3
+    ]
+  },
+  "IFC4X3": {
+    "IFCACTORROLE": [
+      -1,
+      2
+    ],
+    "IFCADDRESS": [
+      -1,
+      1
+    ],
+    "IFCAPPLIEDVALUE": [
+      0,
+      1
+    ],
+    "IFCAPPROVAL": [
+      1,
+      2
+    ],
+    "IFCBOUNDARYCONDITION": [
+      0,
+      -1
+    ],
+    "IFCBOUNDARYEDGECONDITION": [
+      0,
+      -1
+    ],
+    "IFCBOUNDARYFACECONDITION": [
+      0,
+      -1
+    ],
+    "IFCBOUNDARYNODECONDITION": [
+      0,
+      -1
+    ],
+    "IFCBOUNDARYNODECONDITIONWARPING": [
+      0,
+      -1
+    ],
+    "IFCCONSTRAINT": [
+      0,
+      1
+    ],
+    "IFCCOORDINATEREFERENCESYSTEM": [
+      0,
+      1
+    ],
+    "IFCCOSTVALUE": [
+      0,
+      1
+    ],
+    "IFCDERIVEDUNIT": [
+      3,
+      -1
+    ],
+    "IFCEXTERNALREFERENCE": [
+      2,
+      -1
+    ],
+    "IFCEXTERNALLYDEFINEDHATCHSTYLE": [
+      2,
+      -1
+    ],
+    "IFCEXTERNALLYDEFINEDSURFACESTYLE": [
+      2,
+      -1
+    ],
+    "IFCEXTERNALLYDEFINEDTEXTFONT": [
+      2,
+      -1
+    ],
+    "IFCGEOGRAPHICCRS": [
+      0,
+      1
+    ],
+    "IFCLIBRARYINFORMATION": [
+      0,
+      5
+    ],
+    "IFCLIBRARYREFERENCE": [
+      2,
+      3
+    ],
+    "IFCMATERIALLAYER": [
+      3,
+      4
+    ],
+    "IFCMATERIALLAYERSET": [
+      1,
+      2
+    ],
+    "IFCMATERIALLAYERWITHOFFSETS": [
+      3,
+      4
+    ],
+    "IFCMATERIALPROFILE": [
+      0,
+      1
+    ],
+    "IFCMATERIALPROFILESET": [
+      0,
+      1
+    ],
+    "IFCMATERIALPROFILEWITHOFFSETS": [
+      0,
+      1
+    ],
+    "IFCMETRIC": [
+      0,
+      1
+    ],
+    "IFCOBJECTIVE": [
+      0,
+      1
+    ],
+    "IFCORGANIZATION": [
+      1,
+      2
+    ],
+    "IFCPHYSICALQUANTITY": [
+      0,
+      1
+    ],
+    "IFCPHYSICALSIMPLEQUANTITY": [
+      0,
+      1
+    ],
+    "IFCPOSTALADDRESS": [
+      -1,
+      1
+    ],
+    "IFCPRESENTATIONLAYERASSIGNMENT": [
+      0,
+      1
+    ],
+    "IFCPRESENTATIONLAYERWITHSTYLE": [
+      0,
+      1
+    ],
+    "IFCPRESENTATIONSTYLE": [
+      0,
+      -1
+    ],
+    "IFCPRODUCTREPRESENTATION": [
+      0,
+      1
+    ],
+    "IFCPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCPROJECTEDCRS": [
+      0,
+      1
+    ],
+    "IFCPROPERTYENUMERATION": [
+      0,
+      -1
+    ],
+    "IFCQUANTITYAREA": [
+      0,
+      1
+    ],
+    "IFCQUANTITYCOUNT": [
+      0,
+      1
+    ],
+    "IFCQUANTITYLENGTH": [
+      0,
+      1
+    ],
+    "IFCQUANTITYNUMBER": [
+      0,
+      1
+    ],
+    "IFCQUANTITYTIME": [
+      0,
+      1
+    ],
+    "IFCQUANTITYVOLUME": [
+      0,
+      1
+    ],
+    "IFCQUANTITYWEIGHT": [
+      0,
+      1
+    ],
+    "IFCRESOURCELEVELRELATIONSHIP": [
+      0,
+      1
+    ],
+    "IFCROOT": [
+      2,
+      3
+    ],
+    "IFCSCHEDULINGTIME": [
+      0,
+      -1
+    ],
+    "IFCSHAPEASPECT": [
+      1,
+      2
+    ],
+    "IFCSTRUCTURALCONNECTIONCONDITION": [
+      0,
+      -1
+    ],
+    "IFCSTRUCTURALLOAD": [
+      0,
+      -1
+    ],
+    "IFCSTRUCTURALLOADCONFIGURATION": [
+      0,
+      -1
+    ],
+    "IFCSTRUCTURALLOADORRESULT": [
+      0,
+      -1
+    ],
+    "IFCSTRUCTURALLOADSTATIC": [
+      0,
+      -1
+    ],
+    "IFCSTRUCTURALLOADTEMPERATURE": [
+      0,
+      -1
+    ],
+    "IFCSTYLEDITEM": [
+      2,
+      -1
+    ],
+    "IFCSURFACEREINFORCEMENTAREA": [
+      0,
+      -1
+    ],
+    "IFCSURFACESTYLE": [
+      0,
+      -1
+    ],
+    "IFCTABLE": [
+      0,
+      -1
+    ],
+    "IFCTABLECOLUMN": [
+      1,
+      2
+    ],
+    "IFCTASKTIME": [
+      0,
+      -1
+    ],
+    "IFCTASKTIMERECURRING": [
+      0,
+      -1
+    ],
+    "IFCTELECOMADDRESS": [
+      -1,
+      1
+    ],
+    "IFCTEXTSTYLE": [
+      0,
+      -1
+    ],
+    "IFCTIMESERIES": [
+      0,
+      1
+    ],
+    "IFCWORKTIME": [
+      0,
+      -1
+    ],
+    "IFCAPPROVALRELATIONSHIP": [
+      0,
+      1
+    ],
+    "IFCARBITRARYCLOSEDPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCARBITRARYOPENPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCARBITRARYPROFILEDEFWITHVOIDS": [
+      1,
+      -1
+    ],
+    "IFCCENTERLINEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCCLASSIFICATION": [
+      3,
+      4
+    ],
+    "IFCCLASSIFICATIONREFERENCE": [
+      2,
+      4
+    ],
+    "IFCCOLOURSPECIFICATION": [
+      0,
+      -1
+    ],
+    "IFCCOMPOSITEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCCONTEXTDEPENDENTUNIT": [
+      2,
+      -1
+    ],
+    "IFCCONVERSIONBASEDUNIT": [
+      2,
+      -1
+    ],
+    "IFCCONVERSIONBASEDUNITWITHOFFSET": [
+      2,
+      -1
+    ],
+    "IFCCURRENCYRELATIONSHIP": [
+      0,
+      1
+    ],
+    "IFCCURVESTYLE": [
+      0,
+      -1
+    ],
+    "IFCCURVESTYLEFONT": [
+      0,
+      -1
+    ],
+    "IFCCURVESTYLEFONTANDSCALING": [
+      0,
+      -1
+    ],
+    "IFCDERIVEDPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCDOCUMENTINFORMATION": [
+      1,
+      2
+    ],
+    "IFCDOCUMENTINFORMATIONRELATIONSHIP": [
+      0,
+      1
+    ],
+    "IFCDOCUMENTREFERENCE": [
+      2,
+      3
+    ],
+    "IFCEVENTTIME": [
+      0,
+      -1
+    ],
+    "IFCEXTENDEDPROPERTIES": [
+      0,
+      1
+    ],
+    "IFCEXTERNALREFERENCERELATIONSHIP": [
+      0,
+      1
+    ],
+    "IFCFAILURECONNECTIONCONDITION": [
+      0,
+      -1
+    ],
+    "IFCFILLAREASTYLE": [
+      0,
+      -1
+    ],
+    "IFCIRREGULARTIMESERIES": [
+      0,
+      1
+    ],
+    "IFCLAGTIME": [
+      0,
+      -1
+    ],
+    "IFCLIGHTSOURCE": [
+      0,
+      -1
+    ],
+    "IFCLIGHTSOURCEAMBIENT": [
+      0,
+      -1
+    ],
+    "IFCLIGHTSOURCEDIRECTIONAL": [
+      0,
+      -1
+    ],
+    "IFCLIGHTSOURCEGONIOMETRIC": [
+      0,
+      -1
+    ],
+    "IFCLIGHTSOURCEPOSITIONAL": [
+      0,
+      -1
+    ],
+    "IFCLIGHTSOURCESPOT": [
+      0,
+      -1
+    ],
+    "IFCMATERIAL": [
+      0,
+      1
+    ],
+    "IFCMATERIALCONSTITUENT": [
+      0,
+      1
+    ],
+    "IFCMATERIALCONSTITUENTSET": [
+      0,
+      1
+    ],
+    "IFCMATERIALDEFINITIONREPRESENTATION": [
+      0,
+      1
+    ],
+    "IFCMATERIALPROPERTIES": [
+      0,
+      1
+    ],
+    "IFCMATERIALRELATIONSHIP": [
+      0,
+      1
+    ],
+    "IFCMIRROREDPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCOBJECTDEFINITION": [
+      2,
+      3
+    ],
+    "IFCOPENCROSSPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCORGANIZATIONRELATIONSHIP": [
+      0,
+      1
+    ],
+    "IFCPARAMETERIZEDPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCPHYSICALCOMPLEXQUANTITY": [
+      0,
+      1
+    ],
+    "IFCPREDEFINEDITEM": [
+      0,
+      -1
+    ],
+    "IFCPREDEFINEDTEXTFONT": [
+      0,
+      -1
+    ],
+    "IFCPRODUCTDEFINITIONSHAPE": [
+      0,
+      1
+    ],
+    "IFCPROFILEPROPERTIES": [
+      0,
+      1
+    ],
+    "IFCPROPERTY": [
+      0,
+      -1
+    ],
+    "IFCPROPERTYDEFINITION": [
+      2,
+      3
+    ],
+    "IFCPROPERTYDEPENDENCYRELATIONSHIP": [
+      0,
+      1
+    ],
+    "IFCPROPERTYSETDEFINITION": [
+      2,
+      3
+    ],
+    "IFCPROPERTYTEMPLATEDEFINITION": [
+      2,
+      3
+    ],
+    "IFCQUANTITYSET": [
+      2,
+      3
+    ],
+    "IFCRECTANGLEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCREGULARTIMESERIES": [
+      0,
+      1
+    ],
+    "IFCRELATIONSHIP": [
+      2,
+      3
+    ],
+    "IFCRESOURCEAPPROVALRELATIONSHIP": [
+      0,
+      1
+    ],
+    "IFCRESOURCECONSTRAINTRELATIONSHIP": [
+      0,
+      1
+    ],
+    "IFCRESOURCETIME": [
+      0,
+      -1
+    ],
+    "IFCROUNDEDRECTANGLEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCSIMPLEPROPERTY": [
+      0,
+      -1
+    ],
+    "IFCSLIPPAGECONNECTIONCONDITION": [
+      0,
+      -1
+    ],
+    "IFCSTRUCTURALLOADLINEARFORCE": [
+      0,
+      -1
+    ],
+    "IFCSTRUCTURALLOADPLANARFORCE": [
+      0,
+      -1
+    ],
+    "IFCSTRUCTURALLOADSINGLEDISPLACEMENT": [
+      0,
+      -1
+    ],
+    "IFCSTRUCTURALLOADSINGLEDISPLACEMENTDISTORTION": [
+      0,
+      -1
+    ],
+    "IFCSTRUCTURALLOADSINGLEFORCE": [
+      0,
+      -1
+    ],
+    "IFCSTRUCTURALLOADSINGLEFORCEWARPING": [
+      0,
+      -1
+    ],
+    "IFCTSHAPEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCTEXTSTYLEFONTMODEL": [
+      0,
+      -1
+    ],
+    "IFCTRAPEZIUMPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCTYPEOBJECT": [
+      2,
+      3
+    ],
+    "IFCTYPEPROCESS": [
+      2,
+      3
+    ],
+    "IFCTYPEPRODUCT": [
+      2,
+      3
+    ],
+    "IFCTYPERESOURCE": [
+      2,
+      3
+    ],
+    "IFCUSHAPEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCZSHAPEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCASYMMETRICISHAPEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCCSHAPEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCCIRCLEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCCOLOURRGB": [
+      0,
+      -1
+    ],
+    "IFCCOMPLEXPROPERTY": [
+      0,
+      -1
+    ],
+    "IFCCONSTRUCTIONRESOURCETYPE": [
+      2,
+      3
+    ],
+    "IFCCONTEXT": [
+      2,
+      3
+    ],
+    "IFCCREWRESOURCETYPE": [
+      2,
+      3
+    ],
+    "IFCELEMENTQUANTITY": [
+      2,
+      3
+    ],
+    "IFCELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCELLIPSEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCEVENTTYPE": [
+      2,
+      3
+    ],
+    "IFCFURNISHINGELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCFURNITURETYPE": [
+      2,
+      3
+    ],
+    "IFCGEOGRAPHICELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCISHAPEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCLSHAPEPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCLABORRESOURCETYPE": [
+      2,
+      3
+    ],
+    "IFCOBJECT": [
+      2,
+      3
+    ],
+    "IFCPREDEFINEDCOLOUR": [
+      0,
+      -1
+    ],
+    "IFCPREDEFINEDCURVEFONT": [
+      0,
+      -1
+    ],
+    "IFCPREDEFINEDPROPERTYSET": [
+      2,
+      3
+    ],
+    "IFCPROCEDURETYPE": [
+      2,
+      3
+    ],
+    "IFCPROCESS": [
+      2,
+      3
+    ],
+    "IFCPRODUCT": [
+      2,
+      3
+    ],
+    "IFCPROJECT": [
+      2,
+      3
+    ],
+    "IFCPROJECTLIBRARY": [
+      2,
+      3
+    ],
+    "IFCPROPERTYBOUNDEDVALUE": [
+      0,
+      -1
+    ],
+    "IFCPROPERTYENUMERATEDVALUE": [
+      0,
+      -1
+    ],
+    "IFCPROPERTYLISTVALUE": [
+      0,
+      -1
+    ],
+    "IFCPROPERTYREFERENCEVALUE": [
+      0,
+      -1
+    ],
+    "IFCPROPERTYSET": [
+      2,
+      3
+    ],
+    "IFCPROPERTYSETTEMPLATE": [
+      2,
+      3
+    ],
+    "IFCPROPERTYSINGLEVALUE": [
+      0,
+      -1
+    ],
+    "IFCPROPERTYTABLEVALUE": [
+      0,
+      -1
+    ],
+    "IFCPROPERTYTEMPLATE": [
+      2,
+      3
+    ],
+    "IFCRECTANGLEHOLLOWPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCREINFORCEMENTDEFINITIONPROPERTIES": [
+      2,
+      3
+    ],
+    "IFCRELASSIGNS": [
+      2,
+      3
+    ],
+    "IFCRELASSIGNSTOACTOR": [
+      2,
+      3
+    ],
+    "IFCRELASSIGNSTOCONTROL": [
+      2,
+      3
+    ],
+    "IFCRELASSIGNSTOGROUP": [
+      2,
+      3
+    ],
+    "IFCRELASSIGNSTOGROUPBYFACTOR": [
+      2,
+      3
+    ],
+    "IFCRELASSIGNSTOPROCESS": [
+      2,
+      3
+    ],
+    "IFCRELASSIGNSTOPRODUCT": [
+      2,
+      3
+    ],
+    "IFCRELASSIGNSTORESOURCE": [
+      2,
+      3
+    ],
+    "IFCRELASSOCIATES": [
+      2,
+      3
+    ],
+    "IFCRELASSOCIATESAPPROVAL": [
+      2,
+      3
+    ],
+    "IFCRELASSOCIATESCLASSIFICATION": [
+      2,
+      3
+    ],
+    "IFCRELASSOCIATESCONSTRAINT": [
+      2,
+      3
+    ],
+    "IFCRELASSOCIATESDOCUMENT": [
+      2,
+      3
+    ],
+    "IFCRELASSOCIATESLIBRARY": [
+      2,
+      3
+    ],
+    "IFCRELASSOCIATESMATERIAL": [
+      2,
+      3
+    ],
+    "IFCRELASSOCIATESPROFILEDEF": [
+      2,
+      3
+    ],
+    "IFCRELCONNECTS": [
+      2,
+      3
+    ],
+    "IFCRELCONNECTSELEMENTS": [
+      2,
+      3
+    ],
+    "IFCRELCONNECTSPATHELEMENTS": [
+      2,
+      3
+    ],
+    "IFCRELCONNECTSPORTTOELEMENT": [
+      2,
+      3
+    ],
+    "IFCRELCONNECTSPORTS": [
+      2,
+      3
+    ],
+    "IFCRELCONNECTSSTRUCTURALACTIVITY": [
+      2,
+      3
+    ],
+    "IFCRELCONNECTSSTRUCTURALMEMBER": [
+      2,
+      3
+    ],
+    "IFCRELCONNECTSWITHECCENTRICITY": [
+      2,
+      3
+    ],
+    "IFCRELCONNECTSWITHREALIZINGELEMENTS": [
+      2,
+      3
+    ],
+    "IFCRELCONTAINEDINSPATIALSTRUCTURE": [
+      2,
+      3
+    ],
+    "IFCRELCOVERSBLDGELEMENTS": [
+      2,
+      3
+    ],
+    "IFCRELCOVERSSPACES": [
+      2,
+      3
+    ],
+    "IFCRELDECLARES": [
+      2,
+      3
+    ],
+    "IFCRELDECOMPOSES": [
+      2,
+      3
+    ],
+    "IFCRELDEFINES": [
+      2,
+      3
+    ],
+    "IFCRELDEFINESBYOBJECT": [
+      2,
+      3
+    ],
+    "IFCRELDEFINESBYPROPERTIES": [
+      2,
+      3
+    ],
+    "IFCRELDEFINESBYTEMPLATE": [
+      2,
+      3
+    ],
+    "IFCRELDEFINESBYTYPE": [
+      2,
+      3
+    ],
+    "IFCRELFILLSELEMENT": [
+      2,
+      3
+    ],
+    "IFCRELFLOWCONTROLELEMENTS": [
+      2,
+      3
+    ],
+    "IFCRELINTERFERESELEMENTS": [
+      2,
+      3
+    ],
+    "IFCRELNESTS": [
+      2,
+      3
+    ],
+    "IFCRELPOSITIONS": [
+      2,
+      3
+    ],
+    "IFCRELPROJECTSELEMENT": [
+      2,
+      3
+    ],
+    "IFCRELREFERENCEDINSPATIALSTRUCTURE": [
+      2,
+      3
+    ],
+    "IFCRELSEQUENCE": [
+      2,
+      3
+    ],
+    "IFCRELSERVICESBUILDINGS": [
+      2,
+      3
+    ],
+    "IFCRELSPACEBOUNDARY": [
+      2,
+      3
+    ],
+    "IFCRELSPACEBOUNDARY1STLEVEL": [
+      2,
+      3
+    ],
+    "IFCRELSPACEBOUNDARY2NDLEVEL": [
+      2,
+      3
+    ],
+    "IFCRELVOIDSELEMENT": [
+      2,
+      3
+    ],
+    "IFCRESOURCE": [
+      2,
+      3
+    ],
+    "IFCSIMPLEPROPERTYTEMPLATE": [
+      2,
+      3
+    ],
+    "IFCSPATIALELEMENT": [
+      2,
+      3
+    ],
+    "IFCSPATIALELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCSPATIALSTRUCTUREELEMENT": [
+      2,
+      3
+    ],
+    "IFCSPATIALSTRUCTUREELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCSPATIALZONE": [
+      2,
+      3
+    ],
+    "IFCSPATIALZONETYPE": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALACTIVITY": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALITEM": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALMEMBER": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALREACTION": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALSURFACEMEMBER": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALSURFACEMEMBERVARYING": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALSURFACEREACTION": [
+      2,
+      3
+    ],
+    "IFCSUBCONTRACTRESOURCETYPE": [
+      2,
+      3
+    ],
+    "IFCSYSTEMFURNITUREELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCTASK": [
+      2,
+      3
+    ],
+    "IFCTASKTYPE": [
+      2,
+      3
+    ],
+    "IFCTRANSPORTATIONDEVICETYPE": [
+      2,
+      3
+    ],
+    "IFCVEHICLETYPE": [
+      2,
+      3
+    ],
+    "IFCWINDOWLININGPROPERTIES": [
+      2,
+      3
+    ],
+    "IFCWINDOWPANELPROPERTIES": [
+      2,
+      3
+    ],
+    "IFCACTOR": [
+      2,
+      3
+    ],
+    "IFCANNOTATION": [
+      2,
+      3
+    ],
+    "IFCBUILDINGSTOREY": [
+      2,
+      3
+    ],
+    "IFCBUILTELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCCHIMNEYTYPE": [
+      2,
+      3
+    ],
+    "IFCCIRCLEHOLLOWPROFILEDEF": [
+      1,
+      -1
+    ],
+    "IFCCIVILELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCCOLUMNTYPE": [
+      2,
+      3
+    ],
+    "IFCCOMPLEXPROPERTYTEMPLATE": [
+      2,
+      3
+    ],
+    "IFCCONSTRUCTIONEQUIPMENTRESOURCETYPE": [
+      2,
+      3
+    ],
+    "IFCCONSTRUCTIONMATERIALRESOURCETYPE": [
+      2,
+      3
+    ],
+    "IFCCONSTRUCTIONPRODUCTRESOURCETYPE": [
+      2,
+      3
+    ],
+    "IFCCONSTRUCTIONRESOURCE": [
+      2,
+      3
+    ],
+    "IFCCONTROL": [
+      2,
+      3
+    ],
+    "IFCCOSTITEM": [
+      2,
+      3
+    ],
+    "IFCCOSTSCHEDULE": [
+      2,
+      3
+    ],
+    "IFCCOURSETYPE": [
+      2,
+      3
+    ],
+    "IFCCOVERINGTYPE": [
+      2,
+      3
+    ],
+    "IFCCREWRESOURCE": [
+      2,
+      3
+    ],
+    "IFCCURTAINWALLTYPE": [
+      2,
+      3
+    ],
+    "IFCDEEPFOUNDATIONTYPE": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONFLOWELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCDOORLININGPROPERTIES": [
+      2,
+      3
+    ],
+    "IFCDOORPANELPROPERTIES": [
+      2,
+      3
+    ],
+    "IFCDOORTYPE": [
+      2,
+      3
+    ],
+    "IFCDRAUGHTINGPREDEFINEDCOLOUR": [
+      0,
+      -1
+    ],
+    "IFCDRAUGHTINGPREDEFINEDCURVEFONT": [
+      0,
+      -1
+    ],
+    "IFCELEMENT": [
+      2,
+      3
+    ],
+    "IFCELEMENTASSEMBLY": [
+      2,
+      3
+    ],
+    "IFCELEMENTASSEMBLYTYPE": [
+      2,
+      3
+    ],
+    "IFCELEMENTCOMPONENT": [
+      2,
+      3
+    ],
+    "IFCELEMENTCOMPONENTTYPE": [
+      2,
+      3
+    ],
+    "IFCENERGYCONVERSIONDEVICETYPE": [
+      2,
+      3
+    ],
+    "IFCENGINETYPE": [
+      2,
+      3
+    ],
+    "IFCEVAPORATIVECOOLERTYPE": [
+      2,
+      3
+    ],
+    "IFCEVAPORATORTYPE": [
+      2,
+      3
+    ],
+    "IFCEVENT": [
+      2,
+      3
+    ],
+    "IFCEXTERNALSPATIALSTRUCTUREELEMENT": [
+      2,
+      3
+    ],
+    "IFCFACILITY": [
+      2,
+      3
+    ],
+    "IFCFACILITYPART": [
+      2,
+      3
+    ],
+    "IFCFACILITYPARTCOMMON": [
+      2,
+      3
+    ],
+    "IFCFASTENER": [
+      2,
+      3
+    ],
+    "IFCFASTENERTYPE": [
+      2,
+      3
+    ],
+    "IFCFEATUREELEMENT": [
+      2,
+      3
+    ],
+    "IFCFEATUREELEMENTADDITION": [
+      2,
+      3
+    ],
+    "IFCFEATUREELEMENTSUBTRACTION": [
+      2,
+      3
+    ],
+    "IFCFLOWCONTROLLERTYPE": [
+      2,
+      3
+    ],
+    "IFCFLOWFITTINGTYPE": [
+      2,
+      3
+    ],
+    "IFCFLOWMETERTYPE": [
+      2,
+      3
+    ],
+    "IFCFLOWMOVINGDEVICETYPE": [
+      2,
+      3
+    ],
+    "IFCFLOWSEGMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCFLOWSTORAGEDEVICETYPE": [
+      2,
+      3
+    ],
+    "IFCFLOWTERMINALTYPE": [
+      2,
+      3
+    ],
+    "IFCFLOWTREATMENTDEVICETYPE": [
+      2,
+      3
+    ],
+    "IFCFOOTINGTYPE": [
+      2,
+      3
+    ],
+    "IFCFURNISHINGELEMENT": [
+      2,
+      3
+    ],
+    "IFCFURNITURE": [
+      2,
+      3
+    ],
+    "IFCGEOGRAPHICELEMENT": [
+      2,
+      3
+    ],
+    "IFCGEOTECHNICALELEMENT": [
+      2,
+      3
+    ],
+    "IFCGEOTECHNICALSTRATUM": [
+      2,
+      3
+    ],
+    "IFCGROUP": [
+      2,
+      3
+    ],
+    "IFCHEATEXCHANGERTYPE": [
+      2,
+      3
+    ],
+    "IFCHUMIDIFIERTYPE": [
+      2,
+      3
+    ],
+    "IFCIMPACTPROTECTIONDEVICE": [
+      2,
+      3
+    ],
+    "IFCIMPACTPROTECTIONDEVICETYPE": [
+      2,
+      3
+    ],
+    "IFCINTERCEPTORTYPE": [
+      2,
+      3
+    ],
+    "IFCINVENTORY": [
+      2,
+      3
+    ],
+    "IFCJUNCTIONBOXTYPE": [
+      2,
+      3
+    ],
+    "IFCKERBTYPE": [
+      2,
+      3
+    ],
+    "IFCLABORRESOURCE": [
+      2,
+      3
+    ],
+    "IFCLAMPTYPE": [
+      2,
+      3
+    ],
+    "IFCLIGHTFIXTURETYPE": [
+      2,
+      3
+    ],
+    "IFCLINEARELEMENT": [
+      2,
+      3
+    ],
+    "IFCLIQUIDTERMINALTYPE": [
+      2,
+      3
+    ],
+    "IFCMARINEFACILITY": [
+      2,
+      3
+    ],
+    "IFCMARINEPART": [
+      2,
+      3
+    ],
+    "IFCMECHANICALFASTENER": [
+      2,
+      3
+    ],
+    "IFCMECHANICALFASTENERTYPE": [
+      2,
+      3
+    ],
+    "IFCMEDICALDEVICETYPE": [
+      2,
+      3
+    ],
+    "IFCMEMBERTYPE": [
+      2,
+      3
+    ],
+    "IFCMOBILETELECOMMUNICATIONSAPPLIANCETYPE": [
+      2,
+      3
+    ],
+    "IFCMOORINGDEVICETYPE": [
+      2,
+      3
+    ],
+    "IFCMOTORCONNECTIONTYPE": [
+      2,
+      3
+    ],
+    "IFCNAVIGATIONELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCOCCUPANT": [
+      2,
+      3
+    ],
+    "IFCOPENINGELEMENT": [
+      2,
+      3
+    ],
+    "IFCOUTLETTYPE": [
+      2,
+      3
+    ],
+    "IFCPAVEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCPERFORMANCEHISTORY": [
+      2,
+      3
+    ],
+    "IFCPERMEABLECOVERINGPROPERTIES": [
+      2,
+      3
+    ],
+    "IFCPERMIT": [
+      2,
+      3
+    ],
+    "IFCPILETYPE": [
+      2,
+      3
+    ],
+    "IFCPIPEFITTINGTYPE": [
+      2,
+      3
+    ],
+    "IFCPIPESEGMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCPLATETYPE": [
+      2,
+      3
+    ],
+    "IFCPORT": [
+      2,
+      3
+    ],
+    "IFCPOSITIONINGELEMENT": [
+      2,
+      3
+    ],
+    "IFCPROCEDURE": [
+      2,
+      3
+    ],
+    "IFCPROJECTORDER": [
+      2,
+      3
+    ],
+    "IFCPROJECTIONELEMENT": [
+      2,
+      3
+    ],
+    "IFCPROTECTIVEDEVICETYPE": [
+      2,
+      3
+    ],
+    "IFCPUMPTYPE": [
+      2,
+      3
+    ],
+    "IFCRAILTYPE": [
+      2,
+      3
+    ],
+    "IFCRAILINGTYPE": [
+      2,
+      3
+    ],
+    "IFCRAILWAY": [
+      2,
+      3
+    ],
+    "IFCRAILWAYPART": [
+      2,
+      3
+    ],
+    "IFCRAMPFLIGHTTYPE": [
+      2,
+      3
+    ],
+    "IFCRAMPTYPE": [
+      2,
+      3
+    ],
+    "IFCREFERENT": [
+      2,
+      3
+    ],
+    "IFCREINFORCINGELEMENT": [
+      2,
+      3
+    ],
+    "IFCREINFORCINGELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCREINFORCINGMESH": [
+      2,
+      3
+    ],
+    "IFCREINFORCINGMESHTYPE": [
+      2,
+      3
+    ],
+    "IFCRELADHERESTOELEMENT": [
+      2,
+      3
+    ],
+    "IFCRELAGGREGATES": [
+      2,
+      3
+    ],
+    "IFCROAD": [
+      2,
+      3
+    ],
+    "IFCROADPART": [
+      2,
+      3
+    ],
+    "IFCROOFTYPE": [
+      2,
+      3
+    ],
+    "IFCSANITARYTERMINALTYPE": [
+      2,
+      3
+    ],
+    "IFCSHADINGDEVICETYPE": [
+      2,
+      3
+    ],
+    "IFCSIGN": [
+      2,
+      3
+    ],
+    "IFCSIGNTYPE": [
+      2,
+      3
+    ],
+    "IFCSIGNALTYPE": [
+      2,
+      3
+    ],
+    "IFCSITE": [
+      2,
+      3
+    ],
+    "IFCSLABTYPE": [
+      2,
+      3
+    ],
+    "IFCSOLARDEVICETYPE": [
+      2,
+      3
+    ],
+    "IFCSPACE": [
+      2,
+      3
+    ],
+    "IFCSPACEHEATERTYPE": [
+      2,
+      3
+    ],
+    "IFCSPACETYPE": [
+      2,
+      3
+    ],
+    "IFCSTACKTERMINALTYPE": [
+      2,
+      3
+    ],
+    "IFCSTAIRFLIGHTTYPE": [
+      2,
+      3
+    ],
+    "IFCSTAIRTYPE": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALACTION": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALCONNECTION": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALCURVEACTION": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALCURVECONNECTION": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALCURVEMEMBER": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALCURVEMEMBERVARYING": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALCURVEREACTION": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALLINEARACTION": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALLOADGROUP": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALPOINTACTION": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALPOINTCONNECTION": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALPOINTREACTION": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALRESULTGROUP": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALSURFACEACTION": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALSURFACECONNECTION": [
+      2,
+      3
+    ],
+    "IFCSUBCONTRACTRESOURCE": [
+      2,
+      3
+    ],
+    "IFCSURFACEFEATURE": [
+      2,
+      3
+    ],
+    "IFCSWITCHINGDEVICETYPE": [
+      2,
+      3
+    ],
+    "IFCSYSTEM": [
+      2,
+      3
+    ],
+    "IFCSYSTEMFURNITUREELEMENT": [
+      2,
+      3
+    ],
+    "IFCTANKTYPE": [
+      2,
+      3
+    ],
+    "IFCTENDON": [
+      2,
+      3
+    ],
+    "IFCTENDONANCHOR": [
+      2,
+      3
+    ],
+    "IFCTENDONANCHORTYPE": [
+      2,
+      3
+    ],
+    "IFCTENDONCONDUIT": [
+      2,
+      3
+    ],
+    "IFCTENDONCONDUITTYPE": [
+      2,
+      3
+    ],
+    "IFCTENDONTYPE": [
+      2,
+      3
+    ],
+    "IFCTRACKELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCTRANSFORMERTYPE": [
+      2,
+      3
+    ],
+    "IFCTRANSPORTELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCTRANSPORTATIONDEVICE": [
+      2,
+      3
+    ],
+    "IFCTUBEBUNDLETYPE": [
+      2,
+      3
+    ],
+    "IFCUNITARYEQUIPMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCVALVETYPE": [
+      2,
+      3
+    ],
+    "IFCVEHICLE": [
+      2,
+      3
+    ],
+    "IFCVIBRATIONDAMPER": [
+      2,
+      3
+    ],
+    "IFCVIBRATIONDAMPERTYPE": [
+      2,
+      3
+    ],
+    "IFCVIBRATIONISOLATOR": [
+      2,
+      3
+    ],
+    "IFCVIBRATIONISOLATORTYPE": [
+      2,
+      3
+    ],
+    "IFCVIRTUALELEMENT": [
+      2,
+      3
+    ],
+    "IFCVOIDINGFEATURE": [
+      2,
+      3
+    ],
+    "IFCWALLTYPE": [
+      2,
+      3
+    ],
+    "IFCWASTETERMINALTYPE": [
+      2,
+      3
+    ],
+    "IFCWINDOWTYPE": [
+      2,
+      3
+    ],
+    "IFCWORKCALENDAR": [
+      2,
+      3
+    ],
+    "IFCWORKCONTROL": [
+      2,
+      3
+    ],
+    "IFCWORKPLAN": [
+      2,
+      3
+    ],
+    "IFCWORKSCHEDULE": [
+      2,
+      3
+    ],
+    "IFCZONE": [
+      2,
+      3
+    ],
+    "IFCACTIONREQUEST": [
+      2,
+      3
+    ],
+    "IFCAIRTERMINALBOXTYPE": [
+      2,
+      3
+    ],
+    "IFCAIRTERMINALTYPE": [
+      2,
+      3
+    ],
+    "IFCAIRTOAIRHEATRECOVERYTYPE": [
+      2,
+      3
+    ],
+    "IFCALIGNMENTCANT": [
+      2,
+      3
+    ],
+    "IFCALIGNMENTHORIZONTAL": [
+      2,
+      3
+    ],
+    "IFCALIGNMENTSEGMENT": [
+      2,
+      3
+    ],
+    "IFCALIGNMENTVERTICAL": [
+      2,
+      3
+    ],
+    "IFCASSET": [
+      2,
+      3
+    ],
+    "IFCAUDIOVISUALAPPLIANCETYPE": [
+      2,
+      3
+    ],
+    "IFCBEAMTYPE": [
+      2,
+      3
+    ],
+    "IFCBEARINGTYPE": [
+      2,
+      3
+    ],
+    "IFCBOILERTYPE": [
+      2,
+      3
+    ],
+    "IFCBRIDGE": [
+      2,
+      3
+    ],
+    "IFCBRIDGEPART": [
+      2,
+      3
+    ],
+    "IFCBUILDING": [
+      2,
+      3
+    ],
+    "IFCBUILDINGELEMENTPART": [
+      2,
+      3
+    ],
+    "IFCBUILDINGELEMENTPARTTYPE": [
+      2,
+      3
+    ],
+    "IFCBUILDINGELEMENTPROXYTYPE": [
+      2,
+      3
+    ],
+    "IFCBUILDINGSYSTEM": [
+      2,
+      3
+    ],
+    "IFCBUILTELEMENT": [
+      2,
+      3
+    ],
+    "IFCBUILTSYSTEM": [
+      2,
+      3
+    ],
+    "IFCBURNERTYPE": [
+      2,
+      3
+    ],
+    "IFCCABLECARRIERFITTINGTYPE": [
+      2,
+      3
+    ],
+    "IFCCABLECARRIERSEGMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCCABLEFITTINGTYPE": [
+      2,
+      3
+    ],
+    "IFCCABLESEGMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCCAISSONFOUNDATIONTYPE": [
+      2,
+      3
+    ],
+    "IFCCHILLERTYPE": [
+      2,
+      3
+    ],
+    "IFCCHIMNEY": [
+      2,
+      3
+    ],
+    "IFCCIVILELEMENT": [
+      2,
+      3
+    ],
+    "IFCCOILTYPE": [
+      2,
+      3
+    ],
+    "IFCCOLUMN": [
+      2,
+      3
+    ],
+    "IFCCOMMUNICATIONSAPPLIANCETYPE": [
+      2,
+      3
+    ],
+    "IFCCOMPRESSORTYPE": [
+      2,
+      3
+    ],
+    "IFCCONDENSERTYPE": [
+      2,
+      3
+    ],
+    "IFCCONSTRUCTIONEQUIPMENTRESOURCE": [
+      2,
+      3
+    ],
+    "IFCCONSTRUCTIONMATERIALRESOURCE": [
+      2,
+      3
+    ],
+    "IFCCONSTRUCTIONPRODUCTRESOURCE": [
+      2,
+      3
+    ],
+    "IFCCONVEYORSEGMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCCOOLEDBEAMTYPE": [
+      2,
+      3
+    ],
+    "IFCCOOLINGTOWERTYPE": [
+      2,
+      3
+    ],
+    "IFCCOURSE": [
+      2,
+      3
+    ],
+    "IFCCOVERING": [
+      2,
+      3
+    ],
+    "IFCCURTAINWALL": [
+      2,
+      3
+    ],
+    "IFCDAMPERTYPE": [
+      2,
+      3
+    ],
+    "IFCDEEPFOUNDATION": [
+      2,
+      3
+    ],
+    "IFCDISCRETEACCESSORY": [
+      2,
+      3
+    ],
+    "IFCDISCRETEACCESSORYTYPE": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONBOARDTYPE": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONCHAMBERELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONCONTROLELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONELEMENT": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONFLOWELEMENT": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONPORT": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONSYSTEM": [
+      2,
+      3
+    ],
+    "IFCDOOR": [
+      2,
+      3
+    ],
+    "IFCDUCTFITTINGTYPE": [
+      2,
+      3
+    ],
+    "IFCDUCTSEGMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCDUCTSILENCERTYPE": [
+      2,
+      3
+    ],
+    "IFCEARTHWORKSCUT": [
+      2,
+      3
+    ],
+    "IFCEARTHWORKSELEMENT": [
+      2,
+      3
+    ],
+    "IFCEARTHWORKSFILL": [
+      2,
+      3
+    ],
+    "IFCELECTRICAPPLIANCETYPE": [
+      2,
+      3
+    ],
+    "IFCELECTRICDISTRIBUTIONBOARDTYPE": [
+      2,
+      3
+    ],
+    "IFCELECTRICFLOWSTORAGEDEVICETYPE": [
+      2,
+      3
+    ],
+    "IFCELECTRICFLOWTREATMENTDEVICETYPE": [
+      2,
+      3
+    ],
+    "IFCELECTRICGENERATORTYPE": [
+      2,
+      3
+    ],
+    "IFCELECTRICMOTORTYPE": [
+      2,
+      3
+    ],
+    "IFCELECTRICTIMECONTROLTYPE": [
+      2,
+      3
+    ],
+    "IFCENERGYCONVERSIONDEVICE": [
+      2,
+      3
+    ],
+    "IFCENGINE": [
+      2,
+      3
+    ],
+    "IFCEVAPORATIVECOOLER": [
+      2,
+      3
+    ],
+    "IFCEVAPORATOR": [
+      2,
+      3
+    ],
+    "IFCEXTERNALSPATIALELEMENT": [
+      2,
+      3
+    ],
+    "IFCFANTYPE": [
+      2,
+      3
+    ],
+    "IFCFILTERTYPE": [
+      2,
+      3
+    ],
+    "IFCFIRESUPPRESSIONTERMINALTYPE": [
+      2,
+      3
+    ],
+    "IFCFLOWCONTROLLER": [
+      2,
+      3
+    ],
+    "IFCFLOWFITTING": [
+      2,
+      3
+    ],
+    "IFCFLOWINSTRUMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCFLOWMETER": [
+      2,
+      3
+    ],
+    "IFCFLOWMOVINGDEVICE": [
+      2,
+      3
+    ],
+    "IFCFLOWSEGMENT": [
+      2,
+      3
+    ],
+    "IFCFLOWSTORAGEDEVICE": [
+      2,
+      3
+    ],
+    "IFCFLOWTERMINAL": [
+      2,
+      3
+    ],
+    "IFCFLOWTREATMENTDEVICE": [
+      2,
+      3
+    ],
+    "IFCFOOTING": [
+      2,
+      3
+    ],
+    "IFCGEOTECHNICALASSEMBLY": [
+      2,
+      3
+    ],
+    "IFCGRID": [
+      2,
+      3
+    ],
+    "IFCHEATEXCHANGER": [
+      2,
+      3
+    ],
+    "IFCHUMIDIFIER": [
+      2,
+      3
+    ],
+    "IFCINTERCEPTOR": [
+      2,
+      3
+    ],
+    "IFCJUNCTIONBOX": [
+      2,
+      3
+    ],
+    "IFCKERB": [
+      2,
+      3
+    ],
+    "IFCLAMP": [
+      2,
+      3
+    ],
+    "IFCLIGHTFIXTURE": [
+      2,
+      3
+    ],
+    "IFCLINEARPOSITIONINGELEMENT": [
+      2,
+      3
+    ],
+    "IFCLIQUIDTERMINAL": [
+      2,
+      3
+    ],
+    "IFCMEDICALDEVICE": [
+      2,
+      3
+    ],
+    "IFCMEMBER": [
+      2,
+      3
+    ],
+    "IFCMOBILETELECOMMUNICATIONSAPPLIANCE": [
+      2,
+      3
+    ],
+    "IFCMOORINGDEVICE": [
+      2,
+      3
+    ],
+    "IFCMOTORCONNECTION": [
+      2,
+      3
+    ],
+    "IFCNAVIGATIONELEMENT": [
+      2,
+      3
+    ],
+    "IFCOUTLET": [
+      2,
+      3
+    ],
+    "IFCPAVEMENT": [
+      2,
+      3
+    ],
+    "IFCPILE": [
+      2,
+      3
+    ],
+    "IFCPIPEFITTING": [
+      2,
+      3
+    ],
+    "IFCPIPESEGMENT": [
+      2,
+      3
+    ],
+    "IFCPLATE": [
+      2,
+      3
+    ],
+    "IFCPROTECTIVEDEVICE": [
+      2,
+      3
+    ],
+    "IFCPROTECTIVEDEVICETRIPPINGUNITTYPE": [
+      2,
+      3
+    ],
+    "IFCPUMP": [
+      2,
+      3
+    ],
+    "IFCRAIL": [
+      2,
+      3
+    ],
+    "IFCRAILING": [
+      2,
+      3
+    ],
+    "IFCRAMP": [
+      2,
+      3
+    ],
+    "IFCRAMPFLIGHT": [
+      2,
+      3
+    ],
+    "IFCREINFORCEDSOIL": [
+      2,
+      3
+    ],
+    "IFCREINFORCINGBAR": [
+      2,
+      3
+    ],
+    "IFCREINFORCINGBARTYPE": [
+      2,
+      3
+    ],
+    "IFCROOF": [
+      2,
+      3
+    ],
+    "IFCSANITARYTERMINAL": [
+      2,
+      3
+    ],
+    "IFCSENSORTYPE": [
+      2,
+      3
+    ],
+    "IFCSHADINGDEVICE": [
+      2,
+      3
+    ],
+    "IFCSIGNAL": [
+      2,
+      3
+    ],
+    "IFCSLAB": [
+      2,
+      3
+    ],
+    "IFCSOLARDEVICE": [
+      2,
+      3
+    ],
+    "IFCSPACEHEATER": [
+      2,
+      3
+    ],
+    "IFCSTACKTERMINAL": [
+      2,
+      3
+    ],
+    "IFCSTAIR": [
+      2,
+      3
+    ],
+    "IFCSTAIRFLIGHT": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALANALYSISMODEL": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALLOADCASE": [
+      2,
+      3
+    ],
+    "IFCSTRUCTURALPLANARACTION": [
+      2,
+      3
+    ],
+    "IFCSWITCHINGDEVICE": [
+      2,
+      3
+    ],
+    "IFCTANK": [
+      2,
+      3
+    ],
+    "IFCTRACKELEMENT": [
+      2,
+      3
+    ],
+    "IFCTRANSFORMER": [
+      2,
+      3
+    ],
+    "IFCTRANSPORTELEMENT": [
+      2,
+      3
+    ],
+    "IFCTUBEBUNDLE": [
+      2,
+      3
+    ],
+    "IFCUNITARYCONTROLELEMENTTYPE": [
+      2,
+      3
+    ],
+    "IFCUNITARYEQUIPMENT": [
+      2,
+      3
+    ],
+    "IFCVALVE": [
+      2,
+      3
+    ],
+    "IFCWALL": [
+      2,
+      3
+    ],
+    "IFCWALLSTANDARDCASE": [
+      2,
+      3
+    ],
+    "IFCWASTETERMINAL": [
+      2,
+      3
+    ],
+    "IFCWINDOW": [
+      2,
+      3
+    ],
+    "IFCACTUATORTYPE": [
+      2,
+      3
+    ],
+    "IFCAIRTERMINAL": [
+      2,
+      3
+    ],
+    "IFCAIRTERMINALBOX": [
+      2,
+      3
+    ],
+    "IFCAIRTOAIRHEATRECOVERY": [
+      2,
+      3
+    ],
+    "IFCALARMTYPE": [
+      2,
+      3
+    ],
+    "IFCALIGNMENT": [
+      2,
+      3
+    ],
+    "IFCAUDIOVISUALAPPLIANCE": [
+      2,
+      3
+    ],
+    "IFCBEAM": [
+      2,
+      3
+    ],
+    "IFCBEARING": [
+      2,
+      3
+    ],
+    "IFCBOILER": [
+      2,
+      3
+    ],
+    "IFCBOREHOLE": [
+      2,
+      3
+    ],
+    "IFCBUILDINGELEMENTPROXY": [
+      2,
+      3
+    ],
+    "IFCBURNER": [
+      2,
+      3
+    ],
+    "IFCCABLECARRIERFITTING": [
+      2,
+      3
+    ],
+    "IFCCABLECARRIERSEGMENT": [
+      2,
+      3
+    ],
+    "IFCCABLEFITTING": [
+      2,
+      3
+    ],
+    "IFCCABLESEGMENT": [
+      2,
+      3
+    ],
+    "IFCCAISSONFOUNDATION": [
+      2,
+      3
+    ],
+    "IFCCHILLER": [
+      2,
+      3
+    ],
+    "IFCCOIL": [
+      2,
+      3
+    ],
+    "IFCCOMMUNICATIONSAPPLIANCE": [
+      2,
+      3
+    ],
+    "IFCCOMPRESSOR": [
+      2,
+      3
+    ],
+    "IFCCONDENSER": [
+      2,
+      3
+    ],
+    "IFCCONTROLLERTYPE": [
+      2,
+      3
+    ],
+    "IFCCONVEYORSEGMENT": [
+      2,
+      3
+    ],
+    "IFCCOOLEDBEAM": [
+      2,
+      3
+    ],
+    "IFCCOOLINGTOWER": [
+      2,
+      3
+    ],
+    "IFCDAMPER": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONBOARD": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONCHAMBERELEMENT": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONCIRCUIT": [
+      2,
+      3
+    ],
+    "IFCDISTRIBUTIONCONTROLELEMENT": [
+      2,
+      3
+    ],
+    "IFCDUCTFITTING": [
+      2,
+      3
+    ],
+    "IFCDUCTSEGMENT": [
+      2,
+      3
+    ],
+    "IFCDUCTSILENCER": [
+      2,
+      3
+    ],
+    "IFCELECTRICAPPLIANCE": [
+      2,
+      3
+    ],
+    "IFCELECTRICDISTRIBUTIONBOARD": [
+      2,
+      3
+    ],
+    "IFCELECTRICFLOWSTORAGEDEVICE": [
+      2,
+      3
+    ],
+    "IFCELECTRICFLOWTREATMENTDEVICE": [
+      2,
+      3
+    ],
+    "IFCELECTRICGENERATOR": [
+      2,
+      3
+    ],
+    "IFCELECTRICMOTOR": [
+      2,
+      3
+    ],
+    "IFCELECTRICTIMECONTROL": [
+      2,
+      3
+    ],
+    "IFCFAN": [
+      2,
+      3
+    ],
+    "IFCFILTER": [
+      2,
+      3
+    ],
+    "IFCFIRESUPPRESSIONTERMINAL": [
+      2,
+      3
+    ],
+    "IFCFLOWINSTRUMENT": [
+      2,
+      3
+    ],
+    "IFCGEOMODEL": [
+      2,
+      3
+    ],
+    "IFCGEOSLICE": [
+      2,
+      3
+    ],
+    "IFCPROTECTIVEDEVICETRIPPINGUNIT": [
+      2,
+      3
+    ],
+    "IFCSENSOR": [
+      2,
+      3
+    ],
+    "IFCUNITARYCONTROLELEMENT": [
+      2,
+      3
+    ],
+    "IFCACTUATOR": [
+      2,
+      3
+    ],
+    "IFCALARM": [
+      2,
+      3
+    ],
+    "IFCCONTROLLER": [
+      2,
+      3
+    ]
+  }
+}

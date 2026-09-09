@@ -3,11 +3,13 @@ import { useMemo, useState, type ReactNode } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import {
     OBJECT_INFO_PSET_NAME,
-    type NativeIfcDocument,
-    type NativeIfcEntity,
     type ObjectInfoIdDefinition,
     type ObjectInfoIndex,
-} from "@/ifc";
+} from "@/ifc/objectInfoValidation";
+import {
+    type NativeIfcDocument,
+    type NativeIfcEntity,
+} from "@/ifc/nativeDocument";
 import { cn } from "@/lib/utils";
 
 import {

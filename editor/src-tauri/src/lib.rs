@@ -4,7 +4,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use std::io::Write;
 use tauri::{ipc::Response, webview::NewWindowResponse, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_dialog::DialogExt;
 
 /// Unique labels for popup windows opened via window.open (panel pop-outs).
 static POPUP_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -48,9 +50,52 @@ fn read_ifc_file(path: String) -> Result<Response, String> {
     Ok(Response::new(bytes))
 }
 
+fn write_ifc_atomically(path: &Path, contents: &[u8]) -> Result<(), String> {
+    let parent = path.parent().ok_or("Ungültiger Speicherpfad.")?;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
+    temporary.write_all(contents).map_err(|e| e.to_string())?;
+    temporary.as_file().sync_all().map_err(|e| e.to_string())?;
+    temporary.persist(path).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn save_ifc_file(
+    app: tauri::AppHandle,
+    file_name: String,
+    contents: String,
+) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let selected = app
+            .dialog()
+            .file()
+            .add_filter("IFC", &["ifc"])
+            .set_file_name(file_name)
+            .blocking_save_file();
+        let Some(selected) = selected else {
+            return Ok(None);
+        };
+        let mut path = selected.into_path().map_err(|e| e.to_string())?;
+        if path.extension().is_none() {
+            path.set_extension("ifc");
+        }
+        if !path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("ifc"))
+        {
+            return Err("Bitte eine Datei mit der Endung .ifc wählen.".into());
+        }
+        write_ifc_atomically(&path, contents.as_bytes())?;
+        Ok(Some(path.to_string_lossy().into_owned()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[cfg(test)]
 mod tests {
-    use super::validated_ifc_path;
+    use super::{validated_ifc_path, write_ifc_atomically};
     use std::{env, fs, process};
 
     #[test]
@@ -68,13 +113,29 @@ mod tests {
         let error = validated_ifc_path(&path).expect_err("reject non-IFC path");
         assert!(error.contains(".ifc-Dateien"));
     }
+
+    #[test]
+    fn save_replaces_complete_contents_and_preserves_original_on_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("model.ifc");
+        fs::write(&path, b"old model").unwrap();
+        write_ifc_atomically(&path, b"new model").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"new model");
+        assert!(write_ifc_atomically(&dir.path().join("missing/model.ifc"), b"lost").is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"new model");
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_http::init())
-        .invoke_handler(tauri::generate_handler![startup_ifc_paths, read_ifc_file])
+        .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![
+            startup_ifc_paths,
+            read_ifc_file,
+            save_ifc_file
+        ])
         .setup(|app| {
             let handle = app.handle().clone();
             WebviewWindowBuilder::new(app, "main", WebviewUrl::default())

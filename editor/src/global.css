@@ -1760,3 +1760,23 @@ body,
 .ifcnative-thatopen-split-bar button.primary:hover {
   background: color-mix(in oklab, var(--primary) 88%, black 6%);
 }
+
+/* Dauerhafter Viewer-Host (siehe createPersistentViewerHost in ifc-workspace) */
+.ifcnative-viewer-host {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+
+.ifcnative-viewer-parking {
+  height: 480px;
+  left: -200vw;
+  pointer-events: none;
+  position: fixed;
+  top: 0;
+  visibility: hidden;
+  width: 640px;
+}

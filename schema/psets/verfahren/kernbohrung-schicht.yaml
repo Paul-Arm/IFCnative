@@ -1,0 +1,15 @@
+# Erweitertes Pset zur Kernbohrung: eine Schicht je Pset (Kernbohrung_Schicht0, _Schicht1 …).
+# Ehem. Katalogklasse BWD - KBSX. Nur in der Ausführung — damit ist es in Planungsdateien
+# automatisch verboten (ehem. IDS DIA-P-08 / Portal execution_only_pset).
+pset: Kernbohrung_Schicht
+familie: 'Kernbohrung_Schicht\d*'
+art: verfahrenErweitert
+gehoertZu: Kernbohrung
+katalog: { kuerzel: KBSX, code: BWD - KBSX }
+phasen: [einzelergebnisse]
+
+merkmale:
+  Bezeichnung: { typ: IfcLabel, loi: 400, optional: true }
+  Beschreibung: { typ: IfcText, loi: 400, optional: true }
+  TiefeVon: { typ: IfcReal, loi: 400, einheit: mm, optional: true }
+  TiefeBis: { typ: IfcReal, loi: 400, einheit: mm, optional: true }

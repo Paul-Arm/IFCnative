@@ -1,0 +1,157 @@
+# Fachmodell-Schema — übergreifende Definitionen.
+#
+# Dieses Verzeichnis ist die EINZIGE Quelle für Aufbau und Prüfung der IFC-Modelle.
+# Handgepflegt. Alles andere (Bundle-JSON, IDS je Modelltyp, Regelhandbuch,
+# Excel-Ansicht für Fachteams) wird daraus generiert.
+#
+# Aufbau
+#   common.yaml          diese Datei: Vokabular, Normalisierung, Phasen, ID-Grammatiken, Befunde
+#   psets/*.yaml         ein Pset je Datei: Merkmale mit Typ, Format, Einheit, LoI, Allplan-Namen
+#   objektarten/*.yaml   eine Objektart je Datei: welche Psets, was Pflicht ist, Referenzen, ID, Kardinalität
+#   modelle/*.yaml       ein Modelltyp je Datei: nur das, was sich NICHT aus den Objektarten ableitet
+#
+# Vokabular (gilt in allen Dateien)
+#   stufe:      fehler   = Portal lehnt den Import ab (Standard, wenn nichts angegeben)
+#               warnung  = Konvention, Import läuft durch; Editor zeigt es an
+#               hinweis  = nur Information
+#   phasen:     Liste aus `phasen` unten. Ein Element ohne `phasen` erbt sie vom Elternknoten.
+#               Alles, was eine Datei darf/muss, ergibt sich aus den Phasen der Objektarten und Psets.
+#   familie:    Regex für nummerierte Psets (Untersuchungsziel0, Untersuchungsziel1 …). Ohne `familie`
+#               ist der Pset-Name exakt.
+#   aliase:     Schreibweisen, die das Portal zusätzlich akzeptiert. Der Schlüssel ist der kanonische Name.
+#   Merkmalspfad: `Pset.Merkmal`, z. B. Objektinformation.BauteilID
+#   befund:     Code aus `befunde`; Meldetext wird daraus erzeugt.
+
+schemaVersion: 1.0.0
+
+normalisierung:
+  # so liest das Portal (psets.py::_cleanup_psets, helpers.py::get_property_value)
+  psetPraefixe: [Pset_, ePset_, ePSet_] # werden entfernt, danach exakter Vergleich (case-sensitiv)
+  merkmalPraefix: "_" # wird entfernt
+  merkmalVergleich: caseInsensitiv # danach: `Name` und `Name_<Kürzel>` gelten gleich
+  merkmalIgnoriert: [id] # ein Merkmal namens `id` (nach Präfixstrip) wird verworfen
+  leerwerte: ["", "-"]
+  werttypenGleich: [[IfcText, IfcLabel]]
+  listenTrenner: [",", ";", "|", "\n"] # für Merkmale mit `liste: true`
+
+# Wie Allplan die Namen schreibt — daraus werden Attribut-Namen für Allplan-Vorlagen generiert.
+allplan:
+  pset: "ePset_{pset}" # Familie: Ziffer wird als X geschrieben (ePset_ProbeX)
+  merkmal: "_{merkmal}_{kuerzel}" # kuerzel steht am Pset (katalog.kuerzel)
+  # Allplan kennt keine strukturierten Werte: IDs sind flache Strings, die den
+  # Grammatiken unten folgen müssen. Der Editor erzeugt und prüft sie; Modellierer
+  # füllen nur `Bezeichnung`.
+
+# Lebenszyklus / Importarten des Portals. Ein Modelltyp (modelle/*.yaml) gehört zu genau einer Phase.
+# `katalogGewerk` ist die Spalte aus den alten openSIM-Excel-Katalogen (nur für die Migration).
+phasen:
+  bauwerksmodell: { label: Bauwerksmodell, portalRolle: null }
+  planung:
+    {
+      label: Untersuchungsplanung (A),
+      portalRolle: planning,
+      katalogGewerk: UP,
+    }
+  einzelergebnisse:
+    {
+      label: Diagnostik Einzelergebnisse (B),
+      portalRolle: execution,
+      katalogGewerk: EE,
+    }
+  ergebnisse:
+    {
+      label: Untersuchungsergebnisse (C),
+      portalRolle: results,
+      katalogGewerk: UE,
+    }
+  monitoring: { label: Monitoring, portalRolle: null }
+
+# LoI-Stufen. Ein Merkmal nennt die Stufe, ab der es gefordert ist (kumulativ nach oben).
+loi: [100, 200, 300, 400, 500]
+
+# Werttypen und Formate der Merkmale
+typen: [IfcLabel, IfcText, IfcReal, IfcInteger, IfcBoolean]
+formate:
+  datum:
+    {
+      muster: '^\d{2}\.\d{2}\.\d{4}$',
+      beispiel: 31.12.2026,
+      befund: invalid_date,
+    }
+  uhrzeit: { muster: '^\d{2}:\d{2}$', beispiel: "14:30", befund: invalid_time }
+  wahrFalsch: { werte: [wahr, falsch] }
+  datei: { beschreibung: Dateiname oder Pfad (Foto, Skizze, Video) }
+
+# ID-Grammatiken. Segmente werden mit `trenner` verbunden. `basis` ist die ID des Elternobjekts
+# und muss als Präfix vorkommen. `laufnummer` vergibt der Editor als max+1 im angegebenen scope.
+idGrammatiken:
+  trenner: "."
+  segment: "[^.]+" # Leerzeichen, Umlaute, _ - + kommen real vor
+  TEILBAUWERK:
+    segmente: [Bauwerk.Bauwerksnummer, Bauwerk.Teilbauwerksnummer]
+  BAUTEIL:
+    basis: TEILBAUWERK
+    segmente:
+      - Objektinformation.IDEbene1
+      - Objektinformation.IDEbene2
+      - Objektinformation.IDEbene3
+      - {
+          name: Nr,
+          laufnummer: true,
+          scope: [TEILBAUWERK, IDEbene1, IDEbene2, IDEbene3],
+        }
+    abgeleitet: # Präfixe, die als Referenzziel gelten
+      Bauteilgruppe: 3
+      Bauteiltyp: 4
+      Bauteilvariante: 5
+  PROJEKT:
+    basis: TEILBAUWERK
+    segmente: [Projekt.Bezeichnung]
+  CONTAINER: # Untersuchungsziel, Untersuchungsbereich, Maßnahme, Messanlage
+    basis: PROJEKT
+    segmente: [Bezeichnung]
+  FACHOBJEKT: # Untersuchungsstelle, Sensor
+    basis: PROJEKT
+    segmente: [Bezeichnung]
+  PROBE:
+    basis: FACHOBJEKT
+    segmente: [Probe.IDProbe]
+  VERFAHREN: # kein eigenes Merkmal; vom Portal abgeleitet
+    basis: FACHOBJEKT
+    segmente: [{ name: PsetName, konstant: true }]
+
+# Was das Portal über Dateigrenzen hinweg tut. Kein Modell-Soll, aber prüfbar.
+portal:
+  reihenfolge:
+    - {
+        zuerst: bauwerksmodell,
+        dann: [planung, einzelergebnisse, ergebnisse, monitoring],
+        befund: structure_model_missing,
+      }
+    - {
+        zuerst: [planung, einzelergebnisse],
+        dann: [ergebnisse],
+        grund: Projekt muss existieren,
+      }
+  georeferenz:
+    regel: erste Datei je Bauwerk setzt CRS und Ursprung (IfcMapConversion, sonst IfcSite); spätere müssen kompatibel sein
+    stufe: fehler
+  referenzVorschlaege: { verfahren: closeMatches, anzahl: 3, schwelle: 0.6 } # difflib.get_close_matches
+
+# Befundcodes (Portal report.py). Felder in {} werden aus dem Kontext gefüllt.
+befunde:
+  missing_pset: "Das Pflicht-PSet '{pset}' fehlt. Bitte das PSet mit allen Pflichtfeldern in der IFC-Datei ergänzen."
+  missing_required_property: "Das Pflichtfeld '{merkmal}' im PSet '{pset}' fehlt oder ist leer. Bitte den Wert in der IFC-Datei ergänzen."
+  component_missing_attributes: "Folgende Pflichtangaben fehlen oder sind leer: {merkmale}. Bitte die Werte in der IFC-Datei ergänzen."
+  duplicate_ifc_id: "Die IFC-ID '{wert}' für {objektart} ist mehrfach vergeben. Jede IFC-ID darf nur einmal vorkommen."
+  unknown_reference: "{objektart} mit der ID '{wert}' wurde nicht gefunden. Bitte die Schreibweise der Referenz prüfen."
+  unassignable_element: "Das 3D-Element kann der gewählten Importart '{phase}' nicht zugeordnet werden."
+  unassigned_extended_property_set: "Das erweiterte PSet '{pset}' konnte keiner Untersuchungsmethode zugeordnet werden. Bitte den PSet-Namen prüfen."
+  invalid_building_count: "Die IFC-Datei muss genau ein IfcBuilding enthalten, gefunden wurden {anzahl}."
+  structure_model_missing: "Es wurde noch kein Bauwerksmodell für dieses Asset importiert. Bitte zuerst das Bauwerksmodell importieren."
+  invalid_date: "Ungültiges Datum: '{wert}'. Erwartet wird das Format TT.MM.JJJJ."
+  invalid_time: "Ungültige Uhrzeit: '{wert}'. Erwartet wird das Format HH:MM."
+  # Editor-eigene Befunde (kein Portal-Code) tragen das Präfix editor_
+  editor_invalid_component_id: "Die Bauteil-ID '{wert}' folgt nicht der Grammatik {grammatik}."
+  editor_id_prefix_mismatch: "Die ID '{wert}' beginnt nicht mit der ID des übergeordneten Objekts '{eltern}'."
+  editor_bezeichnung_convention: "Die Bezeichnung '{wert}' folgt nicht dem Muster {muster}."

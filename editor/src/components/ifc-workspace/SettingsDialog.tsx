@@ -10,12 +10,15 @@
 
 import {
   Cloud,
+  FileJson2,
   Monitor,
   Moon,
   Palette,
   PlugZap,
+  RotateCcw,
   Sun,
   Tags,
+  Upload,
   Workflow,
   type LucideIcon,
 } from "lucide-react";
@@ -29,6 +32,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useTheme, type ThemePreference } from "@/hooks/use-theme";
+import {
+  describeSchema,
+  fachmodellSchema,
+  parseFachmodellSchema,
+  type FachmodellSchema,
+} from "@/ifc/attribution/schema";
+import {
+  MAX_SCHEMA_FILE_BYTES,
+  type AttributionSettings,
+} from "@/ifc/attribution/settings";
 import { UI_SCALE_OPTIONS, useUiScale, type UiScale } from "@/hooks/use-ui-scale";
 import { cn } from "@/lib/utils";
 import type { PortalSettings } from "@/portal/types";
@@ -47,7 +60,9 @@ import {
 import {
   Button,
   DropdownField,
+  InfoRow,
   InfoSection,
+  InlineAlert,
   LabeledInput,
   PanelHeader,
   SegmentedControl,
@@ -60,7 +75,8 @@ export type SettingsSectionId =
   | "hub"
   | "portal-connection"
   | "portal-mapping"
-  | "portal-psets";
+  | "portal-psets"
+  | "attribution-schema";
 
 interface SettingsSection {
   id: SettingsSectionId;
@@ -115,6 +131,15 @@ const SECTIONS: SettingsSection[] = [
     label: "Property-Sets",
     title: "MKP Portal — Property-Sets",
   },
+  {
+    description:
+      "Kataloge, Importregeln und Befundtexte, gegen die das Fenster „IFC-Attribuierung“ prüft.",
+    group: "IFC-Attribuierung",
+    icon: FileJson2,
+    id: "attribution-schema",
+    label: "Fachmodell-Schema",
+    title: "IFC-Attribuierung — Fachmodell-Schema",
+  },
 ];
 
 const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
@@ -134,6 +159,8 @@ export interface SettingsDialogProps {
   onVcsSettingsChange: (settings: VcsSettings) => void;
   vcsAuth: VcsAuth | null;
   onVcsAuthChange: (auth: VcsAuth | null) => void;
+  attributionSettings: AttributionSettings;
+  onAttributionSettingsChange: (settings: AttributionSettings) => void;
 }
 
 export function SettingsDialog({
@@ -146,6 +173,8 @@ export function SettingsDialog({
   onVcsSettingsChange,
   vcsAuth,
   onVcsAuthChange,
+  attributionSettings,
+  onAttributionSettingsChange,
 }: SettingsDialogProps) {
   const [activeId, setActiveId] = useState<SettingsSectionId>(defaultSection);
   const navRef = useRef<HTMLDivElement | null>(null);
@@ -293,6 +322,12 @@ export function SettingsDialog({
                 onSettingsChange={onPortalSettingsChange}
               />
             ) : null}
+            {active.id === "attribution-schema" ? (
+              <AttributionSchemaSettings
+                settings={attributionSettings}
+                onSettingsChange={onAttributionSettingsChange}
+              />
+            ) : null}
           </div>
         </div>
 
@@ -416,6 +451,169 @@ function HubSettings({
           </Button>
         </ToolbarGroup>
       </Toolbar>
+    </>
+  );
+}
+
+function formatDateTime(iso: string): string {
+  if (!iso) {
+    return "—";
+  }
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime())
+    ? iso
+    : date.toLocaleString("de-DE", { dateStyle: "medium", timeStyle: "short" });
+}
+
+function formatBytes(size: number): string {
+  if (size >= 1024 * 1024) {
+    return `${(size / (1024 * 1024)).toLocaleString("de-DE", { maximumFractionDigits: 1 })} MB`;
+  }
+  return `${Math.max(1, Math.round(size / 1024)).toLocaleString("de-DE")} KB`;
+}
+
+/**
+ * Welche Schemadatei (JSON, Ausgabe von `npm run schema:generate`) das
+ * Attribuierungs-Fenster nutzt. Standard ist das eingebaute Schema; eine
+ * gewählte Datei wird samt Inhalt lokal gespeichert und wirkt sofort.
+ */
+function AttributionSchemaSettings({
+  settings,
+  onSettingsChange,
+}: {
+  settings: AttributionSettings;
+  onSettingsChange: (settings: AttributionSettings) => void;
+}) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const file = settings.schemaFile;
+  let activeSchema: FachmodellSchema = fachmodellSchema;
+  if (file) {
+    const parsed = parseFachmodellSchema(file.text);
+    if (parsed.ok) {
+      activeSchema = parsed.schema;
+    }
+  }
+  const summary = describeSchema(activeSchema);
+  const builtin = describeSchema(fachmodellSchema);
+
+  const chooseFile = async (chosen: File) => {
+    setError(null);
+    if (chosen.size > MAX_SCHEMA_FILE_BYTES) {
+      setError(
+        `Die Datei ist ${formatBytes(chosen.size)} groß; gespeichert werden höchstens ${formatBytes(MAX_SCHEMA_FILE_BYTES)}.`,
+      );
+      return;
+    }
+    setBusy(true);
+    try {
+      const text = await chosen.text();
+      const parsed = parseFachmodellSchema(text);
+      if (!parsed.ok) {
+        setError(`${chosen.name}: ${parsed.error}`);
+        return;
+      }
+      onSettingsChange({
+        schemaFile: {
+          loadedAt: new Date().toISOString(),
+          name: chosen.name,
+          size: chosen.size,
+          text,
+        },
+      });
+    } catch (readError) {
+      setError(
+        `Datei konnte nicht gelesen werden: ${readError instanceof Error ? readError.message : String(readError)}`,
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <InfoSection title="Aktives Schema">
+        <InfoRow
+          label="Quelle"
+          value={
+            file
+              ? `Datei ${file.name} (${formatBytes(file.size)}, gewählt ${formatDateTime(file.loadedAt)})`
+              : "Eingebaut (mit dem Editor ausgeliefert)"
+          }
+        />
+        <InfoRow label="Version" value={summary.version || "—"} />
+        <InfoRow label="Erzeugt" value={formatDateTime(summary.erzeugt)} />
+        <InfoRow
+          label="Katalog BWD"
+          value={`${summary.bwd.klassen.toLocaleString("de-DE")} Klassen · ${summary.bwd.regeln.toLocaleString("de-DE")} Regeln${summary.bwd.datei ? ` · ${summary.bwd.datei}` : ""}`}
+        />
+        <InfoRow
+          label="Katalog MON"
+          value={`${summary.mon.klassen.toLocaleString("de-DE")} Klassen · ${summary.mon.regeln.toLocaleString("de-DE")} Regeln${summary.mon.datei ? ` · ${summary.mon.datei}` : ""}`}
+        />
+        <InfoRow
+          label="Regeln"
+          value={`${summary.verfahren.toLocaleString("de-DE")} Verfahren · ${summary.befunde.toLocaleString("de-DE")} Befundcodes`}
+        />
+        {error ? <InlineAlert tone="danger">{error}</InlineAlert> : null}
+      </InfoSection>
+
+      <Toolbar>
+        <ToolbarGroup>
+          <Button
+            disabled={busy}
+            title="Schemadatei (JSON, Ausgabe des Generators) wählen"
+            variant="outline"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Upload aria-hidden className="size-3.5" />
+            JSON-Datei wählen…
+          </Button>
+          <Button
+            disabled={!file || busy}
+            title={
+              file
+                ? `Gewählte Datei verwerfen und das eingebaute Schema (Version ${builtin.version}) verwenden`
+                : "Das eingebaute Schema ist bereits aktiv"
+            }
+            variant="outline"
+            onClick={() => {
+              setError(null);
+              onSettingsChange({ schemaFile: null });
+            }}
+          >
+            <RotateCcw aria-hidden className="size-3.5" />
+            Eingebautes Schema verwenden
+          </Button>
+        </ToolbarGroup>
+      </Toolbar>
+      <input
+        ref={fileInputRef}
+        accept="application/json,.json"
+        aria-label="Schemadatei wählen"
+        className="hidden"
+        type="file"
+        onChange={(event) => {
+          const chosen = event.currentTarget.files?.[0];
+          event.currentTarget.value = "";
+          if (chosen) {
+            void chooseFile(chosen);
+          }
+        }}
+      />
+
+      <InfoSection title="Hinweise">
+        <p className="text-[11px] leading-relaxed text-muted-foreground">
+          Die Datei muss die Form von <code>fachmodell-schema.json</code>{" "}
+          haben, wie sie <code>npm run schema:generate</code> aus den
+          Objektkatalog-Excels und den Portal-Regeln erzeugt. Sie wird mit
+          Inhalt in diesem Browser gespeichert und gilt für alle Dokumente.
+          Nach dem Wechsel prüft das Fenster „IFC-Attribuierung“ sofort gegen
+          das neue Schema.
+        </p>
+      </InfoSection>
     </>
   );
 }

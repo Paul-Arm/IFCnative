@@ -1,0 +1,29 @@
+# Nummeriertes Pset der Probe (Probe0, Probe1 …). Ehem. Katalogklasse BWD - PB (ePset_ProbeX).
+# Erst ab der Ausführung erlaubt — in der Planung gibt es keine Proben.
+pset: Probe
+familie: 'Probe\d*'
+katalog: { kuerzel: PB, code: BWD - PB }
+traeger: IfcBuildingElementProxy
+phasen: [einzelergebnisse]
+
+merkmale:
+  ID: { typ: IfcLabel, loi: 100, grammatik: PROBE, aliase: [IDProbe] }
+  IDProbe:
+    {
+      typ: IfcLabel,
+      loi: 100,
+      beschreibung: Kurzkennung innerhalb der Untersuchungsstelle (letztes ID-Segment),
+    }
+  Bezeichnung: { typ: IfcLabel, loi: 100, optional: true, fallback: IDProbe }
+  UntersuchungsstelleID:
+    { typ: IfcLabel, loi: 100, referenz: Untersuchungsstelle }
+  BaustoffuntersuchungProbe: { typ: IfcLabel, loi: 100 }
+  Material: { typ: IfcLabel, loi: 300 }
+  EntnahmetiefeVon_cm: { typ: IfcReal, loi: 300, einheit: cm }
+  EntnahmetiefeBis_cm: { typ: IfcReal, loi: 300, einheit: cm }
+  Probenlaenge_cm: { typ: IfcReal, loi: 400, einheit: cm, optional: true }
+  Probenbreite_cm: { typ: IfcReal, loi: 400, einheit: cm, optional: true }
+  Probenhoehe_cm: { typ: IfcReal, loi: 400, einheit: cm, optional: true }
+  Probendurchmesser_cm: { typ: IfcReal, loi: 400, einheit: cm, optional: true }
+  Bemerkung: { typ: IfcText, loi: 200, optional: true, aliase: [Beschreibung] }
+  Foto: { typ: IfcLabel, loi: 400, format: datei, optional: true }

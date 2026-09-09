@@ -11,8 +11,10 @@ import {
     type CatalogKind,
     type CatalogValidationFinding,
     type IfcObjectCatalog,
+} from "@/ifc/catalog";
+import {
     type NativeIfcDocument,
-} from "@/ifc";
+} from "@/ifc/nativeDocument";
 import { cn } from "@/lib/utils";
 
 import {

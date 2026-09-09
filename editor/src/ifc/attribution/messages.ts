@@ -4,7 +4,7 @@
  * gehalten im Schema unter `befunde`. Wer im Editor eine Meldung sieht,
  * sieht beim Upload dieselbe.
  */
-import { fachmodellSchema } from "./schema";
+import { activeSchema } from "./schema";
 
 export interface PortalIssueFields {
   code: string;
@@ -44,6 +44,7 @@ const EMBEDDED_FIELDS: Record<string, string[]> = {
 const EDITOR_MESSAGES: Record<string, string> = {
   editor_reference_unchecked: "Referenz auf {model_name} '{value}' konnte nicht geprüft werden — kein Bauwerksmodell geladen bzw. Ziel nicht in dieser Datei. Das Portal prüft sie beim Upload gegen die Datenbank.",
   editor_invalid_component_id: "Bauteil-ID '{value}' hat nicht sechs Segmente (Bauwerk.Teilbauwerk.Ebene1.Ebene2.Ebene3.Nr).",
+  editor_bauwerksmodell_duplicate_id: "Die Bauteil-ID '{value}' kommt in mehreren der geladenen Bauwerksmodelle vor ({model_name}). Referenzen darauf sind mehrdeutig; die Bauwerksmodelle sollten sich in Teilbauwerk oder Nummerierung unterscheiden.",
   editor_area_method_unused: "Der Untersuchungsbereich nennt das Verfahren '{value}' ({property_name}), aber keine Untersuchungsstelle des Bereichs trägt das zugehörige Pset. Entweder fehlt das Verfahren an einer Stelle oder der Eintrag im Bereich ist veraltet.",
   editor_method_not_in_area: "Die Untersuchungsstelle trägt das Verfahren '{value}' (Pset {pset_name}), ihr Untersuchungsbereich nennt es nicht. Verfahren im Bereich ergänzen oder das Pset prüfen.",
 };
@@ -58,7 +59,7 @@ function fill(template: string, fields: PortalIssueFields): string {
 
 /** Haupttext eines Befunds, wie ihn das Portal-Frontend rendert. */
 export function formatPortalMessage(fields: PortalIssueFields): string {
-  const definition = fachmodellSchema.befunde[fields.code];
+  const definition = activeSchema().befunde[fields.code];
   if (!definition) {
     const editor = EDITOR_MESSAGES[fields.code];
     return editor ? fill(editor, fields) : fields.code;

@@ -25,7 +25,7 @@ if (!root) {
 createRoot(root).render(
   <React.StrictMode>
     <ErrorBoundary onReset={resetWorkspaceUi}>
-      <IfcWorkspace />
+      <React.Suspense fallback={<div style={{ padding: 24 }}>IFCnative lädt…</div>}><IfcWorkspace /></React.Suspense>
     </ErrorBoundary>
   </React.StrictMode>,
 );

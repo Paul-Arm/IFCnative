@@ -1,5 +1,11 @@
 import type { MosaicNode } from "react-mosaic-component";
 
+import { parseFachmodellSchema } from "@/ifc/attribution/schema";
+import {
+    createDefaultAttributionSettings,
+    MAX_SCHEMA_FILE_BYTES,
+    type AttributionSettings,
+} from "@/ifc/attribution/settings";
 import { normalizePortalMapping } from "@/portal/mapping";
 import {
     createDefaultPortalSettings,
@@ -21,6 +27,7 @@ import {
 } from "./constants";
 import type { MosaicViewId } from "./types";
 
+export { createDefaultAttributionSettings } from "@/ifc/attribution/settings";
 export { createDefaultPortalSettings } from "@/portal/types";
 export { createDefaultVcsSettings } from "@/vcs/types";
 
@@ -37,6 +44,7 @@ export interface RecentIfcFileEntry {
 }
 
 const ACTIVE_WORKSPACE_STORAGE_KEY = "ifcnative:active-workspace:v1";
+const ATTRIBUTION_SETTINGS_STORAGE_KEY = "ifcnative:attribution-settings:v1";
 const CUSTOM_WORKSPACES_STORAGE_KEY = "ifcnative:custom-workspaces:v1";
 const NOTES_STORAGE_KEY = "ifcnative:notes:v1";
 const PORTAL_SETTINGS_STORAGE_KEY = "ifcnative:portal-settings:v1";
@@ -201,6 +209,45 @@ export function loadPortalSettings(): PortalSettings {
 
 export function savePortalSettings(settings: PortalSettings) {
   writeJson(PORTAL_SETTINGS_STORAGE_KEY, settings);
+}
+
+/**
+ * Einstellungen der IFC-Attribuierung. Eine gespeicherte Schemadatei wird
+ * beim Lesen erneut geprüft; was nicht mehr parsbar ist (etwa nach einer
+ * Formatänderung des Generators), fällt auf das eingebaute Schema zurück.
+ */
+export function loadAttributionSettings(): AttributionSettings {
+  const defaults = createDefaultAttributionSettings();
+  const parsed = readJson<unknown>(ATTRIBUTION_SETTINGS_STORAGE_KEY, null);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return defaults;
+  }
+  const candidate = parsed as Record<string, unknown>;
+  const file = candidate.schemaFile;
+  if (!file || typeof file !== "object" || Array.isArray(file)) {
+    return defaults;
+  }
+  const entry = file as Record<string, unknown>;
+  const text = typeof entry.text === "string" ? entry.text : "";
+  if (!text || text.length > MAX_SCHEMA_FILE_BYTES || !parseFachmodellSchema(text).ok) {
+    return defaults;
+  }
+  return {
+    schemaFile: {
+      loadedAt: readStringOr(entry.loadedAt, ""),
+      name: readStringOr(entry.name, "schema.json"),
+      size: typeof entry.size === "number" && Number.isFinite(entry.size) ? entry.size : text.length,
+      text,
+    },
+  };
+}
+
+export function saveAttributionSettings(settings: AttributionSettings) {
+  if (!settings.schemaFile) {
+    removeLocalStorage(ATTRIBUTION_SETTINGS_STORAGE_KEY);
+    return;
+  }
+  writeJson(ATTRIBUTION_SETTINGS_STORAGE_KEY, settings);
 }
 
 export function loadPortalTokens(): PortalTokens | null {

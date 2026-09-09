@@ -1,0 +1,67 @@
+# Verfahrens-Pset: hängt an einer Untersuchungsstelle oder Probe, kein eigenes Element.
+# Ehem. Katalogklasse BWD - KB. Ein Verfahren ist ein Pset mit `art: verfahren`; die Liste aller
+# Verfahren ergibt sich aus den Dateien in psets/ — es gibt keine separate Verfahrensliste mehr.
+pset: Kernbohrung
+art: verfahren
+katalog: { kuerzel: KB, code: BWD - KB }
+traeger: [Untersuchungsstelle, Probe]
+phasen: [planung, einzelergebnisse]
+
+# Psets, die zu diesem Verfahren gehören und nur zusammen mit ihm vorkommen dürfen
+# (Portal: unassigned_extended_property_set). Ihre Phasen stehen in ihrer eigenen Datei.
+erweitert: [Kernbohrung_Schicht]
+
+merkmale:
+  # Portal-Pflicht: welches Untersuchungsziel; Fallback auf Objektinformation.UntersuchungszielID
+  UntersuchungszielID:
+    {
+      typ: IfcLabel,
+      loi: 100,
+      referenz: Untersuchungsziel,
+      liste: true,
+      aliase: [UntersuchungszielIDs],
+      fallback: Objektinformation.UntersuchungszielID,
+    }
+  MessfeldID:
+    {
+      typ: IfcLabel,
+      loi: 100,
+      optional: true,
+      referenz: Messfeld,
+      referenzScope: gleichesElement,
+    }
+  Kernbohrung: { typ: IfcLabel, loi: 300 }
+  Bohrrichtung: { typ: IfcLabel, loi: 300 }
+  Bohrtiefe_cm: { typ: IfcReal, loi: 300, einheit: cm }
+  Durchmesser_mm: { typ: IfcReal, loi: 300, einheit: mm }
+  Material: { typ: IfcLabel, loi: 300 }
+  SchichtenaufbauMehrlagigeKonstruktion:
+    {
+      typ: IfcLabel,
+      loi: 300,
+      format: wahrFalsch,
+      optional: true,
+      phasen: [einzelergebnisse],
+    }
+  Datum: { typ: IfcLabel, loi: 300, format: datum, phasen: [einzelergebnisse] }
+  BearbeiterInFirmaInstitut: { typ: IfcLabel, loi: 400, optional: true }
+  BearbeiterInName:
+    { typ: IfcLabel, loi: 400, optional: true, phasen: [einzelergebnisse] }
+  Foto: { typ: IfcLabel, loi: 300, format: datei, phasen: [einzelergebnisse] }
+  Skizze:
+    {
+      typ: IfcLabel,
+      loi: 400,
+      format: datei,
+      optional: true,
+      phasen: [einzelergebnisse],
+    }
+  Video:
+    {
+      typ: IfcLabel,
+      loi: 400,
+      format: datei,
+      optional: true,
+      phasen: [einzelergebnisse],
+    }
+  Bemerkung: { typ: IfcText, loi: 200, optional: true }

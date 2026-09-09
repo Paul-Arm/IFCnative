@@ -4587,3 +4587,91 @@ test("duplicating a body shares the representation and gets its own placement", 
     !reparsed.diagnostics.some((line) => line.includes("references missing")),
   );
 });
+
+test("plane splitting supports triangulated and polygonal IFC4 bodies with real clipped meshes", async () => {
+  const api = new WebIFC.IfcAPI();
+  await api.Init();
+  for (const kind of ["IFCTRIANGULATEDFACESET", "IFCPOLYGONALFACESET"] as const) {
+    const sample = createNativeSampleDocument();
+    const product = sample.entities.find((entity) => entity.type === "IFCBUILTELEMENT")!;
+    const body = getNativeBodyRepresentation(sample, product.id);
+    const firstId = Math.max(...sample.entities.map((entity) => entity.id)) + 1;
+    const faces = [[1, 4, 3, 2], [5, 6, 7, 8], [1, 2, 6, 5], [2, 3, 7, 6], [3, 4, 8, 7], [4, 1, 5, 8]];
+    const coordinates = `#${firstId}=IFCCARTESIANPOINTLIST3D(((-2.,-1.,0.),(2.,-1.,0.),(2.,1.,0.),(-2.,1.,0.),(-2.,-1.,2.),(2.,-1.,2.),(2.,1.,2.),(-2.,1.,2.)));`;
+    const triangles = faces.flatMap(([a, b, c, d]) => [`(${a},${b},${c})`, `(${a},${c},${d})`]);
+    const geometry = kind === "IFCTRIANGULATEDFACESET"
+      ? `#${body.solidId}=${kind}(#${firstId},$,.T.,(${triangles.join(",")}),$);`
+      : `#${body.solidId}=${kind}(#${firstId},.T.,(${faces.map((_, index) => `#${firstId + index + 1}`).join(",")}),$);\n` + faces.map((face, index) => `#${firstId + index + 1}=IFCINDEXEDPOLYGONALFACE((${face.join(",")}));`).join("\n");
+    const text = serializeNativeIfcDocument(sample)
+      .replace(new RegExp(`#${body.solidId}=\\s*IFCEXTRUDEDAREASOLID[^;]*;`), geometry + "\n" + coordinates)
+      .replace("'SweptSolid'", "'Tessellation'");
+    const source = parseNativeIfcText(text, "mesh.ifc");
+    assert.equal(source.entityById.get(body.solidId!)?.type, kind);
+    const split = splitNativeBodyByPlane(source, product.id, { point: { x: 0, y: 0, z: 1 }, normal: { x: 1, y: 0, z: 0 } });
+    assert.ok(split, `${kind} must be accepted as an IFC4 Boolean operand`);
+    assert.equal(split.document.entityById.has(product.id), false);
+    assert.equal(split.document.entitiesByType.get("IFCBOOLEANRESULT")?.length, 2);
+    assert.equal(split.document.entitiesByType.get("IFCBOOLEANCLIPPINGRESULT")?.length ?? 0, 0);
+    const subset = extractNativeSubsetIfc(split.document, split.partIds)!;
+    const reopened = parseNativeIfcText(subset.text, "split.ifc");
+    assert.ok(!reopened.diagnostics.some((line) => line.includes("references missing")));
+    const modelId = api.OpenModel(new TextEncoder().encode(subset.text));
+    try {
+      const halves = split.partIds.map((id) => streamElementWorldBounds(api, modelId, id)).sort((a, b) => a.min[0] - b.min[0]);
+      assert.deepEqual(halves.map((bounds) => [roundCoordinate(bounds.min[0]), roundCoordinate(bounds.max[0])]), [[-2, 0], [0, 2]], kind);
+      for (const bounds of halves) {
+        assert.equal(roundCoordinate(bounds.min[1]), 0);
+        assert.equal(roundCoordinate(bounds.max[1]), 2);
+        assert.equal(roundCoordinate(bounds.min[2]), -1);
+        assert.equal(roundCoordinate(bounds.max[2]), 1);
+      }
+    } finally { api.CloseModel(modelId); }
+    const repeated = splitNativeBodyByPlane(split.document, split.partIds[0], { point: { x: 0, y: 0, z: 1 }, normal: { x: 0, y: 0, z: 1 } });
+    assert.ok(repeated, "an already split mesh remains splittable");
+    assert.equal(serializeNativeIfcDocument(source), serializeNativeIfcDocument(parseNativeIfcText(text, "mesh.ifc")));
+  }
+});
+
+// Imported DESITE meshes follow the same path as the generated regression box.
+test("plane splitting cuts the imported triangulated bridge fixture", async () => {
+  const { readFileSync } = await import("node:fs");
+  const source = parseNativeIfcText(readFileSync(new URL("./fixtures/attribution/bauwerksmodell-vlrlp.ifc", import.meta.url), "utf8"), "bridge.ifc");
+  const api = new WebIFC.IfcAPI();
+  await api.Init();
+  const originalId = api.OpenModel(new TextEncoder().encode(extractNativeSubsetIfc(source, [66])!.text));
+  const originalBounds = streamElementWorldBounds(api, originalId, 66);
+  api.CloseModel(originalId);
+  const cutX = (originalBounds.min[0] + originalBounds.max[0]) / 2;
+  const split = splitNativeBodyByPlane(source, 66, {
+    normal: { x: 1, y: 0, z: 0 },
+    point: { x: cutX, y: -(originalBounds.min[2] + originalBounds.max[2]) / 2, z: (originalBounds.min[1] + originalBounds.max[1]) / 2 },
+  });
+  assert.ok(split);
+  const subset = extractNativeSubsetIfc(split.document, split.partIds)!;
+  const modelId = api.OpenModel(new TextEncoder().encode(subset.text));
+  try {
+    const halves = split.partIds.map((id) => streamElementWorldBounds(api, modelId, id)).sort((a, b) => a.min[0] - b.min[0]);
+    assert.ok(Math.abs(halves[0].max[0] - cutX) < 0.001);
+    assert.ok(Math.abs(halves[1].min[0] - cutX) < 0.001);
+    assert.ok(Math.abs(halves[0].min[0] - originalBounds.min[0]) < 0.001);
+    assert.ok(Math.abs(halves[1].max[0] - originalBounds.max[0]) < 0.001);
+    assert.deepEqual(split.document.propertySetsByEntity.get(split.partIds[0]), split.document.propertySetsByEntity.get(split.partIds[1]));
+  } finally { api.CloseModel(modelId); }
+});
+
+test("viewer import skips duplicate mesh attributes while preserving geometry, properties and identity", { timeout: 15_000 }, async (t) => {
+  const { Worker } = await import("node:worker_threads");
+  const { fileURLToPath } = await import("node:url");
+  // Fragments starts a global update timer on import. Match the application's
+  // worker lifetime so that it cannot keep the test process alive afterward.
+  const worker = new Worker('require("tsx/cjs"); require(require("node:worker_threads").workerData);', {
+    eval: true,
+    workerData: fileURLToPath(new URL("./helpers/fragmentImport.ts", import.meta.url)),
+  });
+  t.after(() => worker.terminate());
+  await new Promise<void>((resolve, reject) => {
+    worker.once("message", () => resolve());
+    worker.once("error", reject);
+    worker.once("exit", (code) => reject(new Error(`Fragment verification exited before completion (${code}).`)));
+  });
+});

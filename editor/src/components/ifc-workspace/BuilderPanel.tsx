@@ -12,12 +12,12 @@ import {
 import { useEffect, useState, type ReactNode } from "react";
 
 import {
-  getNativeBodyRepresentation,
-  getNativeLengthUnitScale,
-  getNativePlacement,
-  type NativeBodyProfile,
-  type NativeIfcDocument,
-} from "@/ifc";
+    getNativeBodyRepresentation,
+    getNativeLengthUnitScale,
+    getNativePlacement,
+    type NativeBodyProfile,
+    type NativeIfcDocument,
+} from "@/ifc/nativeDocument";
 
 import { ENTITY_TYPES } from "./constants";
 import type { BodyElementDraft, CoordinateClipboard } from "./types";

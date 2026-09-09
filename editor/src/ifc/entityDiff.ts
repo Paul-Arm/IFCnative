@@ -1,3 +1,7 @@
+import { scanStepEntities, readStepReferences as readReferences, splitStepArguments as splitTopLevelArgs, stepStringEnd } from "./stepScanner";
+import { getNativeIdentityAttributeIndexes } from "./entityIdentity";
+import { unquoteStepString } from "./stepEncoding";
+
 export type IfcDiffLineKind = 'context' | 'add' | 'remove';
 
 export interface IfcDiffLine {
@@ -74,6 +78,7 @@ interface ParsedStepText {
   entities: Map<number, StepEntityLine>;
   order: number[];
   nonEntityLines: string[];
+  incomingRefs: Map<number, number[]>;
 }
 
 const MAX_ENTITY_DIFF_LINES = 800;
@@ -260,32 +265,28 @@ export function previewEntityAwareDiffLines(beforeText: string, afterText: strin
   return result.length ? result.slice(0, limit) : [{ kind: 'context', text: 'No textual IFC changes detected.' }];
 }
 
-function parseStepText(text: string): ParsedStepText {
+function parseStepText(input: string): ParsedStepText {
+  const { text, entities: records } = scanStepEntities(input);
   const entities = new Map<number, StepEntityLine>();
-  const order: number[] = [];
-  const nonEntityLines: string[] = [];
-
-  for (const rawLine of text.split('\n')) {
-    const line = rawLine.trimEnd();
-    const match = line.match(/^#(\d+)\s*=\s*([A-Z0-9_]+)\((.*)\);\s*$/i);
-    if (!match) {
-      if (line.trim()) {
-        nonEntityLines.push(line);
-      }
-      continue;
+  const incomingRefs = new Map<number, number[]>();
+  const frame: string[] = [];
+  const schema = text.match(/FILE_SCHEMA\s*\(\s*\(\s*'([^']+)'/i)?.[1] ?? "IFC4";
+  let previousEnd = 0;
+  for (const record of records) {
+    frame.push(text.slice(previousEnd, record.start));
+    previousEnd = record.end;
+    const { id, type, args } = record;
+    const nameIndex = getNativeIdentityAttributeIndexes(record, schema).name;
+    const entity = { id, type, args, name: nameIndex == null ? undefined : unquoteStepString(args[nameIndex]), text: text.slice(record.start, record.end) };
+    entities.set(id, entity);
+    for (const ref of new Set(args.flatMap(readReferences))) {
+      const incoming = incomingRefs.get(ref);
+      if (incoming) incoming.push(id);
+      else incomingRefs.set(ref, [id]);
     }
-    const entity = {
-      args: splitTopLevelArgs(match[3]),
-      id: Number(match[1]),
-      name: readEntityName(match[3]),
-      text: line,
-      type: match[2].toUpperCase(),
-    };
-    entities.set(entity.id, entity);
-    order.push(entity.id);
   }
-
-  return { entities, nonEntityLines, order };
+  frame.push(text.slice(previousEnd));
+  return { entities, incomingRefs, order: records.map((record) => record.id), nonEntityLines: frame.join("\n").split(/\r?\n/).map((line) => line.trim()).filter(Boolean) };
 }
 
 function addFileFrameDiff(result: IfcDiffLine[], before: string[], after: string[]) {
@@ -307,12 +308,7 @@ function addFileFrameDiff(result: IfcDiffLine[], before: string[], after: string
   }
 }
 
-function readEntityName(argsText: string) {
-  const args = splitTopLevelArgs(argsText);
-  const raw = args[2];
-  const match = raw?.match(/^'([\s\S]*)'$/);
-  return match?.[1]?.replace(/''/g, "'");
-}
+
 
 function isRelationshipEntity(entity: StepEntityLine) {
   return entity.type.startsWith('IFCREL');
@@ -451,20 +447,11 @@ function describeProfileGeometry(entity: StepEntityLine) {
 }
 
 function traceProductsForGeometry(step: ParsedStepText, geometryId: number): IfcGeometryProductSummary[] {
-  const parentsByChild = new Map<number, Set<number>>();
-  for (const entity of step.entities.values()) {
-    for (const ref of readReferences(entity.text)) {
-      const parents = parentsByChild.get(ref) ?? new Set<number>();
-      parents.add(entity.id);
-      parentsByChild.set(ref, parents);
-    }
-  }
-
   const reachable = new Set<number>([geometryId]);
   const queue = [geometryId];
   for (let cursor = 0; cursor < queue.length && cursor < 200; cursor += 1) {
     const current = queue[cursor];
-    for (const parent of parentsByChild.get(current) ?? []) {
+    for (const parent of step.incomingRefs.get(current) ?? []) {
       if (!reachable.has(parent)) {
         reachable.add(parent);
         queue.push(parent);
@@ -472,7 +459,7 @@ function traceProductsForGeometry(step: ParsedStepText, geometryId: number): Ifc
     }
   }
 
-  return [...step.entities.values()]
+  return [...reachable].map((id) => step.entities.get(id)!).filter(Boolean)
     .filter((entity) => isPlacedProduct(entity) && readReferences(entity.args[6]).some((id) => reachable.has(id)))
     .map((entity) => ({
       id: entity.id,
@@ -486,19 +473,24 @@ function traceProductsForPlacementPoint(step: ParsedStepText, pointId: number): 
   const axisPlacementIds = new Set<number>();
   const localPlacementIds = new Set<number>();
 
-  for (const entity of step.entities.values()) {
+  for (const id of step.incomingRefs.get(pointId) ?? []) {
+    const entity = step.entities.get(id)!;
     if (entity.type === 'IFCAXIS2PLACEMENT3D' && readReferences(entity.args[0]).includes(pointId)) {
       axisPlacementIds.add(entity.id);
     }
   }
 
-  for (const entity of step.entities.values()) {
-    if (entity.type === 'IFCLOCALPLACEMENT' && readReferences(entity.args[1]).some((id) => axisPlacementIds.has(id))) {
-      localPlacementIds.add(entity.id);
+  for (const axisId of axisPlacementIds) {
+    for (const id of step.incomingRefs.get(axisId) ?? []) {
+      const entity = step.entities.get(id)!;
+      if (entity.type === 'IFCLOCALPLACEMENT' && readReferences(entity.args[1]).includes(axisId)) {
+        localPlacementIds.add(id);
+      }
     }
   }
 
-  return [...step.entities.values()]
+  const candidates = new Set([...localPlacementIds].flatMap((id) => step.incomingRefs.get(id) ?? []));
+  return [...candidates].map((id) => step.entities.get(id)!)
     .filter((entity) => isPlacedProduct(entity) && readReferences(entity.args[5]).some((id) => localPlacementIds.has(id)))
     .map((entity) => ({
       id: entity.id,
@@ -513,9 +505,7 @@ function isPlacedProduct(entity: StepEntityLine) {
   return entity.args.length > 5 && !entity.type.startsWith('IFCREL') && readReferences(entity.args[5]).length > 0;
 }
 
-function readReferences(value = '') {
-  return [...value.matchAll(/#(\d+)/g)].map((match) => Number(match[1])).filter(Number.isFinite);
-}
+
 
 function readCartesianPoint(entity: StepEntityLine): [number, number, number] | undefined {
   const coordinates = entity.args[0]?.match(/^\((.*)\)$/)?.[1];
@@ -546,40 +536,7 @@ function roundDiff(value: number) {
   return Math.round(value * 1_000_000) / 1_000_000;
 }
 
-function splitTopLevelArgs(value: string) {
-  const result: string[] = [];
-  let current = '';
-  let depth = 0;
-  let inString = false;
-  for (let index = 0; index < value.length; index += 1) {
-    const char = value[index];
-    const next = value[index + 1];
-    if (char === "'") {
-      current += char;
-      if (inString && next === "'") {
-        current += next;
-        index += 1;
-      } else {
-        inString = !inString;
-      }
-      continue;
-    }
-    if (!inString) {
-      if (char === '(') {
-        depth += 1;
-      } else if (char === ')') {
-        depth = Math.max(0, depth - 1);
-      } else if (char === ',' && depth === 0) {
-        result.push(current.trim());
-        current = '';
-        continue;
-      }
-    }
-    current += char;
-  }
-  result.push(current.trim());
-  return result;
-}
+
 
 function entityHeading(entity: StepEntityLine, action: string) {
   const label = entity.name ? ` '${entity.name}'` : '';
@@ -587,7 +544,15 @@ function entityHeading(entity: StepEntityLine, action: string) {
 }
 
 function normalizeStepLine(line: string) {
-  return line.replace(/\s+/g, ' ').trim();
+  const parts: string[] = [];
+  for (let index = 0; index < line.length; index++) {
+    if (line[index] === "'") {
+      const end = stepStringEnd(line, index);
+      parts.push(line.slice(index, end));
+      index = end - 1;
+    } else if (!/\s/.test(line[index])) parts.push(line[index]);
+  }
+  return parts.join("");
 }
 
 function uniqueNumbers(values: number[]) {

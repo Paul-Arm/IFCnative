@@ -7,7 +7,7 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Check, Copy, Plus, Save, Trash2 } from "lucide-react";
+import { Check, ChevronRight, Copy, Plus, Save, Trash2 } from "lucide-react";
 import {
     useEffect,
     useMemo,
@@ -19,28 +19,37 @@ import {
 
 import {
     catalogObjectLabel,
-    getNativeBodyRepresentation,
-    getNativeLengthUnitScale,
-    getNativePlacementWorld,
-    ifcPlacementPointToViewerWorldPoint,
-    nativeWorldToLocalPlacementPoint,
-    quote,
-    relationshipTypesForEntities,
-    splitTopLevel,
-    unquote,
-    viewerWorldPointToIfcPlacementPoint,
     type CatalogObjectType,
     type CatalogPropertyRule,
     type CatalogValidationFinding,
     type IfcObjectCatalog,
+} from "@/ifc/catalog";
+import {
+    getNativeIdentityAttributeIndexes,
+    getNativeBodyRepresentation,
+    getNativeLengthUnitScale,
+    getNativePlacementWorld,
+    nativeWorldToLocalPlacementPoint,
+    quote,
+    splitTopLevel,
+    unquote,
     type NativeBodyProfile,
     type NativeIfcDocument,
     type NativeIfcEntity,
     type NativeIfcPropertySet,
     type NativeIfcRelationship,
+} from "@/ifc/nativeDocument";
+import {
+    ifcPlacementPointToViewerWorldPoint,
+    viewerWorldPointToIfcPlacementPoint,
+} from "@/ifc/coordinateMapping";
+import {
+    relationshipTypesForEntities,
+} from "@/ifc/relationshipRules";
+import {
     type ObjectInfoIndex,
     type ObjectInfoValidationFinding,
-} from "@/ifc";
+} from "@/ifc/objectInfoValidation";
 import { cn } from "@/lib/utils";
 
 import {
@@ -79,12 +88,8 @@ import {
     type DataTableColumn,
 } from "./ui";
 
-export const INSPECTOR_MODES: { value: InspectorMode; label: string }[] = [
-  { value: "overview", label: "Übersicht" },
-  { value: "properties", label: "Eigenschaften" },
-  { value: "placement", label: "Platzierung" },
-  { value: "relations", label: "Beziehungen" },
-];
+import { INSPECTOR_MODES } from "./inspectorModes";
+export { INSPECTOR_MODES } from "./inspectorModes";
 
 export function InspectorPanel({
   activeCatalogObjectId,
@@ -113,6 +118,7 @@ export function InspectorPanel({
   onAddUnit,
   onApplyCatalogFindings,
   onDuplicatePropertySet,
+  onModeChange,
   onMovePlacement,
   onRemoveRelationship,
   onRemovePropertyFromSet,
@@ -198,6 +204,7 @@ export function InspectorPanel({
   onAddUnit(unitType: string, unitName: string): void;
   onApplyCatalogFindings(findings: CatalogValidationFinding[]): void;
   onDuplicatePropertySet(setId: number): void;
+  onModeChange?(mode: InspectorMode): void;
   onMovePlacement(x: string, y: string, z: string): void;
   onRemoveRelationship(relationshipId: number): void;
   onRemovePropertyFromSet(setId: number, propertyId: number): void;
@@ -296,6 +303,7 @@ export function InspectorPanel({
       objectInfoFindings={objectInfoFindings}
       objectInfoIndex={objectInfoIndex}
       onAddUnit={onAddUnit}
+      onModeChange={onModeChange}
       onSaveEdit={onSaveEdit}
       onSelectEntity={onSelectEntity}
     />
@@ -327,7 +335,7 @@ function EmptyBlock({
 
 function TextLine({ children }: { children: ReactNode }) {
   return (
-    <div className="text-sm leading-6 text-muted-foreground">{children}</div>
+    <div className="text-xs leading-5 text-muted-foreground">{children}</div>
   );
 }
 
@@ -645,6 +653,7 @@ function OverviewPanel({
   objectInfoFindings,
   objectInfoIndex,
   onAddUnit,
+  onModeChange,
   onSaveEdit,
   onSelectEntity,
 }: {
@@ -653,24 +662,40 @@ function OverviewPanel({
   objectInfoFindings: ObjectInfoValidationFinding[];
   objectInfoIndex: ObjectInfoIndex;
   onAddUnit(unitType: string, unitName: string): void;
+  onModeChange?(mode: InspectorMode): void;
   onSaveEdit(draft: EntityEditDraft): void;
   onSelectEntity(entityId: number): void;
 }) {
   const path = findTreePath(document, entity.id);
   const sets = document.propertySetsByEntity.get(entity.id) ?? [];
   const relationships = document.relationshipsByEntity.get(entity.id) ?? [];
+  // Beziehungen nach Klasse gebündelt — die Einzelzeilen zeigt der Tab
+  // "Beziehungen"; hier reicht der Überblick.
+  const relationshipGroups = [
+    ...relationships.reduce(
+      (groups, relationship) =>
+        groups.set(
+          relationship.type,
+          (groups.get(relationship.type) ?? 0) + 1,
+        ),
+      new Map<string, number>(),
+    ),
+  ];
 
   return (
     <PanelShell scroll>
+      {/* Klasse steht im Eyebrow; der Name nur hier (nicht in der
+          Fensterleiste), bei Bedarf zweizeilig. Zähler stehen unten bei
+          "Verknüpft". */}
       <PanelHeader
-        eyebrow={`#${entity.id}`}
+        eyebrow={`#${entity.id} · ${shortType(entity.type)}`}
         title={entity.name || shortType(entity.type)}
-        description={`${sets.length.toLocaleString("de-DE")} Psets · ${relationships.length.toLocaleString("de-DE")} Beziehungen`}
-        meta={<Badge tone="info">{shortType(entity.type)}</Badge>}
       />
 
       <InfoSection title="Identität">
-        <div className="grid gap-1">
+        {/* @container: die Kachelbreite entscheidet, nicht der Viewport —
+            schmal stehen Label und Wert untereinander. */}
+        <div className="@container grid gap-1">
           <IdentityEditRow label="Klasse">
             <Select
               value={entity.type}
@@ -702,10 +727,7 @@ function OverviewPanel({
               </SelectContent>
             </Select>
           </IdentityEditRow>
-          <div className="grid gap-1 rounded-md bg-muted/30 px-2 py-1 text-sm sm:grid-cols-[8rem_minmax(0,1fr)] sm:items-center sm:gap-2">
-            <span className="text-[0.7rem] font-medium uppercase tracking-wide text-muted-foreground">
-              GlobalId
-            </span>
+          <IdentityEditRow label="GlobalId">
             <span className="flex min-w-0 items-center gap-1">
               <span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">
                 {entity.globalId || "–"}
@@ -717,8 +739,8 @@ function OverviewPanel({
                 />
               ) : null}
             </span>
-          </div>
-          <IdentityEditRow label="Name">
+          </IdentityEditRow>
+          {getNativeIdentityAttributeIndexes(entity, document.schema).name != null ? <IdentityEditRow label="Name">
             <CommitInput
               className="h-6 w-full"
               placeholder="–"
@@ -732,8 +754,8 @@ function OverviewPanel({
                 })
               }
             />
-          </IdentityEditRow>
-          <IdentityEditRow label="Beschreibung">
+          </IdentityEditRow> : null}
+          {getNativeIdentityAttributeIndexes(entity, document.schema).description != null ? <IdentityEditRow label="Beschreibung">
             <CommitInput
               className="h-6 w-full"
               placeholder="–"
@@ -747,7 +769,7 @@ function OverviewPanel({
                 })
               }
             />
-          </IdentityEditRow>
+          </IdentityEditRow> : null}
           <EntitySpecificIdentityFields
             entity={entity}
             schema={document.schema}
@@ -783,79 +805,66 @@ function OverviewPanel({
         )}
       </InfoSection>
 
-      <InfoSection title="Eigenschaften & Mengen">
-        {sets.length ? (
-          <CappedItems
-            items={sets}
-            limit={12}
-            renderItem={(set) => (
-              <div
-                key={set.id}
-                className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 rounded-md bg-muted/30 px-2 py-1.5"
-              >
-                <Badge tone={set.kind === "Qto" ? "warning" : "success"}>
-                  {set.kind}
-                </Badge>
-                <EntityChip
-                  document={document}
-                  id={set.id}
-                  showType={false}
-                  onSelect={onSelectEntity}
-                />
-                <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
-                  {set.name}
+      <InfoSection title="Verknüpft">
+        <OverviewLinkRow
+          count={sets.length}
+          label="Psets & Mengen"
+          onOpen={onModeChange ? () => onModeChange("properties") : undefined}
+        >
+          {sets.length ? (
+            <OverviewChips
+              items={sets}
+              limit={8}
+              renderItem={(set) => (
+                <button
+                  key={set.id}
+                  type="button"
+                  title={`#${set.id} ${set.name} · ${set.values.length.toLocaleString("de-DE")} Werte`}
+                  onClick={() => onSelectEntity(set.id)}
+                  className="flex min-w-0 max-w-full items-center gap-1 rounded border border-border/60 bg-background px-1.5 py-0.5 text-[11px] leading-4 text-foreground transition-colors hover:border-primary/50 hover:bg-primary/5 hover:text-primary"
+                >
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "size-1.5 shrink-0 rounded-full",
+                      set.kind === "Qto" ? "bg-warning" : "bg-success",
+                    )}
+                  />
+                  <span className="truncate">{set.name}</span>
+                </button>
+              )}
+            />
+          ) : (
+            <TextLine>Keine Psets oder Mengen.</TextLine>
+          )}
+        </OverviewLinkRow>
+        <OverviewLinkRow
+          count={relationships.length}
+          label="Beziehungen"
+          onOpen={onModeChange ? () => onModeChange("relations") : undefined}
+        >
+          {relationshipGroups.length ? (
+            <OverviewChips
+              items={relationshipGroups}
+              limit={8}
+              renderItem={([type, count]) => (
+                <span
+                  key={type}
+                  className="flex min-w-0 max-w-full items-center gap-1 rounded border border-border/60 bg-background px-1.5 py-0.5 text-[11px] leading-4 text-foreground"
+                >
+                  <span className="truncate">{shortType(type)}</span>
+                  {count > 1 ? (
+                    <span className="tabular-nums text-muted-foreground">
+                      ×{count.toLocaleString("de-DE")}
+                    </span>
+                  ) : null}
                 </span>
-                <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
-                  {set.values.length.toLocaleString("de-DE")} Werte
-                </span>
-              </div>
-            )}
-          />
-        ) : (
-          <TextLine>Keine Psets oder QTOs verknüpft.</TextLine>
-        )}
-      </InfoSection>
-
-      <InfoSection title="Beziehungen">
-        {relationships.length ? (
-          <CappedItems
-            items={relationships}
-            limit={20}
-            renderItem={(relationship) => (
-              <div
-                key={relationship.id}
-                className="grid gap-1 rounded-md bg-muted/30 px-2 py-1.5"
-              >
-                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                  <EntityChip
-                    document={document}
-                    id={relationship.id}
-                    showType={false}
-                    onSelect={onSelectEntity}
-                  />
-                  <span className="min-w-0 truncate text-xs font-medium text-foreground">
-                    {shortType(relationship.type)}
-                  </span>
-                </div>
-                <div className="flex min-w-0 flex-wrap items-center gap-1 text-xs text-muted-foreground">
-                  <RelationshipIdChips
-                    document={document}
-                    ids={relationship.sourceIds}
-                    onSelect={onSelectEntity}
-                  />
-                  <span aria-hidden>→</span>
-                  <RelationshipIdChips
-                    document={document}
-                    ids={relationship.targetIds}
-                    onSelect={onSelectEntity}
-                  />
-                </div>
-              </div>
-            )}
-          />
-        ) : (
-          <TextLine>Keine Beziehungen indexiert.</TextLine>
-        )}
+              )}
+            />
+          ) : (
+            <TextLine>Keine Beziehungen.</TextLine>
+          )}
+        </OverviewLinkRow>
       </InfoSection>
 
       <ObjectInfoSummary
@@ -888,11 +897,71 @@ function IdentityEditRow({
   label: string;
 }) {
   return (
-    <div className="grid gap-1 rounded-md bg-muted/30 px-2 py-1 text-sm sm:grid-cols-[8rem_minmax(0,1fr)] sm:items-center sm:gap-2">
-      <span className="text-[0.7rem] font-medium uppercase tracking-wide text-muted-foreground">
+    <div className="grid gap-0.5 py-0.5 text-sm @sm:grid-cols-[7rem_minmax(0,1fr)] @sm:items-center @sm:gap-2">
+      <span className="truncate text-[0.7rem] font-medium uppercase tracking-wide text-muted-foreground">
         {label}
       </span>
       <span className="min-w-0">{children}</span>
+    </div>
+  );
+}
+
+/** Zeile der Sprungleiste: Label + Zähler, optional "Öffnen" in den Tab. */
+function OverviewLinkRow({
+  children,
+  count,
+  label,
+  onOpen,
+}: {
+  children: ReactNode;
+  count: number;
+  label: string;
+  onOpen?: () => void;
+}) {
+  return (
+    <div className="grid gap-1">
+      <div className="flex items-center gap-1.5">
+        <span className="text-[0.7rem] font-medium uppercase tracking-wide text-muted-foreground">
+          {label}
+        </span>
+        <span className="text-[11px] tabular-nums text-muted-foreground">
+          {count.toLocaleString("de-DE")}
+        </span>
+        {onOpen ? (
+          <button
+            type="button"
+            onClick={onOpen}
+            className="ml-auto inline-flex items-center gap-0.5 rounded px-1 text-[11px] text-primary transition-colors hover:bg-primary/10"
+          >
+            Öffnen
+            <ChevronRight aria-hidden className="size-3" />
+          </button>
+        ) : null}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+/** Chip-Leiste mit "+n"-Rest statt Liste — für den Überblick reicht das. */
+function OverviewChips<T>({
+  items,
+  limit,
+  renderItem,
+}: {
+  items: T[];
+  limit: number;
+  renderItem(item: T): ReactNode;
+}) {
+  const hidden = items.length - limit;
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-1">
+      {items.slice(0, limit).map((item) => renderItem(item))}
+      {hidden > 0 ? (
+        <span className="text-[11px] text-muted-foreground">
+          +{hidden.toLocaleString("de-DE")}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -1180,42 +1249,6 @@ function identityClassOptions(currentType: string) {
   return options;
 }
 
-function RelationshipIdChips({
-  document,
-  ids,
-  onSelect,
-}: {
-  document: NativeIfcDocument;
-  ids: number[];
-  onSelect(entityId: number): void;
-}) {
-  const visible = ids.slice(0, 4);
-  const hidden = ids.length - visible.length;
-  if (!ids.length) {
-    return <span>–</span>;
-  }
-  return (
-    <span className="flex min-w-0 flex-wrap items-center gap-1">
-      {visible.map((id) => (
-        <EntityChip
-          key={id}
-          document={document}
-          id={id}
-          onSelect={onSelect}
-        />
-      ))}
-      {hidden > 0 ? (
-        <span
-          className="text-[11px] text-muted-foreground"
-          title={`${hidden.toLocaleString("de-DE")} weitere ausgeblendet`}
-        >
-          +{hidden.toLocaleString("de-DE")} weitere
-        </span>
-      ) : null}
-    </span>
-  );
-}
-
 function ObjectInfoSummary({
   document,
   findings,
@@ -1257,8 +1290,19 @@ function ObjectInfoSummary({
         </span>
       </div>
 
-      <SubHeading>Objektinfo-IDs</SubHeading>
+      {!definitions.length &&
+      !outgoing.length &&
+      !incoming.length &&
+      !localFindings.length ? (
+        <TextLine>
+          Kein ePset_Objektinformationen._ID, keine ID-Referenzen und keine
+          Findings am ausgewählten Objekt.
+        </TextLine>
+      ) : null}
+
       {definitions.length ? (
+        <>
+          <SubHeading>Objektinfo-IDs</SubHeading>
         <CappedItems
           items={definitions}
           limit={10}
@@ -1277,14 +1321,12 @@ function ObjectInfoSummary({
             </div>
           )}
         />
-      ) : (
-        <TextLine>
-          Kein ePset_Objektinformationen._ID am ausgewählten Objekt.
-        </TextLine>
-      )}
+        </>
+      ) : null}
 
-      <SubHeading>Ausgehende ID-Referenzen</SubHeading>
       {outgoing.length ? (
+        <>
+          <SubHeading>Ausgehende ID-Referenzen</SubHeading>
         <CappedItems
           items={outgoing}
           limit={15}
@@ -1318,12 +1360,12 @@ function ObjectInfoSummary({
             );
           }}
         />
-      ) : (
-        <TextLine>Keine ausgehenden ID-Referenzen.</TextLine>
-      )}
+        </>
+      ) : null}
 
-      <SubHeading>Eingehende ID-Referenzen</SubHeading>
       {incoming.length ? (
+        <>
+          <SubHeading>Eingehende ID-Referenzen</SubHeading>
         <CappedItems
           items={incoming}
           limit={15}
@@ -1346,12 +1388,12 @@ function ObjectInfoSummary({
             </div>
           )}
         />
-      ) : (
-        <TextLine>Keine eingehenden ID-Referenzen.</TextLine>
-      )}
+        </>
+      ) : null}
 
-      <SubHeading>Lokale Findings</SubHeading>
       {localFindings.length ? (
+        <>
+          <SubHeading>Lokale Findings</SubHeading>
         <CappedItems
           items={localFindings}
           limit={10}
@@ -1377,9 +1419,8 @@ function ObjectInfoSummary({
             </div>
           )}
         />
-      ) : (
-        <TextLine>Keine lokalen Objektinfo-Findings.</TextLine>
-      )}
+        </>
+      ) : null}
     </InfoSection>
   );
 }
@@ -1546,8 +1587,6 @@ function AdvancedEditSection({
         variant="default"
         onClick={() =>
           onSave({
-            description: entity.description,
-            name: entity.name,
             rawArgs,
             type: entity.type,
           })
@@ -4336,22 +4375,7 @@ function parseTypedPropertyValue(rawValue: string, entity?: NativeIfcEntity) {
       valueType: `IFCPROPERTYTABLEVALUE:${readStepListValueType(entity.args[2])}:${readStepListValueType(entity.args[3])}`,
     };
   }
-  const trimmed = rawValue.trim();
-  const match = trimmed.match(/^([A-Z0-9_]+)\(([\s\S]*)\)$/i);
-  if (!match) {
-    return { value: trimmed === "-" ? "" : trimmed, valueType: "IFCLABEL" };
-  }
-  const valueType = normalizePropertyValueType(match[1]);
-  const inner = match[2].trim();
-  if (valueType === "IFCBOOLEAN") {
-    const flag = inner.replace(/^\./, "").replace(/\.$/, "").toUpperCase();
-    return { value: flag === "F" ? "False" : "True", valueType };
-  }
-  const unquoted = inner.match(/^'([\s\S]*)'$/)?.[1];
-  if (unquoted != null) {
-    return { value: unquote(inner) ?? unquoted.replace(/''/g, "'"), valueType };
-  }
-  return { value: inner.replace(/^\./, "").replace(/\.$/, ""), valueType };
+  return parseIfcValue(rawValue.trim() === "-" ? "" : rawValue);
 }
 
 function parseStepValueList(rawValue = "") {

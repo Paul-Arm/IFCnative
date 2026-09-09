@@ -1,0 +1,13 @@
+# Messfeld: kein eigenes Element, ein Pset Messfeld<n> an der Untersuchungsstelle.
+objektart: Messfeld
+entity: { pset: Messfeld, am: Untersuchungsstelle }
+
+id:
+  merkmal: Messfeld.ID
+  eindeutig: { scope: element } # Verfahren referenzieren es nur am selben Element
+
+phasen:
+  planung: &alle
+    psets:
+      Messfeld: { pflicht: [ID] }
+  einzelergebnisse: *alle

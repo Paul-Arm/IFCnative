@@ -1,3 +1,4 @@
+import { prepareFileTreeInput } from "@pierre/trees";
 import { FileTree, useFileTree } from "@pierre/trees/react";
 import { Boxes, Crosshair, Network, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
@@ -8,7 +9,7 @@ import {
     type NativeIfcDocument,
     type NativeIfcEntity,
     type NativeIfcTreeNode,
-} from "@/ifc";
+} from "@/ifc/nativeDocument";
 import { cn } from "@/lib/utils";
 
 import {
@@ -17,6 +18,10 @@ import {
     type StructureChildGroup,
 } from "./constants";
 import { IFC_TREE_SPRITE_SHEET, ifcTreeIconFor } from "./structureTreeIcons";
+import {
+  createStructureTreeIndex,
+  getVisibleStructureIndex,
+} from "./structureTreeIndex";
 import { Button, shortType } from "./ui";
 
 interface StructureTreeModel {
@@ -84,9 +89,39 @@ export function StructurePanel({
     () => buildStructureTreeModel(document),
     [document],
   );
+  const treeIndex = useMemo(
+    () => createStructureTreeIndex(prepareFileTreeInput(
+      treeModel.paths.length ? treeModel.paths : [EMPTY_TREE_PLACEHOLDER],
+      { flattenEmptyDirectories: false },
+    )),
+    [treeModel],
+  );
+  const appliedTreeModelRef = useRef(treeModel);
+
+  const treeIcons = useMemo(() => {
+    const byFileName: Record<string, string> = Object.create(null);
+    for (const path of treeModel.paths) {
+      if (path.endsWith("/")) continue;
+      const name = path.slice(path.lastIndexOf("/") + 1);
+      const id = treeModel.idByPath.get(path);
+      if (id === undefined) continue;
+      const icon = ifcTreeIconFor(treeModel.typeById.get(id) ?? "");
+      // Basename rules are shared across branches. Use a neutral symbol
+      // when equally named objects belong to different IFC classes.
+      byFileName[name] = byFileName[name] && byFileName[name] !== icon
+        ? "ifc-tree-element"
+        : icon;
+    }
+    return {
+      byFileName,
+      remap: { "file-tree-icon-file": "ifc-tree-element" },
+      spriteSheet: IFC_TREE_SPRITE_SHEET,
+    };
+  }, [treeModel]);
 
   const idByPathRef = useRef(treeModel.idByPath);
   const typeByIdRef = useRef(treeModel.typeById);
+  const nameByIdRef = useRef(treeModel.nameById);
   const onAddChildRef = useRef(onAddChild);
   const onAddFreeRef = useRef(onAddFree);
   const onCenterCameraRef = useRef(onCenterCamera);
@@ -108,10 +143,6 @@ export function StructurePanel({
   onSelectManyRef.current = onSelectMany;
   onRemoveRef.current = onRemove;
 
-  const initialPaths = treeModel.paths.length
-    ? treeModel.paths
-    : [EMPTY_TREE_PLACEHOLDER];
-
   const { model } = useFileTree({
     density: "compact",
     fileTreeSearchMode: "expand-matches",
@@ -119,47 +150,32 @@ export function StructurePanel({
     id: "ifcnative-structure-tree",
     initialExpandedPaths: treeModel.expandedPaths,
     initialVisibleRowCount: 18,
-    // Zwei Zeilen pro Eintrag (Name + Typ) brauchen mehr Höhe als das
-    // Compact-Preset; die Virtualisierung rechnet mit diesem Wert.
-    itemHeight: 38,
+    // Keep the virtualizer and the single-line visual rows in agreement.
+    itemHeight: 24,
     onSelectionChange: (paths) => {
       // Echos des programmatischen Reveal-Syncs ignorieren: sie tragen keine
       // neue Information und würden Auswahl-Objekte ohne Baum-Pfad (Gruppen/
       // Systeme außerhalb der Raumstruktur) still aus der Workspace-Auswahl
       // entfernen.
       if (selectionSyncActiveRef.current) return;
-      const ids: number[] = [];
+      const ids = new Set<number>();
       for (const path of paths) {
         const id = idByPathRef.current.get(path);
-        if (typeof id === "number" && !ids.includes(id)) {
-          ids.push(id);
-        }
+        if (typeof id === "number") ids.add(id);
       }
-      if (ids.length === 0) return;
-      onSelectManyRef.current(ids);
+      if (ids.size === 0) return;
+      onSelectManyRef.current([...ids]);
     },
-    paths: initialPaths,
-    icons: {
-      // Blätter zeigen statt des generischen Datei-Icons einen dezenten
-      // Punkt — das Typ-Symbol sitzt in der zweiten Zeile (Decoration).
-      remap: { "file-tree-icon-file": "file-tree-icon-dot" },
-      spriteSheet: IFC_TREE_SPRITE_SHEET,
-    },
+    preparedInput: treeIndex.preparedInput,
+    icons: treeIcons,
     renderRowDecoration: ({ item }) => {
       const id = idByPathRef.current.get(item.path);
       if (typeof id !== "number") return null;
       const typeName = typeByIdRef.current.get(id);
       if (!typeName) return null;
-      // Icon-Decoration; der title liefert Tooltip UND die sichtbare
-      // Typ-Zeile (per attr()-Content im unsafeCSS unten).
       return {
-        icon: {
-          name: ifcTreeIconFor(typeName),
-          width: 11,
-          height: 11,
-          viewBox: "0 0 16 16",
-        },
-        title: `${typeName.replace(/^IFC/i, "")} · #${id}`,
+        text: `#${id}`,
+        title: `${nameByIdRef.current.get(id) ?? item.name}\n${typeName} · #${id}`,
       };
     },
     // Kein baum-eigenes Suchfeld: die Panel-Suche filtert über
@@ -179,8 +195,9 @@ export function StructurePanel({
          --trees-theme-*-Variablen der Bibliothek mappen, damit der Baum
          auch im Dark Mode lesbar bleibt. */
       :host {
-        font-family: inherit;
-        font-size: 13px;
+        --trees-font-family-override: var(--font-sans);
+        --trees-font-size-override: 11px;
+        --trees-font-weight-semibold-override: 500;
         --trees-theme-sidebar-bg: var(--card);
         --trees-theme-sidebar-fg: var(--foreground);
         --trees-theme-sidebar-header-fg: var(--muted-foreground);
@@ -188,8 +205,8 @@ export function StructurePanel({
         --trees-theme-list-hover-bg: var(--accent);
         --trees-theme-list-active-selection-bg: color-mix(
           in oklab,
-          var(--primary) 14%,
-          transparent
+          var(--primary) 11%,
+          var(--card)
         );
         --trees-theme-list-active-selection-fg: var(--foreground);
         --trees-theme-focus-ring: var(--ring);
@@ -203,91 +220,77 @@ export function StructurePanel({
         );
         /* Rand- und Zeilen-Abstände eindampfen: die Bibliothek reserviert
            links/rechts je 16px Container-Padding plus Zeilen-Margins. */
-        --trees-padding-inline-override: 2px;
+        --trees-padding-inline-override: 0px;
         --trees-item-margin-x-override: 0px;
-        --trees-item-padding-x-override: 6px;
-        --trees-item-row-gap-override: 5px;
+        --trees-item-padding-x-override: 4px;
+        --trees-item-row-gap-override: 4px;
+        --trees-icon-width-override: 12px;
+        --trees-level-gap-override: 3px;
+        --trees-border-radius-override: 3px;
+        --trees-indent-guide-bg-override: color-mix(in oklab, var(--border) 65%, transparent);
       }
-      /* Zweizeilige Einträge: Name oben, Typ-Icon + IFC-Typ · #ID darunter.
-         Die Zeile ist im Original ein Flex-Row mit line-height = Zeilenhöhe;
-         hier als Grid mit fester Spaltenstruktur und zwei Inhaltszeilen.
-         Die Zeilen sind 1fr/1fr, damit Spalten wie die Einrückungslinien
-         (spacing) die volle Zeilenhöhe füllen — sonst reißen die Linien
-         zwischen den Einträgen ab. */
-      [data-type='item'] {
-        display: grid;
-        grid-template-columns: auto auto minmax(0, 1fr) auto;
-        grid-template-rows: 1fr 1fr;
-        grid-template-areas:
-          'spacing icon content action'
-          'spacing icon decoration action';
-        align-items: stretch;
-        column-gap: var(--trees-item-row-gap);
-        row-gap: 0;
-        line-height: 1.25;
-      }
-      [data-type='item'] > [data-item-section='spacing'] {
-        grid-area: spacing;
-        height: 100%;
-      }
-      [data-type='item'] > [data-item-section='icon'] {
-        grid-area: icon;
-        align-self: center;
-      }
-      /* Blatt-Zeilen: der auf den Dot umgemappte Datei-Slot rendert das
-         Symbol in voller 16px-Größe — auf einen dezenten Bullet schrumpfen. */
-      [data-item-type='file'] > [data-item-section='icon'] svg {
-        width: 5px;
-        height: 5px;
-        opacity: 0.55;
+      [data-item-section='icon'] svg {
+        width: 12px;
+        height: 12px;
       }
       [data-type='item'] > [data-item-section='content'] {
-        grid-area: content;
-        align-self: end;
+        flex: 1 1 0;
       }
-      [data-type='item'] > [data-item-section='decoration'] {
-        grid-area: decoration;
-        align-self: start;
-        justify-content: flex-start;
-        text-align: start;
-        font-size: 10.5px;
-        letter-spacing: 0.01em;
-      }
-      [data-type='item'] > [data-item-section='decoration'] > span {
-        justify-content: flex-start;
-        gap: 4px;
-      }
-      [data-type='item'] > [data-item-section='decoration'] > span > svg {
-        flex-shrink: 0;
-      }
-      /* Sichtbarer Typ-Text aus dem title-Attribut der Icon-Decoration. */
-      [data-type='item'] > [data-item-section='decoration'] > span[title]::after {
-        content: attr(title);
+      /* IFC names need their prefix, unlike filenames with an extension.
+         Keep the library's accessible label and render its two text segments
+         as one line with ordinary end ellipsis. */
+      [data-item-section='content'] [data-truncate-group-container] {
+        display: block;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-      [data-type='item'] > [data-item-section='git'],
-      [data-type='item'] > [data-item-section='action'] {
-        grid-area: action;
-        align-self: center;
+      [data-item-section='content'] [data-truncate-group-container] div {
+        display: contents;
+        direction: inherit;
+      }
+      [data-item-section='content'] [data-truncate-group-container] [aria-hidden],
+      [data-item-section='content'] [data-truncate-group-container] [data-truncate-fill] {
+        display: none;
+      }
+      [data-item-type='folder'] > [data-item-section='content'] {
+        font-weight: 500;
+      }
+      [data-type='item'] > [data-item-section='decoration'] {
+        flex: 0 0 auto;
+        margin-left: 4px;
+        font-size: 10px;
+        font-variant-numeric: tabular-nums;
+      }
+      [data-item-selected='true'] {
+        box-shadow: inset 2px 0 0 var(--primary);
       }
     `,
   });
 
   useEffect(() => {
+    if (appliedTreeModelRef.current === treeModel) return;
+    appliedTreeModelRef.current = treeModel;
+    lastRevealRef.current = null;
     idByPathRef.current = treeModel.idByPath;
     typeByIdRef.current = treeModel.typeById;
-    model.resetPaths(
-      treeModel.paths.length ? treeModel.paths : [EMPTY_TREE_PLACEHOLDER],
-      { initialExpandedPaths: treeModel.expandedPaths },
-    );
-  }, [model, treeModel]);
+    nameByIdRef.current = treeModel.nameById;
+    model.setIcons(treeIcons);
+    selectionSyncActiveRef.current = true;
+    try {
+      model.resetPaths(treeIndex.preparedInput.paths, {
+        initialExpandedPaths: treeModel.expandedPaths,
+        preparedInput: treeIndex.preparedInput,
+      });
+    } finally {
+      selectionSyncActiveRef.current = false;
+    }
+  }, [model, treeIcons, treeIndex, treeModel]);
 
   useEffect(() => {
     const trimmed = (search ?? "").trim();
     // Die ID steht nicht mehr zwingend im Zeilennamen (nur noch in der
-    // Decoration-Zeile). Die Baum-Suche matcht aber über den vollständigen
+    // ID-Spalte). Die Baum-Suche matcht aber über den vollständigen
     // Pfad — reine ID-Eingaben ("533" / "#533") deshalb auf den Pfad des
     // Treffers übersetzen, damit die versprochene ID-Suche weiter greift.
     const idMatch = /^#?(\d+)$/.exec(trimmed);
@@ -329,9 +332,9 @@ export function StructurePanel({
     targetPaths.add(path);
     selectionSyncActiveRef.current = true;
     try {
-      const currentPaths = model.getSelectedPaths();
+      const currentPaths = new Set(model.getSelectedPaths());
       for (const targetPath of targetPaths) {
-        if (!currentPaths.includes(targetPath)) {
+        if (!currentPaths.has(targetPath)) {
           model.getItem(targetPath)?.select();
         }
       }
@@ -349,7 +352,6 @@ export function StructurePanel({
     const revealTargetChanged =
       lastRevealRef.current?.selectedId !== selectedId ||
       lastRevealRef.current?.nonce !== revealSelectionNonce;
-    lastRevealRef.current = { nonce: revealSelectionNonce, selectedId };
     if (!revealTargetChanged) {
       return;
     }
@@ -364,18 +366,14 @@ export function StructurePanel({
       const scrollElement = shadowRoot?.querySelector<HTMLElement>(
         "[data-file-tree-virtualized-scroll]",
       );
-      const focusedIndex = treeModel.paths
-        .filter((candidatePath) =>
-          getAncestorDirectoryPaths(candidatePath).every((ancestorPath) => {
-            const ancestor = model.getItem(ancestorPath);
-            return (
-              ancestor &&
-              "isExpanded" in ancestor &&
-              ancestor.isExpanded()
-            );
-          }),
-        )
-        .indexOf(path);
+      const focusedIndex = getVisibleStructureIndex(
+        treeIndex,
+        path,
+        (directoryPath) => {
+          const directory = model.getItem(directoryPath);
+          return !!directory && "isExpanded" in directory && directory.isExpanded();
+        },
+      );
       if (!shadowRoot || !scrollElement || focusedIndex < 0) {
         if (revealFrame < TREE_REVEAL_MAX_FRAMES) {
           animationFrame = window.requestAnimationFrame(revealSelectedItem);
@@ -389,6 +387,24 @@ export function StructurePanel({
         shadowRoot
           ?.querySelector<HTMLElement>("[data-file-tree-sticky-overlay]")
           ?.getBoundingClientRect().height ?? 0;
+      const renderedRow = Array.from(
+        shadowRoot.querySelectorAll<HTMLElement>("[role='treeitem'][data-item-path]"),
+      ).find(
+        (row) => row.dataset.itemPath === path && row.dataset.itemParked !== "true",
+      );
+      if (renderedRow) {
+        const rowBounds = renderedRow.getBoundingClientRect();
+        const viewportBounds = scrollElement.getBoundingClientRect();
+        if (
+          rowBounds.top >= viewportBounds.top + stickyOverlayHeight &&
+          rowBounds.bottom <= viewportBounds.bottom
+        ) {
+          // Only acknowledge completed reveals: a selection update can cancel
+          // a pending frame and must still retry this target on the next effect.
+          lastRevealRef.current = { nonce: revealSelectionNonce, selectedId };
+          return;
+        }
+      }
       const usableHeight = Math.max(
         itemHeight,
         scrollElement.clientHeight - stickyOverlayHeight,
@@ -401,17 +417,6 @@ export function StructurePanel({
           usableHeight / 2,
       );
 
-      const renderedRow = Array.from(
-        shadowRoot.querySelectorAll<HTMLElement>("[data-item-path]"),
-      ).find(
-        (row) =>
-          row.dataset.itemPath === path && row.dataset.itemParked !== "true",
-      );
-      if (renderedRow) {
-        renderedRow.scrollIntoView({ block: "center", inline: "nearest" });
-        return;
-      }
-
       if (revealFrame < TREE_REVEAL_MAX_FRAMES) {
         animationFrame = window.requestAnimationFrame(revealSelectedItem);
       }
@@ -420,7 +425,7 @@ export function StructurePanel({
     animationFrame = window.requestAnimationFrame(revealSelectedItem);
 
     return () => window.cancelAnimationFrame(animationFrame);
-  }, [model, revealSelectionNonce, selectedId, selectedIds, treeModel]);
+  }, [model, revealSelectionNonce, selectedId, selectedIds, treeIndex, treeModel]);
 
   // Override default click behaviour: single click on a row body should only
   // select; only the chevron expands. Double click on a row body toggles
@@ -771,21 +776,22 @@ function FallbackRow({
   return (
     <div
       className={cn(
-        "group flex h-7 items-center gap-1 rounded-sm px-1.5 transition-colors",
+        "group flex h-6 items-center gap-1 rounded-sm px-1 transition-colors",
         selected ? "bg-primary/10" : "hover:bg-muted/50",
       )}
     >
       <button
         type="button"
         onClick={onPress}
-        title={`#${entity.id} · ${entity.type}`}
+        title={`${entity.name || entity.type}\n${entity.type} · #${entity.id}`}
         className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-left"
       >
-        <span className="min-w-0 truncate text-xs font-medium text-foreground">
+        <Boxes aria-hidden className="size-3 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1 truncate text-[11px] text-foreground">
           {entity.name || `#${entity.id}`}
         </span>
-        <span className="min-w-0 shrink truncate text-[10px] text-muted-foreground">
-          #{entity.id} · {shortType(entity.type)}
+        <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+          #{entity.id}
         </span>
       </button>
       <button
@@ -888,7 +894,7 @@ function addTreeNode(
 /**
  * Pfad-Segment einer Entität, eindeutig unter ihren Geschwistern. "#id" hängt
  * nur bei Namenskollision am Segment — die ID steht sichtbar in der
- * Decoration-Zeile; der Pfad muss aber eindeutig bleiben (Selektion, Reveal
+ * ID-Spalte; der Pfad muss aber eindeutig bleiben (Selektion, Reveal
  * und ID-Suche laufen über Pfade). Das übergebene Set sammelt die bereits
  * vergebenen Segmente einer Geschwisterebene und wird dabei ergänzt.
  */

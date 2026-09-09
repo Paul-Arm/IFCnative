@@ -1,0 +1,14 @@
+# Modelltyp Diagnostik Einzelergebnisse (B, Ausführung). Erlaubte Objektarten und Psets ergeben sich
+# aus allen Definitionen mit phase `einzelergebnisse`: Bauwerk (Bezug), Projekt, Untersuchungsziel,
+# Untersuchungsbereich, Untersuchungsstelle, Probe, Messfeld, alle Verfahren inkl. erweiterter Psets.
+# Untersuchungsergebnisse (phase ergebnisse) sind damit automatisch verboten.
+modell: Diagnostik Einzelergebnisse
+phase: einzelergebnisse
+ids: { datei: diagnostik-ausfuehrung.ids, praefix: DIA-A }
+
+# Jedes 3D-Element muss genau eine Objektart treffen (Portal: unassignable_element).
+elementeOhneObjektart: { stufe: fehler, befund: unassignable_element }
+
+# Was zusätzlich zu den Objektart-Regeln in dieser Datei gilt
+benoetigt: [bauwerksmodell] # Import-Vorbedingung (common.portal.reihenfolge)
+ersetzt: planung # dieselbe Projekt-ID überschreibt den Planungsstand im Portal

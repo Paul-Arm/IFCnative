@@ -6,20 +6,155 @@ import { fileURLToPath } from "node:url";
 import { crc32 as nodeCrc32 } from "node:zlib";
 
 import { formatPortalMessage } from "../src/ifc/attribution/messages";
+import { filterAttributionRows, planColumnChanges, planObjectNames } from "../src/ifc/attribution/editing";
 import { cleanValue, findPset, getProperty, getValue, psetMatches, splitIdList, stripPsetPrefix } from "../src/ifc/attribution/normalize";
 import { buildBauwerksmodellIndex, closeMatches, runPortalCheck, type PortalFinding } from "../src/ifc/attribution/portalCheck";
-import { classifyMethodPset, fachmodellSchema, katalogFor } from "../src/ifc/attribution/schema";
+import { activeSchema, classifyMethodPset, describeSchema, fachmodellSchema, importartLabel, isBuiltinSchemaActive, katalogFor, parseFachmodellSchema, schemaRevision, setActiveSchema, type FachmodellSchema } from "../src/ifc/attribution/schema";
 import { collectBcfTopics, createBcfArchive } from "../src/ifc/attribution/bcf";
 import { compareAreaMethods, methodLabelForPset, normalizeMethodName } from "../src/ifc/attribution/methods";
 import { addFachobjekt } from "../src/ifc/attribution/objects";
 import { addMethodPset, addRepeatPset, attachPset, childId, nextRepeatIndex, upsertProperty, upsertPropertyInSet, writeBauteilReference, writeCell } from "../src/ifc/attribution/recipes";
 import { buildTable, collectRows, formatMeters, objektartenOf, parseMeters } from "../src/ifc/attribution/table";
+import { ATTRIBUTION_ROW_HEIGHT, clampColumnWidth, virtualRowRange, virtualRowSlots } from "../src/ifc/attribution/tableViewport";
 import { applyImport, autoMap, parseDelimited, planImport } from "../src/ifc/attribution/tableImport";
 import { buildFachmodellTree, detectImportart } from "../src/ifc/attribution/tree";
 import { createZip, crc32, readZipEntries } from "../src/ifc/attribution/zip";
 import { getNativePlacementWorld, parseNativeIfcText, updateNativePropertyValue } from "../src/ifc/nativeDocument";
 
 const here = dirname(fileURLToPath(import.meta.url));
+
+test("Tabellenvirtualisierung: sichtbarer Bereich bleibt bei 100.000 Zeilen begrenzt und erreicht das Ende", () => {
+  const count = 100_000;
+  const range = virtualRowRange(count, 50_000 * ATTRIBUTION_ROW_HEIGHT, 640, 64);
+  assert.ok(range.start <= 50_000 && range.end >= 50_018);
+  assert.ok(range.end - range.start <= 31);
+  const bottom = virtualRowRange(count, count * ATTRIBUTION_ROW_HEIGHT, 640, 64);
+  assert.equal(bottom.end, count);
+  assert.ok(bottom.start < count - 10);
+  assert.deepEqual(virtualRowRange(0, 50_000, 0, 64), { start: 0, end: 0 });
+  assert.deepEqual(virtualRowRange(3, 50_000, 640, 64), { start: 0, end: 3 });
+});
+
+test("Tabellenvirtualisierung: aktive Eingabe bleibt einzeln gemountet; Abstände ergeben die volle Tabelle", () => {
+  for (const pinned of [2, 50_010, 99_999, -1]) {
+    const slots = virtualRowSlots(100_000, 50_000, 50_030, pinned);
+    assert.ok(slots.length <= 31);
+    if (pinned >= 0) assert.ok(slots.some((slot) => slot.index === pinned));
+    assert.equal(new Set(slots.map((slot) => slot.index)).size, slots.length);
+    const bottomGap = 100_000 - slots.at(-1)!.index - 1;
+    assert.equal(slots.reduce((sum, slot) => sum + slot.gap + 1, bottomGap), 100_000);
+  }
+});
+
+test("Spaltenbreiten: extreme und ungültige Werte bleiben im bedienbaren Bereich", () => {
+  assert.equal(clampColumnWidth(-100), 80);
+  assert.equal(clampColumnWidth(100_000), 1200);
+  assert.equal(clampColumnWidth(Number.NaN), 180);
+  assert.equal(clampColumnWidth(243.7), 244);
+});
+
+test("Referenzfelder: Katalog und Dateispalten erkennen Zieltypen ohne eigene IDs umzudeuten", () => {
+  const document = loadFixture("diagnostik-einzelergebnisse.ifc");
+  const tree = buildFachmodellTree(document, "einzelergebnisse");
+  const options = { importart: "einzelergebnisse" as const, scope: { loi: 300 as const, gewerke: [] }, katalog: katalogFor("einzelergebnisse"), bauwerksmodell: null, findings: [] };
+  const table = buildTable(document, collectRows(tree.root!), { ...options, objektart: "untersuchungsstelle" });
+  assert.equal(table.columns.find((column) => column.property === "UntersuchungszielID")?.reference, "Untersuchungsziel");
+  assert.equal(table.columns.find((column) => column.property === "BauteilID")?.reference, "Bauteil");
+  assert.equal(table.columns.find((column) => column.property === "UntersuchungsbereichID")?.reference, "Untersuchungsbereich");
+  assert.ok(table.columns.filter((column) => column.property === "ID" || column.property.startsWith("IDEbene")).every((column) => !column.reference));
+  const row = table.rows[0]!;
+  const withCustom = upsertProperty(document, row.entityId, ["Objektinformation(en)?"], "Objektinformationen", "UntersuchungszielIDs_OI", "externes-ziel", "IFCLABEL");
+  const fileOnly = buildTable(withCustom, collectRows(tree.root!), { ...options, katalog: null, objektart: "untersuchungsstelle" });
+  assert.equal(fileOnly.columns.find((column) => column.property === "UntersuchungszielIDs")?.reference, "Untersuchungsziel");
+  const probes = buildTable(document, collectRows(tree.root!), { ...options, objektart: "probe" });
+  assert.equal(probes.columns.find((column) => column.property === "UntersuchungsstelleID")?.reference, "Untersuchungsstelle");
+});
+
+test("Referenzfelder: gewählte Ziel-IDs werden geschrieben und Mehrfachreferenzen aufgelöst", () => {
+  const document = loadFixture("diagnostik-einzelergebnisse.ifc");
+  const tree = buildFachmodellTree(document, "einzelergebnisse");
+  const nodes = collectRows(tree.root!);
+  const targets = nodes.filter((node) => node.kind === "untersuchungsziel");
+  assert.ok(targets.length >= 2);
+  const options = { importart: "einzelergebnisse" as const, objektart: "untersuchungsstelle" as const, scope: { loi: 300 as const, gewerke: [] }, katalog: katalogFor("einzelergebnisse"), bauwerksmodell: null, findings: [] };
+  const table = buildTable(document, nodes, options);
+  const column = table.columns.find((entry) => entry.property === "UntersuchungszielID")!;
+  const row = table.rows[0]!;
+  const value = targets.slice(0, 2).map((target) => target.id).join("; ");
+  const next = writeCell(document, row, column, value, "einzelergebnisse");
+  const cell = buildTable(next, nodes, options).rows[0]!.cells.find((entry) => entry.column.key === column.key)!;
+  assert.equal(cell.value, value);
+  assert.equal(cell.state, "ok");
+  assert.ok(cell.target?.includes(targets[0]!.label));
+  assert.ok(cell.target?.includes(targets[1]!.label));
+  const unknown = writeCell(next, row, column, `${value}; unbekannt`, "einzelergebnisse");
+  assert.equal(buildTable(unknown, nodes, options).rows[0]!.cells.find((entry) => entry.column.key === column.key)?.state, "import");
+});
+
+test("Attribuierung: leere gewählte Objektart behält Schema und Importspalten", () => {
+  const document = loadFixture("monitoring-lbm.ifc");
+  const tree = buildFachmodellTree(document, "monitoring");
+  const table = buildTable(document, collectRows(tree.root!), { importart: "monitoring", objektart: "untersuchungsstelle", scope: { loi: 300, gewerke: [] }, katalog: katalogFor("planung"), bauwerksmodell: null, findings: [] });
+  assert.equal(table.objektart, "untersuchungsstelle");
+  assert.equal(table.rows.length, 0);
+  assert.ok(table.columns.some((column) => column.property === "BauteilID"));
+  assert.ok(table.columns.some((column) => column.position === "x"), "Koordinatenimport auch vor dem ersten Objekt");
+  const empty = buildTable(document, [], { importart: "monitoring", objektart: "messanlage", scope: { loi: 300, gewerke: [] }, katalog: katalogFor("monitoring"), bauwerksmodell: null, findings: [] });
+  assert.equal(empty.objektart, "messanlage");
+  assert.ok(empty.columns.some((column) => column.property === "ID"));
+  assert.ok(autoMap(["ID", "Bezeichnung"], empty));
+});
+
+test("Attribuierung: Sammeländerung trifft nur ausgewählte nummerierte Psets am selben Träger", () => {
+  const document = loadFixture("monitoring-lbm.ifc");
+  const tree = buildFachmodellTree(document, "monitoring");
+  const table = buildTable(document, collectRows(tree.root!), { importart: "monitoring", objektart: "massnahme", scope: { loi: 300, gewerke: [] }, katalog: katalogFor("monitoring"), bauwerksmodell: null, findings: [] });
+  const column = table.columns.find((entry) => entry.property === "Bezeichnung")!;
+  assert.ok(table.rows.length > 2);
+  assert.equal(table.rows[0]!.entityId, table.rows[1]!.entityId);
+  const selected = [table.rows[0]!, table.rows[2]!];
+  const changes = planColumnChanges(selected, column, "Gemeinsam geändert", "all");
+  assert.equal(changes.length, 2);
+  let next = document;
+  for (const change of changes) next = writeCell(next, change.row, column, change.after, "monitoring");
+  for (const row of table.rows) {
+    const set = next.propertySetsByEntity.get(row.entityId)!.find((entry) => entry.id === row.psetId)!;
+    const original = row.cells.find((cell) => cell.column.key === column.key)!.value;
+    assert.equal(getValue(set, "Bezeichnung"), selected.includes(row) ? "Gemeinsam geändert" : original);
+  }
+  assert.deepEqual(planColumnChanges(selected, { ...column, derived: true }, "x", "all"), []);
+  assert.deepEqual(planColumnChanges(selected, { ...column, position: "x" }, "x", "all"), []);
+});
+
+test("Attribuierung: Nur leere ergänzen überspringt Werte, abgeleitete und nicht anwendbare Zellen", () => {
+  const document = loadFixture("monitoring-lbm.ifc");
+  const tree = buildFachmodellTree(document, "monitoring");
+  const table = buildTable(document, collectRows(tree.root!), { importart: "monitoring", objektart: "sensor", scope: { loi: 300, gewerke: [] }, katalog: katalogFor("monitoring"), bauwerksmodell: null, findings: [] });
+  const row = table.rows[0]!;
+  const column = table.columns.find((entry) => entry.property === "Bezeichnung")!;
+  const states = ["ok", "leer", "fehlt", "na", "abgeleitet"] as const;
+  const rows = states.map((state, index) => ({ ...row, key: String(index), cells: [{ column, value: state === "ok" ? "Behalten" : "", raw: "", state }] }));
+  const changes = planColumnChanges(rows, column, "Neu", "empty");
+  assert.deepEqual(changes.map((change) => change.row.key), ["1", "2"]);
+  assert.deepEqual(planColumnChanges(rows, column, "Behalten", "all").map((change) => change.row.key), ["1", "2"]);
+});
+
+test("Attribuierung: Mehrfachanlage erkennt bestehende und wiederholte IDs vor dem Schreiben", () => {
+  const plan = planObjectNames(" A \r\nB\n\nA\nC ", "Projekt", new Set(["Projekt.C"]));
+  assert.deepEqual(plan.entries.map((entry) => entry.name), ["A", "B", "A", "C"]);
+  assert.deepEqual(plan.duplicates, ["Projekt.A", "Projekt.C"]);
+  assert.deepEqual(planObjectNames("\n ", "Projekt", new Set()).entries, []);
+});
+
+test("Attribuierung: Objektsuche kombiniert Begriffe und berücksichtigt Eigenschaftswerte", () => {
+  const document = loadFixture("monitoring-lbm.ifc");
+  const tree = buildFachmodellTree(document, "monitoring");
+  const table = buildTable(document, collectRows(tree.root!), { importart: "monitoring", objektart: "sensor", scope: { loi: 300, gewerke: [] }, katalog: katalogFor("monitoring"), bauwerksmodell: null, findings: [] });
+  assert.equal(filterAttributionRows(table.rows, ""), table.rows);
+  const row = table.rows[0]!;
+  assert.deepEqual(filterAttributionRows(table.rows, `#${row.entityId} ${row.label.toUpperCase()}`), [row]);
+  assert.deepEqual(filterAttributionRows(table.rows, "__kein_treffer__"), []);
+});
 
 function loadFixture(name: string) {
   const text = readFileSync(resolve(here, "fixtures/attribution", name), "latin1");
@@ -724,4 +859,116 @@ test("Befundtexte: wörtlich wie das Portal-Frontend", () => {
   const document = loadFixture("monitoring-lbm.ifc");
   const building = document.entitiesByType.get("IFCBUILDING")![0]!;
   assert.ok(findPset(document, building.id, "Projekt"));
+});
+
+/* ---------------- Schemadatei und mehrere Bauwerksmodelle ---------------- */
+
+test("Schema: JSON-Datei wird geprüft, aktiviert und wieder auf das eingebaute zurückgesetzt", () => {
+  const rejected = parseFachmodellSchema("{}");
+  assert.equal(rejected.ok, false);
+  assert.match((rejected as { error: string }).error, /schemaVersion/);
+  assert.match((parseFachmodellSchema("nope") as { error: string }).error, /^Kein gültiges JSON/);
+
+  const accepted = parseFachmodellSchema(JSON.stringify(fachmodellSchema));
+  assert.equal(accepted.ok, true);
+  const variant = (accepted as { schema: FachmodellSchema }).schema;
+  variant.schemaVersion = "9.9.9";
+  variant.importarten.monitoring = { ...variant.importarten.monitoring, label: "Monitoring (Test)" };
+  variant.katalog.mon.klassen = 1;
+  variant.befunde.missing_pset = { ...variant.befunde.missing_pset!, de: "TEST {pset_name}" };
+
+  const before = schemaRevision();
+  try {
+    assert.equal(setActiveSchema(variant), before + 1);
+    assert.equal(isBuiltinSchemaActive(), false);
+    assert.equal(activeSchema().schemaVersion, "9.9.9");
+    assert.equal(importartLabel("monitoring"), "Monitoring (Test)");
+    assert.equal(katalogFor("monitoring")?.klassen, 1);
+    assert.equal(describeSchema().mon.klassen, 1);
+    // Befundtexte kommen aus dem aktiven Schema.
+    assert.equal(formatPortalMessage({ code: "missing_pset", pset_name: "X" }), "TEST X");
+    // Nochmaliges Setzen desselben Schemas ändert die Revision nicht.
+    assert.equal(setActiveSchema(variant), before + 1);
+  } finally {
+    setActiveSchema(null);
+  }
+  assert.equal(isBuiltinSchemaActive(), true);
+  assert.equal(schemaRevision(), before + 2);
+  assert.equal(katalogFor("monitoring")?.klassen, 9);
+  assert.equal(describeSchema().bwd.klassen, 66);
+  assert.notEqual(formatPortalMessage({ code: "missing_pset", pset_name: "X" }), "TEST X");
+});
+
+/** Zweites Bauwerksmodell aus dem VLRLP-Fixture: Teilbauwerk B, Bauteil-IDs wie die Referenzen des Fachmodells. */
+function synthesizeModelB(references: string[]) {
+  const text = readFileSync(resolve(here, "fixtures/attribution", "bauwerksmodell-vlrlp.ifc"), "latin1");
+  const ids = [...new Set([...text.matchAll(/IFCTEXT\('(6316873\.A1\.[^']+)'\)/g)].map((match) => match[1]!))].filter((id) => id.split(".").length === 6);
+  assert.equal(ids.length, 10);
+  let patched = text.replace(/IFCTEXT\('A1'\)/g, "IFCTEXT('B')");
+  for (const [index, id] of ids.entries()) {
+    const target = references[index] ?? id.replace(".A1.", ".B.");
+    patched = patched.split(`'${id}'`).join(`'${target}'`);
+  }
+  return parseNativeIfcText(patched, "bauwerksmodell-b.ifc");
+}
+
+test("Mehrere Bauwerksmodelle: Bauteil-Referenzen werden über alle geladenen Modelle aufgelöst", () => {
+  const document = loadFixture("monitoring-lbm.ifc");
+  const unchecked = runPortalCheck(document, { importart: "monitoring" }).findings.filter((finding) => finding.code === "editor_reference_unchecked");
+  const references = [...new Set(unchecked.map((finding) => finding.value!))];
+  assert.ok(references.length >= 1 && references.every((id) => id.startsWith("6316873.B.")), references.join(", "));
+
+  const modelA = loadFixture("bauwerksmodell-vlrlp.ifc");
+  const modelB = synthesizeModelB(references);
+  const index = buildBauwerksmodellIndex([modelA, modelB]);
+  assert.equal(index.modelle.length, 2);
+  assert.deepEqual(index.modelle.map((entry) => entry.teilbauwerk), ["A1", "B"]);
+  assert.deepEqual([...index.bauwerksnummern], ["6316873"]);
+  assert.equal(index.components.size, 20);
+  assert.equal(index.components.get(references[0]!)?.model, 1, "Referenz liegt im zweiten Modell");
+  assert.equal(index.duplicates.size, 0);
+  assert.equal(index.teilbauwerk, "A1", "Kurzform zeigt das erste Modell");
+
+  // Nur Modell A: alle Referenzen unbekannt. A + B: alles aufgelöst, keine ungeprüften Referenzen mehr.
+  const onlyA = runPortalCheck(document, { importart: "monitoring", bauwerksmodelle: [modelA] });
+  assert.equal(codes(onlyA.findings).unknown_reference, unchecked.length, dump(onlyA.findings));
+  const both = runPortalCheck(document, { importart: "monitoring", bauwerksmodelle: [modelA, modelB] });
+  const counts = codes(both.findings);
+  assert.equal(counts.unknown_reference ?? 0, 0, dump(both.findings));
+  assert.equal(counts.editor_reference_unchecked ?? 0, 0);
+  // Kurzform + Liste ergeben dieselbe Menge, Dubletten der Übergabe zählen nicht doppelt.
+  const mixed = runPortalCheck(document, { importart: "monitoring", bauwerksmodell: modelA, bauwerksmodelle: [modelA, modelB] });
+  assert.equal(codes(mixed.findings).unknown_reference ?? 0, 0);
+
+  // Tabelle: BauteilID-Zellen der Sensoren sind gegen beide Modelle „ok“ mit Ziel.
+  const tree = buildFachmodellTree(document, "monitoring", both.findings);
+  const table = buildTable(document, collectRows(tree.root!), { importart: "monitoring", scope: { loi: 500, gewerke: [] }, katalog: katalogFor("monitoring"), bauwerksmodell: index, findings: both.findings, objektart: "sensor" });
+  const cells = table.rows.map((row) => row.cells.find((cell) => cell.column.property === "BauteilID")!);
+  assert.ok(cells.length >= 1);
+  assert.ok(cells.every((cell) => cell.state === "ok" && cell.target), cells.map((cell) => `${cell.value}:${cell.state}`).join(", "));
+});
+
+test("Mehrere Bauwerksmodelle: gleiche Bauteil-ID in zwei Modellen wird als Warnung gemeldet, Bauwerksnummer muss zu einem Modell passen", () => {
+  const modelA = loadFixture("bauwerksmodell-vlrlp.ifc");
+  const copy = loadFixture("bauwerksmodell-vlrlp.ifc");
+  const index = buildBauwerksmodellIndex([modelA, copy]);
+  assert.equal(index.components.size, 10);
+  assert.equal(index.duplicates.size, 10);
+  assert.deepEqual([...index.duplicates.values()][0], [0, 1]);
+
+  const document = loadFixture("monitoring-lbm.ifc");
+  const result = runPortalCheck(document, { importart: "monitoring", bauwerksmodelle: [modelA, copy] });
+  const duplicates = result.findings.filter((finding) => finding.code === "editor_bauwerksmodell_duplicate_id");
+  assert.equal(duplicates.length, 10);
+  assert.equal(duplicates[0]!.severity, "warning");
+  assert.match(duplicates[0]!.message, /kommt in mehreren der geladenen Bauwerksmodelle vor \(bauwerksmodell-vlrlp\.ifc, bauwerksmodell-vlrlp\.ifc\)/);
+  // Das Bauwerksmodell selbst bekommt diese Warnung nicht.
+  assert.equal(codes(runPortalCheck(modelA, { importart: "bauwerksmodell", bauwerksmodelle: [modelA, copy] }).findings).editor_bauwerksmodell_duplicate_id ?? 0, 0);
+
+  // Bauwerksnummer: Fachmodell 6316873 gegen ein fremdes Modell → Konflikt; sobald ein passendes Modell dabei ist, keiner.
+  const foreignText = readFileSync(resolve(here, "fixtures/attribution", "bauwerksmodell-vlrlp.ifc"), "latin1").replace(/IFCTEXT\('6316873'\)/g, "IFCTEXT('9999999')");
+  const foreign = parseNativeIfcText(foreignText, "fremd.ifc");
+  const diagnostik = loadFixture("diagnostik-einzelergebnisse.ifc");
+  assert.equal(codes(runPortalCheck(diagnostik, { importart: "einzelergebnisse", bauwerksmodelle: [foreign] }).findings).data_conflict, 1);
+  assert.equal(codes(runPortalCheck(diagnostik, { importart: "einzelergebnisse", bauwerksmodelle: [foreign, modelA] }).findings).data_conflict ?? 0, 0);
 });

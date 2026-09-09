@@ -27,9 +27,11 @@ import { useMemo, useState } from "react";
 
 import { Input } from "@/components/ui/input";
 import {
-  isRelationshipTypeAllowedForEndpointTypes,
-  type NativeIfcDocument,
-} from "@/ifc";
+    isRelationshipTypeAllowedForEndpointTypes,
+} from "@/ifc/relationshipRules";
+import {
+    type NativeIfcDocument,
+} from "@/ifc/nativeDocument";
 import { cn } from "@/lib/utils";
 import { LINK_PSET_NAME } from "@/portal/catalogPsets";
 import { PortalApiClient, PortalApiError } from "@/portal/client";

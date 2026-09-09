@@ -1,3 +1,5 @@
+import { readIfcBytes, toExactArrayBuffer } from "./ifcBytes";
+
 export interface ConvertIfcToFragmentsRequest {
   bytes?: ArrayBuffer | null;
   file?: File | null;
@@ -170,23 +172,13 @@ async function convertIfcToFragmentsOnMainThread(
   request: ConvertIfcToFragmentsRequest,
   onProgress?: (progress: ConvertIfcToFragmentsProgress) => void,
 ) {
-  const [{ IfcImporter }, { readFragmentCoordination }] = await Promise.all([
+  const [{ IfcImporter }, { readFragmentCoordination }, { configureFragmentImporter }] = await Promise.all([
     import("@thatopen/fragments"),
     import("./fragmentCoordination"),
+    import("./fragmentImporter"),
   ]);
   const importer = new IfcImporter();
-  importer.wasm = {
-    absolute: true,
-    path: request.wasmPath,
-  };
-  importer.webIfcSettings = {
-    // Rebase far-from-origin (georeferenced) models so vertex data stays
-    // within float32 precision. The scene stays rebased; the transform is
-    // extracted below and used to convert picks/writes to IFC world.
-    COORDINATE_TO_ORIGIN: true,
-  };
-  importer.addAllAttributes();
-  importer.addAllRelations();
+  configureFragmentImporter(importer, request.wasmPath);
 
   const bytes = await readIfcBytes(request);
   const startedAt = performance.now();
@@ -210,31 +202,7 @@ async function convertIfcToFragmentsOnMainThread(
   };
 }
 
-async function readIfcBytes(request: ConvertIfcToFragmentsRequest) {
-  if (request.file) {
-    return new Uint8Array(await request.file.arrayBuffer());
-  }
-  if (request.bytes) {
-    return new Uint8Array(request.bytes);
-  }
-  return new TextEncoder().encode(request.text ?? "");
-}
-
-function toExactArrayBuffer(bytes: Uint8Array): ArrayBuffer {
-  if (
-    bytes.buffer instanceof ArrayBuffer &&
-    bytes.byteOffset === 0 &&
-    bytes.byteLength === bytes.buffer.byteLength
-  ) {
-    return bytes.buffer;
-  }
-  const buffer = new ArrayBuffer(bytes.byteLength);
-  new Uint8Array(buffer).set(bytes);
-  return buffer;
-}
-
 export type {
     ConvertIfcToFragmentsWorkerRequest,
     ConvertIfcToFragmentsWorkerResponse
 };
-

@@ -1,0 +1,4 @@
+# Raum des Bauwerksmodells — wie Bauteil, aber IfcSpace.
+objektart: Raum
+erbt: Bauteil
+entity: { klasse: IfcSpace }

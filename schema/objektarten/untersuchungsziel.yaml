@@ -1,0 +1,15 @@
+# Container am IfcBuilding: ein Untersuchungsziel je Pset Untersuchungsziel<n>.
+objektart: Untersuchungsziel
+entity: { pset: Untersuchungsziel, am: Bauwerk } # Familie → jedes Pset ist eine Instanz
+kardinalitaet: { proDatei: { min: 1 } }
+
+id:
+  merkmal: Untersuchungsziel.ID
+  grammatik: CONTAINER
+  eindeutig: { scope: datei, befund: duplicate_ifc_id }
+
+phasen:
+  planung: &alle
+    psets:
+      Untersuchungsziel: { pflicht: [ID, Bezeichnung] }
+  einzelergebnisse: *alle

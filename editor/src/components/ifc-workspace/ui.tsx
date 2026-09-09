@@ -120,7 +120,10 @@ export function PanelHeader({
           </div>
         ) : null}
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <h2 className="min-w-0 truncate text-sm font-semibold leading-tight text-foreground">
+          <h2
+            className="line-clamp-2 min-w-0 break-words text-sm font-semibold leading-tight text-foreground"
+            title={title}
+          >
             {title}
           </h2>
           {meta}
@@ -711,7 +714,7 @@ export function InfoSection({
   title: string;
 }) {
   return (
-    <section className="grid gap-2 rounded-lg border border-border/60 bg-card p-3">
+    <section className="grid gap-1.5 rounded-lg border border-border/60 bg-card p-2.5">
       <h3 className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
         {title}
       </h3>

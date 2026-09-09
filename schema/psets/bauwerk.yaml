@@ -1,0 +1,39 @@
+# Pset am IfcBuilding: identifiziert das Bauwerk / Teilbauwerk.
+# Ehem. Katalogklasse BWD - BW (ePset_Bauwerk). Im Bauwerksmodell Pflicht, in Fachmodellen
+# nur der Bezug über Bauwerksnummer (siehe objektarten/bauwerk.yaml).
+pset: Bauwerk
+katalog: { kuerzel: BW, code: BWD - BW }
+traeger: IfcBuilding
+
+merkmale:
+  Bauwerksnummer: { typ: IfcLabel, loi: 100 }
+  Teilbauwerksnummer: { typ: IfcLabel, loi: 100 }
+  Bauwerksname: { typ: IfcLabel, loi: 100, aliase: [Bezeichnung] }
+  Bauwerkstyp: { typ: IfcLabel, loi: 200 }
+  Bauweise: { typ: IfcLabel, loi: 200 }
+  EigentuemerIn: { typ: IfcLabel, loi: 200 }
+  Koordinatensystem: { typ: IfcLabel, loi: 100 }
+  OffsetX: { typ: IfcReal, loi: 100, einheit: m }
+  OffsetY: { typ: IfcReal, loi: 100, einheit: m }
+  OffsetZ: { typ: IfcReal, loi: 100, einheit: m }
+  BaujahrBeginn: { typ: IfcLabel, loi: 300 }
+  BaujahrEnde: { typ: IfcLabel, loi: 300 }
+  DatumInbetriebnahme: { typ: IfcLabel, loi: 300, format: datum }
+  Breite: { typ: IfcReal, loi: 300, einheit: m }
+  Laenge: { typ: IfcReal, loi: 300, einheit: m }
+  Brueckenflaeche_m2: { typ: IfcReal, loi: 300, einheit: m2 }
+  Brueckenklasse: { typ: IfcLabel, loi: 300 }
+  Lastklassenbeiwert: { typ: IfcReal, loi: 300 }
+  QuerschnittUeberbau: { typ: IfcLabel, loi: 300 }
+  StatischesSystemLaengs: { typ: IfcLabel, loi: 300 }
+  StatischesSystemQuer: { typ: IfcLabel, loi: 300 }
+  Kilometrierung: { typ: IfcLabel, loi: 300 }
+  Streckenbezeichnung: { typ: IfcLabel, loi: 300 }
+  UeberfuehrteStrecke: { typ: IfcLabel, loi: 300 }
+  StraßeUndNummer: { typ: IfcLabel, loi: 300 }
+  Postleitzahl: { typ: IfcLabel, loi: 300 }
+  Ort: { typ: IfcLabel, loi: 300 }
+  Besonderheit: { typ: IfcText, loi: 400 }
+  Bemerkung: { typ: IfcText, loi: 200 }
+  Foto: { typ: IfcLabel, loi: 400, format: datei }
+  Weblink: { typ: IfcLabel, loi: 400 }

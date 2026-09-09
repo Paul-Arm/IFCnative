@@ -16,7 +16,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { normalizeIfcClass } from "@/ifc";
+import {
+    normalizeIfcClass,
+} from "@/ifc/catalog";
 import {
   IFC_CLASS_CHOICES,
   PORTAL_VERFAHREN_MAPPING_MODELS,
