@@ -213,7 +213,7 @@ pro Entity), .ifc-Download.
 
 Markdown wird überall (md-Dateien, Issue-Beschreibungen, Kommentare) mit
 einem **WYSIWYG-Editor** bearbeitet (`components/MarkdownEditor.vue`,
-TipTap + tiptap-markdown): Toolbar für Überschriften, Fett/Kursiv, Listen,
+TipTap + @tiptap/markdown): Toolbar für Überschriften, Fett/Kursiv, Listen,
 Aufgabenlisten, Tabellen, Links, Code — gespeichert wird reiner Markdown;
 über den Umschalter rechts in der Toolbar lässt sich jederzeit der
 Markdown-Quelltext direkt bearbeiten.

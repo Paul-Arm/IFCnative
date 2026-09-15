@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * WYSIWYG-Markdown-Editor (TipTap + tiptap-markdown).
+ * WYSIWYG-Markdown-Editor (TipTap + @tiptap/markdown).
  *
  * v-model ist reiner Markdown-Text — gespeichert wird also exakt das Format,
  * das Server und Anzeige (marked/DOMPurify) ohnehin sprechen. Über den
@@ -9,15 +9,10 @@
  */
 import { Editor, EditorContent } from "@tiptap/vue-3";
 import StarterKit from "@tiptap/starter-kit";
-import Link from "@tiptap/extension-link";
-import Placeholder from "@tiptap/extension-placeholder";
-import Table from "@tiptap/extension-table";
-import TableRow from "@tiptap/extension-table-row";
-import TableHeader from "@tiptap/extension-table-header";
-import TableCell from "@tiptap/extension-table-cell";
-import TaskItem from "@tiptap/extension-task-item";
-import TaskList from "@tiptap/extension-task-list";
-import { Markdown } from "tiptap-markdown";
+import { Placeholder } from "@tiptap/extensions";
+import { TableKit } from "@tiptap/extension-table";
+import { TaskItem, TaskList } from "@tiptap/extension-list";
+import { Markdown } from "@tiptap/markdown";
 import {
   PhArrowClockwise,
   PhArrowCounterClockwise,
@@ -55,27 +50,36 @@ const raw = ref(false);
 
 const editor = new Editor({
   content: props.modelValue,
+  contentType: "markdown",
   extensions: [
-    StarterKit.configure({ heading: { levels: [1, 2, 3, 4] } }),
-    Link.configure({ openOnClick: false }),
+    StarterKit.configure({
+      heading: { levels: [1, 2, 3, 4] },
+      link: { openOnClick: false },
+      // Markdown kennt keine Unterstreichung — Strg+U würde beim Speichern
+      // stillschweigend verloren gehen.
+      underline: false,
+    }),
     Placeholder.configure({ placeholder: props.placeholder }),
-    Table.configure({ resizable: false }),
-    TableRow,
-    TableHeader,
-    TableCell,
+    TableKit.configure({ table: { resizable: false } }),
     TaskList,
     TaskItem.configure({ nested: true }),
-    Markdown.configure({
-      html: false,
-      linkify: true,
-      transformPastedText: true,
-    }),
+    Markdown,
   ],
   editorProps: {
     attributes: { class: "markdown-body md-editor-content" },
+    // Eingefügter Klartext (z. B. aus einer .md-Datei) wird als Markdown
+    // geparst; Rich-Text aus Browser/Office geht den normalen HTML-Weg.
+    handlePaste: (_view, event) => {
+      const data = event.clipboardData;
+      if (!data || data.types.includes("text/html")) return false;
+      const text = data.getData("text/plain");
+      if (!text || editor.isActive("codeBlock")) return false;
+      editor.commands.insertContent(text, { contentType: "markdown" });
+      return true;
+    },
   },
   onUpdate: () => {
-    emit("update:modelValue", editor.storage.markdown.getMarkdown());
+    emit("update:modelValue", editor.getMarkdown());
   },
 });
 
@@ -84,8 +88,8 @@ const editor = new Editor({
 watch(
   () => props.modelValue,
   (value) => {
-    if (!raw.value && value !== editor.storage.markdown.getMarkdown()) {
-      editor.commands.setContent(value, false);
+    if (!raw.value && value !== editor.getMarkdown()) {
+      editor.commands.setContent(value, { emitUpdate: false, contentType: "markdown" });
     }
   },
 );
@@ -93,7 +97,10 @@ watch(
 function toggleRaw(): void {
   if (raw.value) {
     // Quelltext -> Editor: Markdown neu parsen.
-    editor.commands.setContent(props.modelValue, false);
+    editor.commands.setContent(props.modelValue, {
+      emitUpdate: false,
+      contentType: "markdown",
+    });
   }
   linkOpen.value = false;
   raw.value = !raw.value;
