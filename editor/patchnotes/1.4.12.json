@@ -1,0 +1,12 @@
+{
+  "version": "1.4.12",
+  "title": "Updates direkt im Editor",
+  "publishedAt": "2026-09-15T10:00:00Z",
+  "changes": [
+    "Der Editor sucht nach dem Start und alle sechs Stunden nach neuen Versionen.",
+    "Ein unaufdringlicher Hinweis oben rechts informiert über Updates und lässt sich für eine Woche ausblenden.",
+    "Unter Einstellungen → Updates & Patchnotes können Updates manuell gesucht, heruntergeladen und installiert werden.",
+    "Patchnotes zeigen die Änderungen der angebotenen oder installierten Version.",
+    "Vor der Installation wird die Signatur geprüft. Ungespeicherte IFC-Dateien verhindern den Neustart."
+  ]
+}

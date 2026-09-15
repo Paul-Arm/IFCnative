@@ -22,3 +22,10 @@ The Windows desktop app uses Tauri 2 with the existing Vite renderer. Install th
 `npm run tauri:dev` for development. `npm run desktop:build` creates the unpackaged
 Windows executable and `npm run desktop:dist` (or `desktop:installer`) creates an
 NSIS installer under `src-tauri/target/release/bundle/nsis`.
+
+## Updates und manuelle Releases
+
+Die Desktop-App unterstützt Updates aus Azure Blob Storage mit Patchnotes,
+Signaturprüfung und einer für sieben Tage ausblendbaren Benachrichtigung.
+Die Einrichtung und den manuellen Upload beschreibt [docs/UPDATES.md](docs/UPDATES.md).
+`npm run release:prepare` bereitet nach der Windows-Signierung den Upload vor.

@@ -35,10 +35,11 @@ module.exports = [
     },
   },
   {
-    files: ["eslint.config.js", "scripts/**/*.js"],
+    files: ["eslint.config.js", "scripts/**/*.{js,mjs}"],
     languageOptions: {
       globals: {
         __dirname: "readonly",
+        Buffer: "readonly",
         console: "readonly",
         process: "readonly",
         require: "readonly",

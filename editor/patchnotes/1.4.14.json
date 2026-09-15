@@ -1,0 +1,10 @@
+{
+  "version": "1.4.14",
+  "title": "Test-Update 1.4.14",
+  "publishedAt": "2026-09-15T12:04:23.914Z",
+  "changes": [
+    "Testversion für den vollständigen Update-Ablauf von IFCnative 1.4.13 auf 1.4.14.",
+    "Dieses Release dient zum Testen von Update-Hinweis, Patchnotes, Download, Signaturprüfung und Installation.",
+    "Nach erfolgreicher Installation zeigen die Einstellungen die Version 1.4.14 an."
+  ]
+}

@@ -7,6 +7,7 @@ use std::{
 use std::io::Write;
 use tauri::{ipc::Response, webview::NewWindowResponse, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
+mod updates;
 
 /// Unique labels for popup windows opened via window.open (panel pop-outs).
 static POPUP_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -131,10 +132,17 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updates::UpdateState::default())
         .invoke_handler(tauri::generate_handler![
             startup_ifc_paths,
             read_ifc_file,
-            save_ifc_file
+            save_ifc_file,
+            updates::update_status,
+            updates::check_editor_update,
+            updates::download_editor_update,
+            updates::install_editor_update,
+            updates::editor_patchnotes
         ])
         .setup(|app| {
             let handle = app.handle().clone();

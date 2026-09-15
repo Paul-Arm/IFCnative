@@ -10,6 +10,7 @@
 
 import {
   Cloud,
+  ArrowUpCircle,
   FileJson2,
   Monitor,
   Moon,
@@ -52,6 +53,7 @@ import {
 } from "@/vcs/types";
 
 import { HubAuthForm } from "./HubAuthForm";
+import { UpdateSettings } from "./UpdateSettings";
 import {
   PortalConnectionSettings,
   PortalMappingSettings,
@@ -72,6 +74,7 @@ import {
 
 export type SettingsSectionId =
   | "appearance"
+  | "updates"
   | "hub"
   | "portal-connection"
   | "portal-mapping"
@@ -90,6 +93,14 @@ interface SettingsSection {
 }
 
 const SECTIONS: SettingsSection[] = [
+  {
+    description: "Neue Versionen, automatische Update-Suche und Änderungen im Editor.",
+    group: "Allgemein",
+    icon: ArrowUpCircle,
+    id: "updates",
+    label: "Updates & Patchnotes",
+    title: "Updates & Patchnotes",
+  },
   {
     description: "Farbschema und Skalierung der Oberfläche.",
     group: "Allgemein",
@@ -296,6 +307,7 @@ export function SettingsDialog({
           >
             <PanelHeader title={active.title} description={active.description} />
             {active.id === "appearance" ? <AppearanceSettings /> : null}
+            {active.id === "updates" ? <UpdateSettings /> : null}
             {active.id === "hub" ? (
               <HubSettings
                 auth={vcsAuth}

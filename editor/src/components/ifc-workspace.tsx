@@ -1,8 +1,5 @@
-import { loadWorkspaceDocument, loadWorkspaceDocuments } from "./ifc-workspace/documentLoading";
-import { pickFiles } from "../desktop/pickFiles";
 import { Button as IconButton } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
 import {
     Select,
     SelectContent,
@@ -11,6 +8,7 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
 import {
     FileText,
     PanelTopOpen,
@@ -22,11 +20,11 @@ import {
     X,
 } from "lucide-react";
 import {
-    lazy,
-    Suspense,
     cloneElement,
     isValidElement,
+    lazy,
     startTransition,
+    Suspense,
     useEffect,
     useLayoutEffect,
     useMemo,
@@ -42,11 +40,43 @@ import {
     type MosaicNode,
     type MosaicPath,
 } from "react-mosaic-component";
+import { pickFiles } from "../desktop/pickFiles";
+import {
+    loadWorkspaceDocument,
+    loadWorkspaceDocuments,
+} from "./ifc-workspace/documentLoading";
 
 import {
-  readDesktopIfcAsset,
-  readDesktopStartupIfcAssets,
+    readDesktopIfcAsset,
+    readDesktopStartupIfcAssets,
 } from "@/desktop/startupIfc";
+import { createMinimalIfcProjectWithFreshGuids } from "@/ifc/builder";
+import {
+    catalogObjectLabel,
+    findCatalogObject,
+    type CatalogKind,
+    type CatalogObjectType,
+    type CatalogValidationFinding,
+    type IfcObjectCatalog,
+} from "@/ifc/catalog";
+import {
+    applyCatalogQuickFix,
+    suggestCatalogObjectForEntity,
+    validateEntityAgainstCatalogObject,
+} from "@/ifc/catalogValidation";
+import {
+    ifcPlacementPointToViewerWorldPoint,
+    viewerWorldDeltaToIfcPlacementDelta,
+    viewerWorldDirectionToIfcPlacementDirection,
+    viewerWorldPointToIfcPlacementPoint,
+} from "@/ifc/coordinateMapping";
+import {
+    applyDiagnosticObjectInfo,
+    applyDiagnosticProcedureFromCatalog,
+    setDiagnosticObjectiveReferences as setNativeDiagnosticObjectiveReferences,
+    type DiagnosticObjectInfoDraft,
+} from "@/ifc/diagnosticsAssistant";
+import { parseIdsXml, type IdsDocumentModel } from "@/ifc/ids";
 import {
     addNativeApproval,
     addNativeBodyElement,
@@ -110,47 +140,19 @@ import {
     type NativeIfcEntity,
     type NativeSpatialStructureDraft,
 } from "@/ifc/nativeDocument";
-import {
-    applyCatalogQuickFix,
-    suggestCatalogObjectForEntity,
-    validateEntityAgainstCatalogObject,
-} from "@/ifc/catalogValidation";
-import {
-    applyDiagnosticObjectInfo,
-    applyDiagnosticProcedureFromCatalog,
-    setDiagnosticObjectiveReferences as setNativeDiagnosticObjectiveReferences,
-    type DiagnosticObjectInfoDraft,
-} from "@/ifc/diagnosticsAssistant";
+import { parseNativeIfcFileInWorker } from "@/ifc/nativeDocumentWorker";
+import { type NativeGraphPreset } from "@/ifc/nativeGraph";
 import {
     buildObjectInfoIndex,
     validateObjectInfoIndex,
 } from "@/ifc/objectInfoValidation";
-import {
-    catalogObjectLabel,
-    findCatalogObject,
-    type CatalogKind,
-    type CatalogObjectType,
-    type CatalogValidationFinding,
-    type IfcObjectCatalog,
-} from "@/ifc/catalog";
-import {
-    createMinimalIfcProjectWithFreshGuids,
-} from "@/ifc/builder";
-import {
-    ifcPlacementPointToViewerWorldPoint,
-    viewerWorldDeltaToIfcPlacementDelta,
-    viewerWorldDirectionToIfcPlacementDirection,
-    viewerWorldPointToIfcPlacementPoint,
-} from "@/ifc/coordinateMapping";
-import {
-    parseIdsXml,
-    type IdsDocumentModel,
-} from "@/ifc/ids";
-import {
-    parseNativeIfcFileInWorker,
-} from "@/ifc/nativeDocumentWorker";
-import { type NativeGraphPreset } from "@/ifc/nativeGraph";
 
+import {
+    AttributionHeaderChip,
+    AttributionOverlay,
+    type AttributionMode,
+    type AttributionStatus,
+} from "@/components/ifc-workspace/AttributionOverlay";
 import {
     Button,
     parseDecimalInput,
@@ -163,17 +165,31 @@ import {
     useUiScale,
     type UiScale,
 } from "@/hooks/use-ui-scale";
+import { unwrapMutation } from "@/ifc/attribution/mutations";
+import {
+    readBauteilId,
+    writeBauteilReference,
+} from "@/ifc/attribution/recipes";
+import { schemaRevision as currentSchemaRevision } from "@/ifc/attribution/schema";
+import {
+    applyAttributionSettings,
+    type AttributionSettings,
+} from "@/ifc/attribution/settings";
 import { recordDiagnostic } from "../diagnostics/watchdog";
 import { ChildWindow } from "./child-window";
 import { registerEmergencySave } from "./error-boundary";
-import { AttributionHeaderChip, AttributionOverlay, type AttributionMode, type AttributionStatus } from "@/components/ifc-workspace/AttributionOverlay";
 import type { AttributionPick } from "./ifc-workspace/AttributionPanel";
-import { unwrapMutation } from "@/ifc/attribution/mutations";
-const AttributionPanel = lazy(() => import("./ifc-workspace/AttributionPanel").then((module) => ({ default: module.AttributionPanel })));
-import { readBauteilId, writeBauteilReference } from "@/ifc/attribution/recipes";
-import { schemaRevision as currentSchemaRevision } from "@/ifc/attribution/schema";
-import { applyAttributionSettings, type AttributionSettings } from "@/ifc/attribution/settings";
+const AttributionPanel = lazy(() =>
+  import("./ifc-workspace/AttributionPanel").then((module) => ({
+    default: module.AttributionPanel,
+  })),
+);
 
+import { saveIfcFile } from "@/desktop/saveIfc";
+import { editorUpdates } from "@/updates/client";
+import { useUpdateScheduler } from "@/updates/use-updates";
+import { VcsApiClient } from "@/vcs/client";
+import type { VcsDocumentOrigin } from "@/vcs/types";
 import {
     BUILT_IN_WORKSPACES,
     DEFAULT_MOSAIC_LAYOUT,
@@ -184,21 +200,33 @@ import {
     RELATION_TYPES,
 } from "./ifc-workspace/constants";
 import { DeleteEntityDialog } from "./ifc-workspace/DeleteEntityDialog";
-import { type NewIfcDraft } from "./ifc-workspace/NewIfcDialog";
 import {
     clearRecoveryDocuments,
     readRecoveryDocuments,
     writeRecoveryDocuments,
     type RecoveredDocument,
 } from "./ifc-workspace/documentRecovery";
+import {
+    acknowledgeDocumentSave,
+    captureDocumentSave,
+    commitDocumentTransaction,
+    createDocumentTransaction,
+    createWorkspaceDocumentSession,
+    mergePendingViewerChange,
+    readDocumentText,
+    refreshDocumentViewer,
+    requestDocumentViewerLoad,
+    restoreDocumentTransaction,
+    type WorkspaceDocumentSession,
+} from "./ifc-workspace/documentTransaction";
 import { INSPECTOR_MODES } from "./ifc-workspace/inspectorModes";
+import { type NewIfcDraft } from "./ifc-workspace/NewIfcDialog";
 import { SaveDialog } from "./ifc-workspace/SaveDialog";
 import type { SettingsSectionId } from "./ifc-workspace/SettingsDialog";
 import {
     StartPage,
     type StartPageHubDocument,
 } from "./ifc-workspace/StartPage";
-import { VcsOriginStatus } from "./ifc-workspace/VcsOriginStatus";
 import { StructurePanel } from "./ifc-workspace/StructurePanel";
 import type {
     BodyElementDraft,
@@ -210,6 +238,9 @@ import type {
     Point,
     StructureMode,
 } from "./ifc-workspace/types";
+import { UpdateNotification } from "./ifc-workspace/UpdateNotification";
+import { useDocumentSessions } from "./ifc-workspace/useDocumentSessions";
+import { VcsOriginStatus } from "./ifc-workspace/VcsOriginStatus";
 import { NotesPanel, RecentFilesPanel } from "./ifc-workspace/WorkspacePanels";
 import {
     cloneMosaicNode,
@@ -236,31 +267,7 @@ import {
     saveVcsSettings,
     type RecentIfcFileEntry,
 } from "./ifc-workspace/workspaceStorage";
-import { VcsApiClient } from "@/vcs/client";
-import type { VcsDocumentOrigin } from "@/vcs/types";
-import { readDocumentText, refreshDocumentViewer, requestDocumentViewerLoad, mergePendingViewerChange, createWorkspaceDocumentSession, acknowledgeDocumentSave, captureDocumentSave, commitDocumentTransaction, createDocumentTransaction, restoreDocumentTransaction, type WorkspaceDocumentSession } from "./ifc-workspace/documentTransaction";
-import { saveIfcFile } from "@/desktop/saveIfc";
-import { useDocumentSessions } from "./ifc-workspace/useDocumentSessions";
 import type { RelationshipFlowClipboardNode } from "./relationship-flow.types";
-const PsetBatchPanel = lazy(() => import("./ifc-workspace/PsetBatchPanel").then((module) => ({ default: module.PsetBatchPanel })));
-const VcsPanel = lazy(() => import("./ifc-workspace/VcsPanel").then((module) => ({ default: module.VcsPanel })));
-const SpatialStructureDialog = lazy(() => import("./ifc-workspace/SpatialStructureDialog").then((module) => ({ default: module.SpatialStructureDialog })));
-const SettingsDialog = lazy(() => import("./ifc-workspace/SettingsDialog").then((module) => ({ default: module.SettingsDialog })));
-const PortalPanel = lazy(() => import("./ifc-workspace/PortalPanel").then((module) => ({ default: module.PortalPanel })));
-const CheckPanel = lazy(() => import("./ifc-workspace/CheckPanel").then((module) => ({ default: module.CheckPanel })));
-const ResourceReferencesPanel = lazy(() => import("./ifc-workspace/InspectorPanel").then((module) => ({ default: module.ResourceReferencesPanel })));
-const ResourceControlsPanel = lazy(() => import("./ifc-workspace/InspectorPanel").then((module) => ({ default: module.ResourceControlsPanel })));
-const InspectorPanel = lazy(() => import("./ifc-workspace/InspectorPanel").then((module) => ({ default: module.InspectorPanel })));
-const GroupsPanel = lazy(() => import("./ifc-workspace/GroupsPanel").then((module) => ({ default: module.GroupsPanel })));
-const HubAddDialog = lazy(() => import("./ifc-workspace/HubAddDialog").then((module) => ({ default: module.HubAddDialog })));
-const GroupManagerDialog = lazy(() => import("./ifc-workspace/GroupManagerDialog").then((module) => ({ default: module.GroupManagerDialog })));
-const GraphPanel = lazy(() => import("./ifc-workspace/GraphPanel").then((module) => ({ default: module.GraphPanel })));
-const DiagnosticsAssistantPanel = lazy(() => import("./ifc-workspace/DiagnosticsAssistantPanel").then((module) => ({ default: module.DiagnosticsAssistantPanel })));
-const CatalogReviewPanel = lazy(() => import("./ifc-workspace/CatalogPanel").then((module) => ({ default: module.CatalogReviewPanel })));
-const CatalogPanel = lazy(() => import("./ifc-workspace/CatalogPanel").then((module) => ({ default: module.CatalogPanel })));
-const BuilderPanel = lazy(() => import("./ifc-workspace/BuilderPanel").then((module) => ({ default: module.BuilderPanel })));
-
-const ThatOpenViewer = lazy(() => import("./that-open-viewer"));
 import type {
     ViewerContextMenuTarget,
     ViewerCoordinatePick,
@@ -272,6 +279,93 @@ import type {
     ViewerMirrorResult,
     ViewerRotationChange,
 } from "./that-open-viewer.types";
+const PsetBatchPanel = lazy(() =>
+  import("./ifc-workspace/PsetBatchPanel").then((module) => ({
+    default: module.PsetBatchPanel,
+  })),
+);
+const VcsPanel = lazy(() =>
+  import("./ifc-workspace/VcsPanel").then((module) => ({
+    default: module.VcsPanel,
+  })),
+);
+const SpatialStructureDialog = lazy(() =>
+  import("./ifc-workspace/SpatialStructureDialog").then((module) => ({
+    default: module.SpatialStructureDialog,
+  })),
+);
+const SettingsDialog = lazy(() =>
+  import("./ifc-workspace/SettingsDialog").then((module) => ({
+    default: module.SettingsDialog,
+  })),
+);
+const PortalPanel = lazy(() =>
+  import("./ifc-workspace/PortalPanel").then((module) => ({
+    default: module.PortalPanel,
+  })),
+);
+const CheckPanel = lazy(() =>
+  import("./ifc-workspace/CheckPanel").then((module) => ({
+    default: module.CheckPanel,
+  })),
+);
+const ResourceReferencesPanel = lazy(() =>
+  import("./ifc-workspace/InspectorPanel").then((module) => ({
+    default: module.ResourceReferencesPanel,
+  })),
+);
+const ResourceControlsPanel = lazy(() =>
+  import("./ifc-workspace/InspectorPanel").then((module) => ({
+    default: module.ResourceControlsPanel,
+  })),
+);
+const InspectorPanel = lazy(() =>
+  import("./ifc-workspace/InspectorPanel").then((module) => ({
+    default: module.InspectorPanel,
+  })),
+);
+const GroupsPanel = lazy(() =>
+  import("./ifc-workspace/GroupsPanel").then((module) => ({
+    default: module.GroupsPanel,
+  })),
+);
+const HubAddDialog = lazy(() =>
+  import("./ifc-workspace/HubAddDialog").then((module) => ({
+    default: module.HubAddDialog,
+  })),
+);
+const GroupManagerDialog = lazy(() =>
+  import("./ifc-workspace/GroupManagerDialog").then((module) => ({
+    default: module.GroupManagerDialog,
+  })),
+);
+const GraphPanel = lazy(() =>
+  import("./ifc-workspace/GraphPanel").then((module) => ({
+    default: module.GraphPanel,
+  })),
+);
+const DiagnosticsAssistantPanel = lazy(() =>
+  import("./ifc-workspace/DiagnosticsAssistantPanel").then((module) => ({
+    default: module.DiagnosticsAssistantPanel,
+  })),
+);
+const CatalogReviewPanel = lazy(() =>
+  import("./ifc-workspace/CatalogPanel").then((module) => ({
+    default: module.CatalogReviewPanel,
+  })),
+);
+const CatalogPanel = lazy(() =>
+  import("./ifc-workspace/CatalogPanel").then((module) => ({
+    default: module.CatalogPanel,
+  })),
+);
+const BuilderPanel = lazy(() =>
+  import("./ifc-workspace/BuilderPanel").then((module) => ({
+    default: module.BuilderPanel,
+  })),
+);
+
+const ThatOpenViewer = lazy(() => import("./that-open-viewer"));
 
 function matchesEntitySearch(entity: NativeIfcEntity, query: string) {
   const id = String(entity.id);
@@ -311,7 +405,8 @@ export default function IfcWorkspace() {
     };
   });
   const [initialDocument] = useState(createInitialWorkspaceDocument);
-  const [documentSessions, setDocumentSessions] = useDocumentSessions(initialDocument);
+  const [documentSessions, setDocumentSessions] =
+    useDocumentSessions(initialDocument);
   const [activeDocumentId, setActiveDocumentId] = useState(initialDocument.id);
   const [customWorkspaces, setCustomWorkspaces] = useState(
     workspaceBootState.customWorkspaces,
@@ -357,21 +452,29 @@ export default function IfcWorkspace() {
   const [idsModel, setIdsModel] = useState<IdsDocumentModel | null>(null);
   const [idsImporting, setIdsImporting] = useState(false);
   const [selectedCatalogObjectId, setSelectedCatalogObjectId] = useState("");
-  const [attributionPick, setAttributionPick] = useState<AttributionPick | null>(null);
+  const [attributionPick, setAttributionPick] =
+    useState<AttributionPick | null>(null);
   // IFC-Attribuierung läuft als großes Fenster über dem Layout, eingeklappt als Chip in der Kopfzeile (Zustand bleibt gemountet).
-  const [attributionMode, setAttributionMode] = useState<AttributionMode>("closed");
-  const [attributionStatus, setAttributionStatus] = useState<AttributionStatus | null>(null);
+  const [attributionMode, setAttributionMode] =
+    useState<AttributionMode>("closed");
+  const [attributionStatus, setAttributionStatus] =
+    useState<AttributionStatus | null>(null);
   // Schemadatei der Attribuierung: beim Start anwenden, damit das erste Rendern schon dagegen prüft.
-  const [attributionSettings, setAttributionSettingsState] = useState<AttributionSettings>(() => {
-    const loaded = loadAttributionSettings();
-    applyAttributionSettings(loaded);
-    return loaded;
-  });
-  const [schemaRevision, setSchemaRevision] = useState(() => currentSchemaRevision());
+  const [attributionSettings, setAttributionSettingsState] =
+    useState<AttributionSettings>(() => {
+      const loaded = loadAttributionSettings();
+      applyAttributionSettings(loaded);
+      return loaded;
+    });
+  const [schemaRevision, setSchemaRevision] = useState(() =>
+    currentSchemaRevision(),
+  );
   const setAttributionSettings = (next: AttributionSettings) => {
     setSchemaRevision(applyAttributionSettings(next));
     setAttributionSettingsState(next);
-    logAction(`ui.attributionSchema({ file: ${JSON.stringify(next.schemaFile?.name ?? null)} });`);
+    logAction(
+      `ui.attributionSchema({ file: ${JSON.stringify(next.schemaFile?.name ?? null)} });`,
+    );
   };
   const [recentIfcFiles, setRecentIfcFiles] = useState(loadRecentIfcFiles);
   const [notes, setNotes] = useState(loadNotes);
@@ -616,7 +719,9 @@ export default function IfcWorkspace() {
   );
   const closedMosaicIds = useMemo(() => {
     const visibleIds = new Set(getMosaicLeaves(mosaicValue));
-    return MOSAIC_VIEW_IDS.filter((id) => (id === "attribution" ? attributionMode === "closed" : !visibleIds.has(id)));
+    return MOSAIC_VIEW_IDS.filter((id) =>
+      id === "attribution" ? attributionMode === "closed" : !visibleIds.has(id),
+    );
   }, [attributionMode, mosaicValue]);
 
   const normalizedSearch = search.trim().toLowerCase();
@@ -779,7 +884,6 @@ export default function IfcWorkspace() {
     log?: string,
     nextGraphPositions?: Map<number, Point>,
     options?: {
-
       /**
        * Fasst wiederholte Änderungen zusammen: existiert bereits ein
        * ausstehender Eintrag mit diesem key, wird nur dessen Label ersetzt
@@ -798,9 +902,17 @@ export default function IfcWorkspace() {
     const committedSessionId = activeSession.id;
     const transaction = createDocumentTransaction(document, next, summary);
     try {
-      setDocumentSessions((current) => current.map((session) => session.id === committedSessionId
-        ? commitDocumentTransaction(session, transaction, { selectedId: nextSelectedId, graphPositions: nextGraphPositions, pendingKey: options?.pendingKey })
-        : session));
+      setDocumentSessions((current) =>
+        current.map((session) =>
+          session.id === committedSessionId
+            ? commitDocumentTransaction(session, transaction, {
+                selectedId: nextSelectedId,
+                graphPositions: nextGraphPositions,
+                pendingKey: options?.pendingKey,
+              })
+            : session,
+        ),
+      );
     } catch (error) {
       reportFailure("Änderung konnte nicht übernommen werden", error);
       return;
@@ -939,8 +1051,16 @@ export default function IfcWorkspace() {
     if (!entry) return;
     setDeleteRequest(null);
     if (entry.affectsGeometry) dropQueuedMirrorRequests([activeSession.id]);
-    setDocumentSessions((current) => current.map((session) => session.id === activeSession.id ? restoreDocumentTransaction(session, direction) : session));
-    logAction(`history.${direction}({ summary: ${JSON.stringify(entry.summary)} });`);
+    setDocumentSessions((current) =>
+      current.map((session) =>
+        session.id === activeSession.id
+          ? restoreDocumentTransaction(session, direction)
+          : session,
+      ),
+    );
+    logAction(
+      `history.${direction}({ summary: ${JSON.stringify(entry.summary)} });`,
+    );
   };
 
   const undoDocument = () => restoreDocumentHistory("undo");
@@ -1280,7 +1400,13 @@ export default function IfcWorkspace() {
       const nextSessions = loaded.map(({ session }) => session);
       for (const { session, elapsedMs } of loaded) {
         rememberRecentIfc(session, "added", session.sourceIfcFile);
-        logAction("ui.addIfc.file({ file: '" + session.document.fileName + "', parser: 'worker', ms: " + Math.round(elapsedMs) + " });");
+        logAction(
+          "ui.addIfc.file({ file: '" +
+            session.document.fileName +
+            "', parser: 'worker', ms: " +
+            Math.round(elapsedMs) +
+            " });",
+        );
       }
       startTransition(() => {
         setDocumentSessions((current) => [...current, ...nextSessions]);
@@ -1373,11 +1499,13 @@ export default function IfcWorkspace() {
       return;
     }
     const sourceDocument = document;
-    const next = batchNativeDocument(sourceDocument, (draft) => fixes.reduce(
-      (currentDocument, finding) =>
-        applyCatalogQuickFix(currentDocument, selectedId, finding),
-      draft,
-    ));
+    const next = batchNativeDocument(sourceDocument, (draft) =>
+      fixes.reduce(
+        (currentDocument, finding) =>
+          applyCatalogQuickFix(currentDocument, selectedId, finding),
+        draft,
+      ),
+    );
     if (next === sourceDocument) {
       return;
     }
@@ -1447,24 +1575,34 @@ export default function IfcWorkspace() {
   const exportIfc = async (): Promise<boolean> => {
     if (saveInFlight.current) return false;
     saveInFlight.current = true;
-    const fileName = (document.fileName.replace(/\.ifc$/i, "") || "IFCnative") + ".ifc";
+    const fileName =
+      (document.fileName.replace(/\.ifc$/i, "") || "IFCnative") + ".ifc";
     try {
       const snapshot = captureDocumentSave(activeSession);
       const result = await saveIfcFile(fileName, snapshot.text);
       if (result.status === "cancelled") return false;
       if (result.status === "saved") {
-        setDocumentSessions((current) => current.map((session) => acknowledgeDocumentSave(session, snapshot)));
+        setDocumentSessions((current) =>
+          current.map((session) => acknowledgeDocumentSave(session, snapshot)),
+        );
       }
       setStatusAlert({
-        message: result.status === "saved" ? `${fileName} gespeichert.` : `Download von ${fileName} gestartet. Die Wiederherstellung bleibt erhalten, bis eine Speicherung bestätigt werden kann.`,
+        message:
+          result.status === "saved"
+            ? `${fileName} gespeichert.`
+            : `Download von ${fileName} gestartet. Die Wiederherstellung bleibt erhalten, bis eine Speicherung bestätigt werden kann.`,
         tone: "success",
       });
-      logAction(`ui.exportIfc({ file: ${JSON.stringify(fileName)}, status: '${result.status}' });`);
+      logAction(
+        `ui.exportIfc({ file: ${JSON.stringify(fileName)}, status: '${result.status}' });`,
+      );
       return true;
     } catch (error) {
       reportFailure(`Export von ${fileName} fehlgeschlagen`, error);
       return false;
-    } finally { saveInFlight.current = false; }
+    } finally {
+      saveInFlight.current = false;
+    }
   };
 
   // Aktueller Stand als IFC-Text für die IFC-Ablage (gleiche Cache-Regel wie
@@ -1480,7 +1618,11 @@ export default function IfcWorkspace() {
   ) => {
     setLoadingIfcName(fileName);
     try {
-      const { session } = await loadWorkspaceDocument({ text, fileName, origin });
+      const { session } = await loadWorkspaceDocument({
+        text,
+        fileName,
+        origin,
+      });
       startTransition(() => {
         setDocumentSessions((current) => [...current, session]);
         setActiveDocumentId(session.id);
@@ -1501,9 +1643,12 @@ export default function IfcWorkspace() {
       setLoadingIfcName(
         files.length === 1 ? files[0].name : `${files.length} IFC-Dateien`,
       );
-      const loaded = await loadWorkspaceDocuments(files.map((file) => ({ file })));
+      const loaded = await loadWorkspaceDocuments(
+        files.map((file) => ({ file })),
+      );
       const nextSessions = loaded.map(({ session }) => session);
-      for (const session of nextSessions) rememberRecentIfc(session, "opened", session.sourceIfcFile);
+      for (const session of nextSessions)
+        rememberRecentIfc(session, "opened", session.sourceIfcFile);
       startTransition(() => {
         setDocumentSessions(nextSessions);
         setActiveDocumentId(nextSessions[0].id);
@@ -1550,27 +1695,57 @@ export default function IfcWorkspace() {
 
   // "Vom IFC Hub hinzufügen"-Dialog: Stände als ZUSÄTZLICHE Tabs öffnen,
   // offene Dokumente bleiben erhalten.
-  const loadHubDocuments = async (hubDocuments: StartPageHubDocument[], append: boolean) => {
+  const loadHubDocuments = async (
+    hubDocuments: StartPageHubDocument[],
+    append: boolean,
+  ) => {
     if (!hubDocuments.length) return;
-    setLoadingIfcName(hubDocuments.length === 1 ? hubDocuments[0].fileName : hubDocuments.length + " Modelle vom IFC Hub");
+    setLoadingIfcName(
+      hubDocuments.length === 1
+        ? hubDocuments[0].fileName
+        : hubDocuments.length + " Modelle vom IFC Hub",
+    );
     try {
       const loaded = await loadWorkspaceDocuments(hubDocuments);
       const nextSessions = loaded.map(({ session }) => session);
       startTransition(() => {
-        setDocumentSessions((current) => append ? [...current, ...nextSessions] : nextSessions);
-        setActiveDocumentId(nextSessions[append ? nextSessions.length - 1 : 0].id);
+        setDocumentSessions((current) =>
+          append ? [...current, ...nextSessions] : nextSessions,
+        );
+        setActiveDocumentId(
+          nextSessions[append ? nextSessions.length - 1 : 0].id,
+        );
       });
-      for (const session of nextSessions) rememberRecentIfc(session, append ? "added" : "opened", session.sourceIfcFile);
+      for (const session of nextSessions)
+        rememberRecentIfc(
+          session,
+          append ? "added" : "opened",
+          session.sourceIfcFile,
+        );
       if (append) setHubAddOpen(false);
-      const label = hubDocuments.length === 1 ? hubDocuments[0].fileName : hubDocuments.length + " Modelle";
-      setStatusAlert({ message: label + " vom IFC Hub " + (append ? "hinzugefügt." : "geladen."), tone: "success" });
-      logAction("ui." + (append ? "menubar.hubAdd" : "startPage.hubOpen") + "({ files: " + hubDocuments.length + " });");
+      const label =
+        hubDocuments.length === 1
+          ? hubDocuments[0].fileName
+          : hubDocuments.length + " Modelle";
+      setStatusAlert({
+        message:
+          label + " vom IFC Hub " + (append ? "hinzugefügt." : "geladen."),
+        tone: "success",
+      });
+      logAction(
+        "ui." +
+          (append ? "menubar.hubAdd" : "startPage.hubOpen") +
+          "({ files: " +
+          hubDocuments.length +
+          " });",
+      );
     } finally {
       setLoadingIfcName("");
     }
   };
 
-  const addHubDocuments = (documents: StartPageHubDocument[]) => loadHubDocuments(documents, true);
+  const addHubDocuments = (documents: StartPageHubDocument[]) =>
+    loadHubDocuments(documents, true);
   const openHubDocuments = async (documents: StartPageHubDocument[]) => {
     try {
       await loadHubDocuments(documents, false);
@@ -1593,7 +1768,10 @@ export default function IfcWorkspace() {
         siteName: draft.siteName,
         storeyName: draft.storeyName,
       });
-      const { session: loaded } = await loadWorkspaceDocument({ text, fileName: draft.fileName });
+      const { session: loaded } = await loadWorkspaceDocument({
+        text,
+        fileName: draft.fileName,
+      });
       const session: WorkspaceDocumentSession = {
         ...loaded,
         // Die frische Datei existiert noch nirgendwo auf der Platte —
@@ -1671,32 +1849,43 @@ export default function IfcWorkspace() {
     if (!vcsAuth) {
       throw new Error("Nicht am IFC Hub angemeldet.");
     }
-    if (saveInFlight.current) throw new Error("Eine Speicherung läuft bereits.");
+    if (saveInFlight.current)
+      throw new Error("Eine Speicherung läuft bereits.");
     saveInFlight.current = true;
     try {
-    const snapshot = captureDocumentSave(activeSession);
-    const client = new VcsApiClient(vcsSettings, vcsAuth);
-    const ifcText = snapshot.text;
-    const result = await client.createCommit(
-      origin.projectSlug,
-      origin.modelSlug,
-      { branch: origin.branch, message, ifcText },
-    );
-    setDocumentSessions((current) => current.map((session) => session.id === snapshot.sessionId ? {
-      ...acknowledgeDocumentSave(session, snapshot),
-      vcsOrigin: session.vcsOrigin ? { ...session.vcsOrigin, commitId: result.commit.id } : null,
-    } : session));
-    setSaveDialogOpen(false);
-    setStatusAlert({
-      message: result.diff.identical
-        ? `Commit ${result.commit.id.slice(0, 8)} auf ${origin.branch} angelegt (Stand identisch mit dem Branch-Kopf).`
-        : `Commit ${result.commit.id.slice(0, 8)} auf ${origin.branch} angelegt: ${result.diff.added.length} neu, ${result.diff.modified.length} geändert, ${result.diff.removed.length} entfernt.`,
-      tone: "success",
-    });
-    logAction(
-      `ui.saveDialog.commit({ project: '${origin.projectSlug}', model: '${origin.modelSlug}', branch: '${origin.branch}', commit: '${result.commit.id.slice(0, 8)}' });`,
-    );
-    } finally { saveInFlight.current = false; }
+      const snapshot = captureDocumentSave(activeSession);
+      const client = new VcsApiClient(vcsSettings, vcsAuth);
+      const ifcText = snapshot.text;
+      const result = await client.createCommit(
+        origin.projectSlug,
+        origin.modelSlug,
+        { branch: origin.branch, message, ifcText },
+      );
+      setDocumentSessions((current) =>
+        current.map((session) =>
+          session.id === snapshot.sessionId
+            ? {
+                ...acknowledgeDocumentSave(session, snapshot),
+                vcsOrigin: session.vcsOrigin
+                  ? { ...session.vcsOrigin, commitId: result.commit.id }
+                  : null,
+              }
+            : session,
+        ),
+      );
+      setSaveDialogOpen(false);
+      setStatusAlert({
+        message: result.diff.identical
+          ? `Commit ${result.commit.id.slice(0, 8)} auf ${origin.branch} angelegt (Stand identisch mit dem Branch-Kopf).`
+          : `Commit ${result.commit.id.slice(0, 8)} auf ${origin.branch} angelegt: ${result.diff.added.length} neu, ${result.diff.modified.length} geändert, ${result.diff.removed.length} entfernt.`,
+        tone: "success",
+      });
+      logAction(
+        `ui.saveDialog.commit({ project: '${origin.projectSlug}', model: '${origin.modelSlug}', branch: '${origin.branch}', commit: '${result.commit.id.slice(0, 8)}' });`,
+      );
+    } finally {
+      saveInFlight.current = false;
+    }
   };
 
   // Erfolgsmeldungen verschwinden von selbst; Fehler bleiben stehen, bis sie
@@ -1814,6 +2003,33 @@ export default function IfcWorkspace() {
   );
   const autosaveSessionsRef = useRef(documentSessions);
   autosaveSessionsRef.current = documentSessions;
+  const recoveredDocumentsRef = useRef(recoveredDocuments);
+  recoveredDocumentsRef.current = recoveredDocuments;
+  const loadingIfcRef = useRef(loadingIfcName);
+  loadingIfcRef.current = loadingIfcName;
+  useUpdateScheduler();
+  useEffect(() => {
+    editorUpdates.setInstallGuard(
+      () =>
+        !autosaveSessionsRef.current.some(
+          (session) => session.hasUnexportedChanges,
+        ) &&
+        !saveInFlight.current &&
+        !loadingIfcRef.current,
+    );
+    editorUpdates.setBeforeInstall(async () => {
+      // The guard guarantees no dirty sessions, so a stale autosave snapshot
+      // would only produce a misleading recovery banner after the restart.
+      // A recovery the user has not decided on yet must survive.
+      if (recoveredDocumentsRef.current.length) return;
+      await clearRecoveryDocuments();
+      persistedDocumentsRef.current = new Map();
+    });
+    return () => {
+      editorUpdates.setInstallGuard(() => false);
+      editorUpdates.setBeforeInstall(() => {});
+    };
+  }, []);
   const autosaveBlockedRef = useRef(true);
   autosaveBlockedRef.current =
     !recoveryChecked || recoveredDocuments.length > 0;
@@ -1997,7 +2213,6 @@ export default function IfcWorkspace() {
       `Edit #${selectedId} ${draft.type}`,
       `saveEdit({ id: ${selectedId}, class: '${draft.type}' });`,
       undefined,
-
     );
   };
 
@@ -2600,13 +2815,13 @@ export default function IfcWorkspace() {
     let added = 0;
     const next = batchNativeDocument(document, (draft) => {
       let next = draft;
-    for (const id of batchSelectionIds) {
-      if (findEntityPsetByName(next, id, name)) {
-        continue;
+      for (const id of batchSelectionIds) {
+        if (findEntityPsetByName(next, id, name)) {
+          continue;
+        }
+        next = addNativeEmptyPropertySet(next, id, name);
+        added += 1;
       }
-      next = addNativeEmptyPropertySet(next, id, name);
-      added += 1;
-    }
       return next;
     });
     if (next === document) {
@@ -2661,36 +2876,37 @@ export default function IfcWorkspace() {
     let addedProperties = 0;
     const next = batchNativeDocument(document, (draft) => {
       let next = draft;
-    for (const id of batchSelectionIds) {
-      for (const group of groups.values()) {
-        const existingSet = findEntityPsetByName(next, id, group.name);
-        const existingNames = new Set(
-          (existingSet?.values ?? []).map((property) =>
-            property.name.trim().toLowerCase(),
-          ),
-        );
-        const missingProperties = [...group.properties.values()].filter(
-          (property) => !existingNames.has(property.name.trim().toLowerCase()),
-        );
-        if (missingProperties.length === 0) {
-          continue;
-        }
-        next = mergeNativePropertySetValues(
-          next,
-          id,
-          group.name,
-          missingProperties.map((property) => ({
-            name: property.name,
-            value: "",
-            valueType: property.valueType,
-          })),
-        );
-        addedProperties += missingProperties.length;
-        if (!existingSet) {
-          addedPsets += 1;
+      for (const id of batchSelectionIds) {
+        for (const group of groups.values()) {
+          const existingSet = findEntityPsetByName(next, id, group.name);
+          const existingNames = new Set(
+            (existingSet?.values ?? []).map((property) =>
+              property.name.trim().toLowerCase(),
+            ),
+          );
+          const missingProperties = [...group.properties.values()].filter(
+            (property) =>
+              !existingNames.has(property.name.trim().toLowerCase()),
+          );
+          if (missingProperties.length === 0) {
+            continue;
+          }
+          next = mergeNativePropertySetValues(
+            next,
+            id,
+            group.name,
+            missingProperties.map((property) => ({
+              name: property.name,
+              value: "",
+              valueType: property.valueType,
+            })),
+          );
+          addedProperties += missingProperties.length;
+          if (!existingSet) {
+            addedPsets += 1;
+          }
         }
       }
-    }
       return next;
     });
     if (next === document) {
@@ -2722,23 +2938,23 @@ export default function IfcWorkspace() {
     let added = 0;
     const next = batchNativeDocument(document, (draft) => {
       let next = draft;
-    for (const id of batchSelectionIds) {
-      const set = findEntityPsetByName(next, id, psetName);
-      if (set) {
-        const exists = set.values.some(
-          (item) => item.name.trim().toLowerCase() === name.toLowerCase(),
-        );
-        if (exists) {
-          continue;
+      for (const id of batchSelectionIds) {
+        const set = findEntityPsetByName(next, id, psetName);
+        if (set) {
+          const exists = set.values.some(
+            (item) => item.name.trim().toLowerCase() === name.toLowerCase(),
+          );
+          if (exists) {
+            continue;
+          }
+          next = addNativePropertyToSet(next, set.id, name, value, valueType);
+        } else {
+          next = addNativePropertySetValues(next, id, psetName, [
+            { name, value, valueType },
+          ]);
         }
-        next = addNativePropertyToSet(next, set.id, name, value, valueType);
-      } else {
-        next = addNativePropertySetValues(next, id, psetName, [
-          { name, value, valueType },
-        ]);
+        added += 1;
       }
-      added += 1;
-    }
       return next;
     });
     if (next === document) {
@@ -2770,23 +2986,23 @@ export default function IfcWorkspace() {
     let changed = 0;
     const next = batchNativeDocument(document, (draft) => {
       let next = draft;
-    for (const id of batchSelectionIds) {
-      const set = findEntityPsetByName(next, id, psetName);
-      const property = set?.values.find(
-        (item) => item.name.trim().toLowerCase() === token,
-      );
-      if (!property) {
-        continue;
+      for (const id of batchSelectionIds) {
+        const set = findEntityPsetByName(next, id, psetName);
+        const property = set?.values.find(
+          (item) => item.name.trim().toLowerCase() === token,
+        );
+        if (!property) {
+          continue;
+        }
+        const updated = updateNativePropertyValue(next, property.id, {
+          value: readSimplePropertyValueText(next.entityById.get(property.id)),
+          valueType,
+        });
+        if (updated !== next) {
+          next = updated;
+          changed += 1;
+        }
       }
-      const updated = updateNativePropertyValue(next, property.id, {
-        value: readSimplePropertyValueText(next.entityById.get(property.id)),
-        valueType,
-      });
-      if (updated !== next) {
-        next = updated;
-        changed += 1;
-      }
-    }
       return next;
     });
     if (next === document) {
@@ -3549,7 +3765,6 @@ export default function IfcWorkspace() {
       undefined,
       {
         pendingKey,
-
       },
     );
     return { label, pendingKey };
@@ -3601,7 +3816,6 @@ export default function IfcWorkspace() {
       undefined,
       {
         pendingKey,
-
       },
     );
     return { label, pendingKey };
@@ -3738,7 +3952,10 @@ export default function IfcWorkspace() {
         />
       </div>
       <div className="relative shrink-0">
-        <Search aria-hidden className="pointer-events-none absolute left-2 top-1/2 z-10 size-3 -translate-y-1/2 text-muted-foreground" />
+        <Search
+          aria-hidden
+          className="pointer-events-none absolute left-2 top-1/2 z-10 size-3 -translate-y-1/2 text-muted-foreground"
+        />
         <Input
           value={search}
           onChange={(event) => setSearch(event.currentTarget.value)}
@@ -4073,8 +4290,14 @@ export default function IfcWorkspace() {
         return (
           <TileContent>
             <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-xs text-muted-foreground">
-              <p>Die IFC-Attribuierung läuft als großes Fenster über dem Layout.</p>
-              <Button size="sm" variant="outline" onClick={() => setAttributionMode("open")}>
+              <p>
+                Die IFC-Attribuierung läuft als großes Fenster über dem Layout.
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setAttributionMode("open")}
+              >
                 Fenster öffnen
               </Button>
             </div>
@@ -4157,7 +4380,6 @@ export default function IfcWorkspace() {
                   summary,
                   `portal.applyImport({ summary: '${summary.replace(/'/g, "\\'")}' });`,
                   undefined,
-
                 )
               }
               onSelectEntity={(id) => selectEntity(id, "portal")}
@@ -4387,9 +4609,13 @@ export default function IfcWorkspace() {
     </div>
   ) : null;
 
-    if (showStartPage) {
-      return (
-        <div className="start-page-workspace relative isolate flex min-h-screen flex-col overflow-hidden bg-background text-foreground">
+  if (showStartPage) {
+    return (
+      <div className="start-page-workspace relative isolate flex min-h-screen flex-col overflow-hidden bg-background text-foreground">
+        <UpdateNotification
+          hidden={settingsOpen}
+          onOpenSettings={() => openSettings("updates")}
+        />
         {recoveryBanner}
         {statusAlertBar}
         {/* Ohne Menüleiste: Einstellungen (inkl. Farbschema) oben rechts. */}
@@ -4404,19 +4630,23 @@ export default function IfcWorkspace() {
             <Settings aria-hidden className="size-4" />
           </IconButton>
         </div>
-        {settingsOpen ? <Suspense fallback={null}><SettingsDialog
-          defaultSection={settingsSection}
-          open={settingsOpen}
-          portalSettings={portalSettings}
-          vcsAuth={vcsAuth}
-          vcsSettings={vcsSettings}
-          onOpenChange={setSettingsOpen}
-          onPortalSettingsChange={setPortalSettings}
-          onVcsAuthChange={setVcsAuth}
-          attributionSettings={attributionSettings}
-          onAttributionSettingsChange={setAttributionSettings}
-          onVcsSettingsChange={setVcsSettings}
-        /></Suspense> : null}
+        {settingsOpen ? (
+          <Suspense fallback={null}>
+            <SettingsDialog
+              defaultSection={settingsSection}
+              open={settingsOpen}
+              portalSettings={portalSettings}
+              vcsAuth={vcsAuth}
+              vcsSettings={vcsSettings}
+              onOpenChange={setSettingsOpen}
+              onPortalSettingsChange={setPortalSettings}
+              onVcsAuthChange={setVcsAuth}
+              attributionSettings={attributionSettings}
+              onAttributionSettingsChange={setAttributionSettings}
+              onVcsSettingsChange={setVcsSettings}
+            />
+          </Suspense>
+        ) : null}
         <StartPage
           auth={vcsAuth}
           loadingName={loadingIfcName}
@@ -4436,6 +4666,10 @@ export default function IfcWorkspace() {
 
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
+      <UpdateNotification
+        hidden={settingsOpen}
+        onOpenSettings={() => openSettings("updates")}
+      />
       <header className="relative z-20 flex shrink-0 flex-col border-b border-border/70 bg-card/95 shadow-sm backdrop-blur">
         <div className="flex h-9 items-center gap-2 px-2">
           <img
@@ -4512,7 +4746,19 @@ export default function IfcWorkspace() {
         </div>
         <div className="flex items-center bg-muted/50 px-1.5 py-1">
           {renderDocumentTabs()}
-          <AttributionHeaderChip mode={attributionMode} status={attributionStatus && attributionStatus.document !== document ? { ...attributionStatus, pending: true } : attributionStatus} onToggle={() => setAttributionMode((current) => (current === "open" ? "collapsed" : "open"))} />
+          <AttributionHeaderChip
+            mode={attributionMode}
+            status={
+              attributionStatus && attributionStatus.document !== document
+                ? { ...attributionStatus, pending: true }
+                : attributionStatus
+            }
+            onToggle={() =>
+              setAttributionMode((current) =>
+                current === "open" ? "collapsed" : "open",
+              )
+            }
+          />
         </div>
       </header>
 
@@ -4539,50 +4785,72 @@ export default function IfcWorkspace() {
 
       {/* Viewer dauerhaft gemountet; die Mosaic-Kachel zeigt nur den Host. */}
       {createPortal(
-        <Suspense fallback={<div className="p-4 text-xs text-muted-foreground">3D-Viewer lädt…</div>}><ThatOpenViewer
-          activeDocumentId={activeSession.id}
-          activeModelDeferredReason={
-            activeSession.viewerModelDeferredReason
+        <Suspense
+          fallback={
+            <div className="p-4 text-xs text-muted-foreground">
+              3D-Viewer lädt…
+            </div>
           }
-          activeModelFileName={activeSession.document.fileName}
-          activeModelLoaded={activeSession.viewerModelLoadRequested}
-          combineSelectionCount={viewerCombineCount}
-          cutPlane={viewerCutPlane}
-          editCapabilities={viewerEditCapabilities}
-          focusRequest={viewerFocusRequest}
-          mirrorRequests={viewerMirrorRequests}
-          models={viewerModels}
-          pendingViewerChanges={activeSession.pendingViewerChanges.map(
-            (change) => change.label,
-          )}
-          selectedEntityIds={batchSelectionIds}
-          onLog={logAction}
-          onAddBodyAt={addBodyAtViewerPoint}
-          onCombineSelected={() =>
-            combineSelectedBodies("Kombiniertes Teil", true)
-          }
-          onCutPlaneActiveChange={setCutPlaneActive}
-          onCutPlaneAxisCycle={cycleCutPlaneAxis}
-          onCutPlaneChange={applyViewerCutPlaneChange}
-          onCutPlaneModeChange={setCutPlaneMode}
-          onDeleteBody={deleteBodyForEntity}
-          onDuplicateBody={duplicateBodyForEntity}
-          onLoadActiveModel={requestActiveViewerLoad}
-          onMirrorApplied={applyViewerMirrorResult}
-          onMoveSelected={nudgeSelectedPlacement}
-          onPickCoordinates={storePickedCoordinates}
-          onRecalculateModel={recalculateViewerModel}
-          onRotateSelected={rotateSelectedPlacement}
-          onViewerMounted={recalculateStaleViewerSessions}
-          onSelect={selectEntity}
-          onSplitSelected={splitSelectedBody}
-        /></Suspense>,
+        >
+          <ThatOpenViewer
+            activeDocumentId={activeSession.id}
+            activeModelDeferredReason={activeSession.viewerModelDeferredReason}
+            activeModelFileName={activeSession.document.fileName}
+            activeModelLoaded={activeSession.viewerModelLoadRequested}
+            combineSelectionCount={viewerCombineCount}
+            cutPlane={viewerCutPlane}
+            editCapabilities={viewerEditCapabilities}
+            focusRequest={viewerFocusRequest}
+            mirrorRequests={viewerMirrorRequests}
+            models={viewerModels}
+            pendingViewerChanges={activeSession.pendingViewerChanges.map(
+              (change) => change.label,
+            )}
+            selectedEntityIds={batchSelectionIds}
+            onLog={logAction}
+            onAddBodyAt={addBodyAtViewerPoint}
+            onCombineSelected={() =>
+              combineSelectedBodies("Kombiniertes Teil", true)
+            }
+            onCutPlaneActiveChange={setCutPlaneActive}
+            onCutPlaneAxisCycle={cycleCutPlaneAxis}
+            onCutPlaneChange={applyViewerCutPlaneChange}
+            onCutPlaneModeChange={setCutPlaneMode}
+            onDeleteBody={deleteBodyForEntity}
+            onDuplicateBody={duplicateBodyForEntity}
+            onLoadActiveModel={requestActiveViewerLoad}
+            onMirrorApplied={applyViewerMirrorResult}
+            onMoveSelected={nudgeSelectedPlacement}
+            onPickCoordinates={storePickedCoordinates}
+            onRecalculateModel={recalculateViewerModel}
+            onRotateSelected={rotateSelectedPlacement}
+            onViewerMounted={recalculateStaleViewerSessions}
+            onSelect={selectEntity}
+            onSplitSelected={splitSelectedBody}
+          />
+        </Suspense>,
         viewerHost.element,
       )}
 
       {attributionMode !== "closed" ? (
-        <Suspense fallback={<div className="fixed bottom-4 right-4 rounded bg-card p-3">Attribuierung lädt…</div>}><AttributionOverlay collapsed={attributionMode === "collapsed"} status={attributionStatus && attributionStatus.document !== document ? { ...attributionStatus, pending: true } : attributionStatus} onCollapse={() => setAttributionMode("collapsed")} onClose={() => setAttributionMode("closed")}>
-          <AttributionPanel
+        <Suspense
+          fallback={
+            <div className="fixed bottom-4 right-4 rounded bg-card p-3">
+              Attribuierung lädt…
+            </div>
+          }
+        >
+          <AttributionOverlay
+            collapsed={attributionMode === "collapsed"}
+            status={
+              attributionStatus && attributionStatus.document !== document
+                ? { ...attributionStatus, pending: true }
+                : attributionStatus
+            }
+            onCollapse={() => setAttributionMode("collapsed")}
+            onClose={() => setAttributionMode("closed")}
+          >
+            <AttributionPanel
               activeSessionId={activeSession.id}
               coordinateClipboard={coordinateClipboard}
               document={viewerDocument}
@@ -4608,7 +4876,11 @@ export default function IfcWorkspace() {
               schemaFileName={attributionSettings.schemaFile?.name ?? null}
               schemaRevision={schemaRevision}
               onCommit={(mutate, summary, log) => {
-                const { document: next, createdEntityIds: created, movedEntityIds: moved } = unwrapMutation(batchNativeDocument(document, mutate));
+                const {
+                  document: next,
+                  createdEntityIds: created,
+                  movedEntityIds: moved,
+                } = unwrapMutation(batchNativeDocument(document, mutate));
                 if (next === document) return;
                 if (!created.length && !moved.length) {
                   commitDocument(next, selectedId, summary, log);
@@ -4617,15 +4889,27 @@ export default function IfcWorkspace() {
                 // Neue oder verschobene Marker sofort im Viewer zeigen: exakte Geometrie als Mini-IFC nachkonvertieren (wie der Baukasten).
                 const affected = [...created, ...moved];
                 const subset = extractNativeSubsetIfc(next, affected);
-                commitDocument(next, created[0] ?? selectedId, summary, log, undefined, {
-
-                  viewerMirror: subset
-                    ? { entityIds: affected, kind: "reconvert-subset", replacedEntityIds: moved, subsetIfcText: subset.text }
-                    : undefined,
-                });
+                commitDocument(
+                  next,
+                  created[0] ?? selectedId,
+                  summary,
+                  log,
+                  undefined,
+                  {
+                    viewerMirror: subset
+                      ? {
+                          entityIds: affected,
+                          kind: "reconvert-subset",
+                          replacedEntityIds: moved,
+                          subsetIfcText: subset.text,
+                        }
+                      : undefined,
+                  },
+                );
               }}
             />
-        </AttributionOverlay></Suspense>
+          </AttributionOverlay>
+        </Suspense>
       ) : null}
 
       <DeleteEntityDialog
@@ -4635,16 +4919,26 @@ export default function IfcWorkspace() {
         onConfirm={confirmDeleteEntity}
       />
 
-      {structureDialogOpen ? <Suspense fallback={null}><SpatialStructureDialog
-        defaultProjectName={document.fileName.replace(/\.ifc$/i, "") || "Projekt"}
-        hasProject={Boolean(document.entitiesByType.get("IFCPROJECT")?.length)}
-        open={structureDialogOpen}
-        orphanCount={
-          structureDialogOpen ? listNativeUnassignedProductIds(document).length : 0
-        }
-        onCreate={applySpatialStructure}
-        onOpenChange={setStructureDialogOpen}
-      /></Suspense> : null}
+      {structureDialogOpen ? (
+        <Suspense fallback={null}>
+          <SpatialStructureDialog
+            defaultProjectName={
+              document.fileName.replace(/\.ifc$/i, "") || "Projekt"
+            }
+            hasProject={Boolean(
+              document.entitiesByType.get("IFCPROJECT")?.length,
+            )}
+            open={structureDialogOpen}
+            orphanCount={
+              structureDialogOpen
+                ? listNativeUnassignedProductIds(document).length
+                : 0
+            }
+            onCreate={applySpatialStructure}
+            onOpenChange={setStructureDialogOpen}
+          />
+        </Suspense>
+      ) : null}
 
       <SaveDialog
         canCommit={Boolean(vcsAuth)}
@@ -4670,29 +4964,37 @@ export default function IfcWorkspace() {
         onVcsSettingsChange={setVcsSettings}
       />
 
-      {hubAddOpen ? <Suspense fallback={null}><HubAddDialog
-        auth={vcsAuth}
-        busy={Boolean(loadingIfcName)}
-        open={hubAddOpen}
-        settings={vcsSettings}
-        onAddDocuments={addHubDocuments}
-        onAuthChange={setVcsAuth}
-        onOpenChange={setHubAddOpen}
-        onSettingsChange={setVcsSettings}
-      /></Suspense> : null}
+      {hubAddOpen ? (
+        <Suspense fallback={null}>
+          <HubAddDialog
+            auth={vcsAuth}
+            busy={Boolean(loadingIfcName)}
+            open={hubAddOpen}
+            settings={vcsSettings}
+            onAddDocuments={addHubDocuments}
+            onAuthChange={setVcsAuth}
+            onOpenChange={setHubAddOpen}
+            onSettingsChange={setVcsSettings}
+          />
+        </Suspense>
+      ) : null}
 
-      {groupManagerEntityId != null ? <Suspense fallback={null}><GroupManagerDialog
-        document={document}
-        entity={
-          groupManagerEntityId != null
-            ? (document.entityById.get(groupManagerEntityId) ?? null)
-            : null
-        }
-        onAssignToGroup={assignEntityToGroup}
-        onClose={() => setGroupManagerEntityId(null)}
-        onCreateGroup={createGroupForEntity}
-        onRemoveMembership={removeGroupMembership}
-      /></Suspense> : null}
+      {groupManagerEntityId != null ? (
+        <Suspense fallback={null}>
+          <GroupManagerDialog
+            document={document}
+            entity={
+              groupManagerEntityId != null
+                ? (document.entityById.get(groupManagerEntityId) ?? null)
+                : null
+            }
+            onAssignToGroup={assignEntityToGroup}
+            onClose={() => setGroupManagerEntityId(null)}
+            onCreateGroup={createGroupForEntity}
+            onRemoveMembership={removeGroupMembership}
+          />
+        </Suspense>
+      ) : null}
 
       <footer className="flex h-6 shrink-0 items-center gap-3 overflow-hidden border-t border-border/70 bg-card px-3 text-[11px] text-muted-foreground">
         <span className="shrink-0 font-medium text-foreground/80">
@@ -4770,10 +5072,20 @@ export default function IfcWorkspace() {
   );
 }
 
-function TileContent({ children, className }: { children: React.ReactNode; className?: string }) {
+function TileContent({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
     <div className={cn("flex h-full min-h-0 flex-col gap-3", className)}>
-      <Suspense fallback={<div className="p-4 text-xs text-muted-foreground">Lädt…</div>}>
+      <Suspense
+        fallback={
+          <div className="p-4 text-xs text-muted-foreground">Lädt…</div>
+        }
+      >
         {children}
       </Suspense>
     </div>
@@ -4833,12 +5145,16 @@ function pickIfcFile() {
 }
 
 function pickIfcFiles(multiple: boolean) {
-  return pickFiles(".ifc,application/x-step,text/plain,application/octet-stream", multiple)
-    .then((files) => files.map((file) => ({ file, name: file.name })));
+  return pickFiles(
+    ".ifc,application/x-step,text/plain,application/octet-stream",
+    multiple,
+  ).then((files) => files.map((file) => ({ file, name: file.name })));
 }
 
 async function pickCatalogFile() {
-  const [file] = await pickFiles(".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel");
+  const [file] = await pickFiles(
+    ".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel",
+  );
   return file ? { file, name: file.name } : undefined;
 }
 
@@ -4989,8 +5305,6 @@ function formatCoordinate(value: number) {
   const rounded = Math.round(value * 1000) / 1000;
   return String(Object.is(rounded, -0) ? 0 : rounded);
 }
-
-
 
 function readBodyCoordinate(value: string | undefined) {
   return parseDecimalInput(value);

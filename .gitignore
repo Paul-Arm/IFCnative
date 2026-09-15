@@ -12,7 +12,11 @@ release/
 **/src-tauri/target/
 
 *.orig.*
+# Private signing keys and certificate exports
 *.key
+*.pfx
+*.p12
+editor/.release-keys/
 
 # debug
 npm-debug.*
@@ -25,6 +29,7 @@ yarn-error.*
 
 # local env files
 .env*.local
+editor/.env
 
 # IFC version control server local data
 .ifc-vcs-data/
