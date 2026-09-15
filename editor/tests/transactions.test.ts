@@ -5,6 +5,8 @@ import {
   addNativeQuantitySet, mergeNativePropertySetValues, addNativePropertyToSet, batchNativeDocument,
   createNativeSampleDocument, getNativePlacement, getNativePlacementWorldFrame,
   parseNativeIfcText, readReferences, removeNativePropertySet, serializeNativeIfcDocument,
+  splitNativeBodyByPlane,
+  assignNativeMaterial, canAssignNativeMaterial, createNativeMaterial, updateNativeMaterial,
   updateNativeEntity, updateNativePlacement, updateNativePlacementRotation, updateNativePropertyValue,
   type NativeIfcDocument,
 } from "../src/ifc/nativeDocument";
@@ -28,6 +30,73 @@ const sharedPlacement = () => parse(`
 #3=IFCLOCALPLACEMENT($,#2);
 #4=IFCWALL('0000000000000000000001',$,'A',$,$,#3,$,$,.NOTDEFINED.);
 #5=IFCWALL('0000000000000000000002',$,'B',$,$,#3,$,$,.NOTDEFINED.);`);
+
+test("material library creates and edits schema-correct standalone materials with STEP escaping", () => {
+  for (const schema of ["IFC4", "IFC2X3"]) {
+    const base = parse("#1=IFCCARTESIANPOINT((0.,0.,0.));", schema);
+    const draft = { name: "Béton O'Brien", description: "Dämmung", category: "Beton" };
+    const created = createNativeMaterial(base, draft);
+    assert.equal(created.document.entitiesByType.get("IFCRELASSOCIATESMATERIAL"), undefined);
+    const material = created.document.entityById.get(created.materialId)!;
+    assert.equal(material.name, draft.name);
+    assert.equal(material.args.length, schema === "IFC2X3" ? 1 : 3);
+    const edited = updateNativeMaterial(created.document, material.id, { ...draft, name: "Stahl", category: "Metall" });
+    const reopened = parseNativeIfcText(serializeNativeIfcDocument(edited), "materials.ifc");
+    assert.equal(reopened.entityById.get(material.id)?.name, "Stahl");
+    assert.equal(reopened.entityById.get(material.id)?.description, schema === "IFC2X3" ? "" : draft.description);
+    assert.equal(material.name, draft.name, "editing never mutates shared source data");
+    const session = createWorkspaceDocumentSession(created.document);
+    const committed = commitDocumentTransaction(session, createDocumentTransaction(created.document, edited, "Edit material"));
+    assert.equal(committed.hasUnexportedChanges, true);
+    assert.deepEqual(committed.pendingViewerChanges, []);
+    assertIndexes(reopened);
+  }
+});
+
+const sharedMaterials = () => parse(`
+#1=IFCWALL('0000000000000000000001',$,'A',$,$,$,$,$,.NOTDEFINED.);
+#2=IFCWALL('0000000000000000000002',$,'B',$,$,$,$,$,.NOTDEFINED.);
+#3=IFCWALL('0000000000000000000003',$,'C',$,$,$,$,$,.NOTDEFINED.);
+#10=IFCMATERIAL('Beton',$,'Beton');
+#11=IFCMATERIAL('Stahl',$,'Metall');
+#12=IFCMATERIALLAYER(#10,0.2,$,$,$,$,$);
+#13=IFCMATERIALLAYERSET((#12),'Wand',$);
+#20=IFCRELASSOCIATESMATERIAL('0000000000000000000020',$,$,$,(#1,#2),#13);
+#21=IFCRELASSOCIATESMATERIAL('0000000000000000000021',$,$,$,(#3),#11);`);
+
+test("material assignment replaces only selected members of a shared layer-set relation", () => {
+  const base = sharedMaterials();
+  const next = assignNativeMaterial(base, [1, 1, 10, 999], 11);
+  assert.deepEqual(readReferences(next.entityById.get(20)!.args[4]), [2]);
+  assert.deepEqual(readReferences(next.entityById.get(21)!.args[4]), [3, 1]);
+  assert.equal(next.entityById.get(12), base.entityById.get(12));
+  assert.equal(next.entityById.get(13), base.entityById.get(13));
+  assert.deepEqual(readReferences(base.entityById.get(20)!.args[4]), [1, 2]);
+  assert.equal(canAssignNativeMaterial(base, 10), false);
+  assert.equal(canAssignNativeMaterial(base, 20), false);
+  assert.equal(assignNativeMaterial(next, [1, 3], 11), next, "reassigning same material is a no-op");
+  assert.equal(assignNativeMaterial(base, [1], 999), base);
+  assertIndexes(next);
+});
+
+test("bulk material assignment round trips, removes empty relations and is one undoable transaction", () => {
+  const base = sharedMaterials();
+  const next = assignNativeMaterial(base, [1, 2, 3], 10);
+  const relations = next.entitiesByType.get("IFCRELASSOCIATESMATERIAL")!;
+  assert.equal(relations.length, 1);
+  assert.deepEqual(readReferences(relations[0].args[4]), [1, 2, 3]);
+  assert.equal(relations[0].args[5], "#10");
+  const session = createWorkspaceDocumentSession(base);
+  const committed = commitDocumentTransaction(session, createDocumentTransaction(base, next, "Assign material"), { refreshViewer: true });
+  assert.equal(committed.undoStack.length, 1);
+  assert.equal(committed.viewerModelText, captureDocumentSave(committed).text);
+  const reopened = parseNativeIfcText(captureDocumentSave(committed).text, "materials.ifc");
+  assert.ok(!reopened.diagnostics.some((message) => message.includes("references missing")));
+  assertIndexes(reopened);
+  const undone = restoreDocumentTransaction(committed, "undo");
+  assert.equal(serializeNativeIfcDocument(undone.document), serializeNativeIfcDocument(base));
+  assert.equal(serializeNativeIfcDocument(restoreDocumentTransaction(undone, "redo").document), serializeNativeIfcDocument(next));
+});
 function assertIndexes(document: NativeIfcDocument) {
   assert.equal(new Set(document.entities.map((entity) => entity.id)).size, document.entities.length);
   for (const entity of document.entities) {
@@ -387,6 +456,37 @@ test("viewer refresh and saving use the same revision without acknowledging unsa
   const movedAgain = commitDocumentTransaction(refreshed, createDocumentTransaction(next, updateNativePlacement(next, 4, { x: 9 }), "Move again"));
   assert.notEqual(readDocumentText(movedAgain), text);
   assert.equal(readDocumentText(refreshed), text);
+});
+
+test("splitting refreshes the committed viewer snapshot including earlier edits and preserves undo", () => {
+  const base = createNativeSampleDocument();
+  const id = base.entities.find((entity) => entity.type === "IFCBUILTELEMENT")!.id;
+  const initial = createWorkspaceDocumentSession(base);
+  const moved = updateNativePlacement(base, id, { x: 100, y: 200, z: 30 });
+  const edited = commitDocumentTransaction(initial, createDocumentTransaction(base, moved, "Move"));
+  const split = splitNativeBodyByPlane(moved, id, {
+    point: { x: 100, y: 200, z: 30 }, normal: { x: 1, y: 0, z: 0 },
+  });
+  assert.ok(split);
+  const committed = commitDocumentTransaction(edited, createDocumentTransaction(moved, split.document, "Split"), {
+    selectedId: split.partIds[0], refreshViewer: true,
+  });
+  assert.equal(committed.viewerModelText, captureDocumentSave(committed).text);
+  assert.equal(committed.viewerModelRevision, edited.viewerModelRevision + 1);
+  assert.equal(committed.viewerModelBytes, null);
+  assert.equal(committed.viewerModelFile, null);
+  assert.deepEqual(committed.pendingViewerChanges, []);
+  assert.equal(committed.hasUnexportedChanges, true);
+  const shown = parseNativeIfcText(committed.viewerModelText!, "viewer.ifc");
+  assert.equal(shown.entityById.has(id), false);
+  for (const partId of split.partIds) {
+    assert.deepEqual(getNativePlacementWorldFrame(shown, partId), getNativePlacementWorldFrame(moved, id));
+  }
+  const undone = restoreDocumentTransaction(committed, "undo");
+  assert.equal(serializeNativeIfcDocument(undone.document), serializeNativeIfcDocument(moved));
+  assert.equal(undone.viewerModelText, captureDocumentSave(undone).text);
+  const redone = restoreDocumentTransaction(undone, "redo");
+  assert.equal(redone.viewerModelText, committed.viewerModelText);
 });
 
 test("viewer loading retains original file sources until geometry actually requires refresh", () => {

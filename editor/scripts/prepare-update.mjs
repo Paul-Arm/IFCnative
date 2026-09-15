@@ -1,4 +1,4 @@
-import { readFile, mkdir, copyFile, writeFile } from "node:fs/promises";
+import { readFile, readdir, mkdir, copyFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
@@ -33,6 +33,23 @@ function keyId(encoded) {
   return data.subarray(2, 10).toString("hex");
 }
 
+export function releaseHistory(notes, currentVersion, baseUrl) {
+  const seen = new Set();
+  const releases = notes.filter((item) => item.version.localeCompare(currentVersion, undefined, { numeric: true }) <= 0);
+  for (const item of releases) {
+    releaseManifest({ version: item.version, notes: item, baseUrl, signature: "pending" });
+    if (seen.has(item.version)) throw new Error("Doppelte Patchnotes-Version.");
+    seen.add(item.version);
+  }
+  releases.sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt)
+    || b.version.localeCompare(a.version, undefined, { numeric: true }));
+  const history = { releases };
+  if (releases.length > 500 || Buffer.byteLength(JSON.stringify(history, null, 2) + "\n") > 256 * 1024) {
+    throw new Error("Patchnotes-Verlauf überschreitet das App-Limit (500 Releases / 256 KiB).");
+  }
+  return history;
+}
+
 async function main() {
   const pkg = await readJson(path.join(root, "package.json"));
   const channel = await readJson(path.join(root, "update-channel.json"));
@@ -42,6 +59,11 @@ async function main() {
   const notes = await readJson(notesPath);
   // Validate inputs before signing or copying anything. No upload is performed.
   releaseManifest({ version, notes, baseUrl: channel.baseUrl, signature: "pending" });
+  const notesDir = path.join(root, "patchnotes");
+  const previousNotes = await Promise.all((await readdir(notesDir))
+    .filter((name) => /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\.json$/.test(name) && name !== `${version}.json`)
+    .map((name) => readJson(path.join(notesDir, name))));
+  const history = releaseHistory([...previousNotes, notes], version, channel.baseUrl);
   if (!channel.publicKey) throw new Error("Öffentlicher Updater-Schlüssel fehlt.");
   const signatureCheck = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
     // PowerShell 7 can pass its module paths to Windows PowerShell 5.1.
@@ -69,9 +91,10 @@ async function main() {
   await copyFile(installer, path.join(binaryDir, fileName));
   await copyFile(`${installer}.sig`, path.join(binaryDir, `${fileName}.sig`));
   await writeFile(path.join(out, "patchnotes", `${version}.json`), JSON.stringify(notes, null, 2) + "\n");
+  await writeFile(path.join(out, "patchnotes", "index.json"), JSON.stringify(history, null, 2) + "\n");
   await writeFile(path.join(out, "latest.json"), JSON.stringify(manifest, null, 2) + "\n");
   const hash = createHash("sha256").update(await readFile(installer)).digest("hex");
-  console.log(`Manueller Upload vorbereitet: ${out}\nSHA256: ${hash}\nInstaller, .sig und Patchnotes zuerst hochladen; latest.json zuletzt ersetzen.`);
+  console.log(`Manueller Upload vorbereitet: ${out}\nSHA256: ${hash}\nInstaller, .sig, Patchnotes und patchnotes/index.json zuerst hochladen; latest.json zuletzt ersetzen.`);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

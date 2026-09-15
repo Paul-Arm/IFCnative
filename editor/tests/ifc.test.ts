@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { Matrix4, Object3D, Vector3 } from "three";
+import { Box3, Matrix4, Object3D, Vector3 } from "three";
+import { getFragmentCutPlaneBounds } from "../src/ifc/cutPlanePlacement";
 import * as WebIFC from "web-ifc";
 
 import { createBodyGeometry } from "../src/components/bodyGeometry";
@@ -2792,6 +2793,56 @@ test("mapped multi-body product splits with a freely oriented IFC plane", async 
   api.CloseModel(modelID);
 });
 
+test("plane splitting preserves translated and rotated placement chains in both halves", async () => {
+  const sample = createNativeSampleDocument();
+  const storey = sample.entities.find((entity) => entity.type === "IFCBUILDINGSTOREY")!;
+  const product = sample.entities.find((entity) => entity.type === "IFCBUILTELEMENT")!;
+  let source = updateNativePlacement(sample, storey.id, { x: "32555405.364", y: "5792521.487", z: "30" });
+  source = updateNativePlacementRotation(source, storey.id, {
+    axis: { x: 0, y: 0, z: 1 }, refDirection: { x: 0, y: 1, z: 0 },
+  });
+  source = updateNativePlacement(source, product.id, { x: "3", y: "4", z: "5" });
+  source = updateNativePlacementRotation(source, product.id, {
+    axis: { x: 0, y: 0, z: 1 }, refDirection: { x: 1, y: 1, z: 0 },
+  });
+  const frame = getNativePlacementWorldFrame(source, product.id);
+  const api = new WebIFC.IfcAPI();
+  await api.Init();
+  const originalModel = api.OpenModel(new TextEncoder().encode(serializeNativeIfcDocument(source)));
+  const original = streamElementWorldBounds(api, originalModel, product.id);
+  api.CloseModel(originalModel);
+  const cutX = (original.min[0] + original.max[0]) / 2;
+  const split = splitNativeBodyByPlane(source, product.id, {
+    point: { x: cutX, y: -(original.min[2] + original.max[2]) / 2, z: (original.min[1] + original.max[1]) / 2 },
+    normal: { x: 1, y: 0, z: 0 },
+  });
+  assert.ok(split);
+  for (const id of split.partIds) assert.deepEqual(getNativePlacementWorldFrame(split.document, id), frame);
+  for (const text of [serializeNativeIfcDocument(split.document), extractNativeSubsetIfc(split.document, split.partIds)!.text]) {
+    const reopened = parseNativeIfcText(text, "placed-split.ifc");
+    assert.ok(!reopened.diagnostics.some((line) => line.includes("references missing")));
+    for (const coordinateToOrigin of [false, true]) {
+      const modelId = api.OpenModel(new TextEncoder().encode(text), { COORDINATE_TO_ORIGIN: coordinateToOrigin });
+      try {
+        const halves = split.partIds.map((id) => streamElementWorldBounds(api, modelId, id)).sort((a, b) => a.min[0] - b.min[0]);
+        const coordination = api.GetCoordinationMatrix(modelId);
+        for (const half of halves) {
+          for (let axis = 0; axis < 3; axis++) {
+            half.min[axis] -= coordination[12 + axis];
+            half.max[axis] -= coordination[12 + axis];
+          }
+        }
+        assert.ok(Math.abs(halves[0].max[0] - cutX) < 0.001, "first half ends at world cut plane");
+        assert.ok(Math.abs(halves[1].min[0] - cutX) < 0.001, "second half starts at world cut plane");
+        for (let axis = 0; axis < 3; axis++) {
+          assert.ok(Math.abs(Math.min(...halves.map((half) => half.min[axis])) - original.min[axis]) < 0.001, `minimum axis ${axis}`);
+          assert.ok(Math.abs(Math.max(...halves.map((half) => half.max[axis])) - original.max[axis]) < 0.001, `maximum axis ${axis}`);
+        }
+      } finally { api.CloseModel(modelId); }
+    }
+  }
+});
+
 test("native body preset can spawn at world coordinates under a selected parent", () => {
   const sample = createNativeSampleDocument();
   const block = sample.entities.find(
@@ -4659,14 +4710,48 @@ test("plane splitting cuts the imported triangulated bridge fixture", async () =
   } finally { api.CloseModel(modelId); }
 });
 
-test("viewer import skips duplicate mesh attributes while preserving geometry, properties and identity", { timeout: 15_000 }, async (t) => {
+test("cut plane uses the absolute scene bounds once and covers large selected elements", async () => {
+  const object = new Object3D();
+  object.position.set(32_555_405, 35, -5_792_521);
+  object.rotation.y = Math.PI / 4;
+  const localBox = new Box3(new Vector3(-200, -10, -5), new Vector3(200, 10, 5));
+  const bounds = await getFragmentCutPlaneBounds({
+    object,
+    async getMergedBox(ids) {
+      assert.deepEqual(ids, [42]);
+      // Same contract as Fragments: the SDK applies matrixWorld before returning.
+      return localBox.clone().applyMatrix4(object.matrixWorld);
+    },
+  }, 42);
+  assert.ok(bounds);
+  assert.ok(bounds.center.distanceTo(object.position) < 1e-8);
+  const sceneBox = localBox.clone().applyMatrix4(object.matrixWorld);
+  assert.ok(bounds.size > sceneBox.getSize(new Vector3()).length());
+  assert.ok(bounds.size > 100, "large bodies must not be clipped by the former 100m cap");
+  assert.equal(await getFragmentCutPlaneBounds({ object, getMergedBox: async () => new Box3() }, 42), null);
+});
+
+test("cut plane remains visible but proportional for small elements", async () => {
+  const bounds = await getFragmentCutPlaneBounds({
+    object: new Object3D(),
+    getMergedBox: async () => new Box3(new Vector3(-0.1, -0.1, -0.1), new Vector3(0.1, 0.1, 0.1)),
+  }, 1);
+  assert.ok(bounds);
+  assert.deepEqual(bounds.center.toArray(), [0, 0, 0]);
+  assert.ok(bounds.size > 0.2 && bounds.size < 1);
+});
+
+for (const [name, helper] of [
+  ["viewer import skips duplicate mesh attributes while preserving geometry, properties and identity", "fragmentImport"],
+  ["viewer import keeps both split halves aligned at large rotated placements", "splitPlacement"],
+]) test(name, { timeout: 15_000 }, async (t) => {
   const { Worker } = await import("node:worker_threads");
   const { fileURLToPath } = await import("node:url");
   // Fragments starts a global update timer on import. Match the application's
   // worker lifetime so that it cannot keep the test process alive afterward.
   const worker = new Worker('require("tsx/cjs"); require(require("node:worker_threads").workerData);', {
     eval: true,
-    workerData: fileURLToPath(new URL("./helpers/fragmentImport.ts", import.meta.url)),
+    workerData: fileURLToPath(new URL(`./helpers/${helper}.ts`, import.meta.url)),
   });
   t.after(() => worker.terminate());
   await new Promise<void>((resolve, reject) => {

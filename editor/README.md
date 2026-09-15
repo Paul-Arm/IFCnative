@@ -29,3 +29,24 @@ Die Desktop-App unterstützt Updates aus Azure Blob Storage mit Patchnotes,
 Signaturprüfung und einer für sieben Tage ausblendbaren Benachrichtigung.
 Die Einrichtung und den manuellen Upload beschreibt [docs/UPDATES.md](docs/UPDATES.md).
 `npm run release:prepare` bereitet nach der Windows-Signierung den Upload vor.
+Es erzeugt auch `patchnotes/index.json` für den aufklappbaren Versionsverlauf.
+
+## Kürzlich verwendete Dateien
+
+Im Desktop-Build verwendet die IFC-Auswahl den nativen Dateidialog und speichert
+den vollständigen Pfad lokal. Ein Klick auf der Startseite öffnet die Datei
+anschließend direkt, auch nach einem Neustart. Alte Einträge ohne Pfad müssen
+einmal erneut ausgewählt werden. Verschobene oder gelöschte Dateien zeigen einen
+Fehler. Im Web-Build bleibt die erneute Dateiauswahl erforderlich, weil der
+Browser keinen freien Zugriff auf lokale Dateipfade erlaubt.
+
+`npm run test:desktop` prüft Pfaderhalt, Abbruch, fehlende Dateien und die
+Migration alter Einträge.
+
+## Fehlerberichte und Update-Metriken mit Sentry
+
+Die optionale Desktop-Telemetrie läuft auf einem Rust-Worker; im Web-Build läuft
+das Sentry-SDK in einem Web Worker. Offline werden Berichte still verworfen.
+Desktop-Updates erscheinen unter **Explore → Metrics → `editor.update`** mit Nutzername,
+Quell-/Zielversion und Status; `completed` bestätigt den Start der installierten Zielversion.
+Projektvorlagen, DSN-Variablen, Datenumfang und Tests: [docs/SENTRY.md](docs/SENTRY.md).

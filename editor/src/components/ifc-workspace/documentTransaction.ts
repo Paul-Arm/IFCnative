@@ -49,7 +49,7 @@ export function mergePendingViewerChange(
 }
 
 function metadataEntity(entity: NativeIfcEntity) {
-  return entity.type.startsWith("IFCPROPERTY") || entity.type.startsWith("IFCQUANTITY") ||
+  return entity.type === "IFCMATERIAL" || entity.type === "IFCMATERIALPROPERTIES" || entity.type === "IFCEXTENDEDMATERIALPROPERTIES" || entity.type.startsWith("IFCPROPERTY") || entity.type.startsWith("IFCQUANTITY") ||
     entity.type === "IFCELEMENTQUANTITY" || entity.type === "IFCRELDEFINESBYPROPERTIES" ||
     entity.type === "IFCGROUP" || entity.type === "IFCRELASSIGNSTOGROUP";
 }
@@ -81,7 +81,7 @@ export function createDocumentTransaction(base: NativeIfcDocument, document: Nat
 export function commitDocumentTransaction(
   session: WorkspaceDocumentSession,
   transaction: DocumentTransaction,
-  options: { selectedId?: number; graphPositions?: Map<number, Point>; pendingKey?: string } = {},
+  options: { selectedId?: number; graphPositions?: Map<number, Point>; pendingKey?: string; refreshViewer?: boolean } = {},
 ): WorkspaceDocumentSession {
   if (isEmptyNativeDocumentDelta(transaction.delta)) return session;
   let next = transaction.document;
@@ -101,7 +101,7 @@ export function commitDocumentTransaction(
   const pendingViewerChanges = transaction.affectsGeometry
     ? mergePendingViewerChange(session.pendingViewerChanges, { key: options.pendingKey, label: transaction.summary })
     : session.pendingViewerChanges;
-  return {
+  const committed: WorkspaceDocumentSession = {
     ...session, document: next, documentRevision: session.documentRevision + 1,
     documentTextDirty: true, hasUnexportedChanges: true,
     selectedId, selectedIds, graphPositions: options.graphPositions ?? session.graphPositions,
@@ -109,6 +109,9 @@ export function commitDocumentTransaction(
     undoStack: [...session.undoStack, { delta: transaction.delta, affectsGeometry: transaction.affectsGeometry, summary: transaction.summary, ui: createWorkspaceUiSnapshot(session) }].slice(-HISTORY_LIMIT),
     sourceIfcBytes: null, sourceIfcFile: null,
   };
+  return options.refreshViewer && transaction.affectsGeometry
+    ? refreshDocumentViewer(committed)
+    : committed;
 }
 
 export function restoreDocumentTransaction(session: WorkspaceDocumentSession, direction: "undo" | "redo"): WorkspaceDocumentSession {

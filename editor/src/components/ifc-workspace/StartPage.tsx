@@ -196,7 +196,9 @@ export function StartPage({
                       <button
                         className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border/60 bg-background px-3 py-2 text-left transition-colors hover:border-primary/40 hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-60"
                         disabled={busy}
-                        title={entry.path ?? entry.name}
+                        title={entry.path ?? `${entry.name} · ${"__TAURI_INTERNALS__" in globalThis
+                          ? "Einmal erneut auswählen, um den Dateipfad zu speichern"
+                          : "Datei erneut auswählen"}`}
                         type="button"
                         onClick={() => onOpenRecentFile(entry)}
                       >

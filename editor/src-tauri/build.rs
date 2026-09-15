@@ -32,5 +32,19 @@ fn main() {
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     fs::write(out.join("update-sas-token.txt"), token.trim())
         .expect("Update-Token konnte nicht für den Build vorbereitet werden.");
+    const SENTRY_KEY: &str = "IFCNATIVE_SENTRY_DSN";
+    println!("cargo:rerun-if-env-changed={SENTRY_KEY}");
+    let dsn = env::var(SENTRY_KEY).ok().unwrap_or_else(|| {
+        dotenvy::from_path_iter(&env_file)
+            .ok()
+            .into_iter()
+            .flatten()
+            .filter_map(Result::ok)
+            .find(|(key, _)| key == SENTRY_KEY)
+            .map(|(_, value)| value)
+            .unwrap_or_default()
+    });
+    fs::write(out.join("sentry-dsn.txt"), dsn.trim())
+        .expect("Sentry-Konfiguration konnte nicht für den Build vorbereitet werden.");
     tauri_build::build()
 }

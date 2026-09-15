@@ -1,0 +1,12 @@
+{
+  "version": "1.4.15",
+  "title": "Dateien direkt öffnen und Patchnotes-Verlauf",
+  "publishedAt": "2026-09-15T12:59:38.000Z",
+  "changes": [
+    "Der animierte Hintergrund des Startbildschirms zeigt einen größeren Ausschnitt.",
+    "Die Einstellungen zeigen den Patchnotes-Verlauf mit aufklappbaren Versionen und Markierungen für installierte und verfügbare Updates.",
+    "Im Windows-Editor öffnet Kürzlich verwendet Dateien mit gespeichertem Pfad direkt. Ältere Einträge ohne Pfad müssen einmal erneut ausgewählt werden.",
+    "Die native Dateiauswahl behält Windows-Dateipfade; das Lesen von IFC-Dateien läuft im Hintergrund.",
+    "Fehlerberichte über Sentry laufen im Hintergrund und erfassen PC-Benutzername, App-Version und offene IFC-Dateinamen. Offline werden keine Berichte gesendet; bei Verbindungsfehlern pausiert der Versand."
+  ]
+}

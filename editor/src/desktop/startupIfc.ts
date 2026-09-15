@@ -6,6 +6,15 @@ export interface DesktopIfcAsset {
 
 type NativeFileBytes = ArrayBuffer | Uint8Array | number[];
 
+/** The native picker preserves filesystem paths for reopening recent documents. */
+export async function pickDesktopIfcAssets(multiple: boolean): Promise<DesktopIfcAsset[]> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  const paths = await invoke<string[]>("pick_ifc_files", { multiple });
+  const assets: DesktopIfcAsset[] = [];
+  for (const path of paths) assets.push(await readDesktopIfcAsset(path));
+  return assets;
+}
+
 export async function readDesktopStartupIfcAssets(): Promise<
   DesktopIfcAsset[]
 > {

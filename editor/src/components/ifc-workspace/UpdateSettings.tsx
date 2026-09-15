@@ -160,27 +160,35 @@ export function UpdateSettings() {
           {state.error}
         </p>
       ) : null}
-      <InfoSection title={`Patchnotes · ${notesVersion}`}>
+      <InfoSection title="Patchnotes-Verlauf">
         {state.notesLoading ? (
           <p className="text-xs text-muted-foreground">
             Patchnotes werden geladen…
           </p>
         ) : null}
-        {state.patchnotes ? (
-          <div className="space-y-2 text-sm">
-            <h3 className="font-medium">{state.patchnotes.title}</h3>
-            <p className="text-xs text-muted-foreground">
-              {new Date(state.patchnotes.publishedAt).toLocaleDateString(
-                "de-DE",
-              )}
-            </p>
-            <ul className="list-disc space-y-1 pl-5">
-              {state.patchnotes.changes.map((change, index) => (
-                <li key={index} className="whitespace-pre-wrap break-words">
-                  {change}
-                </li>
-              ))}
-            </ul>
+        {state.patchnotesHistory.length ? (
+          <div className="space-y-3">
+            {state.patchnotesHistory.map((notes) => (
+              <details key={notes.version} open={notes.version === notesVersion} className="rounded-lg border border-border/60 p-3 text-sm">
+                <summary className="cursor-pointer font-medium">
+                  {notes.version} · {notes.title}
+                  {notes.version === state.currentVersion ? <span className="ml-2 text-xs font-normal text-muted-foreground">Installiert</span> : null}
+                  {notes.version === state.update?.version ? <span className="ml-2 text-xs font-normal text-primary">Verfügbar</span> : null}
+                </summary>
+                <div className="mt-3 space-y-2">
+                  <p className="text-xs text-muted-foreground">
+                    {new Date(notes.publishedAt).toLocaleDateString("de-DE")}
+                  </p>
+                  <ul className="list-disc space-y-1 pl-5">
+                    {notes.changes.map((change, index) => (
+                      <li key={index} className="whitespace-pre-wrap break-words">
+                        {change}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </details>
+            ))}
           </div>
         ) : state.update?.notes ? (
           <p className="whitespace-pre-wrap break-words text-sm">

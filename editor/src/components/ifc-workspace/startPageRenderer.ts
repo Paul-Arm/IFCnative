@@ -106,7 +106,8 @@ export function createStartPageRenderer(canvas: HTMLCanvasElement, random: () =>
     rect = canvas.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
     pixelRatio = Math.min(window.devicePixelRatio || 1, 2, Math.sqrt(8_000_000 / (rect.width * rect.height)));
-    viewScale = Math.max(rect.width / 1440, rect.height / 900);
+    // Wider framing for the orthographic canvas scene (about 22% wider view).
+    viewScale = Math.max(rect.width / 1440, rect.height / 900) * 0.82;
     offsetX = (rect.width - 1440 * viewScale) / 2;
     offsetY = (rect.height - 900 * viewScale) / 2;
     canvas.width = Math.ceil(rect.width * pixelRatio);

@@ -9,6 +9,7 @@ export const MOSAIC_VIEW_IDS: MosaicViewId[] = [
   "viewer",
   "inspector",
   "builder",
+  "materials",
   "catalog",
   "catalog-review",
   "attribution",
@@ -180,6 +181,7 @@ export const BUILT_IN_WORKSPACES: WorkspaceDefinition[] = [
 
 export const MOSAIC_TITLES: Record<MosaicViewId, string> = {
   builder: "Baukasten",
+  materials: "Materialien",
   catalog: "Objektkatalog",
   "catalog-review": "Objektkatalog: Prüfung",
   attribution: "IFC-Attribuierung",

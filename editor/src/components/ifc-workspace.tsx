@@ -41,16 +41,20 @@ import {
     type MosaicPath,
 } from "react-mosaic-component";
 import { pickFiles } from "../desktop/pickFiles";
+import { captureTelemetryError, setTelemetryIfcContext } from "../diagnostics/telemetry";
 import {
     loadWorkspaceDocument,
     loadWorkspaceDocuments,
 } from "./ifc-workspace/documentLoading";
 
 import {
+    pickDesktopIfcAssets,
     readDesktopIfcAsset,
     readDesktopStartupIfcAssets,
 } from "@/desktop/startupIfc";
 import { createMinimalIfcProjectWithFreshGuids } from "@/ifc/builder";
+import { canAssignNativeMaterial, createNativeMaterial, updateNativeMaterial, type NativeMaterialDraft } from "@/ifc/nativeDocument";
+import { assignMaterialWithAppearance, saveMaterialProperty, updateMaterialAppearance, type MaterialAppearanceDraft, type MaterialPropertyDraft } from "@/ifc/materialEditing";
 import {
     catalogObjectLabel,
     findCatalogObject,
@@ -364,6 +368,9 @@ const BuilderPanel = lazy(() =>
     default: module.BuilderPanel,
   })),
 );
+const MaterialsPanel = lazy(() =>
+  import("./ifc-workspace/MaterialsPanel").then((module) => ({ default: module.MaterialsPanel })),
+);
 
 const ThatOpenViewer = lazy(() => import("./that-open-viewer"));
 
@@ -558,6 +565,15 @@ export default function IfcWorkspace() {
     documentSessions.length === 1 &&
     documentSessions[0].id === initialDocument.id &&
     !documentSessions[0].hasUnexportedChanges;
+
+  // Geometry edits don't change telemetry context or trigger IPC messages.
+  const telemetryIfcNames = [...new Set([
+    ...(/\.ifc$/i.test(loadingIfcName) ? [loadingIfcName] : []),
+    ...(showStartPage ? [] : documentSessions.map((session) => session.document.fileName)),
+  ])].slice(0, 32).join("\0");
+  useEffect(() => {
+    setTelemetryIfcContext(telemetryIfcNames ? telemetryIfcNames.split("\0") : []);
+  }, [telemetryIfcNames]);
 
   const updateActiveSession = (
     updater: (session: WorkspaceDocumentSession) => WorkspaceDocumentSession,
@@ -897,6 +913,8 @@ export default function IfcWorkspace() {
        * schlägt der Mirror fehl, bleibt "Modell neu berechnen" verfügbar.
        */
       viewerMirror?: ViewerMirrorOp;
+      /** Rebuild this document from its committed IFC after topology changes. */
+      refreshViewer?: boolean;
     },
   ) => {
     const committedSessionId = activeSession.id;
@@ -909,6 +927,7 @@ export default function IfcWorkspace() {
                 selectedId: nextSelectedId,
                 graphPositions: nextGraphPositions,
                 pendingKey: options?.pendingKey,
+                refreshViewer: options?.refreshViewer,
               })
             : session,
         ),
@@ -917,7 +936,9 @@ export default function IfcWorkspace() {
       reportFailure("Änderung konnte nicht übernommen werden", error);
       return;
     }
-    if (
+    if (transaction.affectsGeometry && options?.refreshViewer) {
+      dropQueuedMirrorRequests([committedSessionId]);
+    } else if (
       transaction.affectsGeometry &&
       options?.viewerMirror &&
       activeSession.viewerModelLoadRequested
@@ -1671,6 +1692,7 @@ export default function IfcWorkspace() {
   // Startseite: kürzlich verwendete Datei erneut öffnen. Nur im Desktop-Build
   // mit gespeichertem Pfad direkt lesbar — sonst bleibt der Datei-Picker.
   const openRecentIfcFile = async (entry: RecentIfcFileEntry) => {
+    if (loadingIfcName) return;
     if (!entry.path || !("__TAURI_INTERNALS__" in globalThis)) {
       void openIfc();
       return;
@@ -1678,14 +1700,7 @@ export default function IfcWorkspace() {
     try {
       setLoadingIfcName(entry.name);
       const asset = await readDesktopIfcAsset(entry.path);
-      const { session } = await loadWorkspaceDocument(asset);
-      startTransition(() => {
-        setDocumentSessions([session]);
-        setActiveDocumentId(session.id);
-      });
-      rememberRecentIfc(session, "opened", asset.file);
-      setStatusAlert({ message: `${asset.name} geöffnet.`, tone: "success" });
-      logAction(`ui.startPage.recent({ file: '${asset.name}' });`);
+      await openIfcAsset(asset, "desktop");
     } catch (error) {
       reportFailure(`${entry.name} konnte nicht erneut geöffnet werden`, error);
     } finally {
@@ -1910,6 +1925,7 @@ export default function IfcWorkspace() {
   }, [activeDocumentId]);
 
   const reportFailure = (context: string, error: unknown) => {
+    captureTelemetryError(error, "application");
     const message = error instanceof Error ? error.message : String(error);
     setStatusAlert({ message: `${context}: ${message}`, tone: "danger" });
     recordDiagnostic("error", `${context}: ${message}`);
@@ -2550,9 +2566,8 @@ export default function IfcWorkspace() {
       });
       return;
     }
-    // Partielle Rekonvertierung: nur die neuen Teile als Mini-IFC in den
-    // Viewer spiegeln; schlägt sie fehl, bleibt "Modell neu berechnen".
-    const subset = extractNativeSubsetIfc(result.document, result.partIds);
+    // Beide Hälften zusammen mit vorhandenen Live-Edits aus demselben IFC-Stand
+    // laden. So bleiben keine alten Subset-/Delta-Geometrien im Viewer zurück.
     commitDocument(
       result.document,
       result.partIds[0],
@@ -2561,15 +2576,7 @@ export default function IfcWorkspace() {
       undefined,
       {
         pendingKey: `split:${selectedId}`,
-
-        viewerMirror: subset
-          ? {
-              entityIds: result.partIds,
-              kind: "reconvert-subset",
-              replacedEntityIds: [selectedId],
-              subsetIfcText: subset.text,
-            }
-          : undefined,
+        refreshViewer: true,
       },
     );
     setSelectedIds(new Set(result.partIds));
@@ -3079,6 +3086,37 @@ export default function IfcWorkspace() {
       `Add quantity '${quantityName}' to #${selectedId}`,
       `addQuantity({ objectId: ${selectedId}, name: '${quantityName}', type: '${quantityType}' });`,
     );
+  };
+
+  const createLibraryMaterial = (draft: NativeMaterialDraft) => {
+    const result = createNativeMaterial(document, draft);
+    commitDocument(result.document, undefined, `Material '${draft.name}' anlegen`);
+    setStatusAlert({ message: `Material „${draft.name}“ angelegt.`, tone: "success" });
+    return result.materialId;
+  };
+
+  const editLibraryMaterial = (id: number, draft: NativeMaterialDraft) => {
+    commitDocument(updateNativeMaterial(document, id, draft), undefined, `Material #${id} bearbeiten`);
+    setStatusAlert({ message: `Material „${draft.name}“ gespeichert.`, tone: "success" });
+  };
+
+  const assignLibraryMaterial = (id: number) => {
+    const targets = batchSelectionIds.filter((entityId) => canAssignNativeMaterial(document, entityId));
+    if (!targets.length) return;
+    const next = assignMaterialWithAppearance(document, targets, id);
+    commitDocument(next, undefined, `Material #${id} an ${targets.length} Objekte zuordnen`, undefined, undefined, { refreshViewer: true });
+    setStatusAlert({ message: `Material „${document.entityById.get(id)?.name}“ ${targets.length} Objekten zugeordnet.`, tone: "success" });
+  };
+
+  const editMaterialAppearance = (id: number, styleId: number | undefined, draft: MaterialAppearanceDraft) => {
+    const next = updateMaterialAppearance(document, id, styleId, draft);
+    commitDocument(next, undefined, `Materialdarstellung #${id} ändern`, undefined, undefined, { refreshViewer: true });
+    setStatusAlert({ message: "Materialdarstellung gespeichert.", tone: "success" });
+  };
+
+  const editMaterialProperty = (id: number, draft: MaterialPropertyDraft) => {
+    commitDocument(saveMaterialProperty(document, id, draft), undefined, `Materialeigenschaft ${draft.name} speichern`);
+    setStatusAlert({ message: `Materialeigenschaft „${draft.name}“ gespeichert.`, tone: "success" });
   };
 
   const addMaterial = (materialName: string, materialCategory: string) => {
@@ -4240,6 +4278,10 @@ export default function IfcWorkspace() {
             />
           </TileContent>
         );
+      case "materials":
+        return <TileContent><MaterialsPanel key={activeSession.id} document={document} selectedIds={batchSelectionIds}
+          onCreate={createLibraryMaterial} onUpdate={editLibraryMaterial} onAssign={assignLibraryMaterial}
+          onAppearance={editMaterialAppearance} onProperty={editMaterialProperty} /></TileContent>;
       case "catalog":
         return (
           <TileContent>
@@ -4799,6 +4841,7 @@ export default function IfcWorkspace() {
             activeModelLoaded={activeSession.viewerModelLoadRequested}
             combineSelectionCount={viewerCombineCount}
             cutPlane={viewerCutPlane}
+            showMaterialColors={!closedMosaicIds.includes("materials") || detachedViews.has("materials")}
             editCapabilities={viewerEditCapabilities}
             focusRequest={viewerFocusRequest}
             mirrorRequests={viewerMirrorRequests}
@@ -4818,6 +4861,7 @@ export default function IfcWorkspace() {
             onCutPlaneModeChange={setCutPlaneMode}
             onDeleteBody={deleteBodyForEntity}
             onDuplicateBody={duplicateBodyForEntity}
+            onChangeMaterial={() => restoreMosaicView("materials")}
             onLoadActiveModel={requestActiveViewerLoad}
             onMirrorApplied={applyViewerMirrorResult}
             onMoveSelected={nudgeSelectedPlacement}
@@ -5145,6 +5189,7 @@ function pickIfcFile() {
 }
 
 function pickIfcFiles(multiple: boolean) {
+  if ("__TAURI_INTERNALS__" in globalThis) return pickDesktopIfcAssets(multiple);
   return pickFiles(
     ".ifc,application/x-step,text/plain,application/octet-stream",
     multiple,

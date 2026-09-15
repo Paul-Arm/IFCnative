@@ -12,7 +12,12 @@ mockIPC(async (command, args) => {
   switch (command) {
     case "update_status": return { currentVersion: "1.4.12", configured: true };
     case "check_editor_update": return { version: "1.4.13", notes: "Test-Release mit Verbesserungen." };
-    case "editor_patchnotes": return { version: "1.4.13", title: "Verbesserungen im IFC-Editor", publishedAt: "2026-09-15T10:00:00Z", changes: ["Update-Hinweise können für sieben Tage ausgeblendet werden.", "Installation nach einem Klick mit Signaturprüfung."] };
+    case "editor_patchnotes": {
+      const notes = { version: "1.4.13", title: "Verbesserungen im IFC-Editor", publishedAt: "2026-09-15T10:00:00Z", changes: ["Update-Hinweise können für sieben Tage ausgeblendet werden.", "Installation nach einem Klick mit Signaturprüfung."] };
+      return (args as { version: string }).version === "index"
+        ? { releases: [notes, { ...notes, version: "1.4.12", title: "Automatische Editor-Updates", publishedAt: "2026-09-14T10:00:00Z", changes: ["Update-Suche und signierte Installation."] }] }
+        : notes;
+    }
     case "download_editor_update": {
       const channel = (args as { onProgress: { onmessage: (value: unknown) => void } }).onProgress;
       channel.onmessage({ downloaded: 5, total: 10 });

@@ -13,6 +13,7 @@ export type MosaicViewId =
   | "viewer"
   | "inspector"
   | "builder"
+  | "materials"
   | "catalog"
   | "catalog-review"
   | "attribution"

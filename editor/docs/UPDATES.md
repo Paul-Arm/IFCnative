@@ -81,6 +81,7 @@ editor/
       IFCnative_1.4.14_x64-setup.exe
       IFCnative_1.4.14_x64-setup.exe.sig
   patchnotes/
+    index.json
     1.4.14.json
 ```
 
@@ -107,7 +108,7 @@ Alle Befehle im Verzeichnis `editor` ausführen:
    prüft deren Schlüssel-ID und erstellt `release/azure-<Version>/` mit
    Installer, `.sig`, Patchnotes und `latest.json`. Es lädt nichts hoch.
    Optional: `npm run release:prepare -- <Installerpfad> <Patchnotespfad>`.
-7. `releases/<Version>/` und `patchnotes/<Version>.json` manuell hochladen.
+7. `releases/<Version>/`, `patchnotes/<Version>.json` und `patchnotes/index.json` manuell hochladen.
 8. **`latest.json` zuletzt hochladen/ersetzen.** Damit wird die Version angeboten.
 
 ### Windows-Installer signieren (PowerShell)
@@ -143,7 +144,7 @@ Für 1.4.14 entsteht lokal `editor/release/azure-1.4.14/`. Dessen **Inhalt** in 
 Container `editor` hochladen, ohne eine zusätzliche Ebene `azure-1.4.14/`:
 
 1. `releases/1.4.14/IFCnative_1.4.14_x64-setup.exe` und die zugehörige `.exe.sig`.
-2. `patchnotes/1.4.14.json`.
+2. `patchnotes/1.4.14.json` und `patchnotes/index.json`.
 3. Zuletzt `latest.json` im Container-Stamm ersetzen.
 
 Die Blob-Pfade erzeugen die Ordnerdarstellung automatisch. Der Upload erfolgt
@@ -188,6 +189,22 @@ Upload-Ordner und erzeugt aus Titel und Änderungsliste das Feld `notes` in
 `latest.json`. `publishedAt` wird als `pub_date` übernommen. Damit stammen die
 separaten Patchnotes und der Manifest-Text aus derselben Datei. Das Beispiel
 vor einem echten Release durch die tatsächlichen Änderungen und das Datum ersetzen.
+
+Zusätzlich sammelt das Skript die vorhandenen Versionsdateien bis einschließlich
+der Release-Version in `patchnotes/index.json` (`{ "releases": [ ... ] }`). Die
+Datei enthält den vollständigen Verlauf mit neuestem Veröffentlichungsdatum zuerst;
+zukünftige vorbereitete Versionen werden ausgeschlossen. Alte Patchnotes im
+Quellcode behalten. Auch bei einem benutzerdefinierten Patchnotespfad werden die
+früheren Versionen aus `editor/patchnotes/` ergänzt.
+
+Die Einstellungsseite zeigt den Verlauf als aufklappbare Versionsliste mit
+Markierungen für installierte und verfügbare Versionen. Die App liest genau die
+Index-Datei, benötigt also weiterhin kein Azure-Listenrecht. Fehlt der Index bei
+einem älteren Deployment, zeigt sie die aktuelle Versionsdatei bzw. Manifest-Notizen.
+Ein bereits geladener Verlauf bleibt während derselben Sitzung auch bei
+Netzwerkfehlern sichtbar. Für den Index ebenfalls `application/json` und
+`Cache-Control: no-cache` setzen. Das Vorbereitungsskript begrenzt ihn auf
+500 Releases und 256 KiB, passend zur App.
 
 ## Manifest
 

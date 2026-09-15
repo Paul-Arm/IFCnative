@@ -436,7 +436,9 @@ export function mergeRecentIfcFile(
   const dedupeKey = entry.path || entry.name;
   return [
     entry,
-    ...current.filter((item) => (item.path || item.name) !== dedupeKey),
+    ...current.filter((item) => (item.path || item.name) !== dedupeKey
+      // Upgrade old browser-picker entries once a native path becomes available.
+      && !(entry.path && !item.path && item.name === entry.name)),
   ].slice(0, MAX_RECENT_IFC_FILES);
 }
 

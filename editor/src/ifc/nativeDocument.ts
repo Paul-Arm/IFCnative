@@ -5377,6 +5377,83 @@ function createNativePropertyEntity(
   };
 }
 
+export interface NativeMaterialDraft {
+  name: string;
+  description: string;
+  category: string;
+}
+
+export function canAssignNativeMaterial(document: NativeIfcDocument, id: number) {
+  const entity = document.entityById.get(id);
+  return Boolean(entity && getNativeIdentityAttributeIndexes(entity, document.schema).name === 2 &&
+    IFC_GLOBAL_ID_PATTERN.test(entity.globalId) && !entity.type.startsWith("IFCREL") &&
+    !entity.type.startsWith("IFCPROPERTY") && entity.type !== "IFCELEMENTQUANTITY");
+}
+
+/** A library material can exist without an object assignment. */
+export function createNativeMaterial(document: NativeIfcDocument, draft: NativeMaterialDraft) {
+  const materialId = getNextNativeEntityId(document);
+  if (!draft.name.trim()) throw new Error("Bitte einen Materialnamen eingeben.");
+  const material = createMaterialEntity(materialId, draft.name, draft.category);
+  material.args = document.schema.startsWith("IFC2X3")
+    ? [quote(draft.name.trim())]
+    : [quote(draft.name.trim()), quoteOrDollar(draft.description), quoteOrDollar(draft.category)];
+  material.description = document.schema.startsWith("IFC2X3") ? "" : draft.description.trim();
+  return { document: appendNativeEntities(document, [material]), materialId };
+}
+
+export function updateNativeMaterial(document: NativeIfcDocument, materialId: number, draft: NativeMaterialDraft) {
+  if (document.entityById.get(materialId)?.type !== "IFCMATERIAL" || !draft.name.trim()) return document;
+  const args = document.schema.startsWith("IFC2X3")
+    ? [quote(draft.name.trim())]
+    : [quote(draft.name.trim()), quoteOrDollar(draft.description), quoteOrDollar(draft.category)];
+  return updateNativeEntity(document, materialId, { args });
+}
+
+/** Replace direct assignments atomically, preserving shared relations for other objects. */
+export function assignNativeMaterial(document: NativeIfcDocument, entityIds: Iterable<number>, materialId: number) {
+  if (document.entityById.get(materialId)?.type !== "IFCMATERIAL") return document;
+  const ids = [...new Set(entityIds)].filter((id) => canAssignNativeMaterial(document, id));
+  if (!ids.length) return document;
+  const selected = new Set(ids);
+  const associations = document.entitiesByType.get("IFCRELASSOCIATESMATERIAL") ?? [];
+  const currentById = new Map<number, number[]>();
+  for (const relation of associations) {
+    const resourceId = readReferences(relation.args[5])[0];
+    for (const id of readReferences(relation.args[4])) {
+      if (selected.has(id)) currentById.set(id, [...(currentById.get(id) ?? []), resourceId]);
+    }
+  }
+  if (ids.every((id) => {
+    const current = currentById.get(id);
+    return current?.length === 1 && current[0] === materialId;
+  })) return document;
+  const entities: NativeIfcEntity[] = [];
+  for (const entity of document.entities) {
+    if (entity.type !== "IFCRELASSOCIATESMATERIAL") { entities.push(entity); continue; }
+    const before = readReferences(entity.args[4]);
+    const remaining = before.filter((id) => !selected.has(id));
+    if (remaining.length === before.length) entities.push(entity);
+    else if (remaining.length) {
+      const args = [...entity.args];
+      args[4] = `(${remaining.map((id) => `#${id}`).join(",")})`;
+      entities.push({ ...entity, args });
+    }
+  }
+  const existingIndex = entities.findIndex((entity) => entity.type === "IFCRELASSOCIATESMATERIAL" && readReferences(entity.args[5])[0] === materialId);
+  if (existingIndex >= 0) {
+    const existing = entities[existingIndex];
+    const args = [...existing.args];
+    args[4] = `(${[...readReferences(args[4]), ...ids].map((id) => `#${id}`).join(",")})`;
+    entities[existingIndex] = { ...existing, args };
+  } else {
+    const relation = createAssociationEntity(getNextNativeEntityId(document), ids[0], materialId, "IFCRELASSOCIATESMATERIAL", "Material");
+    relation.args[4] = `(${ids.map((id) => `#${id}`).join(",")})`;
+    entities.push(relation);
+  }
+  return rebuildNativeDocument(document, entities);
+}
+
 export function addNativeMaterial(
   document: NativeIfcDocument,
   entityId: number,

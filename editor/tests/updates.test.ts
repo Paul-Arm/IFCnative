@@ -9,6 +9,7 @@ import {
     checkErrorMessage,
     notificationVisible,
     parsePatchnotes,
+    parsePatchnotesHistory,
     readPreferences,
     type UpdateBackend,
 } from "../src/updates/controller";
@@ -72,6 +73,54 @@ test("automatic checks are throttled and never download or install", async () =>
   await s.controller.tick();
   assert.deepEqual(s.calls, ["check", "check"]);
   assert.equal(notificationVisible(s.controller.getSnapshot()), true);
+});
+
+const historyNote = (version: string) => ({ version, title: `Version ${version}`, publishedAt: "2026-09-15T10:00:00Z", changes: ["Verbesserung"] });
+
+test("patchnotes history sorts releases, rejects duplicates and invalid entries", () => {
+  assert.deepEqual(parsePatchnotesHistory({ releases: [historyNote("1.4.9"), historyNote("1.4.14")] }).map((n) => n.version), ["1.4.14", "1.4.9"]);
+  for (const releases of [[historyNote("1.4.14"), historyNote("1.4.14")], [historyNote("../private")], [{ ...historyNote("1.4.14"), changes: [42] }]]) {
+    assert.throws(() => parsePatchnotesHistory({ releases }));
+  }
+});
+
+test("history supplies current notes when the separate file is missing", async () => {
+  const s = setup({ patchnotes: async () => { throw new Error("404"); }, patchnotesHistory: async () => ({ releases: [historyNote("1.4.12"), historyNote("1.4.13")] }) });
+  await s.controller.check();
+  await s.controller.loadPatchnotes();
+  assert.equal(s.controller.getSnapshot().patchnotes?.version, "1.4.13");
+  assert.equal(s.controller.getSnapshot().patchnotesHistory.length, 2);
+  assert.equal(s.controller.getSnapshot().notesError, null);
+});
+
+test("older blob deployments fall back to current notes and history can be retried", async () => {
+  let missing = true;
+  const s = setup({ patchnotesHistory: async () => {
+    if (missing) throw new Error("404?sig=secret");
+    return { releases: [historyNote("1.4.12"), historyNote("1.4.13")] };
+  } });
+  await s.controller.check();
+  await s.controller.loadPatchnotes();
+  assert.equal(s.controller.getSnapshot().patchnotesHistory.length, 1);
+  assert.match(s.controller.getSnapshot().notesError ?? "", /Verlauf/);
+  assert.ok(!s.controller.getSnapshot().notesError?.includes("secret"));
+  missing = false;
+  await s.controller.loadPatchnotes();
+  assert.equal(s.controller.getSnapshot().patchnotesHistory.length, 2);
+  assert.equal(s.controller.getSnapshot().notesError, null);
+});
+
+test("stale history requests cannot replace notes after a new update check", async () => {
+  let finish!: (value: unknown) => void;
+  const s = setup({ patchnotesHistory: () => new Promise((resolve) => { finish = resolve; }) });
+  await s.controller.check();
+  const loading = s.controller.loadPatchnotes();
+  await s.controller.check();
+  finish({ releases: [historyNote("1.4.13")] });
+  await loading;
+  assert.equal(s.controller.getSnapshot().patchnotes, null);
+  assert.deepEqual(s.controller.getSnapshot().patchnotesHistory, []);
+  assert.equal(s.controller.getSnapshot().notesLoading, false);
 });
 test("seven-day dismissal survives restart and newer releases, then expires", async () => {
   const s = setup();

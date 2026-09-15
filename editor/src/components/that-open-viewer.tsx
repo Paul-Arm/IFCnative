@@ -13,6 +13,7 @@ import {
     MousePointer2,
     Move,
     Plus,
+    PaintBucket,
     RefreshCw,
     Rotate3d,
     RotateCw,
@@ -25,6 +26,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { recordDiagnostic } from "../diagnostics/watchdog";
+import { getFragmentCutPlaneBounds } from "../ifc/cutPlanePlacement";
 import {
     convertIfcToFragmentsInWorker,
     type ConvertIfcToFragmentsProgress,
@@ -65,6 +67,7 @@ export default function ThatOpenViewer({
   activeModelLoaded = true,
   combineSelectionCount = 0,
   cutPlane,
+  showMaterialColors = false,
   editCapabilities = {
     canMove: false,
     canRotate: false,
@@ -75,6 +78,7 @@ export default function ThatOpenViewer({
   onLoadActiveModel,
   onAddBodyAt,
   onCombineSelected,
+  onChangeMaterial,
   onCutPlaneActiveChange,
   onViewerMounted,
   onCutPlaneAxisCycle,
@@ -96,6 +100,7 @@ export default function ThatOpenViewer({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const runtimeRef = useRef<ViewerRuntime | null>(null);
   const activeDocumentIdRef = useRef(activeDocumentId);
+  const showMaterialColorsRef = useRef(showMaterialColors);
   const modelsRef = useRef(models);
   const selectedByDocumentIdRef = useRef(new Map<string, number>());
   const selectedEntityIdsRef = useRef<number[]>([]);
@@ -151,6 +156,7 @@ export default function ThatOpenViewer({
   );
 
   activeDocumentIdRef.current = activeDocumentId;
+  showMaterialColorsRef.current = showMaterialColors;
   modelsRef.current = models;
   selectedByDocumentIdRef.current = new Map(
     models.map((model) => [model.documentId, model.selectedId]),
@@ -225,6 +231,7 @@ export default function ThatOpenViewer({
           });
         },
         isCoordinatePickerActive: () => pickerActiveRef.current,
+        showMaterialColors: () => showMaterialColorsRef.current,
         onCoordinatePickerUsed: () => setPickerActive(false),
         onContextTarget: (target) => setContextTarget(target),
         onProgress: (progress) => setLoadProgress(progress),
@@ -325,7 +332,7 @@ export default function ThatOpenViewer({
     }
     void runtime.highlight(activeDocumentId, activeSelectedId);
     void runtime.updateGrid(activeDocumentId);
-  }, [activeDocumentId, activeSelectedId, modelReady, selectionSignature]);
+  }, [activeDocumentId, activeSelectedId, modelReady, selectionSignature, showMaterialColors]);
 
   useEffect(() => {
     const runtime = runtimeRef.current;
@@ -489,6 +496,7 @@ export default function ThatOpenViewer({
       },
       { icon: CopyPlus, id: "duplicate", label: "Duplizieren" },
       { icon: Slice, id: "split", label: "Zerteilen" },
+      { icon: PaintBucket, id: "material", label: "Material ändern" },
       {
         disabled: combineSelectionCount < 2,
         icon: Combine,
@@ -542,6 +550,8 @@ export default function ThatOpenViewer({
       onDuplicateBody?.(target.entityId);
     } else if (item.id === "combine") {
       onCombineSelected?.();
+    } else if (item.id === "material") {
+      onChangeMaterial?.();
     } else if (item.id === "split") {
       // Schnittebene auf der (per Rechtsklick selektierten) Auswahl spawnen;
       // bestätigt wird über die Leiste unten in der Mitte.
@@ -835,6 +845,7 @@ async function createThatOpenRuntime(
     /** Vollständige Mehrfachauswahl des Dokuments (leer für inaktive Dokumente). */
     getSelectedIds(documentId: string): number[];
     isCoordinatePickerActive(): boolean;
+    showMaterialColors(): boolean;
     onError(message: string): void;
     onCoordinatePickerUsed(): void;
     onContextTarget(target: ViewerContextMenuTarget): void;
@@ -1115,6 +1126,15 @@ async function createThatOpenRuntime(
     renderedFaces: FRAGS.RenderedFaces.TWO,
     transparent: false,
   };
+  const materialSelectionBounds = new THREE.Box3();
+  const materialSelectionFrame = new THREE.Box3Helper(materialSelectionBounds, 0xffb703);
+  materialSelectionFrame.visible = false;
+  const materialSelectionFrameMaterials = Array.isArray(materialSelectionFrame.material)
+    ? materialSelectionFrame.material
+    : [materialSelectionFrame.material];
+  for (const material of materialSelectionFrameMaterials) material.depthTest = false;
+  materialSelectionFrame.renderOrder = 49;
+  world.scene.three.add(materialSelectionFrame);
 
   type LoadedViewerModel = {
     documentId: string;
@@ -1321,6 +1341,7 @@ async function createThatOpenRuntime(
     () => void fragments.core.update(true),
   );
   let cutPlaneUpdateNonce = 0;
+  let cutPlaneAnchor = "";
 
   // Bounding-Box der Auswahl im Szenenraum: erst das besitzende Modell,
   // dann Basis und übrige Subsets — je nachdem, wo die Geometrie rendert.
@@ -1339,6 +1360,13 @@ async function createThatOpenRuntime(
         model: owning,
       },
     ];
+    if (owning.deltaModelId) {
+      const delta = fragments.core.models.list.get(owning.deltaModelId);
+      const edited = await owning.getEditedElements().catch((): number[] => []);
+      if (delta && edited.includes(candidates[0].id)) {
+        candidates.unshift({ id: candidates[0].id, model: delta });
+      }
+    }
     if (owning !== loaded.model) {
       candidates.push({
         id: resolveLocalId(loaded, entityId),
@@ -1352,18 +1380,9 @@ async function createThatOpenRuntime(
       }
     }
     for (const candidate of candidates) {
-      const box = await candidate.model
-        .getMergedBox([candidate.id])
+      const bounds = await getFragmentCutPlaneBounds(candidate.model, candidate.id)
         .catch(() => null);
-      if (box && !box.isEmpty()) {
-        return {
-          center: fragmentModelPointToScene(
-            box.getCenter(new THREE.Vector3()),
-            candidate.model.object,
-          ),
-          size: box.getSize(new THREE.Vector3()).length(),
-        };
-      }
+      if (bounds) return bounds;
     }
     return null;
   };
@@ -1371,6 +1390,7 @@ async function createThatOpenRuntime(
   function setCutPlane(state: ViewerCutPlaneState | undefined) {
     if (!state?.active) {
       cutPlaneUpdateNonce += 1;
+      cutPlaneAnchor = "";
       cutPlaneGizmo.setState({ active: false });
       return Promise.resolve();
     }
@@ -1380,17 +1400,19 @@ async function createThatOpenRuntime(
   async function setCutPlaneInternal(state: ViewerCutPlaneState) {
     const updateNonce = ++cutPlaneUpdateNonce;
     const documentId = callbacks.getActiveDocumentId();
-    const loaded = modelsByDocumentId.get(documentId);
+    let loaded = modelsByDocumentId.get(documentId);
     if (!loaded) {
       cutPlaneGizmo.setState({ active: false });
       return;
     }
     const entityId = callbacks.getSelectedId(documentId);
+    const anchor = `${documentId}:${entityId}:${state.resetNonce ?? 0}`;
+    const recenter = anchor !== cutPlaneAnchor || !state.position;
     let bounds = await getElementSceneBounds(loaded, entityId);
     if (updateNonce !== cutPlaneUpdateNonce) {
       return;
     }
-    if (!bounds && !state.position) {
+    if (!bounds && recenter) {
       // Direkt nach "Hinzufügen"/Split rendert die Auswahl in einem Subset,
       // das die laufende Rekonvertierung erst noch lädt: einmal (mit Timeout,
       // nur lesend) auf die Lade-/Mirror-Queue warten und erneut suchen.
@@ -1401,6 +1423,8 @@ async function createThatOpenRuntime(
       if (updateNonce !== cutPlaneUpdateNonce) {
         return;
       }
+      loaded = modelsByDocumentId.get(documentId);
+      if (!loaded) return;
       bounds = await getElementSceneBounds(loaded, entityId);
       if (updateNonce !== cutPlaneUpdateNonce) {
         return;
@@ -1409,8 +1433,7 @@ async function createThatOpenRuntime(
     // Ohne Geometrie-Box am sichtbaren Kamera-Ziel spawnen statt am Ursprung.
     const boxCenter =
       bounds?.center ?? world.camera.controls.getTarget(new THREE.Vector3());
-    const boxSize = bounds?.size ?? 4;
-    const position = state.position
+    const position = !recenter && state.position
       ? ifcWorldToScenePoint(loaded, state.position)
       : boxCenter;
     const normal = ifcWorldToSceneDirection(loaded, state.normal);
@@ -1419,9 +1442,10 @@ async function createThatOpenRuntime(
       mode: state.mode,
       normal,
       position,
-      size: Math.min(100, Math.max(1, boxSize * 1.35)),
+      size: bounds?.size ?? 6,
     });
-    if (!state.position) {
+    cutPlaneAnchor = anchor;
+    if (recenter) {
       const initialPoint = sceneToIfcWorldPoint(loaded, position);
       const initialNormal = sceneToIfcWorldDirection(loaded, normal);
       callbacks.onCutPlaneChange({
@@ -1794,6 +1818,7 @@ async function createThatOpenRuntime(
     if (runtimeDisposed) {
       return;
     }
+    materialSelectionFrame.visible = false;
     const nextDocumentIds = new Set(
       nextModels.map((model) => model.documentId),
     );
@@ -1983,6 +2008,7 @@ async function createThatOpenRuntime(
     entityId: number,
     options?: { updateGizmo?: boolean; exclusive?: boolean },
   ) {
+    materialSelectionFrame.visible = false;
     const loaded = modelsByDocumentId.get(documentId);
     if (!loaded || !Number.isFinite(entityId) || entityId <= 0) {
       // Auswahl nicht darstellbar (Dokument nicht geladen / leer): die alte
@@ -2038,7 +2064,19 @@ async function createThatOpenRuntime(
       }
     }
     await fragments.resetHighlight();
-    await fragments.highlight(selectionMaterial, targets);
+    if (callbacks.showMaterialColors()) {
+      materialSelectionBounds.makeEmpty();
+      const boxes = await Promise.all(Object.entries(targets).map(async ([modelId, ids]) => {
+        const model = fragments.list.get(modelId);
+        if (!model || !ids.size) return null;
+        model.object.updateWorldMatrix(true, false);
+        return model.getMergedBox([...ids]).catch(() => null);
+      }));
+      for (const box of boxes) if (box && !box.isEmpty()) materialSelectionBounds.union(box);
+      materialSelectionFrame.visible = !materialSelectionBounds.isEmpty();
+    } else {
+      await fragments.highlight(selectionMaterial, targets);
+    }
     // resetHighlight/highlight kann die Sichtbarkeit zuvor ausgeblendeter
     // (ersetzter) Elemente zurücksetzen — z. B. blieb das kombinierte
     // Duplikat sonst als nicht anklickbarer Geist-Körper stehen.
@@ -2429,6 +2467,9 @@ async function createThatOpenRuntime(
     moveGizmo.dispose();
     viewCube.dispose();
     coordinateCursor.dispose();
+    materialSelectionFrame.removeFromParent();
+    materialSelectionFrame.geometry.dispose();
+    for (const material of materialSelectionFrameMaterials) material.dispose();
     components.dispose();
   }
 

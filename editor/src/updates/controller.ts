@@ -26,6 +26,7 @@ export interface UpdateBackend {
   download(version: string, progress: (value: Progress) => void): Promise<void>;
   install(version: string): Promise<void>;
   patchnotes(version: string): Promise<unknown>;
+  patchnotesHistory?(): Promise<unknown>;
 }
 
 /** Error kinds reported by the desktop backend; texts stay in the UI layer so no URL/SAS can leak. */
@@ -77,6 +78,7 @@ export interface UpdateSnapshot extends Preferences {
   /** Failure of the last background check; shown as a hint, never as an error box. */
   lastCheckError: string | null;
   patchnotes: Patchnotes | null;
+  patchnotesHistory: Patchnotes[];
   notesLoading: boolean;
   notesError: string | null;
   now: number;
@@ -144,6 +146,19 @@ export function parsePatchnotes(raw: unknown, version: string): Patchnotes {
   return value as unknown as Patchnotes;
 }
 
+export function parsePatchnotesHistory(raw: unknown): Patchnotes[] {
+  const releases = (raw as { releases?: unknown } | null)?.releases;
+  if (!Array.isArray(releases) || releases.length > 500) throw new Error("Ungültiger Patchnotes-Verlauf.");
+  const versions = new Set<string>();
+  return releases.map((release) => {
+    if (!release || typeof release.version !== "string" || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(release.version)
+      || versions.has(release.version)) throw new Error("Ungültige Patchnotes-Version.");
+    versions.add(release.version);
+    return parsePatchnotes(release, release.version);
+  }).sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt)
+    || b.version.localeCompare(a.version, undefined, { numeric: true }));
+}
+
 /** One controller per main window. UI mounts never duplicate checks/downloads. */
 export class UpdateController {
   private listeners = new Set<() => void>();
@@ -173,6 +188,7 @@ export class UpdateController {
       error: null,
       lastCheckError: null,
       patchnotes: null,
+      patchnotesHistory: [],
       notesLoading: false,
       notesError: null,
       now: clock(),
@@ -295,23 +311,35 @@ export class UpdateController {
       this.snapshot.update?.version ?? this.snapshot.currentVersion;
     if (!this.snapshot.configured || !this.snapshot.desktop || !version) return;
     if (
-      this.snapshot.patchnotes?.version === version ||
+      (this.snapshot.patchnotes?.version === version && !this.snapshot.notesError) ||
       this.snapshot.notesLoading
     )
       return;
     const request = ++this.notesRequest;
     this.patch({ notesLoading: true, notesError: null });
     try {
-      const notes = parsePatchnotes(
-        await this.backend.patchnotes(version),
-        version,
-      );
+      const [current, history] = await Promise.allSettled([
+        this.backend.patchnotes(version).then((raw) => parsePatchnotes(raw, version)),
+        this.backend.patchnotesHistory
+          ? this.backend.patchnotesHistory().then(parsePatchnotesHistory)
+          : Promise.resolve(this.snapshot.patchnotesHistory),
+      ]);
       if (
         request === this.notesRequest &&
         version ===
           (this.snapshot.update?.version ?? this.snapshot.currentVersion)
-      )
-        this.patch({ patchnotes: notes });
+      ) {
+        const releases = history.status === "fulfilled" ? history.value : this.snapshot.patchnotesHistory;
+        const notes = current.status === "fulfilled" ? current.value : releases.find((item) => item.version === version) ?? null;
+        const merged = new Map(releases.map((item) => [item.version, item]));
+        if (notes) merged.set(notes.version, notes);
+        this.patch({
+          patchnotes: notes,
+          patchnotesHistory: parsePatchnotesHistory({ releases: [...merged.values()] }),
+          notesError: !notes ? "Patchnotes sind momentan nicht verfügbar."
+            : history.status === "rejected" ? "Der vollständige Verlauf ist momentan nicht verfügbar." : null,
+        });
+      }
     } catch {
       if (request === this.notesRequest)
         this.patch({ notesError: "Patchnotes sind momentan nicht verfügbar." });

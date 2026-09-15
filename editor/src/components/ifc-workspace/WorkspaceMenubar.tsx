@@ -59,7 +59,7 @@ const WINDOW_MENU_CATEGORIES = defineWindowMenuCategories([
   { label: "Modell", ids: ["viewer", "structure", "inspector"] },
   {
     label: "Bauen",
-    ids: ["attribution", "builder", "catalog", "catalog-review", "pset-batch"],
+    ids: ["attribution", "builder", "materials", "catalog", "catalog-review", "pset-batch"],
   },
   {
     label: "Prüfen",

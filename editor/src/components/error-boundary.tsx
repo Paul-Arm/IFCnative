@@ -1,6 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 
 import { getDiagnosticsReport, recordDiagnostic } from "../diagnostics/watchdog";
+import { captureTelemetryError } from "../diagnostics/telemetry";
 
 type EmergencySaver = () => void;
 
@@ -53,6 +54,7 @@ export class ErrorBoundary extends Component<
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
+    captureTelemetryError(error, "react");
     const saved = runEmergencySaves();
     this.setState({ saved: saved > 0 });
     recordDiagnostic(

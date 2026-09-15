@@ -55,6 +55,8 @@ export interface ThatOpenViewerProps {
    */
   selectedEntityIds?: number[];
   cutPlane?: ViewerCutPlaneState;
+  /** Keep the material visible while editing; selection uses a bounding frame. */
+  showMaterialColors?: boolean;
   focusRequest?: { documentId: string; entityId: number; nonce: number } | null;
   editCapabilities?: ViewerEditCapabilities;
   /**
@@ -79,6 +81,7 @@ export interface ThatOpenViewerProps {
   ): void;
   /** Rotary-Menü: Mehrfachauswahl zu einem IFC-Objekt kombinieren. */
   onCombineSelected?(): void;
+  onChangeMaterial?(): void;
   onCutPlaneActiveChange?(active: boolean): void;
   /** Rotary-Menü/Zerteilen: Schnittebenen-Achse zyklisch drehen (Y→X→Z). */
   onCutPlaneAxisCycle?(): void;

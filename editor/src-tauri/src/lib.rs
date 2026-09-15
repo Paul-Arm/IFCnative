@@ -7,6 +7,8 @@ use std::{
 use std::io::Write;
 use tauri::{ipc::Response, webview::NewWindowResponse, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
+mod telemetry;
+mod update_telemetry;
 mod updates;
 
 /// Unique labels for popup windows opened via window.open (panel pop-outs).
@@ -44,11 +46,36 @@ fn startup_ifc_paths() -> Vec<String> {
 }
 
 #[tauri::command]
-fn read_ifc_file(path: String) -> Result<Response, String> {
-    let path = validated_ifc_path(Path::new(&path))?;
-    let bytes = fs::read(&path)
-        .map_err(|error| format!("IFC-Datei konnte nicht gelesen werden: {error}"))?;
-    Ok(Response::new(bytes))
+async fn read_ifc_file(path: String) -> Result<Response, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = validated_ifc_path(Path::new(&path))?;
+        let bytes = fs::read(&path)
+            .map_err(|error| format!("IFC-Datei konnte nicht gelesen werden: {error}"))?;
+        Ok(Response::new(bytes))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn pick_ifc_files(app: tauri::AppHandle, multiple: bool) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let picker = app.dialog().file().add_filter("IFC", &["ifc"]);
+        let selected = if multiple {
+            picker.blocking_pick_files().unwrap_or_default()
+        } else {
+            picker.blocking_pick_file().into_iter().collect()
+        };
+        selected
+            .into_iter()
+            .map(|file| {
+                let path = file.into_path().map_err(|error| error.to_string())?;
+                validated_ifc_path(&path).map(|path| path.to_string_lossy().into_owned())
+            })
+            .collect()
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 fn write_ifc_atomically(path: &Path, contents: &[u8]) -> Result<(), String> {
@@ -134,10 +161,14 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(updates::UpdateState::default())
+        .manage(telemetry::Telemetry::start())
         .invoke_handler(tauri::generate_handler![
             startup_ifc_paths,
             read_ifc_file,
+            pick_ifc_files,
             save_ifc_file,
+            telemetry::telemetry_context,
+            telemetry::telemetry_error,
             updates::update_status,
             updates::check_editor_update,
             updates::download_editor_update,

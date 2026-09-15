@@ -26,6 +26,10 @@ const backend: UpdateBackend = {
     const { invoke } = await import("@tauri-apps/api/core");
     return invoke("editor_patchnotes", { version });
   },
+  async patchnotesHistory() {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke("editor_patchnotes", { version: "index" });
+  },
 };
 
 function storage() { try { return globalThis.localStorage; } catch { return undefined; } }

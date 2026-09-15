@@ -2,7 +2,7 @@
 //! The webview never supplies URLs, keys, installer paths or installer bytes.
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use tauri::{async_runtime::Mutex, ipc::Channel, AppHandle, State, Url, WebviewWindow};
+use tauri::{async_runtime::Mutex, ipc::Channel, AppHandle, Manager, State, Url, WebviewWindow};
 use tauri_plugin_http::reqwest;
 use tauri_plugin_updater::{Error as UpdaterError, Update, UpdaterExt};
 
@@ -167,13 +167,18 @@ pub async fn check_editor_update(
     if channel.public_key.trim().is_empty() || channel.sas_token.trim().is_empty() {
         return Err(CheckError::new("config"));
     }
-    let mut pending = state
-        .0
-        .try_lock()
-        .map_err(|_| CheckError::new("busy"))?;
+    let mut pending = state.0.try_lock().map_err(|_| CheckError::new("busy"))?;
     let manifest = channel.url("latest.json")?;
+    let exit_app = app.clone();
     let updater = app
         .updater_builder()
+        .on_before_exit(move || {
+            // Preserve Tauri's default cleanup and give the queued start metric a bounded flush.
+            exit_app.cleanup_before_exit();
+            exit_app
+                .state::<crate::telemetry::Telemetry>()
+                .flush_before_update_exit();
+        })
         .pubkey(channel.public_key.clone())
         .endpoints(vec![manifest.clone()])
         .map_err(|_| CheckError::new("config"))?
@@ -257,6 +262,7 @@ pub async fn download_editor_update(
 #[tauri::command]
 pub async fn install_editor_update(
     window: WebviewWindow,
+    app: AppHandle,
     state: State<'_, UpdateState>,
     version: String,
 ) -> Result<(), String> {
@@ -275,9 +281,25 @@ pub async fn install_editor_update(
         .as_ref()
         .ok_or("Das Update wurde noch nicht heruntergeladen und geprüft.")?;
     // Only bytes verified by Tauri's public-key signature check reach install().
-    update
-        .install(bytes)
-        .map_err(|_| "Die Installation konnte nicht gestartet werden.".into())
+    let from_version = app.package_info().version.to_string();
+    let report = crate::update_telemetry::UpdateReport::new(
+        from_version.clone(),
+        update.version.clone(),
+        "install_started",
+    );
+    crate::update_telemetry::record_install(&app, &report);
+    let telemetry = app.state::<crate::telemetry::Telemetry>();
+    telemetry.report_update(report);
+    if update.install(bytes).is_err() {
+        crate::update_telemetry::clear_install(&app);
+        telemetry.report_update(crate::update_telemetry::UpdateReport::new(
+            from_version,
+            update.version.clone(),
+            "install_failed",
+        ));
+        return Err("Die Installation konnte nicht gestartet werden.".into());
+    }
+    Ok(())
 }
 
 #[tauri::command]
