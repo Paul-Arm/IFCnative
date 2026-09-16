@@ -1,0 +1,13 @@
+{
+  "version": "1.4.16",
+  "title": "Materialien bearbeiten und stabiler 3D-Viewer",
+  "publishedAt": "2026-09-16T04:56:44.994Z",
+  "changes": [
+    "Neues Material-Panel: IFC-Materialien anzeigen, anlegen, bearbeiten und der Auswahl zuordnen; auch über das 3D-Rechtsklickmenü erreichbar.",
+    "Materialfarben, Transparenz, Oberflächenparameter und einfache IFC-Materialeigenschaften lassen sich bearbeiten und in der IFC speichern.",
+    "Materialfarben werden auch bei importierten Körpern mit eigenen Oberflächenstilen übernommen. Im Material-Panel bleibt die Farbe durch eine Auswahlmarkierung als Rahmen sichtbar.",
+    "Geteilte Körper behalten ihre Platzierung. Die Schnittebene richtet Größe und Mittelpunkt am ausgewählten IFC-Element aus.",
+    "Das Grid bleibt bei großen georeferenzierten Koordinaten stabil. Szenenursprung und Grid-Höhe werden an das geladene Modell angepasst.",
+    "Material- und Geometrieänderungen erhalten die Kameraansicht. Kamera zurücksetzen orientiert sich am aktiven Modell; überholte Fokus-Anfragen werden verworfen."
+  ]
+}

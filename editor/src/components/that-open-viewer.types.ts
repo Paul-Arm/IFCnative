@@ -55,8 +55,6 @@ export interface ThatOpenViewerProps {
    */
   selectedEntityIds?: number[];
   cutPlane?: ViewerCutPlaneState;
-  /** Keep the material visible while editing; selection uses a bounding frame. */
-  showMaterialColors?: boolean;
   focusRequest?: { documentId: string; entityId: number; nonce: number } | null;
   editCapabilities?: ViewerEditCapabilities;
   /**

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MKP · Modellqualität & Attribuierung</title>
+  <style>/* ADDON_CSS */</style>
+</head>
+<body>
+  <header><div class="brand">MKP<span>MODELLWERKZEUGE</span></div><span id="connection" class="chip">Nicht verbunden</span></header>
+  <main>
+    <section class="intro"><p class="eyebrow">VDC MANAGER ADD-ON · 01</p><h1>Modellqualität<br>& Attribuierung<span>.</span></h1><p>Fachmodelle prüfen. Fehlende Informationen gezielt ergänzen.</p></section>
+    <section class="connection panel"><div><h2>Projekt verbinden</h2><p id="project">WebForm in VDC Manager öffnen oder den Ablauf mit Beispieldaten ansehen.</p></div><div class="actions"><button id="connect" class="primary">VDC-Projekt laden</button><button id="demo">Demo öffnen</button></div></section>
+    <p id="status" role="status" aria-live="polite">Bereit.</p>
+    <details class="panel settings"><summary>Eigenschaftszuordnung & Schema</summary><p>Die Namen hängen vom IFC-Import ab. Vor der ersten Prüfung am Projekt abgleichen. Nach Änderungen neu laden.</p>
+      <div class="fields"><label>Eigenschaft für IFC-Klasse<input id="class-property" value="IFC:Type"></label><label>Eigenschaft für GlobalId<input id="guid-property" value="IFC:GlobalId"></label><label>Pset-Trennzeichen<select id="separator"><option value=":">Doppelpunkt (:)</option><option value="::">Doppelter Doppelpunkt (::)</option><option value=".">Punkt (.)</option></select></label></div>
+      <div class="actions"><label class="file-button">Schema-JSON laden<input id="schema-file" type="file" accept=".json,application/json"></label><button id="schema-reset">Mitgeliefertes Schema</button><span id="schema-label"></span></div>
+    </details>
+    <section class="panel scope"><div class="section-title"><span class="step">01</span><h2>Prüfumfang</h2></div><div class="fields"><label>Prüfmodell<select id="model"><option value="">Zuerst Projekt laden</option></select></label><label>Phase<select id="phase"></select></label><label>Informationsbedarf<select id="loi"><option>100</option><option>200</option><option selected>300</option><option>400</option><option>500</option></select></label></div>
+      <fieldset><legend>Bauwerksmodelle für Referenzprüfung</legend><div id="references" class="reference-options">Noch keine Modelle geladen.</div></fieldset>
+      <div class="actions"><button id="check" class="primary" disabled>Modell prüfen</button><span class="muted">Prüft das gesamte gewählte Modell, unabhängig von der 3D-Auswahl.</span></div>
+    </section>
+    <div class="stats"><div><span>OBJEKTE IM PRÜFMODELL</span><strong id="count-objects">–</strong></div><div><span>FEHLER</span><strong id="count-errors">–</strong></div><div><span>WARNUNGEN</span><strong id="count-warnings">–</strong></div></div>
+    <section class="panel"><div class="section-title"><span class="step">02</span><h2>Befunde</h2><button id="export" class="subtle" disabled>Bericht als JSON</button></div>
+      <div class="filters"><label class="grow">Befunde suchen<input id="search" type="search" placeholder="Objekt, Eigenschaft oder Meldung …"></label><label>Schweregrad<select id="severity"><option value="all">Alle Befunde</option><option value="error">Fehler</option><option value="warning">Warnungen</option><option value="info">Hinweise</option></select></label></div>
+      <div id="findings" class="findings"><div class="empty">Die Prüfung zeigt hier fehlende Werte und ungültige Referenzen.</div></div><div id="finding-pages" class="actions"></div>
+    </section>
+    <section class="panel"><div class="section-title"><span class="step">03</span><h2>Attribute ergänzen</h2></div><p>Auswahl im Prüfmodell festlegen, ein Merkmal wählen und die geplanten Änderungen prüfen.</p>
+      <div class="actions"><button id="selection" disabled>3D-Auswahl übernehmen</button><button id="all" disabled>Alle im Prüfmodell auswählen</button><button id="none" disabled>Auswahl leeren</button><span id="selected-count">0 ausgewählt</span></div>
+      <div id="objects" class="object-list"></div>
+      <div class="fields"><label>Pset<input id="pset" list="psets" value="ePset_Objektinformation" placeholder="ePset_Objektinformation"><datalist id="psets"></datalist></label><label>Merkmal<input id="property" list="properties" value="IDEbene2" placeholder="IDEbene2"><datalist id="properties"></datalist></label><label>Datentyp<select id="datatype"><option value="xs:string">Text</option><option value="xs:long">Ganzzahl</option><option value="xs:double">Dezimalzahl</option><option value="xs:boolean">Wahr / Falsch</option><option value="xs:int">Ganzzahl (32 Bit)</option><option value="xs:integer">Integer</option><option value="xs:float">Float</option><option value="xs:decimal">Decimal</option></select></label></div>
+      <div class="fields two"><label>Neuer Wert<input id="value" placeholder="Wert eingeben"></label><label>Bearbeitungsmodus<select id="fill-mode"><option value="empty">Nur leere Werte ergänzen</option><option value="all">Vorhandene Werte ersetzen</option></select></label></div>
+      <button id="preview" class="primary" disabled>Änderungsvorschau öffnen</button>
+    </section>
+    <footer>MKP Modellwerkzeuge · Lokale WebForm · Fachregeln aus IFCnative</footer>
+  </main>
+  <dialog id="preview-dialog" aria-labelledby="preview-title"><div class="dialog-head"><div><p class="eyebrow">ATTRIBUTIERUNG</p><h2 id="preview-title">Änderungen prüfen</h2></div><button id="cancel" aria-label="Vorschau schließen">Schließen</button></div><p id="preview-summary"></p><div class="table-scroll"><table><thead><tr><th>Objekt / Merkmal</th><th>Vorher</th><th>Nachher</th></tr></thead><tbody id="preview-rows"></tbody></table></div><p class="muted">Schreibt Eigenschaften in das VDC-Projekt. Die ursprüngliche IFC-Datei wird dadurch nicht gespeichert. Vererbte Werte bleiben unverändert.</p><button id="apply" class="primary">Änderungen anwenden</button></dialog>
+  <script>/* ADDON_JS */</script>
+</body>
+</html>

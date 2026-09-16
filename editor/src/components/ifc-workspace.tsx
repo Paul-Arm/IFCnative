@@ -164,6 +164,7 @@ import {
     typeOption,
 } from "@/components/ifc-workspace/ui";
 import { WorkspaceMenubar } from "@/components/ifc-workspace/WorkspaceMenubar";
+import { WindowTitlebar } from "@/components/ifc-workspace/WindowTitlebar";
 import {
     UI_SCALE_OPTIONS,
     useUiScale,
@@ -4658,10 +4659,8 @@ export default function IfcWorkspace() {
           hidden={settingsOpen}
           onOpenSettings={() => openSettings("updates")}
         />
-        {recoveryBanner}
-        {statusAlertBar}
-        {/* Ohne Menüleiste: Einstellungen (inkl. Farbschema) oben rechts. */}
-        <div className="flex shrink-0 items-center justify-end gap-0.5 px-3 pt-3">
+        <WindowTitlebar>
+          <div data-tauri-drag-region className="min-w-8 flex-1 self-stretch" />
           <IconButton
             aria-label="Einstellungen"
             size="icon-sm"
@@ -4671,7 +4670,9 @@ export default function IfcWorkspace() {
           >
             <Settings aria-hidden className="size-4" />
           </IconButton>
-        </div>
+        </WindowTitlebar>
+        {recoveryBanner}
+        {statusAlertBar}
         {settingsOpen ? (
           <Suspense fallback={null}>
             <SettingsDialog
@@ -4713,10 +4714,11 @@ export default function IfcWorkspace() {
         onOpenSettings={() => openSettings("updates")}
       />
       <header className="relative z-20 flex shrink-0 flex-col border-b border-border/70 bg-card/95 shadow-sm backdrop-blur">
-        <div className="flex h-9 items-center gap-2 px-2">
+        <WindowTitlebar>
           <img
             alt=""
             aria-hidden
+            data-tauri-drag-region
             className="size-5 shrink-0 rounded-[5px] select-none"
             draggable={false}
             src="/brand/ifcnative-icon-03-blueprint.svg"
@@ -4745,7 +4747,8 @@ export default function IfcWorkspace() {
             onToggleView={toggleMosaicView}
             onUndo={undoDocument}
           />
-          <div className="ml-auto flex shrink-0 items-center gap-0.5">
+          <div data-tauri-drag-region className="min-w-8 flex-1 self-stretch" />
+          <div className="flex shrink-0 items-center gap-0.5">
             <IconButton
               aria-label="Rückgängig"
               disabled={!undoStack.length}
@@ -4785,7 +4788,7 @@ export default function IfcWorkspace() {
               <Settings aria-hidden className="size-4" />
             </IconButton>
           </div>
-        </div>
+        </WindowTitlebar>
         <div className="flex items-center bg-muted/50 px-1.5 py-1">
           {renderDocumentTabs()}
           <AttributionHeaderChip
@@ -4841,7 +4844,6 @@ export default function IfcWorkspace() {
             activeModelLoaded={activeSession.viewerModelLoadRequested}
             combineSelectionCount={viewerCombineCount}
             cutPlane={viewerCutPlane}
-            showMaterialColors={!closedMosaicIds.includes("materials") || detachedViews.has("materials")}
             editCapabilities={viewerEditCapabilities}
             focusRequest={viewerFocusRequest}
             mirrorRequests={viewerMirrorRequests}

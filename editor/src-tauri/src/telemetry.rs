@@ -13,6 +13,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
+use tauri::Manager;
 
 const DSN: &str = include_str!(concat!(env!("OUT_DIR"), "/sentry-dsn.txt"));
 const QUEUE_SIZE: usize = 16;
@@ -21,6 +22,7 @@ const MAX_TEXT: usize = 8_192;
 enum Report {
     Error(ErrorReport),
     Update(crate::update_telemetry::UpdateReport),
+    Install(std::path::PathBuf),
     Flush(SyncSender<()>),
 }
 
@@ -42,6 +44,7 @@ pub struct Telemetry {
     online: Arc<AtomicBool>,
     ifc_names: Arc<Mutex<Vec<String>>>,
     update_checked: Arc<AtomicBool>,
+    install_checked: Arc<AtomicBool>,
 }
 
 impl Telemetry {
@@ -52,6 +55,7 @@ impl Telemetry {
             online: Arc::new(AtomicBool::new(false)),
             ifc_names: Arc::new(Mutex::new(Vec::new())),
             update_checked: Arc::new(AtomicBool::new(false)),
+            install_checked: Arc::new(AtomicBool::new(false)),
         };
         let Ok(dsn) = DSN.trim().parse::<sentry::types::Dsn>() else {
             return service;
@@ -78,6 +82,7 @@ impl Telemetry {
                     auth: dsn.to_auth(Some("ifcnative-rust")).to_string(),
                     online: online.clone(),
                     retry_after: Mutex::new(None),
+                    registration: Mutex::new(None),
                 });
                 let mut options = ClientOptions::default();
                 options.dsn = Some(dsn);
@@ -94,7 +99,7 @@ impl Telemetry {
                 options.send_default_pii = false;
                 options.auto_session_tracking = false;
                 options.max_breadcrumbs = 0;
-                options.transport = Some(Arc::new(transport));
+                options.transport = Some(Arc::new(transport.clone()));
                 let client = Client::from(options);
                 let username = std::env::var("USERNAME")
                     .or_else(|_| std::env::var("USER"))
@@ -118,6 +123,21 @@ impl Telemetry {
                                 &sentry::Scope::default(),
                             );
                             client.flush(Some(Duration::from_secs(4)));
+                        }
+                        Report::Install(path) => {
+                            if let Ok(registration) = crate::install_telemetry::Registration::load(
+                                path,
+                                env!("CARGO_PKG_VERSION"),
+                            ) {
+                                if registration.pending() {
+                                    let metric = registration.metric(username.clone());
+                                    if let Ok(mut pending) = transport.registration.lock() {
+                                        *pending = Some(registration);
+                                    }
+                                    client.capture_metric(metric, &sentry::Scope::default());
+                                    client.flush(Some(Duration::from_secs(4)));
+                                }
+                            }
                         }
                         Report::Flush(_) => unreachable!(),
                     }
@@ -168,6 +188,21 @@ impl Telemetry {
         }
     }
 
+    fn register_install(&self, path: std::path::PathBuf) {
+        if !self.online.load(Ordering::Relaxed)
+            || self.install_checked.swap(true, Ordering::Relaxed)
+        {
+            return;
+        }
+        if !self
+            .sender
+            .as_ref()
+            .is_some_and(|sender| sender.try_send(Report::Install(path)).is_ok())
+        {
+            self.install_checked.store(false, Ordering::Relaxed);
+        }
+    }
+
     /// Called only by the updater's native exit hook, never by ordinary app exit.
     pub fn flush_before_update_exit(&self) {
         let Some(sender) = &self.sender else { return };
@@ -186,6 +221,11 @@ pub async fn telemetry_context(
     ifc_names: Vec<String>,
 ) -> Result<(), ()> {
     state.online.store(online, Ordering::Relaxed);
+    if !online {
+        state.install_checked.store(false, Ordering::Relaxed);
+    } else if let Ok(directory) = app.path().app_local_data_dir() {
+        state.register_install(directory.join("installation-telemetry.json"));
+    }
     if let Ok(mut names) = state.ifc_names.lock() {
         *names = ifc_names
             .into_iter()
@@ -302,6 +342,7 @@ struct WorkerTransport {
     auth: String,
     online: Arc<AtomicBool>,
     retry_after: Mutex<Option<Instant>>,
+    registration: Mutex<Option<crate::install_telemetry::Registration>>,
 }
 
 impl Transport for WorkerTransport {
@@ -329,6 +370,11 @@ impl Transport for WorkerTransport {
         match result {
             Ok(response) if response.status().is_success() => {
                 *retry_after = None;
+                if let Ok(mut registration) = self.registration.lock() {
+                    if let Some(registration) = registration.as_mut() {
+                        let _ = registration.acknowledge(&envelope);
+                    }
+                }
             }
             Ok(response) => {
                 // Respect server rate limits; other failures also open the circuit.
@@ -345,7 +391,7 @@ impl Transport for WorkerTransport {
                 *retry_after = Some(Instant::now() + Duration::from_secs(60));
             }
         }
-        // Dropped reports are not persisted, retried or shown as application errors.
+        // Errors/updates are best-effort. Unacknowledged install registrations retry on a later start/reconnect.
     }
 }
 
@@ -389,6 +435,7 @@ mod tests {
             online: Arc::new(AtomicBool::new(false)),
             ifc_names: Arc::new(Mutex::new(vec![])),
             update_checked: Arc::new(AtomicBool::new(false)),
+            install_checked: Arc::new(AtomicBool::new(false)),
         };
         state.report(ErrorReport::default());
         assert!(receiver.try_recv().is_err());
@@ -461,6 +508,7 @@ mod tests {
             online: Arc::new(AtomicBool::new(false)),
             ifc_names: Arc::new(Mutex::new(vec![])),
             update_checked: Arc::new(AtomicBool::new(false)),
+            install_checked: Arc::new(AtomicBool::new(false)),
         };
         let report =
             crate::update_telemetry::UpdateReport::new("1".into(), "2".into(), "completed");
@@ -487,6 +535,7 @@ mod tests {
             auth: "test".into(),
             online: Arc::new(AtomicBool::new(false)),
             retry_after: Mutex::new(None),
+            registration: Mutex::new(None),
         };
         transport.send_envelope(Envelope::new());
         assert!(listener.accept().is_err());
@@ -497,5 +546,134 @@ mod tests {
         assert!(retry.is_some_and(|until| until > Instant::now()));
         transport.send_envelope(Envelope::new());
         assert_eq!(*transport.retry_after.lock().unwrap(), retry);
+    }
+
+    #[test]
+    fn install_registration_retries_failed_http_and_is_only_consumed_after_success() {
+        use std::io::{Read, Write};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("installation-telemetry.json");
+        let mut install_id = None;
+        for (status, remains_pending) in [(503, true), (200, false)] {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = std::thread::spawn(move || {
+                let deadline = Instant::now() + Duration::from_secs(5);
+                let mut stream = loop {
+                    if let Ok((stream, _)) = listener.accept() {
+                        break stream;
+                    }
+                    assert!(Instant::now() < deadline, "no metric request received");
+                    std::thread::sleep(Duration::from_millis(5));
+                };
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                let mut request = Vec::new();
+                let mut buffer = [0; 4096];
+                let body = loop {
+                    let read = stream.read(&mut buffer).unwrap();
+                    assert!(read > 0);
+                    request.extend_from_slice(&buffer[..read]);
+                    if let Some(end) = request.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
+                        let headers = String::from_utf8_lossy(&request[..end]).to_ascii_lowercase();
+                        let length: usize = headers
+                            .lines()
+                            .find_map(|line| line.strip_prefix("content-length:"))
+                            .unwrap()
+                            .trim()
+                            .parse()
+                            .unwrap();
+                        if request.len() >= end + 4 + length {
+                            break String::from_utf8(request[end + 4..end + 4 + length].to_vec())
+                                .unwrap();
+                        }
+                    }
+                };
+                write!(
+                    stream,
+                    "HTTP/1.1 {status} Test\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                )
+                .unwrap();
+                body
+            });
+            let mut registration =
+                crate::install_telemetry::Registration::load(path.clone(), "1.4.16").unwrap();
+            // A successful unrelated error envelope must not consume an install registration.
+            registration.acknowledge(&Envelope::new()).unwrap();
+            assert!(registration.pending());
+            let metric = registration.metric(Some("pc-user".into()));
+            let transport = Arc::new(WorkerTransport {
+                http: reqwest::blocking::Client::builder()
+                    .no_proxy()
+                    .timeout(Duration::from_secs(2))
+                    .build()
+                    .unwrap(),
+                endpoint: format!("http://{address}/envelope"),
+                auth: "test".into(),
+                online: Arc::new(AtomicBool::new(true)),
+                retry_after: Mutex::new(None),
+                registration: Mutex::new(Some(registration)),
+            });
+            let mut options = ClientOptions::default();
+            options.dsn = Some("https://public@example.test/1".parse().unwrap());
+            options.default_integrations = false;
+            options.transport = Some(Arc::new(transport));
+            let client = Client::from(options);
+            client.capture_metric(metric, &sentry::Scope::default());
+            assert!(client.flush(Some(Duration::from_secs(3))));
+            let body = server.join().unwrap();
+            let lines: Vec<_> = body.lines().collect();
+            let header: serde_json::Value = serde_json::from_str(lines[1]).unwrap();
+            assert_eq!(header["type"], "trace_metric");
+            let payload: serde_json::Value = serde_json::from_str(lines[2]).unwrap();
+            let metric = &payload["items"][0];
+            assert_eq!(metric["name"], "editor.install");
+            assert_eq!(metric["value"], 1.0);
+            assert_eq!(
+                metric["attributes"]["install.status"]["value"],
+                "first_seen"
+            );
+            assert_eq!(metric["attributes"]["user.username"]["value"], "pc-user");
+            assert_eq!(
+                metric["attributes"]["installation.first_version"]["value"],
+                "1.4.16"
+            );
+            let id = metric["attributes"]["installation.id"]["value"].clone();
+            if let Some(previous) = &install_id {
+                assert_eq!(previous, &id);
+            }
+            install_id = Some(id);
+            assert!(!body.contains("exception"));
+            assert!(!body.contains("open_ifc"));
+            let next_launch =
+                crate::install_telemetry::Registration::load(path.clone(), "1.4.17").unwrap();
+            assert_eq!(next_launch.pending(), remains_pending);
+        }
+    }
+
+    #[test]
+    fn install_registration_queues_once_and_recovers_from_full_queue() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let state = Telemetry {
+            sender: Some(sender),
+            online: Arc::new(AtomicBool::new(false)),
+            ifc_names: Arc::new(Mutex::new(vec![])),
+            update_checked: Arc::new(AtomicBool::new(false)),
+            install_checked: Arc::new(AtomicBool::new(false)),
+        };
+        let path = std::path::PathBuf::from("unused-test-path");
+        state.register_install(path.clone());
+        assert!(receiver.try_recv().is_err());
+        state.online.store(true, Ordering::Relaxed);
+        state.report(ErrorReport::default());
+        state.register_install(path.clone());
+        assert!(!state.install_checked.load(Ordering::Relaxed));
+        assert!(matches!(receiver.try_recv(), Ok(Report::Error(_))));
+        state.register_install(path.clone());
+        assert!(matches!(receiver.try_recv(), Ok(Report::Install(_))));
+        state.register_install(path);
+        assert!(receiver.try_recv().is_err());
     }
 }

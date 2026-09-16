@@ -1,9 +1,141 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { Box3, Matrix4, Object3D, Vector3 } from "three";
+import { Box3, Box3Helper, BoxGeometry, Matrix4, Object3D, Vector3 } from "three";
 import { getFragmentCutPlaneBounds } from "../src/ifc/cutPlanePlacement";
+import { SelectionFrame } from "../src/ifc/selectionFrame";
+import { cameraClipping, gridAnchor, modelGridElevation, rebaseSceneObjects, viewerSyncPolicy } from "../src/ifc/viewerSceneMath";
 import * as WebIFC from "web-ifc";
+
+test("selection frame follows rotated geometry and coordinated model placement exactly once", () => {
+  const positions = new Float64Array([
+    -0.1, -1, -0.2, 0.1, -1, -0.2, -0.1, 1, -0.2, 0.1, 1, -0.2,
+    -0.1, -1, 0.2, 0.1, -1, 0.2, -0.1, 1, 0.2, 0.1, 1, 0.2,
+  ]);
+  const transform = new Matrix4().makeRotationZ(Math.PI / 6).setPosition(32555405, 35, -5792521);
+  const modelWorld = new Matrix4().makeRotationY(Math.PI / 4).setPosition(100, 20, -50);
+  const frame = new SelectionFrame();
+  // Match the plain matrix data received from the worker.
+  frame.addItems([[{ positions, transform: { elements: transform.elements } as Matrix4 }]], modelWorld);
+  frame.updateMatrixWorld(true);
+  const box = frame.children[0].children[0] as Box3Helper;
+  const size = box.box.getSize(new Vector3());
+  assert.ok(size.distanceTo(new Vector3(0.2, 2, 0.4)) < 1e-7, "bounds must not inflate along scene axes");
+  const vertices = box.geometry.getAttribute("position");
+  const expected = Array.from({ length: positions.length / 3 }, (_, index) =>
+    new Vector3().fromArray(positions, index * 3).applyMatrix4(transform).applyMatrix4(modelWorld));
+  for (let i = 0; i < vertices.count; i++) {
+    const actual = new Vector3().fromBufferAttribute(vertices, i).applyMatrix4(box.matrixWorld);
+    assert.ok(expected.some((point) => point.distanceTo(actual) < 1e-7), "each frame corner coincides with a geometry corner");
+  }
+  frame.reset();
+});
+
+test("selection frame combines item samples locally and keeps multiple items independently rotated", () => {
+  const positions = new Float32Array([-1, -1, -1, 1, 1, 1]);
+  const transform = new Matrix4().makeRotationY(Math.PI / 3).setPosition(12, 3, 4);
+  const frame = new SelectionFrame();
+  frame.addItems([
+    [{ positions, transform }, { positions, transform: transform.clone().multiply(new Matrix4().makeTranslation(4, 0, 0)) }],
+    [{ positions, transform: new Matrix4().makeRotationZ(-Math.PI / 4).setPosition(-10, 0, 0) }],
+    [],
+    [{ positions: new Float32Array([NaN, 0, 0]), transform }],
+  ], new Matrix4());
+  assert.equal(frame.children.length, 2);
+  const box = frame.children[0].children[0] as Box3Helper;
+  assert.ok(box.box.getSize(new Vector3()).distanceTo(new Vector3(6, 2, 2)) < 1e-10);
+  assert.ok(new Vector3().setFromMatrixPosition(frame.children[0].matrix)
+    .distanceTo(new Vector3(2, 0, 0).applyMatrix4(transform)) < 1e-10);
+  let disposed = 0;
+  frame.traverse((child) => {
+    if (!(child instanceof Box3Helper)) return;
+    child.geometry.addEventListener("dispose", () => disposed++);
+    for (const material of Array.isArray(child.material) ? child.material : [child.material]) {
+      material.addEventListener("dispose", () => disposed++);
+    }
+  });
+  frame.reset();
+  assert.equal(disposed, 4);
+  assert.equal(frame.children.length, 0);
+  assert.equal(frame.visible, false);
+});
+
+test("selection frame fits a narrow box whose rotation is baked into imported mesh vertices", () => {
+  const geometry = new BoxGeometry(0.4, 4, 0.2);
+  const source = geometry.getAttribute("position");
+  const baked = new Matrix4().makeRotationZ(0.31).multiply(new Matrix4().makeRotationX(0.2)).setPosition(-100400, 100, -294700);
+  const positions = new Float64Array(source.count * 3);
+  const corners: Vector3[] = [];
+  for (let i = 0; i < source.count; i++) {
+    const point = new Vector3().fromBufferAttribute(source, i).applyMatrix4(baked);
+    point.toArray(positions, i * 3);
+    corners.push(point);
+  }
+  const frame = new SelectionFrame();
+  frame.addItems([[{ positions, indices: geometry.index!.array as Uint16Array, transform: new Matrix4() }]], new Matrix4());
+  frame.updateMatrixWorld(true);
+  const box = frame.children[0].children[0] as Box3Helper;
+  const vertices = box.geometry.getAttribute("position");
+  for (let i = 0; i < vertices.count; i++) {
+    const actual = new Vector3().fromBufferAttribute(vertices, i).applyMatrix4(box.matrixWorld);
+    assert.ok(corners.some((point) => point.distanceTo(actual) < 1e-7), "baked rotation must not produce an oversized axis-aligned frame");
+  }
+  frame.reset();
+  geometry.dispose();
+});
+
+test("georeferenced grid cancels survey coordinates before conversion to GPU float32", () => {
+  const viewPosition = new Vector3(32455167.6187, 102.47318, -5497805.5964);
+  const anchor = gridAnchor(viewPosition);
+  const modelView = new Matrix4().makeTranslation(-viewPosition.x, -viewPosition.y, -viewPosition.z)
+    .multiply(new Matrix4().makeTranslation(anchor.x, 100, anchor.z));
+  const gpuMatrix = new Matrix4().fromArray(modelView.toArray().map(Math.fround));
+  const point = new Vector3(0.123, 0, 0.456).applyMatrix4(gpuMatrix);
+  assert.ok(Math.abs(point.x - (0.123 - anchor.relativeX)) < 0.000001);
+  assert.ok(Math.abs(point.z - (0.456 - anchor.relativeZ)) < 0.000001);
+  assert.ok(Math.abs(Math.fround(viewPosition.x + 0.123) - viewPosition.x - 0.123) > 0.1, "the former GPU world-coordinate addition loses sub-metre detail");
+  const moved = gridAnchor({ x: viewPosition.x + 10, z: viewPosition.z - 20 });
+  assert.equal(moved.relativeX, anchor.relativeX);
+  assert.equal(moved.relativeZ, anchor.relativeZ);
+});
+
+test("grid rejects unplaced storey elevation and keeps ground near the visible model", () => {
+  const bounds = new Box3(new Vector3(-10, -3, -10), new Vector3(10, 2, 10));
+  assert.equal(modelGridElevation(bounds, -102.47318), -3);
+  assert.equal(modelGridElevation(bounds, -3.2), -3.2);
+  assert.equal(modelGridElevation(bounds), -3);
+  assert.equal(modelGridElevation(new Box3()), 0);
+  assert.equal(modelGridElevation(bounds, Number.NaN), -3);
+});
+
+test("scene rebasing preserves IFC picks, relative model positions and camera framing", () => {
+  const model = new Object3D(); model.position.set(32455167.6187, 102.47318, -5497805.5964);
+  const delta = new Object3D(); delta.position.copy(model.position).add(new Vector3(4, 2, 1));
+  const toIfc = new Matrix4().makeTranslation(32455167.6187, 102.47318, -5497805.5964);
+  const local = new Vector3(0.012, 0.8, -2);
+  const beforePoint = fragmentModelPointToScene(local, model);
+  const beforePick = fragmentScenePointToIfcWorld(beforePoint, model, toIfc);
+  const eye = beforePoint.clone().add(new Vector3(8, 6, 8));
+  const offset = delta.position.clone().sub(model.position);
+  const result = rebaseSceneObjects([model, delta], model.position, [0, 0, 0]);
+  const afterPoint = fragmentModelPointToScene(local, model);
+  assert.deepEqual(model.position.toArray(), [0, 0, 0]);
+  assert.ok(delta.position.distanceTo(offset) < 1e-8);
+  assert.ok(fragmentScenePointToIfcWorld(afterPoint, model, toIfc).distanceTo(beforePick) < 1e-8);
+  assert.ok(eye.add(result.shift).distanceTo(afterPoint.clone().add(new Vector3(8, 6, 8))) < 1e-8);
+  assert.ok(new Vector3(...result.base).add(new Vector3(32455167.6187, 102.47318, -5497805.5964)).length() < 1e-8);
+});
+
+test("viewer revisions preserve the camera while document changes refit; clipping permits small bodies", () => {
+  assert.deepEqual(viewerSyncPolicy(["geo"], ["geo"]), { fit: false, preserveOrigin: true });
+  assert.deepEqual(viewerSyncPolicy(["small", "geo"], ["geo"]), { fit: true, preserveOrigin: true });
+  assert.deepEqual(viewerSyncPolicy(["small"], ["geo"]), { fit: true, preserveOrigin: false });
+  assert.deepEqual(viewerSyncPolicy([], ["geo"]), { fit: true, preserveOrigin: false });
+  const clipping = cameraClipping(new Vector3(0.2, 0.1, 0.2), new Vector3());
+  assert.equal(clipping.near, 0.001);
+  assert.equal(clipping.far, 2000);
+  assert.ok(cameraClipping(new Vector3(100000, 0, 0), new Vector3()).far > 100000);
+});
 
 import { createBodyGeometry } from "../src/components/bodyGeometry";
 import {

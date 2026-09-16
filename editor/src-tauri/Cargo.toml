@@ -1,6 +1,6 @@
 [package]
 name = "ifcnative"
-version = "1.4.15"
+version = "1.4.16"
 description = "Desktop IFC builder and viewer"
 authors = ["MKP"]
 edition = "2021"

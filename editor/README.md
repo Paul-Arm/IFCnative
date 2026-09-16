@@ -43,10 +43,13 @@ Browser keinen freien Zugriff auf lokale Dateipfade erlaubt.
 `npm run test:desktop` prüft Pfaderhalt, Abbruch, fehlende Dateien und die
 Migration alter Einträge.
 
-## Fehlerberichte und Update-Metriken mit Sentry
+## Fehlerberichte, Installationen und Updates mit Sentry
 
 Die optionale Desktop-Telemetrie läuft auf einem Rust-Worker; im Web-Build läuft
 das Sentry-SDK in einem Web Worker. Offline werden Berichte still verworfen.
 Desktop-Updates erscheinen unter **Explore → Metrics → `editor.update`** mit Nutzername,
 Quell-/Zielversion und Status; `completed` bestätigt den Start der installierten Zielversion.
+**`editor.install`** erfasst den ersten bekannten Online-Start je Windows-Benutzerprofil
+mit Nutzername und dauerhafter Installations-ID. Fehlgeschlagene Registrierungen werden
+beim nächsten Start oder Wiederverbinden erneut versucht.
 Projektvorlagen, DSN-Variablen, Datenumfang und Tests: [docs/SENTRY.md](docs/SENTRY.md).

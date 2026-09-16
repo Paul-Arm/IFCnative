@@ -1,4 +1,4 @@
-# Fehlerberichte und Update-Metriken mit Sentry
+# Fehlerberichte, Installationen und Updates mit Sentry
 
 ## Einrichtung
 
@@ -43,9 +43,43 @@ der Panic-Hook sendet asynchron und erzwingt beim Absturz kein Warten.
 - `navigator.onLine === false` verwirft Berichte sofort. Bei unbemerktem Verbindungsabbruch
   begrenzen Timeouts einen Versuch auf vier Sekunden im Hintergrund.
 - Nach Netzwerk-/HTTP-Fehlern mindestens 60 Sekunden Pause; `Retry-After` wird bis maximal einer Stunde berücksichtigt.
-- Keine Offline-Dateiablage, keine Wiederholungswarteschlange und keine Fehlerbox wegen Sentry.
+- Für Fehlerberichte keine Offline-Dateiablage oder Wiederholungswarteschlange; keine Fehlerbox wegen Sentry.
   Ein überlasteter Client verwirft Berichte. Gleichartige unmittelbar wiederholte Frontendfehler werden gedrosselt.
 - Normales Beenden der App wartet nicht auf den Versand. Ein Fehlerbericht ist best-effort, kein Garant für jeden Absturz.
+
+## Erstinstallation / erstmals erfasste Nutzer
+
+Unter **Explore → Metrics → `editor.install`** erscheint der erste bekannte Online-Start
+pro lokalem Windows-Benutzerprofil. Die Metrik ist ein Counter mit Wert `1`, verwendet
+die Desktop-DSN und erzeugt kein Error-Event.
+
+| Attribut | Bedeutung |
+| --- | --- |
+| `user.username` | PC-Benutzername, falls verfügbar |
+| `installation.id` | Zufällige, dauerhaft gespeicherte ID pro lokalem App-Datenverzeichnis |
+| `installation.first_version` | Version beim ersten erfassten Online-Start |
+| `installation.first_seen_at` | Zeitpunkt dieses ersten Kontakts als Unix-Sekunden |
+| `install.status` | `first_seen` |
+| `app_version` | Version beim Versand |
+
+Nach `user.username` und `installation.id` gruppieren, um Nutzer und Installationen zu sehen.
+Verschiedene PCs können denselben Benutzernamen haben. Die Installations-ID unterscheidet
+deren Profile, identifiziert aber keine Person über mehrere Geräte hinweg.
+
+`installation-telemetry.json` im lokalen App-Datenverzeichnis speichert nur ID, erste Version,
+ersten Kontaktzeitpunkt und Versandbestätigung, keine Benutzernamen oder IFC-Daten.
+Nach HTTP-Erfolg für genau diese Installationsmetrik wird die Registrierung als versendet markiert.
+Neustarts und Updates behalten die ID und melden die Registrierung danach nicht erneut.
+Bei Offline-Nutzung wird auf einen Online-Kontakt gewartet; bei Netzwerkfehlern bleibt die
+Registrierung offen und wird beim nächsten App-Start oder Offline→Online-Wechsel erneut versucht.
+Ohne konfigurierte DSN wird keine Registrierung angelegt.
+
+Auch bestehende Nutzer werden beim ersten Kontakt nach Einführung dieser Funktion erfasst.
+`first_seen` bedeutet daher **erstmals beobachtet**, nicht nachgewiesen neu installiert.
+Installationen ohne anschließenden App-Start lassen sich so nicht erfassen. Werden die lokalen
+App-Daten gelöscht, entsteht beim nächsten Start eine neue ID. Ein Prozessabbruch zwischen
+Serverannahme und lokaler Bestätigung kann einen erneuten Versand verursachen; für die Anzahl
+Installationen die unterschiedlichen `installation.id` zählen, nicht ausschließlich die Countersumme.
 
 ## Updates pro Nutzer
 
@@ -92,6 +126,8 @@ cargo test --lib
 
 Die automatischen Tests prüfen Bereinigung, Dateinamen/Benutzer/Version, Offline-Verhalten,
 volle Warteschlange, Netzwerkfehler-Pause und HTTP-Ratenbegrenzung ohne externe Sentry-Anfragen.
+Die Installationsprüfungen testen persistente IDs, getrennte Profile, Neustarts/Updates,
+Queue-Grenzen sowie HTTP-Fehler und erfolgreiche Bestätigung an einem lokalen Testserver.
 Nach dem Anlegen der Projekte zusätzlich einen gezielten Testfehler im Test-Build auslösen
 und im jeweiligen Sentry-Projekt prüfen. Danach offline wiederholen: keine UI-Störung, kein Versand.
 Ohne echte DSN ist die Ende-zu-Ende-Zustellung nicht verifizierbar.

@@ -17,6 +17,7 @@ import {
     RefreshCw,
     Rotate3d,
     RotateCw,
+    Settings,
     Slice,
     Square,
     Trash2,
@@ -24,9 +25,12 @@ import {
     X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuTrigger } from "./ui/dropdown-menu";
 
 import { recordDiagnostic } from "../diagnostics/watchdog";
 import { getFragmentCutPlaneBounds } from "../ifc/cutPlanePlacement";
+import { SelectionFrame } from "../ifc/selectionFrame";
+import { cameraClipping, gridAnchor, isFiniteSceneBox, modelGridElevation, rebaseSceneObjects, viewerSyncPolicy } from "../ifc/viewerSceneMath";
 import {
     convertIfcToFragmentsInWorker,
     type ConvertIfcToFragmentsProgress,
@@ -59,6 +63,7 @@ import {
 } from "./viewer-rotary-menu";
 
 type ViewerRuntime = Awaited<ReturnType<typeof createThatOpenRuntime>>;
+const SELECTION_BOX_STORAGE_KEY = "ifcnative.viewer.selection-box.v1";
 
 export default function ThatOpenViewer({
   activeDocumentId,
@@ -67,7 +72,6 @@ export default function ThatOpenViewer({
   activeModelLoaded = true,
   combineSelectionCount = 0,
   cutPlane,
-  showMaterialColors = false,
   editCapabilities = {
     canMove: false,
     canRotate: false,
@@ -100,7 +104,14 @@ export default function ThatOpenViewer({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const runtimeRef = useRef<ViewerRuntime | null>(null);
   const activeDocumentIdRef = useRef(activeDocumentId);
-  const showMaterialColorsRef = useRef(showMaterialColors);
+  const [showSelectionBox, setShowSelectionBox] = useState(() => {
+    try {
+      return window.localStorage.getItem(SELECTION_BOX_STORAGE_KEY) !== "false";
+    } catch {
+      return true;
+    }
+  });
+  const showSelectionBoxRef = useRef(showSelectionBox);
   const modelsRef = useRef(models);
   const selectedByDocumentIdRef = useRef(new Map<string, number>());
   const selectedEntityIdsRef = useRef<number[]>([]);
@@ -156,7 +167,7 @@ export default function ThatOpenViewer({
   );
 
   activeDocumentIdRef.current = activeDocumentId;
-  showMaterialColorsRef.current = showMaterialColors;
+  showSelectionBoxRef.current = showSelectionBox;
   modelsRef.current = models;
   selectedByDocumentIdRef.current = new Map(
     models.map((model) => [model.documentId, model.selectedId]),
@@ -231,7 +242,7 @@ export default function ThatOpenViewer({
           });
         },
         isCoordinatePickerActive: () => pickerActiveRef.current,
-        showMaterialColors: () => showMaterialColorsRef.current,
+        showSelectionBox: () => showSelectionBoxRef.current,
         onCoordinatePickerUsed: () => setPickerActive(false),
         onContextTarget: (target) => setContextTarget(target),
         onProgress: (progress) => setLoadProgress(progress),
@@ -331,8 +342,12 @@ export default function ThatOpenViewer({
       return;
     }
     void runtime.highlight(activeDocumentId, activeSelectedId);
-    void runtime.updateGrid(activeDocumentId);
-  }, [activeDocumentId, activeSelectedId, modelReady, selectionSignature, showMaterialColors]);
+  }, [activeDocumentId, activeSelectedId, modelReady, selectionSignature, showSelectionBox]);
+
+  useEffect(() => {
+    if (!runtimeRef.current || !modelReady) return;
+    void runtimeRef.current.updateGrid(activeDocumentId);
+  }, [activeDocumentId, modelReady]);
 
   useEffect(() => {
     const runtime = runtimeRef.current;
@@ -703,6 +718,37 @@ export default function ThatOpenViewer({
           >
             <Box aria-hidden size={16} />
           </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              aria-label="3D-Viewer-Einstellungen"
+              className="ifcnative-thatopen-tool"
+              title="3D-Viewer-Einstellungen"
+            >
+              <Settings aria-hidden size={16} />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side="right" align="start" className="w-64">
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>3D-Viewer</DropdownMenuLabel>
+                <DropdownMenuCheckboxItem
+                  checked={showSelectionBox}
+                  onCheckedChange={(checked) => {
+                    setShowSelectionBox(checked);
+                    try {
+                      window.localStorage.setItem(SELECTION_BOX_STORAGE_KEY, String(checked));
+                    } catch {
+                      // The setting still works for this session without storage.
+                    }
+                  }}
+                >
+                  Auswahlbox anzeigen
+                </DropdownMenuCheckboxItem>
+              </DropdownMenuGroup>
+              <p className="px-1.5 py-1 text-xs text-muted-foreground">
+                Markiert ausgewählte Bauteile mit einem Rahmen und erhält ihre Materialfarben.
+                Ausgeschaltet wird die Auswahl farbig hervorgehoben.
+              </p>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <div aria-hidden className="ifcnative-thatopen-tool-divider" />
           <button
             aria-label="Modell neu berechnen"
@@ -845,7 +891,7 @@ async function createThatOpenRuntime(
     /** Vollständige Mehrfachauswahl des Dokuments (leer für inaktive Dokumente). */
     getSelectedIds(documentId: string): number[];
     isCoordinatePickerActive(): boolean;
-    showMaterialColors(): boolean;
+    showSelectionBox(): boolean;
     onError(message: string): void;
     onCoordinatePickerUsed(): void;
     onContextTarget(target: ViewerContextMenuTarget): void;
@@ -910,7 +956,7 @@ async function createThatOpenRuntime(
   };
   world.scene.three.background = new THREE.Color(readViewerBackdrop());
   world.camera.three.near = 0.1;
-  world.camera.three.far = 1_000_000;
+  world.camera.three.far = 2_000;
   world.camera.three.updateProjectionMatrix();
   world.camera.controls.setLookAt(8, 6, 8, 0, 0, 0);
 
@@ -932,13 +978,11 @@ async function createThatOpenRuntime(
   // runtime setting explicit after setup as recommended by the component API.
   grid.config.visible = true;
   grid.fade = world.camera.three instanceof THREE.PerspectiveCamera;
-  // Der InfiniteGrid-Shader wertet fract() auf ABSOLUTEN Weltkoordinaten aus
-  // — weit vom Ursprung (georeferenzierte Modelle) flackern die Linien durch
-  // float32-Rundung. Patch: Muster kamera-relativ rechnen; der Anker uCamRel
-  // wird CPU-seitig in float64 gegen die auf ein Rasterperioden-Vielfaches
-  // gesnappte Kameraposition bestimmt — das Muster bleibt exakt weltverankert,
-  // die Shader-Werte bleiben klein.
+  // Move the actual mesh on the CPU. Adding cameraPosition in the shader
+  // loses metres of precision at survey coordinates, even if fract() itself
+  // uses small values. modelViewMatrix now contains the precise cancellation.
   const gridMaterial = grid.material;
+  gridMaterial.depthWrite = false;
   gridMaterial.uniforms.uCamRel = { value: new THREE.Vector2() };
   gridMaterial.vertexShader = `
     varying vec2 relPosition;
@@ -946,8 +990,7 @@ async function createThatOpenRuntime(
     uniform vec2 uCamRel;
     void main() {
       vec3 pos = position.xzy * uDistance;
-      relPosition = pos.xz + uCamRel;
-      pos.xz += cameraPosition.xz;
+      relPosition = pos.xz;
       gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
     }
   `;
@@ -962,9 +1005,10 @@ async function createThatOpenRuntime(
     uniform vec2 uCamRel;
     float getGrid(float size) {
       vec2 r = relPosition / size;
-      vec2 grid = abs(fract(r - 0.5) - 0.5) / fwidth(r);
+      vec2 derivative = max(fwidth(r), vec2(0.00001));
+      vec2 grid = abs(fract(r - 0.5) - 0.5) / derivative;
       float line = min(grid.x, grid.y);
-      return 1.0 - min(line, 1.0);
+      return (1.0 - min(line, 1.0)) * (1.0 - smoothstep(0.5, 2.0, max(derivative.x, derivative.y)));
     }
     void main() {
       float d = 1.0 - min(distance(uCamRel, relPosition) / uDistance, 1.0);
@@ -982,13 +1026,20 @@ async function createThatOpenRuntime(
   const updateGridAnchor = () => {
     const size1 = Math.abs(Number(gridMaterial.uniforms.uSize1.value)) || 1;
     const size2 = Math.abs(Number(gridMaterial.uniforms.uSize2.value)) || 10;
-    // Vielfaches beider Rastergrößen — Verschiebung darum ist musterinvariant.
+    // The configured 1 m / 10 m grid repeats at this interval.
     const period = Math.max(size1 * size2, 1);
     const camera = world.camera.three.position;
+    const anchor = gridAnchor(camera, period);
+    grid.three.position.x = anchor.x;
+    grid.three.position.z = anchor.z;
     (gridMaterial.uniforms.uCamRel.value as import("three").Vector2).set(
-      camera.x - Math.round(camera.x / period) * period,
-      camera.z - Math.round(camera.z / period) * period,
+      anchor.relativeX,
+      anchor.relativeZ,
     );
+    const clipping = cameraClipping(camera, world.camera.controls.getTarget(new THREE.Vector3()));
+    world.camera.three.near = clipping.near;
+    world.camera.three.far = clipping.far;
+    world.camera.three.updateProjectionMatrix();
   };
   updateGridAnchor();
   world.camera.controls.addEventListener("update", updateGridAnchor);
@@ -1126,14 +1177,8 @@ async function createThatOpenRuntime(
     renderedFaces: FRAGS.RenderedFaces.TWO,
     transparent: false,
   };
-  const materialSelectionBounds = new THREE.Box3();
-  const materialSelectionFrame = new THREE.Box3Helper(materialSelectionBounds, 0xffb703);
+  const materialSelectionFrame = new SelectionFrame();
   materialSelectionFrame.visible = false;
-  const materialSelectionFrameMaterials = Array.isArray(materialSelectionFrame.material)
-    ? materialSelectionFrame.material
-    : [materialSelectionFrame.material];
-  for (const material of materialSelectionFrameMaterials) material.depthTest = false;
-  materialSelectionFrame.renderOrder = 49;
   world.scene.three.add(materialSelectionFrame);
 
   type LoadedViewerModel = {
@@ -1463,7 +1508,9 @@ async function createThatOpenRuntime(
     }
   }
 
+  let gridRequest = 0;
   async function updateGrid(documentId: string) {
+    const request = ++gridRequest;
     const loaded = modelsByDocumentId.get(documentId);
     if (!loaded) {
       grid.three.position.y = 0;
@@ -1484,33 +1531,24 @@ async function createThatOpenRuntime(
     const finiteCoordinationHeight = Number.isFinite(coordinationHeight)
       ? coordinationHeight
       : 0;
-    let gridElevation: number;
+    let storeyElevation: number | undefined;
     if (elevations.length) {
-      // Elevation is expressed in IFC world coordinates. First convert it to
-      // this model's rebased local frame, then include the model.object offset
-      // that Fragments applied while coordinating all loaded IFCs.
+      // Treat Elevation as a candidate only: many infrastructure exporters
+      // leave it at zero while the storey's placement has an absolute height.
       const localGridPoint = new THREE.Vector3(
         0,
         Math.min(...elevations) + finiteCoordinationHeight,
         0,
       );
-      gridElevation = fragmentModelPointToScene(
+      storeyElevation = fragmentModelPointToScene(
         localGridPoint,
         loaded.model.object,
       ).y;
-    } else {
-      // Some infrastructure IFCs omit IfcBuildingStorey.Elevation. In that
-      // case, anchor the grid to the visible model bounds instead of putting
-      // it at an unrelated georeferencing origin.
-      const gridItems = loaded.fitItems
-        ? [...loaded.fitItems]
-        : await loaded.model.getLocalIds().catch(() => []);
-      const box = gridItems.length
-        ? await loaded.model.getMergedBox(gridItems).catch(() => null)
-        : null;
-      gridElevation = box && !box.isEmpty() ? box.min.y : 0;
     }
-    grid.three.position.y = gridElevation;
+    const box = await getLoadedModelBounds(loaded);
+    if (request !== gridRequest || modelsByDocumentId.get(documentId) !== loaded || runtimeDisposed) return;
+    grid.three.position.y = modelGridElevation(box, storeyElevation);
+    updateGridAnchor();
     callbacks.onLog(
       `viewer.grid({ file: '${loaded.fileName}', elevation: ${formatCoordinate(grid.three.position.y)}, storeys: ${storeyIds.length} });`,
     );
@@ -1798,6 +1836,7 @@ async function createThatOpenRuntime(
   // Serialize reloads: two quick commits would otherwise run syncModels
   // concurrently and can leave an orphaned model instance in the scene.
   let syncQueue: Promise<unknown> = Promise.resolve();
+  let cameraRequest = 0;
 
   function syncModels(
     nextModels: ThatOpenViewerModel[],
@@ -1818,10 +1857,14 @@ async function createThatOpenRuntime(
     if (runtimeDisposed) {
       return;
     }
-    materialSelectionFrame.visible = false;
+    cameraRequest++;
+    highlightRequest++;
+    materialSelectionFrame.reset();
     const nextDocumentIds = new Set(
       nextModels.map((model) => model.documentId),
     );
+    const syncPolicy = viewerSyncPolicy(modelsByDocumentId.keys(), nextDocumentIds);
+    const preservedBase = syncPolicy.preserveOrigin ? fragments.core.baseCoordinates?.slice() : null;
     coordinateCursor.hide();
     // Release any gizmo preview clone before models are disposed/reloaded so
     // no hidden element or orphaned preview mesh survives the reload.
@@ -1853,6 +1896,12 @@ async function createThatOpenRuntime(
           .catch(() => undefined);
         modelsByDocumentId.delete(nextModel.documentId);
         documentIdByModelId.delete(current.model.modelId);
+      }
+
+      // Disposing the final model clears Fragments' baseCoordinates. A new
+      // revision of the same document must keep its scene frame and camera.
+      if (preservedBase && fragments.core.baseCoordinates === null) {
+        fragments.core.baseCoordinates = preservedBase.slice();
       }
 
       callbacks.onStatus(
@@ -1941,11 +1990,12 @@ async function createThatOpenRuntime(
         `viewer.load({ engine: 'thatopen', file: '${nextModel.fileName}', modelId: '${model.modelId}' });`,
       );
     }
+    if (syncPolicy.fit) await rebaseSceneToFirstModel();
     await fragments.core.update(true);
     await updateGrid(callbacks.getActiveDocumentId());
     callbacks.onProgress(null);
-    if (options?.fitAfterLoad ?? true) {
-      await fit();
+    if ((options?.fitAfterLoad ?? true) && syncPolicy.fit) {
+      await fit(callbacks.getActiveDocumentId());
     }
     callbacks.onStatus(
       `ThatOpen loaded ${nextModels.length.toLocaleString()} IFC model(s)`,
@@ -2008,7 +2058,8 @@ async function createThatOpenRuntime(
     entityId: number,
     options?: { updateGizmo?: boolean; exclusive?: boolean },
   ) {
-    materialSelectionFrame.visible = false;
+    const request = highlightRequest;
+    materialSelectionFrame.reset();
     const loaded = modelsByDocumentId.get(documentId);
     if (!loaded || !Number.isFinite(entityId) || entityId <= 0) {
       // Auswahl nicht darstellbar (Dokument nicht geladen / leer): die alte
@@ -2064,16 +2115,19 @@ async function createThatOpenRuntime(
       }
     }
     await fragments.resetHighlight();
-    if (callbacks.showMaterialColors()) {
-      materialSelectionBounds.makeEmpty();
-      const boxes = await Promise.all(Object.entries(targets).map(async ([modelId, ids]) => {
+    if (callbacks.showSelectionBox()) {
+      const geometries = await Promise.all(Object.entries(targets).map(async ([modelId, ids]) => {
         const model = fragments.list.get(modelId);
         if (!model || !ids.size) return null;
+        const items = await model.getItemsGeometry([...ids]).catch(() => null);
+        if (!items) return null;
         model.object.updateWorldMatrix(true, false);
-        return model.getMergedBox([...ids]).catch(() => null);
+        return { items, matrix: model.object.matrixWorld.clone() };
       }));
-      for (const box of boxes) if (box && !box.isEmpty()) materialSelectionBounds.union(box);
-      materialSelectionFrame.visible = !materialSelectionBounds.isEmpty();
+      if (request !== highlightRequest || runtimeDisposed) return;
+      for (const geometry of geometries) {
+        if (geometry) materialSelectionFrame.addItems(geometry.items, geometry.matrix);
+      }
     } else {
       await fragments.highlight(selectionMaterial, targets);
     }
@@ -2090,7 +2144,42 @@ async function createThatOpenRuntime(
     }
   }
 
-  async function fit() {
+  async function rebaseSceneToFirstModel() {
+    const first = modelsByDocumentId.values().next().value as LoadedViewerModel | undefined;
+    if (!first) return;
+    const shift = first.model.object.position.clone().negate();
+    if (shift.lengthSq() < 1e-12 || !shift.toArray().every(Number.isFinite)) return;
+    const base = fragments.core.baseCoordinates;
+    if (!base) return;
+    // Every model, including subset/delta models, uses the same scene offset.
+    fragments.core.baseCoordinates = rebaseSceneObjects(
+      [...fragments.list.values()].map((model) => model.object), first.model.object.position, base,
+    ).base;
+    const eye = world.camera.controls.getPosition(new THREE.Vector3(), true).add(shift);
+    const target = world.camera.controls.getTarget(new THREE.Vector3(), true).add(shift);
+    await world.camera.controls.setLookAt(eye.x, eye.y, eye.z, target.x, target.y, target.z, false);
+    callbacks.onLog(`viewer.scene.rebased({ x: ${formatCoordinate(shift.x)}, y: ${formatCoordinate(shift.y)}, z: ${formatCoordinate(shift.z)} });`);
+  }
+
+  async function getLoadedModelBounds(loaded: LoadedViewerModel) {
+    const modelIds = new Set([loaded.model.modelId, ...loaded.subsetModels.map((subset) => subset.model.modelId)]);
+    const bounds = new THREE.Box3();
+    const boxes = await Promise.all([...fragments.list.values()].map(async (model) => {
+      if (!modelIds.has(model.modelId) && !(model.isDeltaModel && model.parentModelId && modelIds.has(model.parentModelId))) return null;
+      const ids = model === loaded.model && loaded.fitItems
+        ? [...loaded.fitItems]
+        : await model.getLocalIds().catch(() => []);
+      const hidden = loaded.hiddenLocalIdsByModelId.get(model.modelId);
+      const visible = hidden ? ids.filter((id) => !hidden.has(id)) : ids;
+      model.object.updateWorldMatrix(true, false);
+      return visible.length ? model.getMergedBox(visible).catch(() => null) : null;
+    }));
+    for (const box of boxes) if (box && isFiniteSceneBox(box)) bounds.union(box);
+    return bounds;
+  }
+
+  async function fit(documentId?: string) {
+    const request = ++cameraRequest;
     if (!modelsByDocumentId.size) {
       return;
     }
@@ -2103,43 +2192,58 @@ async function createThatOpenRuntime(
         resolveElementModel(activeModel, selectedId),
       );
     }
-    await world.camera.fitToItems(getFitItems());
+    const bounds = new THREE.Box3();
+    const models = documentId ? [modelsByDocumentId.get(documentId)].filter((model): model is LoadedViewerModel => !!model) : [...modelsByDocumentId.values()];
+    const boxes = await Promise.all(models.map(getLoadedModelBounds));
+    for (const box of boxes) if (isFiniteSceneBox(box)) bounds.union(box);
+    if (request !== cameraRequest || runtimeDisposed || !isFiniteSceneBox(bounds)) return;
+    const sphere = bounds.getBoundingSphere(new THREE.Sphere());
+    sphere.radius = Math.max(sphere.radius, 0.05);
+    await world.camera.controls.fitToSphere(sphere, true);
   }
 
   async function focusSelected(documentId: string, entityId: number) {
+    const request = ++cameraRequest;
     const loaded = modelsByDocumentId.get(documentId);
     if (!loaded || !Number.isFinite(entityId) || entityId <= 0) {
       return;
     }
     const localId = resolveLocalId(loaded, entityId);
     await highlight(documentId, entityId).catch(() => undefined);
-    await world.camera
-      .fitToItems({
-        [resolveElementModel(loaded, entityId).modelId]: new Set([localId]),
-      })
-      .catch(() => fit());
+    const model = resolveElementModel(loaded, entityId);
+    model.object.updateWorldMatrix(true, false);
+    const box = await model.getMergedBox([localId]).catch(() => null);
+    if (request !== cameraRequest || runtimeDisposed || !box || !isFiniteSceneBox(box)) return;
+    const sphere = box.getBoundingSphere(new THREE.Sphere());
+    // Spatial/container entities have no renderable box; don't fly to (0,0,0).
+    if (sphere.radius <= 0) return;
+    sphere.radius = Math.max(sphere.radius, 0.05);
+    await world.camera.controls.fitToSphere(sphere, true);
     callbacks.onLog(
       `viewer.camera.center({ file: '${loaded.fileName}', id: ${entityId} });`,
     );
   }
 
   async function resetCamera() {
-    await world.camera.controls.setLookAt(8, 6, 8, 0, 0, 0, true);
+    const request = ++cameraRequest;
     if (modelsByDocumentId.size) {
+      const loaded = modelsByDocumentId.get(callbacks.getActiveDocumentId()) ?? modelsByDocumentId.values().next().value!;
+      const bounds = await getLoadedModelBounds(loaded);
+      if (request !== cameraRequest || runtimeDisposed || !isFiniteSceneBox(bounds)) return;
+      const sphere = bounds.getBoundingSphere(new THREE.Sphere());
+      sphere.radius = Math.max(sphere.radius, 0.05);
+      const eye = sphere.center.clone().add(new THREE.Vector3(8, 6, 8).normalize().multiplyScalar(sphere.radius * 3));
+      await world.camera.controls.setLookAt(eye.x, eye.y, eye.z, sphere.center.x, sphere.center.y, sphere.center.z, false);
+      await world.camera.controls.fitToSphere(sphere, true);
       await fragments.core.update(true);
       const activeDocumentId = callbacks.getActiveDocumentId();
       await highlight(
         activeDocumentId,
         callbacks.getSelectedId(activeDocumentId),
       );
+    } else {
+      await world.camera.controls.setLookAt(8, 6, 8, 0, 0, 0, true);
     }
-  }
-
-  function getFitItems() {
-    const entries = [...modelsByDocumentId.values()].flatMap((loaded) =>
-      loaded.fitItems ? [[loaded.model.modelId, loaded.fitItems] as const] : [],
-    );
-    return entries.length ? Object.fromEntries(entries) : undefined;
   }
 
   // Mirror-Ops laufen durch dieselbe Queue wie die Modell-Reloads: ein Mirror
@@ -2468,8 +2572,7 @@ async function createThatOpenRuntime(
     viewCube.dispose();
     coordinateCursor.dispose();
     materialSelectionFrame.removeFromParent();
-    materialSelectionFrame.geometry.dispose();
-    for (const material of materialSelectionFrameMaterials) material.dispose();
+    materialSelectionFrame.reset();
     components.dispose();
   }
 

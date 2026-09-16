@@ -1,0 +1,13 @@
+{
+  "name": "@ifcnative/vdc-addon",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MKP Modellqualität und Attribuierung als lokale VDC WebForm",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node scripts/test.mjs",
+    "preview": "node scripts/preview.mjs"
+  },
+  "engines": { "node": ">=22.13.0" }
+}

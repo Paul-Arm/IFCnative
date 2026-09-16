@@ -7,6 +7,7 @@ use std::{
 use std::io::Write;
 use tauri::{ipc::Response, webview::NewWindowResponse, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
+mod install_telemetry;
 mod telemetry;
 mod update_telemetry;
 mod updates;
@@ -179,6 +180,7 @@ pub fn run() {
             let handle = app.handle().clone();
             WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title("IFCnative")
+                .decorations(false)
                 .inner_size(1440.0, 940.0)
                 .min_inner_size(1024.0, 720.0)
                 .center()

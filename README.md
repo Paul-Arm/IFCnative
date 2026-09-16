@@ -12,6 +12,14 @@ Werkzeugkasten rund um das native Erstellen, Ansehen und Bearbeiten von IFC-Mode
 | [ifc-to-glb/](ifc-to-glb/README.md) | **ifc2glb**                | .NET 10, xBIM                             | CLI-Konverter IFC → GLB: `src/IfcToGlb.Core` (Bibliothek), `src/IfcToGlb.Cli` (Kommandozeile), `samples/` (Testmodelle).                                                         |
 | [server/](server/README.md)         | **IFC Hub (Server)**    | Node.js/TypeScript, Fastify, Nuxt         | Zentrale IFC-Ablage: Projekte, Benutzer, Versionierung mit Commits + Nachricht und semantischem Diff. Web-UI + REST-API; Speicher lokal (`.ifc-vcs-data/`) oder Azure Blob. Editor-Anbindung über das Panel „IFC Hub“. |
 
+## VDC-Manager-Add-on
+
+Unter [`vdc-addon/`](vdc-addon/README.md) liegt die erste WebForm-Ausbaustufe
+**MKP Modellqualität & Attribuierung**: Fachprüfung, Befundauswahl und
+Attributänderungen mit Vorschau. `node vdc-addon/scripts/build.mjs` erzeugt
+eine offline nutzbare `vdc-addon/dist/index.html`; Demo-Modus ist enthalten.
+Einrichtung und die noch ausstehende Verifikation in VDC sind im Add-on-README dokumentiert.
+
 ## Schnellstart (Haupt-App)
 
 ```powershell
