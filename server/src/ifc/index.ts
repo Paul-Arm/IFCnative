@@ -22,6 +22,21 @@ export {
   diffEntityFields,
   type EntityFieldDiff,
 } from "../../../editor/src/ifc/versioning/entityFieldDiff";
+export { createHashContext } from "../../../editor/src/ifc/versioning/entityHash";
+export {
+  CHANGE_FACETS,
+  buildObjectRecords,
+  diffObjectDetails,
+  diffObjectIndexes,
+  type ChangeFacet,
+  type ObjectChangeEntry,
+  type ObjectChangeStatus,
+  type ObjectDetail,
+  type ObjectDiffSummary,
+  type ObjectFieldChange,
+  type ObjectIndexEntry,
+  type ObjectRecord,
+} from "../../../editor/src/ifc/versioning/objectRecords";
 export {
   parseIdsXml,
   validateIds,

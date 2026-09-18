@@ -9,6 +9,9 @@
 
 import type {
   GuidDiffSummary,
+  ObjectDetail,
+  ObjectIndexEntry,
+  ObjectRecord,
   VersionManifestEntry,
 } from "../ifc";
 
@@ -436,6 +439,19 @@ export interface Repository {
     entries: VersionManifestEntry[],
   ): Promise<void>;
   getManifest(commitId: string): Promise<VersionManifestEntry[]>;
+
+  // Objekt-Records (objektzentrierter Diff: Attribute, Lage, Geometrie,
+  // Eigenschaften, Beziehungen) — Details dedupliziert über record_hash.
+  saveObjectRecords(commitId: string, records: ObjectRecord[]): Promise<void>;
+  /** false = Commit stammt aus der Zeit vor den Records (Backfill nötig). */
+  hasObjectIndex(commitId: string): Promise<boolean>;
+  getObjectIndex(commitId: string): Promise<ObjectIndexEntry[]>;
+  getObjectDetails(recordHashes: string[]): Promise<Map<string, ObjectDetail>>;
+  /** Diff-Zähler eines Commits nachziehen (Backfill alter Commits). */
+  updateCommitStats(
+    commitId: string,
+    stats: { added: number; removed: number; modified: number },
+  ): Promise<void>;
 
   // Diff cache (commits are immutable, so cached diffs never go stale)
   getCachedDiff(

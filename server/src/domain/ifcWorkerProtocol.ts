@@ -1,6 +1,7 @@
 import type {
   EntityFieldDiff,
   IdsValidationSummary,
+  ObjectRecord,
   VersionManifestEntry,
 } from "../ifc";
 
@@ -17,6 +18,18 @@ export interface AnalyzeResult {
   entityCount: number;
   duplicateGlobalIds: string[];
   entries: VersionManifestEntry[];
+  /** Objektzentrierte Records (Attribute, Lage, Geometrie, Psets, …). */
+  objects: ObjectRecord[];
+}
+
+/** Nur die Objekt-Records — Backfill für Commits aus der Zeit davor. */
+export interface ObjectsTask {
+  type: "objects";
+  bytes: Uint8Array;
+}
+
+export interface ObjectsResult {
+  objects: ObjectRecord[];
 }
 
 export interface EntityDiffDocument {
@@ -61,6 +74,7 @@ export interface FragmentsResult {
 
 export type WorkerTask =
   | AnalyzeTask
+  | ObjectsTask
   | EntityDiffTask
   | ValidateIdsTask
   | FragmentsTask;

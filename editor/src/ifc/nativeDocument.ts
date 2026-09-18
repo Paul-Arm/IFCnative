@@ -6933,6 +6933,19 @@ function readTypeAssignments(
   return result;
 }
 
+/**
+ * Property-/Quantity-Set direkt über seine Entity-Id lesen — auch Sets, die
+ * nicht per IfcRelDefinesByProperties hängen (z. B. HasPropertySets eines
+ * Typobjekts).
+ */
+export function readNativePropertySet(
+  document: NativeIfcDocument,
+  setId: number,
+): NativeIfcPropertySet | undefined {
+  const entity = document.entityById.get(setId);
+  return entity ? buildPropertySet(entity, document.entityById) : undefined;
+}
+
 function buildPropertySet(
   entity: NativeIfcEntity,
   entityById: Map<number, NativeIfcEntity>,

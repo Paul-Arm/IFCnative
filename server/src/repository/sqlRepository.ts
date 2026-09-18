@@ -1,7 +1,11 @@
 import { randomUUID } from "node:crypto";
 
 import type {
+  ChangeFacet,
   GuidDiffSummary,
+  ObjectDetail,
+  ObjectIndexEntry,
+  ObjectRecord,
   VersionManifestEntry,
 } from "../ifc";
 import {
@@ -36,6 +40,15 @@ import type {
 
 /** Insert rows in chunks to stay well under Postgres' parameter limit. */
 const INSERT_CHUNK = 400;
+
+/** Reihenfolge der Facetten-Hashes in commit_objects.facets ("a|b|c|d|e"). */
+const FACET_COLUMNS: ChangeFacet[] = [
+  "attributes",
+  "placement",
+  "geometry",
+  "properties",
+  "relations",
+];
 
 /** Wiederholungen bei Nummern-Races (unique constraint auf Laufnummern). */
 const NUMBER_RETRIES = 5;
@@ -600,6 +613,17 @@ export class SqlRepository implements Repository {
     // über Commits/Modelle geteilt).
     await this.sql.query(
       `delete from commit_entities where commit_id in
+         (select id from commits where model_id = $1)`,
+      [modelId],
+    );
+    // object_records bleiben wie entity_objects (content-addressed).
+    await this.sql.query(
+      `delete from commit_objects where commit_id in
+         (select id from commits where model_id = $1)`,
+      [modelId],
+    );
+    await this.sql.query(
+      `delete from commit_object_index where commit_id in
          (select id from commits where model_id = $1)`,
       [modelId],
     );
@@ -1436,6 +1460,130 @@ export class SqlRepository implements Repository {
       type: r.entity_type,
       name: r.name,
     }));
+  }
+
+  // ---- Objekt-Records (objektzentrierter Diff) ---------------------------
+
+  async saveObjectRecords(
+    commitId: string,
+    records: ObjectRecord[],
+  ): Promise<void> {
+    await this.sql.transaction(async () => {
+      for (let i = 0; i < records.length; i += INSERT_CHUNK) {
+        const chunk = records.slice(i, i + INSERT_CHUNK);
+
+        const detailValues: unknown[] = [];
+        const detailTuples = chunk.map((record, idx) => {
+          const base = idx * 2;
+          detailValues.push(record.hash, JSON.stringify(record.detail));
+          return `($${base + 1}, $${base + 2})`;
+        });
+        await this.sql.query(
+          `insert into object_records (record_hash, detail)
+           values ${detailTuples.join(", ")}
+           on conflict (record_hash) do nothing`,
+          detailValues,
+        );
+
+        const refValues: unknown[] = [];
+        const refTuples = chunk.map((record, idx) => {
+          const base = idx * 7;
+          refValues.push(
+            commitId,
+            record.globalId,
+            record.hash,
+            record.type,
+            record.name,
+            record.container,
+            FACET_COLUMNS.map((facet) => record.facets[facet]).join("|"),
+          );
+          return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7})`;
+        });
+        await this.sql.query(
+          `insert into commit_objects
+             (commit_id, global_id, record_hash, entity_type, name, container, facets)
+           values ${refTuples.join(", ")}
+           on conflict (commit_id, global_id) do nothing`,
+          refValues,
+        );
+      }
+      await this.sql.query(
+        `insert into commit_object_index (commit_id, object_count)
+         values ($1, $2)
+         on conflict (commit_id) do update set object_count = excluded.object_count`,
+        [commitId, records.length],
+      );
+    });
+  }
+
+  async hasObjectIndex(commitId: string): Promise<boolean> {
+    const { rows } = await this.sql.query(
+      `select 1 as present from commit_object_index where commit_id = $1`,
+      [commitId],
+    );
+    return rows.length > 0;
+  }
+
+  async getObjectIndex(commitId: string): Promise<ObjectIndexEntry[]> {
+    const { rows } = await this.sql.query<{
+      global_id: string;
+      record_hash: string;
+      entity_type: string;
+      name: string;
+      container: string;
+      facets: string;
+    }>(
+      `select global_id, record_hash, entity_type, name, container, facets
+       from commit_objects where commit_id = $1`,
+      [commitId],
+    );
+    return rows.map((row) => {
+      const parts = row.facets.split("|");
+      const facets = {} as Record<ChangeFacet, string>;
+      FACET_COLUMNS.forEach((facet, index) => {
+        facets[facet] = parts[index] ?? "";
+      });
+      return {
+        globalId: row.global_id,
+        type: row.entity_type,
+        name: row.name,
+        container: row.container,
+        hash: row.record_hash,
+        facets,
+      };
+    });
+  }
+
+  async getObjectDetails(
+    recordHashes: string[],
+  ): Promise<Map<string, ObjectDetail>> {
+    const result = new Map<string, ObjectDetail>();
+    const unique = [...new Set(recordHashes)];
+    for (let i = 0; i < unique.length; i += INSERT_CHUNK) {
+      const chunk = unique.slice(i, i + INSERT_CHUNK);
+      const { rows } = await this.sql.query<{
+        record_hash: string;
+        detail: string;
+      }>(
+        `select record_hash, detail from object_records
+         where record_hash in (${chunk.map((_, idx) => `$${idx + 1}`).join(", ")})`,
+        chunk,
+      );
+      for (const row of rows) {
+        result.set(row.record_hash, JSON.parse(row.detail) as ObjectDetail);
+      }
+    }
+    return result;
+  }
+
+  async updateCommitStats(
+    commitId: string,
+    stats: { added: number; removed: number; modified: number },
+  ): Promise<void> {
+    await this.sql.query(
+      `update commits set added = $2, removed = $3, modified = $4 where id = $1`,
+      [commitId, stats.added, stats.removed, stats.modified],
+    );
   }
 
   // ---- diff cache ------------------------------------------------------

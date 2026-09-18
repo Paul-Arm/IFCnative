@@ -15,7 +15,6 @@ import {
 import type {
   Branch,
   Commit,
-  GuidDiffSummary,
   Issue,
   Member,
   Model,
@@ -238,8 +237,10 @@ const message = ref("");
 const commitBranch = ref<string>("");
 const newBranchName = ref("");
 const uploadError = ref<string | null>(null);
-const uploadResult = ref<{ commit: Commit; diff: GuidDiffSummary } | null>(null);
 const uploading = ref(false);
+/** Upload-Fortschritt 0..100; 100 = Server analysiert die Datei. */
+const uploadPercent = ref<number | null>(null);
+const dragOver = ref(false);
 
 watchEffect(() => {
   if (!commitBranch.value && modelData.value) {
@@ -249,47 +250,99 @@ watchEffect(() => {
 
 function openCommitModal(): void {
   uploadError.value = null;
-  uploadResult.value = null;
   commitBranch.value = selectedBranch.value || modelData.value?.model.defaultBranch || "main";
   showCommitModal.value = true;
 }
 
+function setCommitFile(next: File | null): void {
+  if (next && !/\.ifc$/i.test(next.name)) {
+    uploadError.value = "Bitte eine .ifc-Datei wählen.";
+    return;
+  }
+  uploadError.value = null;
+  file.value = next;
+}
+
 function onFileChange(event: Event): void {
   const input = event.target as HTMLInputElement;
-  file.value = input.files?.[0] ?? null;
+  setCommitFile(input.files?.[0] ?? null);
+}
+
+function onFileDrop(event: DragEvent): void {
+  dragOver.value = false;
+  setCommitFile(event.dataTransfer?.files?.[0] ?? null);
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+/**
+ * Upload per XMLHttpRequest — nur so gibt es einen Fortschritt. Große IFCs
+ * brauchen erst Sekunden für den Upload und dann für die Analyse im Server;
+ * beides soll sichtbar sein.
+ */
+function uploadCommit(form: FormData): Promise<{ commit: Commit }> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api${base}/commits?compact=1`);
+    if (token.value) {
+      xhr.setRequestHeader("authorization", `Bearer ${token.value}`);
+    }
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        uploadPercent.value = Math.round((event.loaded / event.total) * 100);
+      }
+    };
+    xhr.upload.onload = () => {
+      uploadPercent.value = 100;
+    };
+    xhr.onerror = () => reject(new Error("Verbindung zum Server fehlgeschlagen"));
+    xhr.onload = () => {
+      let body: { commit?: Commit; error?: string } = {};
+      try {
+        body = JSON.parse(xhr.responseText) as typeof body;
+      } catch {
+        // kein JSON — Statuscode entscheidet
+      }
+      if (xhr.status >= 200 && xhr.status < 300 && body.commit) {
+        resolve({ commit: body.commit });
+      } else {
+        reject(new Error(body.error ?? `Commit fehlgeschlagen (HTTP ${xhr.status})`));
+      }
+    };
+    xhr.send(form);
+  });
 }
 
 async function submitCommit(): Promise<void> {
-  if (!file.value) return;
+  if (!file.value || uploading.value) return;
   uploadError.value = null;
-  uploadResult.value = null;
+  const branch =
+    commitBranch.value === "__new__" ? newBranchName.value.trim() : commitBranch.value;
+  if (!branch) {
+    uploadError.value = "Branch-Name fehlt";
+    return;
+  }
   uploading.value = true;
+  uploadPercent.value = 0;
   try {
-    const branch =
-      commitBranch.value === "__new__" ? newBranchName.value.trim() : commitBranch.value;
-    if (!branch) {
-      uploadError.value = "Branch-Name fehlt";
-      return;
-    }
     const form = new FormData();
-    form.append("message", message.value);
+    form.append("message", message.value.trim());
     form.append("branch", branch);
     form.append("file", file.value);
-    const result = await api<{ commit: Commit; diff: GuidDiffSummary }>(
-      `${base}/commits`,
-      { method: "POST", body: form },
-    );
-    uploadResult.value = result;
+    const result = await uploadCommit(form);
     message.value = "";
     file.value = null;
-    if (fileInput.value) fileInput.value.value = "";
     showCommitModal.value = false;
-    selectedBranch.value = branch;
-    await Promise.all([refreshModel(), refreshCommits()]);
+    // Direkt zum neuen Stand: dort steht, was sich geändert hat.
+    await navigateTo(`/p/${slug}/m/${modelSlug}/c/${result.commit.id}`);
   } catch (e) {
-    uploadError.value = apiErrorMessage(e);
+    uploadError.value = e instanceof Error ? e.message : apiErrorMessage(e);
   } finally {
     uploading.value = false;
+    uploadPercent.value = null;
   }
 }
 
@@ -455,6 +508,7 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
   dateStyle: "medium",
   timeStyle: "short",
 });
+const numberFmt = new Intl.NumberFormat("de-DE");
 </script>
 
 <template>
@@ -530,16 +584,6 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
       </button>
     </nav>
 
-    <div v-if="uploadResult" class="alert success">
-      Commit {{ uploadResult.commit.id.slice(0, 8) }} angelegt —
-      {{ uploadResult.diff.added.length }} neu,
-      {{ uploadResult.diff.modified.length }} geändert,
-      {{ uploadResult.diff.removed.length }} entfernt<span
-        v-if="uploadResult.diff.identical"
-      >
-        (inhaltlich identisch mit dem Vorgänger)</span
-      >.
-    </div>
     <div v-if="uploadError && !showCommitModal" class="alert error">
       {{ uploadError }}
     </div>
@@ -678,13 +722,17 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
                 <span class="mono">{{ row.commit.id.slice(0, 8) }}</span>
               </div>
             </div>
-            <span v-if="!isMd" class="diffstat">
-              <span class="add">+{{ row.commit.added }}</span>
-              <span class="mod">~{{ row.commit.modified }}</span>
-              <span class="del">−{{ row.commit.removed }}</span>
+            <span
+              v-if="!isMd"
+              class="diffstat"
+              title="Objekte: neu / geändert / entfernt"
+            >
+              <span class="add">+{{ numberFmt.format(row.commit.added) }}</span>
+              <span class="mod">~{{ numberFmt.format(row.commit.modified) }}</span>
+              <span class="del">−{{ numberFmt.format(row.commit.removed) }}</span>
             </span>
             <span v-if="!isMd" class="muted small cg-entities">
-              {{ row.commit.entityCount }} Entities
+              {{ numberFmt.format(row.commit.entityCount) }} Entities
             </span>
             <button class="link" @click="downloadCommit(row.commit)">
               .{{ isMd ? "md" : "ifc" }}
@@ -930,34 +978,57 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
     </template>
 
     <!-- ================= Modal: Committen ================= -->
-    <div v-if="showCommitModal" class="modal-backdrop" @click.self="showCommitModal = false">
+    <div
+      v-if="showCommitModal"
+      class="modal-backdrop"
+      @click.self="uploading || (showCommitModal = false)"
+    >
       <div class="card modal">
         <div class="card-header">
           <h2>Neuen Stand committen</h2>
           <span class="topbar-spacer" />
-          <button class="link" @click="showCommitModal = false">✕</button>
+          <button class="link" :disabled="uploading" @click="showCommitModal = false">✕</button>
         </div>
         <div class="card-body">
           <div v-if="uploadError" class="alert error">{{ uploadError }}</div>
           <form @submit.prevent="submitCommit">
-            <div class="form-row">
-              <label for="commit-file">IFC-Datei</label>
+            <label
+              class="dropzone"
+              :class="{ over: dragOver, filled: !!file, busy: uploading }"
+              for="commit-file"
+              @dragover.prevent="dragOver = true"
+              @dragleave.prevent="dragOver = false"
+              @drop.prevent="onFileDrop"
+            >
               <input
                 id="commit-file"
                 ref="fileInput"
+                class="dropzone-input"
                 type="file"
                 accept=".ifc,application/x-step"
-                required
+                :disabled="uploading"
                 @change="onFileChange"
               />
-            </div>
+              <PhUploadSimple :size="26" aria-hidden="true" />
+              <template v-if="file">
+                <strong>{{ file.name }}</strong>
+                <span class="muted small">
+                  {{ formatFileSize(file.size) }} · andere Datei wählen
+                </span>
+              </template>
+              <template v-else>
+                <strong>IFC-Datei hierher ziehen</strong>
+                <span class="muted small">oder klicken, um eine Datei zu wählen</span>
+              </template>
+            </label>
             <div class="form-row">
-              <label for="commit-message">Commit-Nachricht</label>
+              <label for="commit-message">Was hat sich geändert?</label>
               <input
                 id="commit-message"
                 v-model="message"
                 type="text"
-                placeholder="Was hat sich geändert?"
+                placeholder="z. B. Brandschutzklassen der Innenwände ergänzt"
+                :disabled="uploading"
               />
             </div>
             <div class="form-inline">
@@ -991,9 +1062,31 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
               </div>
               <div class="shrink" style="margin-left: auto">
                 <button class="primary" type="submit" :disabled="uploading || !file">
-                  {{ uploading ? "Lädt hoch …" : "Committen" }}
+                  <span v-if="uploading" class="spinner" aria-hidden="true" />
+                  {{ uploading ? "Wird committet …" : "Committen" }}
                 </button>
               </div>
+            </div>
+            <div v-if="uploading" class="upload-progress" role="status">
+              <span
+                class="progress"
+                :class="{ indeterminate: uploadPercent === 100 }"
+              >
+                <span
+                  :style="{
+                    width: uploadPercent === 100 ? undefined : `${uploadPercent ?? 0}%`,
+                  }"
+                />
+              </span>
+              <span class="muted small">
+                <template v-if="uploadPercent !== null && uploadPercent < 100">
+                  Lade hoch … {{ uploadPercent }} %
+                </template>
+                <template v-else>
+                  Server analysiert das Modell und ermittelt die Änderungen —
+                  bei großen Dateien dauert das einige Sekunden.
+                </template>
+              </span>
             </div>
           </form>
         </div>

@@ -2,6 +2,9 @@ import { randomUUID } from "node:crypto";
 
 import type {
   GuidDiffSummary,
+  ObjectDetail,
+  ObjectIndexEntry,
+  ObjectRecord,
   VersionManifestEntry,
 } from "../ifc";
 import type {
@@ -43,6 +46,8 @@ export class MemoryRepository implements Repository {
   /** per-commit manifest: ordered (globalId, entityHash) references. */
   protected commitEntities = new Map<string, { globalId: string; hash: string }[]>();
   protected diffCache = new Map<string, GuidDiffSummary>();
+  protected objectDetails = new Map<string, ObjectDetail>();
+  protected commitObjects = new Map<string, ObjectIndexEntry[]>();
   /** explizit angelegte Ordner je Projekt. */
   protected folders = new Map<string, Set<string>>();
   protected labels = new Map<string, Label>();
@@ -270,6 +275,7 @@ export class MemoryRepository implements Repository {
     for (const id of commitIds) {
       this.commits.delete(id);
       this.commitEntities.delete(id);
+      this.commitObjects.delete(id);
     }
     for (const key of [...this.diffCache.keys()]) {
       const [from, to] = key.split("->");
@@ -733,6 +739,51 @@ export class MemoryRepository implements Repository {
         name: object?.name ?? "",
       };
     });
+  }
+
+  async saveObjectRecords(
+    commitId: string,
+    records: ObjectRecord[],
+  ): Promise<void> {
+    const index: ObjectIndexEntry[] = [];
+    for (const { detail, ...entry } of records) {
+      if (!this.objectDetails.has(entry.hash)) {
+        this.objectDetails.set(entry.hash, detail);
+      }
+      index.push(entry);
+    }
+    this.commitObjects.set(commitId, index);
+  }
+
+  async hasObjectIndex(commitId: string): Promise<boolean> {
+    return this.commitObjects.has(commitId);
+  }
+
+  async getObjectIndex(commitId: string): Promise<ObjectIndexEntry[]> {
+    return this.commitObjects.get(commitId) ?? [];
+  }
+
+  async getObjectDetails(
+    recordHashes: string[],
+  ): Promise<Map<string, ObjectDetail>> {
+    const result = new Map<string, ObjectDetail>();
+    for (const hash of recordHashes) {
+      const detail = this.objectDetails.get(hash);
+      if (detail) {
+        result.set(hash, detail);
+      }
+    }
+    return result;
+  }
+
+  async updateCommitStats(
+    commitId: string,
+    stats: { added: number; removed: number; modified: number },
+  ): Promise<void> {
+    const commit = this.commits.get(commitId);
+    if (commit) {
+      this.commits.set(commitId, { ...commit, ...stats });
+    }
   }
 
   async getCachedDiff(

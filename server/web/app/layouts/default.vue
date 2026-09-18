@@ -3,6 +3,7 @@ import { PhBooks, PhSignOut, PhUsersThree } from "@phosphor-icons/vue";
 
 const { user, token, logout, setSession } = useAuth();
 const { api } = useApi();
+const route = useRoute();
 
 // user-Objekt beim Laden auffrischen (z. B. neu gesetzter Admin-Status).
 onMounted(async () => {
@@ -42,7 +43,7 @@ onMounted(async () => {
         </button>
       </div>
     </header>
-    <main :class="token ? 'container' : ''">
+    <main :class="[token ? 'container' : '', { wide: token && route.meta.wide }]">
       <slot />
     </main>
   </div>

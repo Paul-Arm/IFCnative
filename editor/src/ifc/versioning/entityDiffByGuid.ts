@@ -7,6 +7,7 @@ import {
   createHashContext,
   ifcGlobalId,
   sha256Hex,
+  type HashContext,
 } from "./entityHash";
 
 /**
@@ -43,8 +44,10 @@ export interface VersionManifest {
   entityCount: number;
 }
 
-export function buildVersionManifest(doc: NativeIfcDocument): VersionManifest {
-  const ctx = createHashContext(doc);
+export function buildVersionManifest(
+  doc: NativeIfcDocument,
+  ctx: HashContext = createHashContext(doc),
+): VersionManifest {
   const entries = new Map<string, VersionManifestEntry>();
   const duplicates = new Set<string>();
 
@@ -105,11 +108,17 @@ export interface GuidDiffSummary {
   identical: boolean;
 }
 
+// Code-Unit-Vergleich statt localeCompare: bei 100k+ Einträgen um
+// Größenordnungen schneller, und die Reihenfolge muss nur stabil sein.
+function compareText(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 function compareEntries(a: GuidDiffEntry, b: GuidDiffEntry): number {
   return (
-    a.type.localeCompare(b.type) ||
-    a.name.localeCompare(b.name) ||
-    a.globalId.localeCompare(b.globalId)
+    compareText(a.type, b.type) ||
+    compareText(a.name, b.name) ||
+    compareText(a.globalId, b.globalId)
   );
 }
 

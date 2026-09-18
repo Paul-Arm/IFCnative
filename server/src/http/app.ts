@@ -22,6 +22,14 @@ import {
   type BcfTopicInput,
   type ParsedBcfTopic,
 } from "../domain/bcfService";
+import {
+  CHANGES_PAGE_LIMIT_DEFAULT,
+  changesGuids,
+  changesOverview,
+  changesPageEntries,
+  withDetails,
+  type ChangesQuery,
+} from "../domain/changesView";
 import { CommitService } from "../domain/commitService";
 import {
   DIFF_PAGE_LIMIT_DEFAULT,
@@ -1848,7 +1856,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       if (!user) return reply;
       if (!(await requireMember(project, user, reply, "write"))) return reply;
 
-      const query = request.query as { branch?: string; message?: string };
+      const query = request.query as {
+        branch?: string;
+        message?: string;
+        compact?: string;
+      };
       const upload = await readIfcUpload(request);
       if (upload.bytes === null || upload.bytes.length === 0) {
         return reply.code(400).send({ error: "File content required" });
@@ -1883,6 +1895,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         await queueRuns(project, model, result.commit.id, autoActions, user.id);
       }
       const [commit] = await withAuthors([result.commit]);
+      if (query.compact) {
+        // Web-UI: nur Zähler — der volle Entity-Diff eines großen Modells
+        // wäre ein zweistelliges MB-JSON, das niemand anzeigt.
+        return reply.code(201).send({
+          commit,
+          identical: result.diff.identical,
+          unchanged: result.changes.unchanged,
+        });
+      }
       return reply.code(201).send({ commit, diff: result.diff });
     },
   );
@@ -2830,6 +2851,161 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           limit: Number(query.limit ?? DIFF_PAGE_LIMIT_DEFAULT),
         }),
       });
+    },
+  );
+
+  // ---- objektzentrierter Diff ("Änderungen") ------------------------------
+  //
+  // Anders als /diff (jede gerootete STEP-Entity) fasst /changes alles je
+  // OBJEKT zusammen: Attribute, Lage, Geometrie, Eigenschaften, Beziehungen.
+  // `from` ist optional — ohne Basis gilt alles als neu (erster Commit).
+
+  interface ChangesRequestQuery {
+    from?: string;
+    to?: string;
+    status?: string;
+    type?: string;
+    facet?: string;
+    container?: string;
+    q?: string;
+    offset?: string;
+    limit?: string;
+    globalId?: string;
+  }
+
+  async function resolveChanges(
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ): Promise<{ from: Commit | null; to: Commit; query: ChangesRequestQuery } | null> {
+    const { slug, model: modelSlug } = request.params as {
+      slug: string;
+      model: string;
+    };
+    const resolved = await resolveModel(slug, modelSlug, reply);
+    if (!resolved) return null;
+    const { project, model } = resolved;
+    if (!(await canReadModel(request, reply, project, model.visibility))) return null;
+    const query = request.query as ChangesRequestQuery;
+    if (!query.to) {
+      reply.code(400).send({ error: "to commit id required" });
+      return null;
+    }
+    const to = await repo.getCommit(query.to);
+    const from = query.from ? await repo.getCommit(query.from) : null;
+    if (
+      !to ||
+      to.modelId !== model.id ||
+      (query.from && (!from || from.modelId !== model.id))
+    ) {
+      reply.code(404).send({ error: "Commit not found" });
+      return null;
+    }
+    return { from, to, query };
+  }
+
+  function changesFilter(
+    query: ChangesRequestQuery,
+    reply: FastifyReply,
+  ): Omit<ChangesQuery, "offset" | "limit"> | null {
+    if (
+      query.status !== undefined &&
+      !["added", "modified", "removed"].includes(query.status)
+    ) {
+      reply.code(400).send({ error: "Invalid status" });
+      return null;
+    }
+    if (
+      query.facet !== undefined &&
+      !["attributes", "placement", "geometry", "properties", "relations"].includes(
+        query.facet,
+      )
+    ) {
+      reply.code(400).send({ error: "Invalid facet" });
+      return null;
+    }
+    return {
+      status: query.status as ChangesQuery["status"],
+      type: query.type || undefined,
+      facet: query.facet as ChangesQuery["facet"],
+      container: query.container,
+      q: query.q || undefined,
+    };
+  }
+
+  app.get(`${api}/projects/:slug/models/:model/changes`, async (request, reply) => {
+    const resolved = await resolveChanges(request, reply);
+    if (!resolved) return reply;
+    const { from, to } = resolved;
+    const summary = await commits.getChanges(from, to);
+    return reply.send({
+      changes: changesOverview(
+        summary,
+        from !== null && from.manifestHash === to.manifestHash,
+      ),
+    });
+  });
+
+  // Gefilterte Seite; jede Zeile trägt ihre wichtigsten Vorher/Nachher-Werte.
+  app.get(
+    `${api}/projects/:slug/models/:model/changes/items`,
+    async (request, reply) => {
+      const resolved = await resolveChanges(request, reply);
+      if (!resolved) return reply;
+      const { from, to, query } = resolved;
+      const filter = changesFilter(query, reply);
+      if (!filter) return reply;
+      const summary = await commits.getChanges(from, to);
+      const page = changesPageEntries(summary, {
+        ...filter,
+        offset: Number(query.offset ?? 0),
+        limit: Number(query.limit ?? CHANGES_PAGE_LIMIT_DEFAULT),
+      });
+      const hashes: string[] = [];
+      for (const entry of page.entries) {
+        if (entry.beforeHash) hashes.push(entry.beforeHash);
+        if (entry.afterHash) hashes.push(entry.afterHash);
+      }
+      const details = await repo.getObjectDetails(hashes);
+      return reply.send({
+        page: {
+          items: withDetails(page.entries, details),
+          total: page.total,
+          offset: page.offset,
+          limit: page.limit,
+        },
+      });
+    },
+  );
+
+  // GlobalIds je Status — für die Einfärbung im 3D-Vergleich.
+  app.get(
+    `${api}/projects/:slug/models/:model/changes/guids`,
+    async (request, reply) => {
+      const resolved = await resolveChanges(request, reply);
+      if (!resolved) return reply;
+      const { from, to, query } = resolved;
+      const filter = changesFilter(query, reply);
+      if (!filter) return reply;
+      const summary = await commits.getChanges(from, to);
+      return reply.send({ guids: changesGuids(summary, filter) });
+    },
+  );
+
+  // Alle Vorher/Nachher-Werte eines Objekts (Aufklappen einer Zeile).
+  app.get(
+    `${api}/projects/:slug/models/:model/changes/item`,
+    async (request, reply) => {
+      const resolved = await resolveChanges(request, reply);
+      if (!resolved) return reply;
+      const { from, to, query } = resolved;
+      if (!query.globalId) {
+        return reply.code(400).send({ error: "globalId required" });
+      }
+      const detail = await commits.getObjectChange(from, to, query.globalId);
+      if (!detail.entry) {
+        return reply.code(404).send({ error: "Objekt ist nicht Teil dieses Diffs" });
+      }
+      return reply.send({ detail });
     },
   );
 

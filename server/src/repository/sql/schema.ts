@@ -92,6 +92,27 @@ create table if not exists commit_entities (
 );
 create index if not exists commit_entities_commit_idx on commit_entities(commit_id);
 
+create table if not exists object_records (
+  record_hash text primary key,
+  detail text not null
+);
+
+create table if not exists commit_objects (
+  commit_id uuid not null references commits(id),
+  global_id text not null,
+  record_hash text not null,
+  entity_type text not null,
+  name text not null,
+  container text not null default '',
+  facets text not null,
+  primary key (commit_id, global_id)
+);
+
+create table if not exists commit_object_index (
+  commit_id uuid primary key references commits(id),
+  object_count int not null
+);
+
 create table if not exists diffs_cache (
   from_commit uuid not null,
   to_commit uuid not null,

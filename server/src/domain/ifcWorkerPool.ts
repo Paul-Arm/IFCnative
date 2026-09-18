@@ -1,11 +1,12 @@
 import { cpus } from "node:os";
 import { Worker, type TransferListItem } from "node:worker_threads";
 
-import type { EntityFieldDiff } from "../ifc";
+import type { EntityFieldDiff, ObjectRecord } from "../ifc";
 import type {
   AnalyzeResult,
   EntityDiffResult,
   FragmentsResult,
+  ObjectsResult,
   ValidateIdsResult,
   WorkerRequest,
   WorkerResponse,
@@ -90,6 +91,12 @@ export class IfcWorkerPool {
   /** STEP parsen + GlobalId-Manifest hashen (Commit-Anlage). */
   analyze(bytes: Uint8Array): Promise<AnalyzeResult> {
     return this.run<AnalyzeResult>({ type: "analyze", bytes });
+  }
+
+  /** Objekt-Records eines Stands nachträglich aufbauen (Backfill). */
+  async objectRecords(bytes: Uint8Array): Promise<ObjectRecord[]> {
+    const result = await this.run<ObjectsResult>({ type: "objects", bytes });
+    return result.objects;
   }
 
   /** IFC -> ThatOpen-Fragments (3D-Vorschau). */

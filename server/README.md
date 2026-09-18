@@ -167,6 +167,29 @@ Die Metadaten-Schicht dedupliziert Entity-Payloads über Commits hinweg
 unveränderlich, der Cache veraltet also nie). Schema in
 `src/repository/sql/schema.ts`, in Tests via PGlite ausgeführt.
 
+### Objektzentrierter Diff ("Änderungen")
+
+Neben dem Entity-Manifest speichert jeder Commit **Objekt-Records**
+(`commit_objects` + deduplizierte Details in `object_records`): je GlobalId
+eines Objekts (Produkte, Typen, räumliche Struktur — keine Relationships und
+Psets) ein Record mit fünf Facetten samt eigenem Hash:
+
+| Facette | Inhalt |
+| --- | --- |
+| `attributes` | Klasse, Name, Beschreibung, ObjectType, Tag, PredefinedType, … |
+| `placement` | Weltkoordinaten + Drehung/Neigung aus der Platzierungskette |
+| `geometry` | versionsstabiler Struktur-Hash der Darstellung + Kennwerte (Darstellungsart, Bestandteile, Profil, Extrusion, Ausdehnung, Stützpunkte) |
+| `properties` | alle Property-/Quantity-Sets mit Werten (in das Besitzerobjekt gefaltet) |
+| `relations` | räumliche Zuordnung, Teil von, Typ, Material, Klassifikation, Gruppe, Öffnungen |
+
+Ein Diff vergleicht nur diese Index-Zeilen — **kein IFC-Parsing beim Lesen**,
+auch nicht für die Vorher/Nachher-Werte eines Objekts. OwnerHistory und
+Zahlenschreibweisen (`3.` vs. `3.0`) gelten nicht als Änderung. Commits aus der
+Zeit vor den Records werden beim ersten Vergleich einmalig im Worker
+nachindiziert; ihre Commit-Zähler (`added/modified/removed`) werden dabei auf
+Objekt-Zählung umgestellt. Aufbau: `editor/src/ifc/versioning/objectRecords.ts`,
+Sichten: `src/domain/changesView.ts`.
+
 ## Starten
 
 ```bash
@@ -261,11 +284,15 @@ Auth: `Authorization: Bearer <JWT>` aus `/api/auth/login`. Fehler kommen als
 | PATCH | `/api/projects/:slug/models/:model` | Einstellungen `{name?, visibility?, defaultBranch?, folder?}` (admin) |
 | DELETE | `/api/projects/:slug/models/:model` | Modell löschen (admin; inkl. Blobs) |
 | POST | `/api/projects/:slug/models/:model/branches` | Branch anlegen `{name, from?}` — startet am Head von `from` |
-| POST | `…/commits?branch=&message=` | Datei-Inhalt hochladen (raw Body **oder** Multipart `file` + Felder `message`/`branch`) → `{commit, diff}`; IFC-Modelle verlangen STEP, `md` beliebigen Text (max 2 MB) |
+| POST | `…/commits?branch=&message=` | Datei-Inhalt hochladen (raw Body **oder** Multipart `file` + Felder `message`/`branch`) → `{commit, diff}` (mit `?compact=1` nur `{commit, identical, unchanged}` — so committet die Web-UI); IFC-Modelle verlangen STEP, `md` beliebigen Text (max 2 MB) |
 | GET | `…/commits?branch=` | Historie (Commits mit Autor) |
 | GET | `…/commits/:id` | Commit-Metadaten |
 | GET | `…/commits/:id/file` | Roh-IFC herunterladen (byte-identisch) |
 | GET | `…/commits/:id/fragments` | ThatOpen-Fragments für die 3D-Vorschau: 200 + Bytes (immutable-Cache-Header) oder **202** `{status: "converting", startedAt, elapsedMs}` solange konvertiert wird (dann erneut fragen; `?wait=1` wartet serverseitig) |
+| GET | `…/changes?to=&from=` | Objektzentrierte Übersicht: Zähler je Status/Typ, je Facette (`attributes`, `placement`, `geometry`, `properties`, `relations`) und je räumlichem Container; ohne `from` gilt alles als neu (erster Stand) |
+| GET | `…/changes/items?to=&from=&status=&facet=&type=&container=&q=&offset=&limit=` | Seite geänderter Objekte (`limit` ≤ 200, Standard 50); jede Zeile trägt ihre wichtigsten Vorher/Nachher-Werte (`highlights`) bzw. Eckdaten (`facts`) |
+| GET | `…/changes/item?to=&from=&globalId=` | Alle Vorher/Nachher-Werte eines Objekts |
+| GET | `…/changes/guids?to=&from=&…Filter` | GlobalIds je Status (max. 50.000) für den 3D-Vergleich |
 | GET | `…/diff?from=&to=` | Diff-Übersicht: `{identical, unchanged, added|modified|removed: {count, types: [{type, count}]}}` — keine Einträge, damit 100k-Änderungen den Browser nicht einfrieren |
 | GET | `…/diff/entries?from=&to=&status=&type=&q=&offset=&limit=` | Diff-Einträge seitenweise (`limit` ≤ 1000, Standard 200); `status`/`type` grenzen ein, `q` filtert Typ/Name/GlobalId über alle Status |
 | GET | `…/diff/entity?from=&to=&globalId=` | Feld-Detail einer geänderten Entity |

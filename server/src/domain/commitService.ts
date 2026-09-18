@@ -2,8 +2,14 @@ import { createHash, randomUUID } from "node:crypto";
 
 import {
   diffManifests,
+  diffObjectDetails,
+  diffObjectIndexes,
   type EntityFieldDiff,
   type GuidDiffSummary,
+  type ObjectChangeEntry,
+  type ObjectDiffSummary,
+  type ObjectFieldChange,
+  type ObjectIndexEntry,
   type VersionManifest,
   type VersionManifestEntry,
 } from "../ifc";
@@ -63,7 +69,22 @@ export interface CreateCommitResult {
   commit: Commit;
   /** Semantic diff against the previous head of the branch (parent commit). */
   diff: GuidDiffSummary;
+  /** Objektzentrierter Diff zum Vorgänger (Grundlage der Commit-Zähler). */
+  changes: ObjectDiffSummary;
 }
+
+/** Vorher/Nachher-Werte eines einzelnen Objekts zwischen zwei Ständen. */
+export interface ObjectChangeDetail {
+  entry: ObjectChangeEntry | null;
+  changes: ObjectFieldChange[];
+}
+
+const EMPTY_CHANGES: ObjectDiffSummary = {
+  added: [],
+  removed: [],
+  modified: [],
+  unchanged: 0,
+};
 
 export class CommitService {
   private readonly workers: IfcWorkerPool;
@@ -125,6 +146,22 @@ export class CommitService {
       : EMPTY_MANIFEST;
     const diff = diffManifests(parentManifest, manifest);
 
+    // Objektzentrierter Diff = die Zahlen, die Menschen sehen. Stammt der
+    // Vorgänger aus der Zeit vor den Objekt-Records, wird er einmalig
+    // nachindiziert; scheitert das, bleiben die Entity-Zähler als Ersatz.
+    const objectIndex: ObjectIndexEntry[] = analysis.objects.map(
+      ({ detail: _detail, ...entry }) => entry,
+    );
+    let changes: ObjectDiffSummary | null = null;
+    try {
+      const parentIndex = parentCommit
+        ? await this.objectIndexOf(parentCommit)
+        : [];
+      changes = diffObjectIndexes(parentIndex, objectIndex);
+    } catch {
+      changes = null;
+    }
+
     const commitId = randomUUID();
     const blobKey = this.blobKey(model.id, commitId);
     // Blob zuerst: schlägt die DB-Transaktion fehl, bleibt höchstens ein
@@ -143,15 +180,16 @@ export class CommitService {
       message,
       createdAt: new Date().toISOString(),
       entityCount: manifest.entityCount,
-      added: diff.added.length,
-      removed: diff.removed.length,
-      modified: diff.modified.length,
+      added: (changes ?? diff).added.length,
+      removed: (changes ?? diff).removed.length,
+      modified: (changes ?? diff).modified.length,
     };
 
     // Commit + Manifest + Branch-Head atomar — kein halber Commit bei Crash.
     await this.repo.transaction(async () => {
       await this.repo.createCommit(commit);
       await this.repo.saveManifest(commitId, analysis.entries);
+      await this.repo.saveObjectRecords(commitId, analysis.objects);
       await this.repo.setBranchHead(branch.id, commit.id);
     });
 
@@ -160,8 +198,11 @@ export class CommitService {
       await this.repo.saveCachedDiff(parentCommit.id, commit.id, diff);
       this.rememberDiff(parentCommit.id, commit.id, diff);
     }
+    if (changes) {
+      this.rememberChanges(parentCommit?.id ?? null, commit.id, changes);
+    }
 
-    return { commit, diff };
+    return { commit, diff, changes: changes ?? EMPTY_CHANGES };
   }
 
   /**
@@ -226,7 +267,130 @@ export class CommitService {
       await this.repo.setBranchHead(branch.id, commit.id);
     });
 
-    return { commit, diff };
+    return { commit, diff, changes: EMPTY_CHANGES };
+  }
+
+  // ---- Objektzentrierter Diff ------------------------------------------
+
+  /** LRU der Objekt-Diffs (Schlüssel "from:to", from = "" beim ersten Commit). */
+  private readonly changesCache = new Map<string, ObjectDiffSummary>();
+  private readonly changesById = new WeakMap<
+    ObjectDiffSummary,
+    Map<string, ObjectChangeEntry>
+  >();
+  /** Laufende Nachindizierungen — parallele Anfragen teilen sich eine. */
+  private readonly indexing = new Map<string, Promise<void>>();
+
+  private rememberChanges(
+    fromId: string | null,
+    toId: string,
+    changes: ObjectDiffSummary,
+  ): void {
+    const key = `${fromId ?? ""}:${toId}`;
+    this.changesCache.delete(key);
+    if (this.changesCache.size >= CommitService.DIFF_CACHE_LIMIT) {
+      const oldest = this.changesCache.keys().next().value;
+      if (oldest !== undefined) {
+        this.changesCache.delete(oldest);
+      }
+    }
+    this.changesCache.set(key, changes);
+  }
+
+  /**
+   * Objekt-Index eines Commits. Commits aus der Zeit vor den Objekt-Records
+   * werden beim ersten Zugriff einmalig im Worker nachindiziert (IFC parsen
+   * -> Records speichern); danach kommt alles aus der Datenbank.
+   */
+  private async objectIndexOf(commit: Commit): Promise<ObjectIndexEntry[]> {
+    if (commit.schema === "markdown") {
+      return [];
+    }
+    if (!(await this.repo.hasObjectIndex(commit.id))) {
+      let pending = this.indexing.get(commit.id);
+      if (!pending) {
+        pending = (async () => {
+          const bytes = await this.store.get(commit.blobKey);
+          const records = await this.workers.objectRecords(new Uint8Array(bytes));
+          await this.repo.saveObjectRecords(commit.id, records);
+        })().finally(() => this.indexing.delete(commit.id));
+        this.indexing.set(commit.id, pending);
+      }
+      await pending;
+    }
+    return this.repo.getObjectIndex(commit.id);
+  }
+
+  /**
+   * Objektzentrierter Diff zweier Stände (`from` = null: gegen den leeren
+   * Stand, d. h. alles ist neu). Braucht nur die kompakten Index-Zeilen aus
+   * der Datenbank — kein IFC-Parsing, auch nicht bei 100k+ Objekten.
+   */
+  async getChanges(from: Commit | null, to: Commit): Promise<ObjectDiffSummary> {
+    const key = `${from?.id ?? ""}:${to.id}`;
+    const cached = this.changesCache.get(key);
+    if (cached) {
+      this.rememberChanges(from?.id ?? null, to.id, cached);
+      return cached;
+    }
+    const [fromIndex, toIndex] = await Promise.all([
+      from ? this.objectIndexOf(from) : Promise.resolve([]),
+      this.objectIndexOf(to),
+    ]);
+    const changes = diffObjectIndexes(fromIndex, toIndex);
+    this.rememberChanges(from?.id ?? null, to.id, changes);
+
+    // Zähler alter Commits (noch Entity-basiert) an den Objekt-Diff angleichen,
+    // damit Commit-Liste und Commit-Seite dieselben Zahlen zeigen.
+    if (
+      to.schema !== "markdown" &&
+      (to.parentCommitId ?? null) === (from?.id ?? null) &&
+      (to.added !== changes.added.length ||
+        to.removed !== changes.removed.length ||
+        to.modified !== changes.modified.length)
+    ) {
+      await this.repo.updateCommitStats(to.id, {
+        added: changes.added.length,
+        removed: changes.removed.length,
+        modified: changes.modified.length,
+      });
+    }
+    return changes;
+  }
+
+  /** Alle Vorher/Nachher-Werte EINES Objekts (Aufklappen in der UI). */
+  async getObjectChange(
+    from: Commit | null,
+    to: Commit,
+    globalId: string,
+  ): Promise<ObjectChangeDetail> {
+    const changes = await this.getChanges(from, to);
+    let byId = this.changesById.get(changes);
+    if (!byId) {
+      byId = new Map();
+      for (const list of [changes.added, changes.modified, changes.removed]) {
+        for (const entry of list) {
+          byId.set(entry.globalId, entry);
+        }
+      }
+      this.changesById.set(changes, byId);
+    }
+    const entry = byId.get(globalId) ?? null;
+    if (!entry) {
+      return { entry: null, changes: [] };
+    }
+    const details = await this.repo.getObjectDetails(
+      [entry.beforeHash, entry.afterHash].filter(
+        (hash): hash is string => hash !== undefined,
+      ),
+    );
+    return {
+      entry,
+      changes: diffObjectDetails(
+        entry.beforeHash ? (details.get(entry.beforeHash) ?? null) : null,
+        entry.afterHash ? (details.get(entry.afterHash) ?? null) : null,
+      ),
+    };
   }
 
   private rememberDiff(fromId: string, toId: string, diff: GuidDiffSummary): void {

@@ -44,7 +44,7 @@ export function sha256Hex(input: string): string {
   return createHash("sha256").update(input).digest("hex");
 }
 
-interface HashContext {
+export interface HashContext {
   doc: NativeIfcDocument;
   /** structural hash per express id of GUID-less support entities (doc-scoped). */
   structuralCache: Map<number, string>;
@@ -106,6 +106,15 @@ function structuralHash(
   const hash = sha256Hex(`${entity.type}(${canonicalArgs.join(",")})`);
   ctx.structuralCache.set(entity.id, hash);
   return hash;
+}
+
+/**
+ * Version-stable hash of whatever an argument references (e.g. a product's
+ * `Representation` or `ObjectPlacement` argument): every `#id` is rewritten to
+ * its GlobalId / structural hash first, so the result survives re-numbering.
+ */
+export function canonicalArgHash(arg: string, ctx: HashContext): string {
+  return sha256Hex(canonicalizeArg(arg, ctx, new Set<number>()));
 }
 
 /** The canonical, express-id-free payload string that is hashed for an entity. */

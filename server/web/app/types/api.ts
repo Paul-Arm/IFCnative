@@ -291,3 +291,69 @@ export interface DiffPage {
   offset: number;
   limit: number;
 }
+
+// ---- Objektzentrierter Diff (GET …/changes*) ---------------------------
+
+export type ChangeFacet =
+  | "attributes"
+  | "placement"
+  | "geometry"
+  | "properties"
+  | "relations";
+
+export interface ChangesStatusOverview {
+  count: number;
+  types: DiffTypeCount[];
+}
+
+/** Übersicht (GET …/changes): Zähler je Status, Typ, Facette, Container. */
+export interface ChangesOverview {
+  identical: boolean;
+  unchanged: number;
+  added: ChangesStatusOverview;
+  modified: ChangesStatusOverview;
+  removed: ChangesStatusOverview;
+  facets: Record<ChangeFacet, number>;
+  containers: { name: string; count: number }[];
+}
+
+export interface ObjectFieldChange {
+  facet: ChangeFacet;
+  group: string;
+  field: string;
+  before: string | null;
+  after: string | null;
+  status: GuidChangeStatus;
+}
+
+/** Zeile der Änderungsliste — trägt ihre wichtigsten Werte gleich mit. */
+export interface ChangeItem {
+  globalId: string;
+  type: string;
+  name: string;
+  container: string;
+  status: GuidChangeStatus;
+  facets: ChangeFacet[];
+  highlights: ObjectFieldChange[];
+  changeCount: number;
+  facts: { label: string; value: string }[];
+}
+
+export interface ChangesPage {
+  items: ChangeItem[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+export interface ChangesGuids {
+  added: string[];
+  modified: string[];
+  removed: string[];
+  truncated: boolean;
+}
+
+export interface ObjectChangeDetail {
+  entry: ChangeItem;
+  changes: ObjectFieldChange[];
+}

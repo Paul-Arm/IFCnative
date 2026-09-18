@@ -5,7 +5,9 @@ import { parentPort, type TransferListItem } from "node:worker_threads";
 import { DOMParser } from "linkedom";
 
 import {
+  buildObjectRecords,
   buildVersionManifest,
+  createHashContext,
   diffEntityFields,
   parseIdsXml,
   parseNativeIfcText,
@@ -101,7 +103,10 @@ async function handle(
   switch (task.type) {
     case "analyze": {
       const doc = parseNativeIfcText(decode(task.bytes));
-      const manifest = buildVersionManifest(doc);
+      // Ein Hash-Kontext für beides: die Struktur-Hashes der Geometrie
+      // werden so nur einmal berechnet.
+      const ctx = createHashContext(doc);
+      const manifest = buildVersionManifest(doc, ctx);
       return {
         result: {
           schema: doc.schema,
@@ -109,9 +114,14 @@ async function handle(
           entityCount: manifest.entityCount,
           duplicateGlobalIds: manifest.duplicateGlobalIds,
           entries: [...manifest.entries.values()],
+          objects: buildObjectRecords(doc, ctx),
         },
         transfer: [],
       };
+    }
+    case "objects": {
+      const doc = parseNativeIfcText(decode(task.bytes));
+      return { result: { objects: buildObjectRecords(doc) }, transfer: [] };
     }
     case "entityDiff": {
       const before = cachedDocument(task.from.id, task.from.bytes);
