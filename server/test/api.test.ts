@@ -79,7 +79,12 @@ test("end-to-end: register, project, model, two commits, diff, download", async 
   const c1Body = JSON.parse(c1.body);
   assert.equal(c1Body.diff.added.length, 3);
 
-  const c2 = await commitIfc(app, token, ifcModel({ height: "3200." }), "raise");
+  const c2 = await commitIfc(
+    app,
+    token,
+    ifcModel({ height: "3200." }),
+    "raise",
+  );
   assert.equal(c2.statusCode, 201);
   const c2Body = JSON.parse(c2.body);
   assert.equal(c2Body.diff.modified.length, 1);
@@ -535,7 +540,10 @@ test("markdown files: create, commit without STEP check, identical detection, do
       payload: content,
     });
 
-  const c1 = await commitMd("# Projekt Acme\n\nHallo **Welt**.", "Erste Version");
+  const c1 = await commitMd(
+    "# Projekt Acme\n\nHallo **Welt**.",
+    "Erste Version",
+  );
   assert.equal(c1.statusCode, 201);
   const c1Body = JSON.parse(c1.body);
   assert.equal(c1Body.commit.schema, "markdown");
@@ -572,6 +580,162 @@ test("markdown files: create, commit without STEP check, identical detection, do
     payload: "# kein ifc",
   });
   assert.equal(notIfc.statusCode, 400);
+
+  await app.close();
+});
+
+test("file models: binary upload without STEP check, content type by extension, no 3D", async () => {
+  const app = await makeApp();
+  const token = await register(app);
+  await app.inject({
+    method: "POST",
+    url: "/api/projects",
+    headers: auth(token),
+    payload: { name: "Acme", slug: "acme" },
+  });
+
+  const created = await app.inject({
+    method: "POST",
+    url: "/api/projects/acme/models",
+    headers: auth(token),
+    payload: { name: "Grundriss EG.pdf", kind: "file", folder: "" },
+  });
+  assert.equal(created.statusCode, 201);
+  const model = JSON.parse(created.body).model;
+  assert.equal(model.kind, "file");
+
+  const pdfBytes = Buffer.from(
+    "%PDF-1.4\n%\xe2\xe3\xcf\xd3\n1 0 obj<<>>endobj\n",
+    "latin1",
+  );
+  const c1 = await app.inject({
+    method: "POST",
+    url: `/api/projects/acme/models/${model.slug}/commits?message=Erste%20Version`,
+    headers: { ...auth(token), "content-type": "application/pdf" },
+    payload: pdfBytes,
+  });
+  assert.equal(c1.statusCode, 201);
+  const c1Body = JSON.parse(c1.body);
+  assert.equal(c1Body.commit.schema, "file");
+  assert.equal(c1Body.diff.identical, false);
+
+  const c2 = await app.inject({
+    method: "POST",
+    url: `/api/projects/acme/models/${model.slug}/commits?message=Nochmal`,
+    headers: { ...auth(token), "content-type": "application/pdf" },
+    payload: pdfBytes,
+  });
+  assert.equal(JSON.parse(c2.body).diff.identical, true);
+
+  const file = await app.inject({
+    method: "GET",
+    url: `/api/projects/acme/models/${model.slug}/commits/${c1Body.commit.id}/file`,
+    headers: auth(token),
+  });
+  assert.equal(file.statusCode, 200);
+  assert.equal(file.headers["content-type"], "application/pdf");
+  assert.ok(
+    file.headers["content-disposition"]
+      ?.toString()
+      .includes("Grundriss%20EG.pdf"),
+  );
+  assert.ok(file.rawPayload.equals(pdfBytes));
+
+  const fragments = await app.inject({
+    method: "GET",
+    url: `/api/projects/acme/models/${model.slug}/commits/${c1Body.commit.id}/fragments`,
+    headers: auth(token),
+  });
+  assert.equal(fragments.statusCode, 400);
+
+  await app.close();
+});
+
+test("file models: octet-stream stays binary, new versions keep the file type", async () => {
+  const app = await makeApp();
+  const token = await register(app);
+  await app.inject({
+    method: "POST",
+    url: "/api/projects",
+    headers: auth(token),
+    payload: { name: "Acme", slug: "acme" },
+  });
+  const model = JSON.parse(
+    (
+      await app.inject({
+        method: "POST",
+        url: "/api/projects/acme/models",
+        headers: auth(token),
+        payload: { name: "plan.dwg", kind: "file", folder: "" },
+      })
+    ).body,
+  ).model;
+  const commitsUrl = `/api/projects/acme/models/${model.slug}/commits`;
+
+  // Kein gültiges UTF-8 — als String geparst würde Fastify das abweisen.
+  const dwgBytes = Buffer.from([
+    0x41, 0x43, 0x31, 0x30, 0x33, 0x32, 0xff, 0xfe, 0x00, 0x80, 0xc3,
+  ]);
+  const raw = await app.inject({
+    method: "POST",
+    url: `${commitsUrl}?message=roh`,
+    headers: { ...auth(token), "content-type": "application/octet-stream" },
+    payload: dwgBytes,
+  });
+  assert.equal(raw.statusCode, 201);
+  const rawId = JSON.parse(raw.body).commit.id;
+  const file = await app.inject({
+    method: "GET",
+    url: `${commitsUrl}/${rawId}/file`,
+    headers: auth(token),
+  });
+  assert.ok(file.rawPayload.equals(dwgBytes));
+
+  const multipart = (fileName: string) => {
+    const boundary = "----ifcvcs-test-boundary";
+    return {
+      headers: {
+        ...auth(token),
+        "content-type": `multipart/form-data; boundary=${boundary}`,
+      },
+      payload: Buffer.concat([
+        Buffer.from(
+          [
+            `--${boundary}`,
+            `Content-Disposition: form-data; name="file"; filename="${fileName}"`,
+            "Content-Type: application/octet-stream",
+            "",
+            "",
+          ].join("\r\n"),
+        ),
+        dwgBytes,
+        Buffer.from(`\r\n--${boundary}--\r\n`),
+      ]),
+    };
+  };
+
+  const wrongType = await app.inject({
+    method: "POST",
+    url: commitsUrl,
+    ...multipart("plan.pdf"),
+  });
+  assert.equal(wrongType.statusCode, 400);
+  assert.match(JSON.parse(wrongType.body).error, /\.dwg/);
+
+  const sameType = await app.inject({
+    method: "POST",
+    url: commitsUrl,
+    ...multipart("Plan-Rev-B.DWG"),
+  });
+  assert.equal(sameType.statusCode, 201);
+
+  const rawWrongName = await app.inject({
+    method: "POST",
+    url: `${commitsUrl}?name=plan.pdf`,
+    headers: { ...auth(token), "content-type": "application/octet-stream" },
+    payload: dwgBytes,
+  });
+  assert.equal(rawWrongName.statusCode, 400);
 
   await app.close();
 });
@@ -916,8 +1080,13 @@ test("global admin: full project access + user management", async () => {
 
   // Admin sieht auch das private Fremdprojekt und darf darin schreiben.
   const list = JSON.parse(
-    (await app.inject({ method: "GET", url: "/api/projects", headers: auth(admin) }))
-      .body,
+    (
+      await app.inject({
+        method: "GET",
+        url: "/api/projects",
+        headers: auth(admin),
+      })
+    ).body,
   );
   assert.ok(list.projects.some((p: { slug: string }) => p.slug === "geheim"));
   const write = await app.inject({
@@ -953,7 +1122,11 @@ test("global admin: full project access + user management", async () => {
         method: "POST",
         url: "/api/admin/users",
         headers: auth(admin),
-        payload: { email: "neu@example.com", name: "Neu", password: "pw123456" },
+        payload: {
+          email: "neu@example.com",
+          name: "Neu",
+          password: "pw123456",
+        },
       })
     ).body,
   ).user;

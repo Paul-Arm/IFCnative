@@ -47,3 +47,5 @@ server/.ifc-vcs-data/
 
 # Fragments-Worker wird aus dem Paket synchronisiert (scripts/sync-fragments-worker.mjs)
 server/web/public/fragments/
+# CAD-Worker (DWG-Parser + WASM, MTEXT) aus dem Paket (scripts/sync-cad-workers.mjs)
+server/web/public/cad/

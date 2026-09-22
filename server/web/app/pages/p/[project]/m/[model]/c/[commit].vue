@@ -1,19 +1,19 @@
 <script setup lang="ts">
 import {
-  PhCheckCircle,
-  PhCopy,
-  PhDownloadSimple,
-  PhGitCommit,
-  PhGitDiff,
+    PhCheckCircle,
+    PhCopy,
+    PhDownloadSimple,
+    PhGitCommit,
+    PhGitDiff,
 } from "@phosphor-icons/vue";
 
 import {
-  actionAppliesTo,
-  type Action,
-  type ActionRun,
-  type Commit,
-  type Model,
-  type Role,
+    actionAppliesTo,
+    type Action,
+    type ActionRun,
+    type Commit,
+    type Model,
+    type Role,
 } from "~/types/api";
 
 // Breites Layout: Liste und 3D-Vergleich stehen nebeneinander.
@@ -82,7 +82,7 @@ async function download(): Promise<void> {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${modelSlug}-${commitId.slice(0, 8)}.${isIfc.value ? "ifc" : "md"}`;
+    a.download = `${modelSlug}-${commitId.slice(0, 8)}.${downloadExtension.value}`;
     a.click();
     URL.revokeObjectURL(url);
   } finally {
@@ -98,7 +98,18 @@ const numberFmt = new Intl.NumberFormat("de-DE");
 
 // ---- Prüfungen (Actions) ----------------------------------------------
 
-const isIfc = computed(() => commitData.value?.commit.schema !== "markdown");
+const isIfc = computed(() => {
+  const schema = commitData.value?.commit.schema;
+  return schema !== "markdown" && schema !== "file";
+});
+const isFile = computed(() => commitData.value?.commit.schema === "file");
+const downloadExtension = computed(() => {
+  if (isIfc.value) return "ifc";
+  if (!isFile.value) return "md";
+  const name = modelData.value?.model.name ?? "";
+  const idx = name.lastIndexOf(".");
+  return idx === -1 ? "bin" : name.slice(idx + 1).toLowerCase();
+});
 
 const { data: actionsData } = useAsyncData(
   `actions-${slug}`,
@@ -393,7 +404,7 @@ function initials(name: string | undefined): string {
           <button :disabled="downloadBusy" @click="download">
             <span v-if="downloadBusy" class="spinner" aria-hidden="true" />
             <PhDownloadSimple v-else :size="15" aria-hidden="true" />
-            {{ downloadBusy ? "Wird geladen …" : isIfc ? ".ifc" : ".md" }}
+            {{ downloadBusy ? "Wird geladen …" : `.${downloadExtension}` }}
           </button>
         </div>
       </template>
@@ -539,8 +550,11 @@ function initials(name: string | undefined): string {
       <SkeletonRows v-if="!commitData" :rows="4" />
       <div v-else-if="!isIfc" class="card-body">
         <div class="alert" style="margin: 0">
-          Markdown-Datei — es gibt keinen Objekt-Diff. Der Inhalt dieses Stands
-          lässt sich oben herunterladen.
+          {{ isFile ? "Datei" : "Markdown-Datei" }} — es gibt keinen Objekt-Diff.
+          Der Inhalt dieses Stands lässt sich oben herunterladen<template v-if="isFile">
+            oder in der
+            <NuxtLink :to="`/p/${slug}/m/${modelSlug}?tab=vorschau`">Vorschau</NuxtLink>
+            ansehen</template>.
         </div>
       </div>
       <CommitChanges

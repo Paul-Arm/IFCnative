@@ -63,9 +63,10 @@ export type Visibility = "private" | "public";
 
 /**
  * Dateiart eines Modells: "ifc" = IFC-Modell mit semantischem GlobalId-Diff,
- * "md" = Markdown-Dokument (z. B. README), versioniert ohne Objekt-Diff.
+ * "md" = Markdown-Dokument (z. B. README), versioniert ohne Objekt-Diff,
+ * "file" = beliebige Datei (PDF, Word, DWG, …), versioniert als Binärblob.
  */
-export type ModelKind = "ifc" | "md";
+export type ModelKind = "ifc" | "md" | "file";
 
 export interface Model {
   id: string;

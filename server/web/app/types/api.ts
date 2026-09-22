@@ -60,11 +60,16 @@ export interface Model {
   createdAt: string;
   /** Ordnerpfad im Projekt ("" = Wurzel), Segmente mit "/" getrennt. */
   folder: string;
-  /** "ifc" = IFC-Modell mit semantischem Diff, "md" = Markdown-Dokument. */
-  kind: "ifc" | "md";
+  /**
+   * "ifc" = IFC-Modell mit semantischem Diff, "md" = Markdown-Dokument,
+   * "file" = beliebige Datei (PDF, Word, DWG, …).
+   */
+  kind: ModelKind;
   branchCount?: number;
   head?: Commit | null;
 }
+
+export type ModelKind = "ifc" | "md" | "file";
 
 export interface Branch {
   id: string;
@@ -99,7 +104,7 @@ export interface IssueModelRef {
   slug: string;
   name: string;
   folder: string;
-  kind: "ifc" | "md";
+  kind: ModelKind;
   /** Commit, in dem der Fehler aufgefallen ist (optional). */
   foundCommitId: string | null;
   /** Commit, mit dem der Fehler behoben wurde (optional). */

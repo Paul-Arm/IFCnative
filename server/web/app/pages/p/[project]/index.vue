@@ -1,43 +1,51 @@
 <script setup lang="ts">
+import {
+    PhArrowElbowLeftUp,
+    PhBlueprint,
+    PhBookOpen,
+    PhCaretDown,
+    PhCaretRight,
+    PhCheckCircle,
+    PhCrosshairSimple,
+    PhCube,
+    PhCubeTransparent,
+    PhDownloadSimple,
+    PhFile,
+    PhFileArrowUp,
+    PhFileDoc,
+    PhFileImage,
+    PhFileMd,
+    PhFilePdf,
+    PhFileText,
+    PhFolder,
+    PhFolderPlus,
+    PhFolders,
+    PhGear,
+    PhImage,
+    PhPlayCircle,
+    PhPlus,
+    PhRecord,
+    PhShieldCheck,
+    PhUploadSimple,
+    PhUsers,
+} from "@phosphor-icons/vue";
 import hljs from "highlight.js/lib/core";
 import pythonLang from "highlight.js/lib/languages/python";
-import {
-  PhArrowElbowLeftUp,
-  PhBookOpen,
-  PhCaretDown,
-  PhCaretRight,
-  PhCheckCircle,
-  PhCrosshairSimple,
-  PhCube,
-  PhCubeTransparent,
-  PhDownloadSimple,
-  PhFileMd,
-  PhFolder,
-  PhFolderPlus,
-  PhFolders,
-  PhGear,
-  PhImage,
-  PhPlayCircle,
-  PhPlus,
-  PhRecord,
-  PhShieldCheck,
-  PhUploadSimple,
-  PhUsers,
-} from "@phosphor-icons/vue";
 
 import type {
-  Action,
-  ActionKind,
-  ActionRun,
-  Commit,
-  Issue,
-  IssueKind,
-  Label,
-  LibraryFile,
-  Member,
-  Model,
-  Project,
-  Role,
+    Action,
+    ActionKind,
+    ActionRun,
+    Commit,
+    Issue,
+    IssueKind,
+    Label,
+    LibraryFile,
+    Member,
+    Model,
+    ModelKind,
+    Project,
+    Role,
 } from "~/types/api";
 
 const route = useRoute();
@@ -231,38 +239,87 @@ async function createModel(): Promise<void> {
   }
 }
 
-// ---- Markdown-Datei anlegen --------------------------------------------
+// ---- Datei hochladen (beliebiger Typ; .md/.ifc landen in ihrer Art) ----
 
 const showFileForm = ref(false);
-const fileName = ref("README.md");
-const fileContent = ref("");
+const uploadFile = ref<File | null>(null);
 const fileMessage = ref("");
 const fileBusy = ref(false);
+const fileDragOver = ref(false);
 const { token } = useAuth();
 
-async function createMarkdownFile(): Promise<void> {
+function fileExtension(name: string): string {
+  const idx = name.lastIndexOf(".");
+  return idx === -1 ? "" : name.slice(idx + 1).toLowerCase();
+}
+
+function modelKindForFile(name: string): ModelKind {
+  const ext = fileExtension(name);
+  if (ext === "md" || ext === "markdown") return "md";
+  if (ext === "ifc") return "ifc";
+  return "file";
+}
+
+/** Listen-Icon je Dateiart/-endung. */
+function modelIcon(model: Model) {
+  if (model.kind === "ifc") return PhCube;
+  if (model.kind === "md") return PhFileMd;
+  const ext = fileExtension(model.name);
+  if (ext === "pdf") return PhFilePdf;
+  if (ext === "doc" || ext === "docx") return PhFileDoc;
+  if (ext === "dwg" || ext === "dxf") return PhBlueprint;
+  if (["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(ext)) return PhFileImage;
+  if (["txt", "csv", "json", "xml", "ids"].includes(ext)) return PhFileText;
+  return PhFile;
+}
+
+function onUploadFileChange(event: Event): void {
+  const input = event.target as HTMLInputElement;
+  uploadFile.value = input.files?.[0] ?? null;
+}
+
+function onUploadFileDrop(event: DragEvent): void {
+  fileDragOver.value = false;
+  uploadFile.value = event.dataTransfer?.files?.[0] ?? null;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+async function uploadNewFile(): Promise<void> {
+  const file = uploadFile.value;
+  if (!file || fileBusy.value) return;
   browserError.value = null;
   fileBusy.value = true;
   try {
-    const name = fileName.value.trim() || "README.md";
     const { model } = await api<{ model: Model }>(`/projects/${slug}/models`, {
       method: "POST",
-      body: { name, kind: "md", folder: currentPath.value },
-    });
-    await $fetch(
-      `/api/projects/${slug}/models/${model.slug}/commits`,
-      {
-        method: "POST",
-        query: { message: fileMessage.value.trim() || "Erste Version" },
-        body: fileContent.value || `# ${name.replace(/\.md$/i, "")}\n`,
-        headers: {
-          "content-type": "text/markdown",
-          ...(token.value ? { authorization: `Bearer ${token.value}` } : {}),
-        },
+      body: {
+        name: file.name,
+        kind: modelKindForFile(file.name),
+        folder: currentPath.value,
       },
-    );
-    fileName.value = "README.md";
-    fileContent.value = "";
+    });
+    const form = new FormData();
+    form.append("message", fileMessage.value.trim() || "Erste Version");
+    form.append("file", file);
+    try {
+      await $fetch(`/api/projects/${slug}/models/${model.slug}/commits`, {
+        method: "POST",
+        query: { compact: 1 },
+        body: form,
+        headers: token.value ? { authorization: `Bearer ${token.value}` } : {},
+      });
+    } catch (e) {
+      // Kein leeres Modell zurücklassen (best effort — braucht Admin-Rolle).
+      await api(`/projects/${slug}/models/${model.slug}`, { method: "DELETE" }).catch(
+        () => undefined,
+      );
+      throw e;
+    }
+    uploadFile.value = null;
     fileMessage.value = "";
     showFileForm.value = false;
     await Promise.all([refreshModels(), refreshProject()]);
@@ -312,7 +369,7 @@ watch(
 
 const viewerModels = computed(() =>
   (modelsData.value?.models ?? []).filter(
-    (model) => model.kind !== "md",
+    (model) => model.kind === "ifc",
   ),
 );
 const viewerSources = computed(() =>
@@ -1284,8 +1341,8 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
                 IFC-Modell
               </button>
               <button class="menu-item" @click="openCreateForm('file')">
-                <PhFileMd :size="16" aria-hidden="true" />
-                Markdown-Datei
+                <PhFileArrowUp :size="16" aria-hidden="true" />
+                Datei hochladen
               </button>
               <button class="menu-item" @click="openCreateForm('folder')">
                 <PhFolderPlus :size="16" aria-hidden="true" />
@@ -1318,23 +1375,41 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
 
         <div v-if="showFileForm" class="card-body" style="border-bottom: 1px solid var(--border)">
           <p class="muted small" style="margin-top: 0">
-            Markdown-Datei — eine <code>README.md</code> wird wie bei GitHub
-            unter der Dateiliste angezeigt<span v-if="currentPath">
+            Beliebige Datei (PDF, Word, DWG, Bilder, Markdown …) mit eigener
+            Versionshistorie. PDF, DOCX und DWG/DXF haben eine Vorschau im
+            Browser; eine <code>README.md</code> wird wie bei GitHub unter der
+            Dateiliste angezeigt<span v-if="currentPath">
               (wird in „{{ currentPath }}“ angelegt)</span>.
           </p>
-          <form @submit.prevent="createMarkdownFile">
-            <div class="form-inline" style="margin-bottom: 0.9rem">
-              <div class="shrink">
-                <label for="file-name">Dateiname</label>
-                <input
-                  id="file-name"
-                  v-model="fileName"
-                  type="text"
-                  required
-                  placeholder="README.md"
-                  style="width: 220px"
-                />
-              </div>
+          <form @submit.prevent="uploadNewFile">
+            <label
+              class="dropzone"
+              :class="{ over: fileDragOver, filled: !!uploadFile, busy: fileBusy }"
+              for="upload-file"
+              @dragover.prevent="fileDragOver = true"
+              @dragleave.prevent="fileDragOver = false"
+              @drop.prevent="onUploadFileDrop"
+            >
+              <input
+                id="upload-file"
+                class="dropzone-input"
+                type="file"
+                :disabled="fileBusy"
+                @change="onUploadFileChange"
+              />
+              <PhUploadSimple :size="26" aria-hidden="true" />
+              <template v-if="uploadFile">
+                <strong>{{ uploadFile.name }}</strong>
+                <span class="muted small">
+                  {{ formatFileSize(uploadFile.size) }} · andere Datei wählen
+                </span>
+              </template>
+              <template v-else>
+                <strong>Datei hierher ziehen</strong>
+                <span class="muted small">oder klicken, um eine Datei zu wählen</span>
+              </template>
+            </label>
+            <div class="form-inline">
               <div>
                 <label for="file-message">Commit-Nachricht</label>
                 <input
@@ -1342,20 +1417,16 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
                   v-model="fileMessage"
                   type="text"
                   placeholder="Erste Version"
+                  :disabled="fileBusy"
                 />
               </div>
+              <div class="shrink" style="align-self: flex-end">
+                <button class="primary" type="submit" :disabled="fileBusy || !uploadFile">
+                  <span v-if="fileBusy" class="spinner" aria-hidden="true" />
+                  {{ fileBusy ? "Wird hochgeladen …" : "Hochladen" }}
+                </button>
+              </div>
             </div>
-            <div class="form-row">
-              <label>Inhalt (Markdown)</label>
-              <MarkdownEditor
-                v-model="fileContent"
-                placeholder="Beschreibung des Projekts …"
-                min-height="12rem"
-              />
-            </div>
-            <button class="primary" type="submit" :disabled="fileBusy">
-              Datei anlegen
-            </button>
           </form>
         </div>
 
@@ -1429,8 +1500,7 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
           </div>
           <div v-for="model in modelsInPath" :key="model.id" class="fb-row">
             <span class="fb-icon" aria-hidden="true">
-              <PhFileMd v-if="model.kind === 'md'" :size="18" />
-              <PhCube v-else :size="18" />
+              <component :is="modelIcon(model)" :size="18" />
             </span>
             <NuxtLink :to="`/p/${slug}/m/${model.slug}`" class="fb-name">
               {{ model.name }}

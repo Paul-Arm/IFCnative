@@ -1,25 +1,26 @@
 <script setup lang="ts">
 import {
-  PhBookOpen,
-  PhCheckCircle,
-  PhCubeTransparent,
-  PhGear,
-  PhGitBranch,
-  PhGitCommit,
-  PhPencilSimple,
-  PhPlus,
-  PhRecord,
-  PhUploadSimple,
+    PhBookOpen,
+    PhCheckCircle,
+    PhCubeTransparent,
+    PhEye,
+    PhGear,
+    PhGitBranch,
+    PhGitCommit,
+    PhPencilSimple,
+    PhPlus,
+    PhRecord,
+    PhUploadSimple,
 } from "@phosphor-icons/vue";
 
 import type {
-  Branch,
-  Commit,
-  Issue,
-  Member,
-  Model,
-  Project,
-  Role,
+    Branch,
+    Commit,
+    Issue,
+    Member,
+    Model,
+    Project,
+    Role,
 } from "~/types/api";
 
 const route = useRoute();
@@ -63,6 +64,29 @@ const canWrite = computed(
   () => isAdmin.value || projectData.value?.role === "contributor",
 );
 const isMd = computed(() => modelData.value?.model.kind === "md");
+const isFile = computed(() => modelData.value?.model.kind === "file");
+const isIfc = computed(() => !isMd.value && !isFile.value);
+
+/** Endung des Modellnamens ("" ohne Punkt) — legt bei Datei-Modellen die Dateiart fest. */
+const modelExtension = computed(() => {
+  const name = modelData.value?.model.name ?? "";
+  const idx = name.lastIndexOf(".");
+  return idx === -1 ? "" : name.slice(idx + 1).toLowerCase();
+});
+
+/** Dateiendung für Downloads: bei Datei-Modellen aus dem Namen, sonst fest. */
+const downloadExtension = computed(() => {
+  if (isMd.value) return "md";
+  if (!isFile.value) return "ifc";
+  return modelExtension.value || "bin";
+});
+
+/** accept-Filter des Datei-Dialogs für neue Versionen. */
+const commitAccept = computed(() => {
+  if (isIfc.value) return ".ifc,application/x-step";
+  if (isFile.value && modelExtension.value) return `.${modelExtension.value}`;
+  return undefined;
+});
 
 const folderCrumbs = computed(() => {
   const folder = modelData.value?.model.folder ?? "";
@@ -76,15 +100,18 @@ const folderCrumbs = computed(() => {
 
 // ---- Tabs --------------------------------------------------------------
 
-type Tab = "inhalt" | "commits" | "3d" | "issues" | "einstellungen";
+type Tab = "inhalt" | "vorschau" | "commits" | "3d" | "issues" | "einstellungen";
 const tab = computed<Tab>(() => {
   const value = route.query.tab;
   if (value === "commits" || value === "issues" || value === "einstellungen") {
     return value;
   }
   if (value === "inhalt" && isMd.value) return "inhalt";
-  if (value === "3d" && !isMd.value) return "3d";
-  return isMd.value ? "inhalt" : "3d";
+  if (value === "vorschau" && isFile.value) return "vorschau";
+  if (value === "3d" && isIfc.value) return "3d";
+  if (isMd.value) return "inhalt";
+  if (isFile.value) return "vorschau";
+  return "3d";
 });
 
 function goTab(nextTab: Tab): void {
@@ -255,8 +282,15 @@ function openCommitModal(): void {
 }
 
 function setCommitFile(next: File | null): void {
-  if (next && !/\.ifc$/i.test(next.name)) {
+  if (next && isIfc.value && !/\.ifc$/i.test(next.name)) {
     uploadError.value = "Bitte eine .ifc-Datei wählen.";
+    return;
+  }
+  // Content-Type und Vorschau hängen an der Endung des Modellnamens — eine
+  // neue Version muss dieselbe Dateiart haben (der Server prüft das auch).
+  const expected = modelExtension.value;
+  if (next && isFile.value && expected && !next.name.toLowerCase().endsWith(`.${expected}`)) {
+    uploadError.value = `Bitte eine .${expected}-Datei wählen — die Dateiart bleibt über alle Versionen gleich.`;
     return;
   }
   uploadError.value = null;
@@ -336,8 +370,14 @@ async function submitCommit(): Promise<void> {
     message.value = "";
     file.value = null;
     showCommitModal.value = false;
-    // Direkt zum neuen Stand: dort steht, was sich geändert hat.
-    await navigateTo(`/p/${slug}/m/${modelSlug}/c/${result.commit.id}`);
+    if (isIfc.value) {
+      // Direkt zum neuen Stand: dort steht, was sich geändert hat.
+      await navigateTo(`/p/${slug}/m/${modelSlug}/c/${result.commit.id}`);
+    } else {
+      // Dateien haben keinen Objekt-Diff — die neue Version direkt anzeigen.
+      await Promise.all([refreshModel(), refreshCommits()]);
+      goTab("vorschau");
+    }
   } catch (e) {
     uploadError.value = e instanceof Error ? e.message : apiErrorMessage(e);
   } finally {
@@ -499,7 +539,7 @@ async function downloadCommit(commit: Commit): Promise<void> {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${modelSlug}-${commit.id.slice(0, 8)}.${isMd.value ? "md" : "ifc"}`;
+  a.download = `${modelSlug}-${commit.id.slice(0, 8)}.${downloadExtension.value}`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -543,6 +583,7 @@ const numberFmt = new Intl.NumberFormat("de-DE");
         {{ modelData.model.visibility === "public" ? "öffentlich" : "privat" }}
       </span>
       <span v-if="isMd" class="badge">Markdown</span>
+      <span v-else-if="isFile" class="badge">Datei</span>
     </nav>
 
     <nav class="gh-tabs">
@@ -555,7 +596,15 @@ const numberFmt = new Intl.NumberFormat("de-DE");
         Inhalt
       </button>
       <button
-        v-if="!isMd"
+        v-if="isFile"
+        :class="{ active: tab === 'vorschau' }"
+        @click="goTab('vorschau')"
+      >
+        <PhEye :size="16" aria-hidden="true" />
+        Vorschau
+      </button>
+      <button
+        v-if="isIfc"
         :class="{ active: tab === '3d' }"
         @click="goTab('3d')"
       >
@@ -638,6 +687,41 @@ const numberFmt = new Intl.NumberFormat("de-DE");
       </div>
     </div>
 
+    <!-- ================= Tab: Vorschau (Datei) ================= -->
+    <div v-else-if="tab === 'vorschau' && isFile" class="card">
+      <div class="card-header">
+        <strong>{{ modelData.model.name }}</strong>
+        <span v-if="selectedBranch" class="badge">{{ selectedBranch }}</span>
+        <span v-if="headCommit" class="commit-id">
+          {{ headCommit.message || "(ohne Nachricht)" }} ·
+          {{ headCommit.id.slice(0, 8) }}
+        </span>
+        <span class="topbar-spacer" />
+        <button v-if="headCommit" @click="downloadCommit(headCommit)">
+          Herunterladen
+        </button>
+        <button v-if="canWrite" class="primary" @click="openCommitModal">
+          <PhUploadSimple :size="14" aria-hidden="true" />
+          Neue Version
+        </button>
+      </div>
+      <LoadingState
+        v-if="commitsPending"
+        center
+        large
+        text="Lade Commit-Stand …"
+      />
+      <FilePreview
+        v-else-if="headCommit"
+        :key="headCommit.id"
+        :src="`/api${base}/commits/${headCommit.id}/file`"
+        :name="modelData.model.name"
+      />
+      <div v-else class="empty">
+        Noch keine Version auf diesem Branch — erst eine Datei hochladen.
+      </div>
+    </div>
+
     <!-- ================= Tab: Commits (Graph) ================= -->
     <div v-else-if="tab === 'commits'" class="card">
       <div class="card-header">
@@ -665,7 +749,7 @@ const numberFmt = new Intl.NumberFormat("de-DE");
           </button>
           <button v-if="!isMd" class="primary" @click="openCommitModal">
             <PhUploadSimple :size="14" aria-hidden="true" />
-            Neuen Stand committen
+            {{ isFile ? "Neue Version hochladen" : "Neuen Stand committen" }}
           </button>
           <button
             v-else
@@ -723,7 +807,7 @@ const numberFmt = new Intl.NumberFormat("de-DE");
               </div>
             </div>
             <span
-              v-if="!isMd"
+              v-if="isIfc"
               class="diffstat"
               title="Objekte: neu / geändert / entfernt"
             >
@@ -731,11 +815,11 @@ const numberFmt = new Intl.NumberFormat("de-DE");
               <span class="mod">~{{ numberFmt.format(row.commit.modified) }}</span>
               <span class="del">−{{ numberFmt.format(row.commit.removed) }}</span>
             </span>
-            <span v-if="!isMd" class="muted small cg-entities">
+            <span v-if="isIfc" class="muted small cg-entities">
               {{ numberFmt.format(row.commit.entityCount) }} Entities
             </span>
             <button class="link" @click="downloadCommit(row.commit)">
-              .{{ isMd ? "md" : "ifc" }}
+              .{{ downloadExtension }}
             </button>
           </div>
         </div>
@@ -971,7 +1055,7 @@ const numberFmt = new Intl.NumberFormat("de-DE");
             Versionsständen — unwiderruflich.
           </p>
           <button class="danger" @click="deleteModel">
-            {{ isMd ? "Datei" : "Modell" }} löschen
+            {{ isIfc ? "Modell" : "Datei" }} löschen
           </button>
         </div>
       </div>
@@ -985,7 +1069,7 @@ const numberFmt = new Intl.NumberFormat("de-DE");
     >
       <div class="card modal">
         <div class="card-header">
-          <h2>Neuen Stand committen</h2>
+          <h2>{{ isFile ? "Neue Version hochladen" : "Neuen Stand committen" }}</h2>
           <span class="topbar-spacer" />
           <button class="link" :disabled="uploading" @click="showCommitModal = false">✕</button>
         </div>
@@ -1005,7 +1089,7 @@ const numberFmt = new Intl.NumberFormat("de-DE");
                 ref="fileInput"
                 class="dropzone-input"
                 type="file"
-                accept=".ifc,application/x-step"
+                :accept="commitAccept"
                 :disabled="uploading"
                 @change="onFileChange"
               />
@@ -1017,7 +1101,7 @@ const numberFmt = new Intl.NumberFormat("de-DE");
                 </span>
               </template>
               <template v-else>
-                <strong>IFC-Datei hierher ziehen</strong>
+                <strong>{{ isIfc ? "IFC-Datei" : "Datei" }} hierher ziehen</strong>
                 <span class="muted small">oder klicken, um eine Datei zu wählen</span>
               </template>
             </label>
@@ -1082,10 +1166,11 @@ const numberFmt = new Intl.NumberFormat("de-DE");
                 <template v-if="uploadPercent !== null && uploadPercent < 100">
                   Lade hoch … {{ uploadPercent }} %
                 </template>
-                <template v-else>
+                <template v-else-if="isIfc">
                   Server analysiert das Modell und ermittelt die Änderungen —
                   bei großen Dateien dauert das einige Sekunden.
                 </template>
+                <template v-else>Server speichert die Datei …</template>
               </span>
             </div>
           </form>

@@ -24,13 +24,29 @@ damit exakt einig, was „geändert“ bedeutet.
   `{globalId -> hash}`; dessen `manifestHash` ist die Content-Adresse.
 - **Semantischer Diff** — Vergleich zweier Commits ist ein Mengen-Diff über
   Manifeste: `added / removed / modified` je GlobalId. Ein Re-Export (der nur
-  STEP-Ids neu nummeriert) ergibt einen *leeren* Diff. Pro geänderter Entity
+  STEP-Ids neu nummeriert) ergibt einen _leeren_ Diff. Pro geänderter Entity
   gibt es Feld-Detail (welches Attribut/Pset-Feld, alt → neu).
 - **Markdown-Dateien** — Modelle mit `kind: "md"` (z. B. `README.md`) werden
   wie IFC-Modelle versioniert (Commits + Nachricht, Branches, Download);
   statt Objekt-Diff dient der Inhalts-Hash der Identisch-Erkennung. Eine
   `README.md` wird in der Web-UI wie bei GitHub unter der Dateiliste des
   jeweiligen Ordners gerendert (marked + DOMPurify).
+- **Beliebige Dateien** — Modelle mit `kind: "file"` (PDF, Word, DWG,
+  Bilder, …) werden als Binärblob versioniert (Commit-Schema `file`,
+  Content-Type nach Dateiendung, Download unter dem Originalnamen). Neue
+  Versionen müssen dieselbe Endung wie der Modellname haben (Server prüft
+  den Multipart-Dateinamen bzw. `?name=`). Die Web-UI lädt sie über
+  „Neu → Datei hochladen“ (`.ifc`/`.md` landen dabei automatisch in ihrer
+  Art) und zeigt eine **Vorschau** im Browser
+  (`components/FilePreview.client.vue`): PDF und Bilder nativ, DOCX über
+  `docx-preview` (Links auf http(s)/mailto beschränkt), DWG/DXF im
+  WebGL-Viewer `@mlightcad/cad-simple-viewer` (MIT), Textformate als
+  Klartext. DWG liest `@mlightcad/libredwg-converter` (libredwg als WASM,
+  **GPL-3.0**) in einem Web Worker; Worker + WASM kopiert
+  `web/scripts/sync-cad-workers.mjs` nach `web/public/cad/`. CAD-Schriften
+  lädt der Viewer bei Bedarf vom jsDelivr-CDN (`mlightcad/cad-data`). Der
+  Viewer verlangt `three@^0.172` und `lodash-es@4.17.21` — `overrides` in
+  `web/package.json` halten beide auf den Projektversionen.
 - **3D-Vorschau** — die Web-UI rendert jeden IFC-Stand mit dem
   ThatOpen-Viewer (`@thatopen/components` + Fragments). Die IFC wird beim
   ersten Abruf **serverseitig** zu Fragments konvertiert
@@ -121,16 +137,16 @@ damit exakt einig, was „geändert“ bedeutet.
     (`PYTHON_BIN`, Default `python`/`python3`; Zeitlimit 5 min), bekommt den
     IFC-Pfad als Argument 1 und als `IFC_PATH`-Umgebungsvariable.
     **Exit-Code 0 = bestanden**, stdout/stderr landen im Run-Protokoll.
-  Jede Action hat einen **Geltungsbereich**: alle IFC-Modelle des Projekts
-  (Standard), ein **Ordner** (inkl. Unterordner, `scopeFolder`) oder ein
-  **einzelnes Modell** (`scopeModelId`) — automatische Läufe bei Commits und
-  „Jetzt prüfen“ berücksichtigen nur Actions, deren Bereich das Modell
-  abdeckt; modellgebundene Actions werden mit dem Modell gelöscht.
-  Jede Ausführung ist ein **Run** mit Status
-  (`queued/running/success/failed/error`), Kurzfazit und Protokoll; Runs
-  laufen sequenziell in einer In-Process-Queue. Auslösen per Knopfdruck auf
-  der Commit-Seite („Jetzt prüfen“) oder automatisch bei jedem neuen Commit
-  (Flag „Bei Commit ausführen“ je Action).
+    Jede Action hat einen **Geltungsbereich**: alle IFC-Modelle des Projekts
+    (Standard), ein **Ordner** (inkl. Unterordner, `scopeFolder`) oder ein
+    **einzelnes Modell** (`scopeModelId`) — automatische Läufe bei Commits und
+    „Jetzt prüfen“ berücksichtigen nur Actions, deren Bereich das Modell
+    abdeckt; modellgebundene Actions werden mit dem Modell gelöscht.
+    Jede Ausführung ist ein **Run** mit Status
+    (`queued/running/success/failed/error`), Kurzfazit und Protokoll; Runs
+    laufen sequenziell in einer In-Process-Queue. Auslösen per Knopfdruck auf
+    der Commit-Seite („Jetzt prüfen“) oder automatisch bei jedem neuen Commit
+    (Flag „Bei Commit ausführen“ je Action).
 - **Zentrale Skript-/IDS-Bibliothek** — Prüfdateien lassen sich
   **projektübergreifend** ablegen (Seite „Bibliothek“ in der Topbar,
   `/api/library`). Eine Action kann statt eines eigenen Uploads einen
@@ -157,10 +173,10 @@ damit exakt einig, was „geändert“ bedeutet.
 
 ## Zwei Speicher-Modi
 
-| Modus | Objekt-Store (IFC-Blobs) | Metadaten (Projekte, Commits, Manifeste) |
-| --- | --- | --- |
-| **lokal** (Standard) | Dateisystem `DATA_DIR` (`./.ifc-vcs-data`) | SQLite `DATA_DIR/catalog.sqlite` (node:sqlite, WAL), oder Postgres wenn `DATABASE_URL` gesetzt |
-| **azure** (`STORAGE=azure`) | Azure Blob Storage | Postgres (`DATABASE_URL`) |
+| Modus                       | Objekt-Store (IFC-Blobs)                   | Metadaten (Projekte, Commits, Manifeste)                                                       |
+| --------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| **lokal** (Standard)        | Dateisystem `DATA_DIR` (`./.ifc-vcs-data`) | SQLite `DATA_DIR/catalog.sqlite` (node:sqlite, WAL), oder Postgres wenn `DATABASE_URL` gesetzt |
+| **azure** (`STORAGE=azure`) | Azure Blob Storage                         | Postgres (`DATABASE_URL`)                                                                      |
 
 Die Metadaten-Schicht dedupliziert Entity-Payloads über Commits hinweg
 (`entity_objects`), Diffs werden gecacht (`diffs_cache`; Commits sind
@@ -174,13 +190,13 @@ Neben dem Entity-Manifest speichert jeder Commit **Objekt-Records**
 eines Objekts (Produkte, Typen, räumliche Struktur — keine Relationships und
 Psets) ein Record mit fünf Facetten samt eigenem Hash:
 
-| Facette | Inhalt |
-| --- | --- |
-| `attributes` | Klasse, Name, Beschreibung, ObjectType, Tag, PredefinedType, … |
-| `placement` | Weltkoordinaten + Drehung/Neigung aus der Platzierungskette |
-| `geometry` | versionsstabiler Struktur-Hash der Darstellung + Kennwerte (Darstellungsart, Bestandteile, Profil, Extrusion, Ausdehnung, Stützpunkte) |
-| `properties` | alle Property-/Quantity-Sets mit Werten (in das Besitzerobjekt gefaltet) |
-| `relations` | räumliche Zuordnung, Teil von, Typ, Material, Klassifikation, Gruppe, Öffnungen |
+| Facette      | Inhalt                                                                                                                                 |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `attributes` | Klasse, Name, Beschreibung, ObjectType, Tag, PredefinedType, …                                                                         |
+| `placement`  | Weltkoordinaten + Drehung/Neigung aus der Platzierungskette                                                                            |
+| `geometry`   | versionsstabiler Struktur-Hash der Darstellung + Kennwerte (Darstellungsart, Bestandteile, Profil, Extrusion, Ausdehnung, Stützpunkte) |
+| `properties` | alle Property-/Quantity-Sets mit Werten (in das Besitzerobjekt gefaltet)                                                               |
+| `relations`  | räumliche Zuordnung, Teil von, Typ, Material, Klassifikation, Gruppe, Öffnungen                                                        |
 
 Ein Diff vergleicht nur diese Index-Zeilen — **kein IFC-Parsing beim Lesen**,
 auch nicht für die Vorher/Nachher-Werte eines Objekts. OwnerHistory und
@@ -257,57 +273,57 @@ npm run build:web      # = npm --prefix web run generate + Sync nach public/
 Auth: `Authorization: Bearer <JWT>` aus `/api/auth/login`. Fehler kommen als
 `{ "error": "…" }`.
 
-| Methode | Pfad | Bemerkung |
-| --- | --- | --- |
-| GET | `/api/health` | `{status, version, storage}` |
-| POST | `/api/auth/register`, `/api/auth/login` | → `{ token, user }` |
-| GET | `/api/me` | aktueller Benutzer (inkl. `isAdmin`) |
-| GET/POST | `/api/admin/users` | Benutzer auflisten / anlegen `{email, password, name?, isAdmin?}` (nur Admin) |
-| PATCH/DELETE | `/api/admin/users/:id` | Name/Admin-Status/Passwort ändern bzw. löschen (nur Admin; Selbst-Aussperrung und Löschen mit Inhalten blockiert) |
-| GET/POST | `/api/projects` | eigene + öffentliche Projekte (mit Rolle) / anlegen `{name, slug?, visibility?}` (Default: public) |
-| GET/PATCH | `/api/projects/:slug` | Projekt + Mitglieder + `folders` (private nur für Mitglieder) / Einstellungen `{name?, visibility?}` (admin) |
-| POST | `/api/projects/:slug/folders` | Ordner anlegen `{path}` (write) |
-| DELETE | `/api/projects/:slug/folders?path=` | leeren Ordner löschen (409 wenn Modelle darin) |
-| DELETE | `/api/projects/:slug` | Projekt löschen (nur Owner; inkl. Blobs) |
-| PUT/GET | `/api/projects/:slug/image` | Projektbild (PNG, z. B. Szenen-Screenshot aus dem 3D-Tab) setzen (write) / abrufen (Mitglied) |
-| GET/POST | `/api/projects/:slug/labels` | Labels auflisten / anlegen `{name, color}` (write) |
-| GET/POST | `/api/projects/:slug/issues` | Issues (`?state=open\|closed`, mit Zählern) / eröffnen `{title, body?, kind?: "virtual"\|"bcf", parentId?, assigneeIds?, modelLinks?: [{modelId, foundCommitId?, fixedCommitId?}], labelIds?, guids?}` — `modelLinks` trägt den Versionsbezug (in welchem Commit aufgefallen/behoben), `parentId` macht das Issue zum Unter-Issue (jedes Mitglied) |
-| GET | `/api/projects/:slug/issues/bcf` | alle BCF-Issues als `.bcfzip` (BCF 2.1) |
-| POST | `/api/projects/:slug/issues/bcf` | `.bcfzip` importieren (Body = Zip, `application/zip`, `?name=` Dateiname für den Titel des Sammel-Issues) → `{imported, skipped, located, parent}` — Topics werden Unter-Issues eines virtuellen Sammel-Issues (write) |
-| GET | `/api/projects/:slug/issues/:number/bcf` | einzelnes BCF-Issue als `.bcfzip` (400 bei virtuellen Issues) |
-| GET/PATCH | `/api/projects/:slug/issues/:number` | Issue-Detail (inkl. `comments`, `subIssues`) / ändern (Titel, Body, State, `parentId`, Zuordnungen — Autor oder write-Rolle) |
-| POST/DELETE | `/api/projects/:slug/issues/:number/comments(/:id)` | kommentieren (jedes Mitglied) / löschen (Autor oder write-Rolle) |
-| POST | `/api/projects/:slug/members` | Mitglied hinzufügen/Rolle ändern `{email, role}` (admin) |
-| DELETE | `/api/projects/:slug/members/:userId` | Mitglied entfernen (admin; Owner geschützt) |
-| GET/POST | `/api/projects/:slug/models` | Modelle (mit Head-Commit) / anlegen `{name, visibility?, folder?, kind?}` (`ifc`\|`md`) |
-| GET | `/api/projects/:slug/models/:model` | Modell + Branches (mit Heads) |
-| PATCH | `/api/projects/:slug/models/:model` | Einstellungen `{name?, visibility?, defaultBranch?, folder?}` (admin) |
-| DELETE | `/api/projects/:slug/models/:model` | Modell löschen (admin; inkl. Blobs) |
-| POST | `/api/projects/:slug/models/:model/branches` | Branch anlegen `{name, from?}` — startet am Head von `from` |
-| POST | `…/commits?branch=&message=` | Datei-Inhalt hochladen (raw Body **oder** Multipart `file` + Felder `message`/`branch`) → `{commit, diff}` (mit `?compact=1` nur `{commit, identical, unchanged}` — so committet die Web-UI); IFC-Modelle verlangen STEP, `md` beliebigen Text (max 2 MB) |
-| GET | `…/commits?branch=` | Historie (Commits mit Autor) |
-| GET | `…/commits/:id` | Commit-Metadaten |
-| GET | `…/commits/:id/file` | Roh-IFC herunterladen (byte-identisch) |
-| GET | `…/commits/:id/fragments` | ThatOpen-Fragments für die 3D-Vorschau: 200 + Bytes (immutable-Cache-Header) oder **202** `{status: "converting", startedAt, elapsedMs}` solange konvertiert wird (dann erneut fragen; `?wait=1` wartet serverseitig) |
-| GET | `…/changes?to=&from=` | Objektzentrierte Übersicht: Zähler je Status/Typ, je Facette (`attributes`, `placement`, `geometry`, `properties`, `relations`) und je räumlichem Container; ohne `from` gilt alles als neu (erster Stand) |
-| GET | `…/changes/items?to=&from=&status=&facet=&type=&container=&q=&offset=&limit=` | Seite geänderter Objekte (`limit` ≤ 200, Standard 50); jede Zeile trägt ihre wichtigsten Vorher/Nachher-Werte (`highlights`) bzw. Eckdaten (`facts`) |
-| GET | `…/changes/item?to=&from=&globalId=` | Alle Vorher/Nachher-Werte eines Objekts |
-| GET | `…/changes/guids?to=&from=&…Filter` | GlobalIds je Status (max. 50.000) für den 3D-Vergleich |
-| GET | `…/diff?from=&to=` | Diff-Übersicht: `{identical, unchanged, added|modified|removed: {count, types: [{type, count}]}}` — keine Einträge, damit 100k-Änderungen den Browser nicht einfrieren |
-| GET | `…/diff/entries?from=&to=&status=&type=&q=&offset=&limit=` | Diff-Einträge seitenweise (`limit` ≤ 1000, Standard 200); `status`/`type` grenzen ein, `q` filtert Typ/Name/GlobalId über alle Status |
-| GET | `…/diff/entity?from=&to=&globalId=` | Feld-Detail einer geänderten Entity |
-| GET/POST | `/api/projects/:slug/actions` | Actions auflisten (inkl. `libraryName`, `scopeModelName`) / anlegen `{name, kind, content, fileName?, runOnCommit?, scopeFolder?\|scopeModelId?}` **oder** `{name, libraryFileId, runOnCommit?, scopeFolder?\|scopeModelId?}` (write) |
-| PATCH/DELETE | `/api/projects/:slug/actions/:id` | Name/`runOnCommit`/Dateiinhalt ändern bzw. löschen (write) |
-| GET | `/api/projects/:slug/actions/:id/file` | hinterlegte IDS/Skript-Datei herunterladen |
-| POST | `…/commits/:id/validate` | Commit prüfen `{actionIds?}` (Default: alle Actions) → `{runs}` (write) |
-| GET | `/api/projects/:slug/runs?commit=&action=&model=` | Runs (ohne Log) mit Action/Modell/Auslöser |
-| GET | `/api/projects/:slug/runs/:runId/events` | Server-Sent Events: `status` (Run inkl. Log, sofort als Snapshot), `log` (`{chunk}` je Ausgabe), `done` — endet mit dem Run; per fetch mit Bearer-Header lesen |
-| POST | `/api/projects/:slug/runs/:runId/cancel` | Run abbrechen (wartend/laufend; 409 wenn schon beendet) (write) |
-| POST | `/api/projects/:slug/runs/:runId/retry` | Neuer Run für dieselbe Action und denselben Commit (write) |
-| GET | `/api/projects/:slug/runs/:runId` | Run-Detail inklusive Protokoll |
-| GET/POST | `/api/library` | zentrale Bibliothek auflisten (mit `usageCount`, `owner`) / Datei ablegen `{name, kind, content, fileName?}` (jeder Angemeldete) |
-| PATCH/DELETE | `/api/library/:id` | Name/Inhalt aktualisieren bzw. löschen (Eigentümer/Admin; DELETE 409 solange referenziert) |
-| GET | `/api/library/:id/file` | Bibliotheksdatei herunterladen |
+| Methode      | Pfad                                                                          | Bemerkung                                                                                                                                                                                                                                                                                                                                          |
+| ------------ | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------- |
+| GET          | `/api/health`                                                                 | `{status, version, storage}`                                                                                                                                                                                                                                                                                                                       |
+| POST         | `/api/auth/register`, `/api/auth/login`                                       | → `{ token, user }`                                                                                                                                                                                                                                                                                                                                |
+| GET          | `/api/me`                                                                     | aktueller Benutzer (inkl. `isAdmin`)                                                                                                                                                                                                                                                                                                               |
+| GET/POST     | `/api/admin/users`                                                            | Benutzer auflisten / anlegen `{email, password, name?, isAdmin?}` (nur Admin)                                                                                                                                                                                                                                                                      |
+| PATCH/DELETE | `/api/admin/users/:id`                                                        | Name/Admin-Status/Passwort ändern bzw. löschen (nur Admin; Selbst-Aussperrung und Löschen mit Inhalten blockiert)                                                                                                                                                                                                                                  |
+| GET/POST     | `/api/projects`                                                               | eigene + öffentliche Projekte (mit Rolle) / anlegen `{name, slug?, visibility?}` (Default: public)                                                                                                                                                                                                                                                 |
+| GET/PATCH    | `/api/projects/:slug`                                                         | Projekt + Mitglieder + `folders` (private nur für Mitglieder) / Einstellungen `{name?, visibility?}` (admin)                                                                                                                                                                                                                                       |
+| POST         | `/api/projects/:slug/folders`                                                 | Ordner anlegen `{path}` (write)                                                                                                                                                                                                                                                                                                                    |
+| DELETE       | `/api/projects/:slug/folders?path=`                                           | leeren Ordner löschen (409 wenn Modelle darin)                                                                                                                                                                                                                                                                                                     |
+| DELETE       | `/api/projects/:slug`                                                         | Projekt löschen (nur Owner; inkl. Blobs)                                                                                                                                                                                                                                                                                                           |
+| PUT/GET      | `/api/projects/:slug/image`                                                   | Projektbild (PNG, z. B. Szenen-Screenshot aus dem 3D-Tab) setzen (write) / abrufen (Mitglied)                                                                                                                                                                                                                                                      |
+| GET/POST     | `/api/projects/:slug/labels`                                                  | Labels auflisten / anlegen `{name, color}` (write)                                                                                                                                                                                                                                                                                                 |
+| GET/POST     | `/api/projects/:slug/issues`                                                  | Issues (`?state=open\|closed`, mit Zählern) / eröffnen `{title, body?, kind?: "virtual"\|"bcf", parentId?, assigneeIds?, modelLinks?: [{modelId, foundCommitId?, fixedCommitId?}], labelIds?, guids?}` — `modelLinks` trägt den Versionsbezug (in welchem Commit aufgefallen/behoben), `parentId` macht das Issue zum Unter-Issue (jedes Mitglied) |
+| GET          | `/api/projects/:slug/issues/bcf`                                              | alle BCF-Issues als `.bcfzip` (BCF 2.1)                                                                                                                                                                                                                                                                                                            |
+| POST         | `/api/projects/:slug/issues/bcf`                                              | `.bcfzip` importieren (Body = Zip, `application/zip`, `?name=` Dateiname für den Titel des Sammel-Issues) → `{imported, skipped, located, parent}` — Topics werden Unter-Issues eines virtuellen Sammel-Issues (write)                                                                                                                             |
+| GET          | `/api/projects/:slug/issues/:number/bcf`                                      | einzelnes BCF-Issue als `.bcfzip` (400 bei virtuellen Issues)                                                                                                                                                                                                                                                                                      |
+| GET/PATCH    | `/api/projects/:slug/issues/:number`                                          | Issue-Detail (inkl. `comments`, `subIssues`) / ändern (Titel, Body, State, `parentId`, Zuordnungen — Autor oder write-Rolle)                                                                                                                                                                                                                       |
+| POST/DELETE  | `/api/projects/:slug/issues/:number/comments(/:id)`                           | kommentieren (jedes Mitglied) / löschen (Autor oder write-Rolle)                                                                                                                                                                                                                                                                                   |
+| POST         | `/api/projects/:slug/members`                                                 | Mitglied hinzufügen/Rolle ändern `{email, role}` (admin)                                                                                                                                                                                                                                                                                           |
+| DELETE       | `/api/projects/:slug/members/:userId`                                         | Mitglied entfernen (admin; Owner geschützt)                                                                                                                                                                                                                                                                                                        |
+| GET/POST     | `/api/projects/:slug/models`                                                  | Modelle (mit Head-Commit) / anlegen `{name, visibility?, folder?, kind?}` (`ifc`\|`md`\|`file`)                                                                                                                                                                                                                                                    |
+| GET          | `/api/projects/:slug/models/:model`                                           | Modell + Branches (mit Heads)                                                                                                                                                                                                                                                                                                                      |
+| PATCH        | `/api/projects/:slug/models/:model`                                           | Einstellungen `{name?, visibility?, defaultBranch?, folder?}` (admin)                                                                                                                                                                                                                                                                              |
+| DELETE       | `/api/projects/:slug/models/:model`                                           | Modell löschen (admin; inkl. Blobs)                                                                                                                                                                                                                                                                                                                |
+| POST         | `/api/projects/:slug/models/:model/branches`                                  | Branch anlegen `{name, from?}` — startet am Head von `from`                                                                                                                                                                                                                                                                                        |
+| POST         | `…/commits?branch=&message=`                                                  | Datei-Inhalt hochladen (raw Body **oder** Multipart `file` + Felder `message`/`branch`) → `{commit, diff}` (mit `?compact=1` nur `{commit, identical, unchanged}` — so committet die Web-UI); IFC-Modelle verlangen STEP, `md` beliebigen Text (max 2 MB), `file` dieselbe Endung wie der Modellname (Raw-Body: `application/octet-stream`, Dateiname optional per `?name=`)                                                                                          |
+| GET          | `…/commits?branch=`                                                           | Historie (Commits mit Autor)                                                                                                                                                                                                                                                                                                                       |
+| GET          | `…/commits/:id`                                                               | Commit-Metadaten                                                                                                                                                                                                                                                                                                                                   |
+| GET          | `…/commits/:id/file`                                                          | Roh-IFC herunterladen (byte-identisch)                                                                                                                                                                                                                                                                                                             |
+| GET          | `…/commits/:id/fragments`                                                     | ThatOpen-Fragments für die 3D-Vorschau: 200 + Bytes (immutable-Cache-Header) oder **202** `{status: "converting", startedAt, elapsedMs}` solange konvertiert wird (dann erneut fragen; `?wait=1` wartet serverseitig)                                                                                                                              |
+| GET          | `…/changes?to=&from=`                                                         | Objektzentrierte Übersicht: Zähler je Status/Typ, je Facette (`attributes`, `placement`, `geometry`, `properties`, `relations`) und je räumlichem Container; ohne `from` gilt alles als neu (erster Stand)                                                                                                                                         |
+| GET          | `…/changes/items?to=&from=&status=&facet=&type=&container=&q=&offset=&limit=` | Seite geänderter Objekte (`limit` ≤ 200, Standard 50); jede Zeile trägt ihre wichtigsten Vorher/Nachher-Werte (`highlights`) bzw. Eckdaten (`facts`)                                                                                                                                                                                               |
+| GET          | `…/changes/item?to=&from=&globalId=`                                          | Alle Vorher/Nachher-Werte eines Objekts                                                                                                                                                                                                                                                                                                            |
+| GET          | `…/changes/guids?to=&from=&…Filter`                                           | GlobalIds je Status (max. 50.000) für den 3D-Vergleich                                                                                                                                                                                                                                                                                             |
+| GET          | `…/diff?from=&to=`                                                            | Diff-Übersicht: `{identical, unchanged, added                                                                                                                                                                                                                                                                                                      | modified | removed: {count, types: [{type, count}]}}` — keine Einträge, damit 100k-Änderungen den Browser nicht einfrieren |
+| GET          | `…/diff/entries?from=&to=&status=&type=&q=&offset=&limit=`                    | Diff-Einträge seitenweise (`limit` ≤ 1000, Standard 200); `status`/`type` grenzen ein, `q` filtert Typ/Name/GlobalId über alle Status                                                                                                                                                                                                              |
+| GET          | `…/diff/entity?from=&to=&globalId=`                                           | Feld-Detail einer geänderten Entity                                                                                                                                                                                                                                                                                                                |
+| GET/POST     | `/api/projects/:slug/actions`                                                 | Actions auflisten (inkl. `libraryName`, `scopeModelName`) / anlegen `{name, kind, content, fileName?, runOnCommit?, scopeFolder?\|scopeModelId?}` **oder** `{name, libraryFileId, runOnCommit?, scopeFolder?\|scopeModelId?}` (write)                                                                                                              |
+| PATCH/DELETE | `/api/projects/:slug/actions/:id`                                             | Name/`runOnCommit`/Dateiinhalt ändern bzw. löschen (write)                                                                                                                                                                                                                                                                                         |
+| GET          | `/api/projects/:slug/actions/:id/file`                                        | hinterlegte IDS/Skript-Datei herunterladen                                                                                                                                                                                                                                                                                                         |
+| POST         | `…/commits/:id/validate`                                                      | Commit prüfen `{actionIds?}` (Default: alle Actions) → `{runs}` (write)                                                                                                                                                                                                                                                                            |
+| GET          | `/api/projects/:slug/runs?commit=&action=&model=`                             | Runs (ohne Log) mit Action/Modell/Auslöser                                                                                                                                                                                                                                                                                                         |
+| GET          | `/api/projects/:slug/runs/:runId/events`                                      | Server-Sent Events: `status` (Run inkl. Log, sofort als Snapshot), `log` (`{chunk}` je Ausgabe), `done` — endet mit dem Run; per fetch mit Bearer-Header lesen                                                                                                                                                                                     |
+| POST         | `/api/projects/:slug/runs/:runId/cancel`                                      | Run abbrechen (wartend/laufend; 409 wenn schon beendet) (write)                                                                                                                                                                                                                                                                                    |
+| POST         | `/api/projects/:slug/runs/:runId/retry`                                       | Neuer Run für dieselbe Action und denselben Commit (write)                                                                                                                                                                                                                                                                                         |
+| GET          | `/api/projects/:slug/runs/:runId`                                             | Run-Detail inklusive Protokoll                                                                                                                                                                                                                                                                                                                     |
+| GET/POST     | `/api/library`                                                                | zentrale Bibliothek auflisten (mit `usageCount`, `owner`) / Datei ablegen `{name, kind, content, fileName?}` (jeder Angemeldete)                                                                                                                                                                                                                   |
+| PATCH/DELETE | `/api/library/:id`                                                            | Name/Inhalt aktualisieren bzw. löschen (Eigentümer/Admin; DELETE 409 solange referenziert)                                                                                                                                                                                                                                                         |
+| GET          | `/api/library/:id/file`                                                       | Bibliotheksdatei herunterladen                                                                                                                                                                                                                                                                                                                     |
 
 CORS ist offen (Bearer-Auth, keine Cookies) — Editor (Vite/Tauri) und
 Nuxt-Dev-Server können direkt zugreifen.

@@ -36,6 +36,7 @@ import {
   diffOverview,
   diffPage,
 } from "../domain/diffView";
+import { contentTypeForFileName, fileExtension } from "../domain/fileTypes";
 import { FragmentsService } from "../domain/fragmentsService";
 import { IfcWorkerPool, defaultIfcWorkerPool } from "../domain/ifcWorkerPool";
 import type { ObjectStore } from "../storage/objectStore";
@@ -50,6 +51,7 @@ import {
   type IssueLinks,
   type Member,
   type Model,
+  type ModelKind,
   type Project,
   type Repository,
   type Role,
@@ -197,13 +199,21 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   // Accept raw IFC/STEP and Markdown request bodies as strings.
   app.addContentTypeParser(
-    ["text/plain", "application/octet-stream", "application/x-step", "text/markdown"],
+    ["text/plain", "application/x-step", "text/markdown"],
     { parseAs: "string" },
     (_req, body, done) => done(null, body),
   );
-  // PNG-Uploads (Projektbild) und Zip-Uploads (BCF-Import) als Buffer.
+  // PNG-Uploads (Projektbild), Zip-Uploads (BCF-Import) und octet-stream
+  // (Rohupload beliebiger Dateien) als Buffer — als String geparst würde
+  // Fastify Binärdaten mit FST_ERR_CTP_INVALID_CONTENT_LENGTH abweisen.
   app.addContentTypeParser(
-    ["image/png", "application/zip"],
+    ["image/png", "application/zip", "application/octet-stream"],
+    { parseAs: "buffer" },
+    (_req, body, done) => done(null, body),
+  );
+  // Alle übrigen Typen (PDF, Word, DWG, …) für Datei-Modelle als Rohbytes.
+  app.addContentTypeParser(
+    "*",
     { parseAs: "buffer" },
     (_req, body, done) => done(null, body),
   );
@@ -1595,14 +1605,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       slug?: string;
       visibility?: "private" | "public";
       folder?: string;
-      kind?: "ifc" | "md";
+      kind?: ModelKind;
     };
     if (!body.name) {
       return reply.code(400).send({ error: "name required" });
     }
     const kind = body.kind ?? "ifc";
-    if (!["ifc", "md"].includes(kind)) {
-      return reply.code(400).send({ error: "Invalid kind (ifc or md)" });
+    if (!["ifc", "md", "file"].includes(kind)) {
+      return reply.code(400).send({ error: "Invalid kind (ifc, md or file)" });
     }
     const folder = normalizeFolderPath(body.folder ?? "");
     if (folder === null) {
@@ -1811,13 +1821,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     /** Rohbytes — bleibt Buffer, damit 100-MB-IFCs nicht als String kopiert werden. */
     bytes: Buffer | null;
     fields: Record<string, string>;
+    /** Dateiname des Multipart-Teils (bei Roh-Bodies unbekannt). */
+    fileName: string | null;
   }
 
   /** Raw STEP body, or multipart with a `file` part plus text fields. */
   async function readIfcUpload(request: FastifyRequest): Promise<IfcUpload> {
     if (request.isMultipart()) {
       const file = await request.file();
-      if (!file) return { bytes: null, fields: {} };
+      if (!file) return { bytes: null, fields: {}, fileName: null };
       const buffer = await file.toBuffer();
       const fields: Record<string, string> = {};
       for (const [key, value] of Object.entries(file.fields)) {
@@ -1831,14 +1843,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           fields[key] = first.value;
         }
       }
-      return { bytes: buffer, fields };
+      return { bytes: buffer, fields, fileName: file.filename || null };
     }
     return {
       bytes:
         typeof request.body === "string"
           ? Buffer.from(request.body, "utf8")
-          : null,
+          : Buffer.isBuffer(request.body)
+            ? request.body
+            : null,
       fields: {},
+      fileName: null,
     };
   }
 
@@ -1860,6 +1875,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         branch?: string;
         message?: string;
         compact?: string;
+        name?: string;
       };
       const upload = await readIfcUpload(request);
       if (upload.bytes === null || upload.bytes.length === 0) {
@@ -1869,8 +1885,22 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (upload.bytes.length > 2 * 1024 * 1024) {
           return reply.code(400).send({ error: "Markdown too large (max 2 MB)" });
         }
-      } else if (!upload.bytes.includes("ISO-10303-21")) {
+      } else if (
+        model.kind === "ifc" &&
+        !upload.bytes.includes("ISO-10303-21")
+      ) {
         return reply.code(400).send({ error: "Valid IFC/STEP body required" });
+      } else if (model.kind === "file") {
+        // Content-Type und Vorschau hängen an der Endung des Modellnamens —
+        // eine neue Version muss dieselbe Dateiart sein (z. B. kein PDF in
+        // "plan.dwg"). Roh-Bodies können den Namen per ?name= mitgeben.
+        const uploadName = upload.fileName ?? query.name ?? null;
+        const expected = fileExtension(model.name);
+        if (uploadName && expected && fileExtension(uploadName) !== expected) {
+          return reply.code(400).send({
+            error: `Falsche Dateiart: „${model.name}“ erwartet eine .${expected}-Datei`,
+          });
+        }
       }
 
       const branchName =
@@ -1960,15 +1990,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return reply.code(404).send({ error: "Commit not found" });
       }
       const buffer = await commits.downloadIfc(commit);
-      const isMd = model.kind === "md";
+      const fileName =
+        model.kind === "file"
+          ? model.name
+          : `${modelSlug}-${commitId}.${model.kind === "md" ? "md" : "ifc"}`;
       return reply
-        .header(
-          "content-type",
-          isMd ? "text/markdown; charset=utf-8" : "application/x-step",
-        )
+        .header("content-type", contentTypeForFileName(fileName))
         .header(
           "content-disposition",
-          `attachment; filename="${modelSlug}-${commitId}.${isMd ? "md" : "ifc"}"`,
+          `attachment; filename="${encodeURIComponent(fileName)}"`,
         )
         .send(buffer);
     },
@@ -1988,8 +2018,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       if (!resolved) return reply;
       const { project, model } = resolved;
       if (!(await canReadModel(request, reply, project, model.visibility))) return reply;
-      if (model.kind === "md") {
-        return reply.code(400).send({ error: "Markdown files have no 3D preview" });
+      if (model.kind !== "ifc") {
+        return reply.code(400).send({ error: "Only IFC models have a 3D preview" });
       }
       const commit = await repo.getCommit(commitId);
       if (!commit || commit.modelId !== model.id) {
@@ -2571,10 +2601,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       const user = await requireUser(request, reply);
       if (!user) return reply;
       if (!(await requireMember(project, user, reply, "write"))) return reply;
-      if (model.kind === "md") {
+      if (model.kind !== "ifc") {
         return reply
           .code(400)
-          .send({ error: "Markdown-Dateien können nicht validiert werden" });
+          .send({ error: "Nur IFC-Modelle können validiert werden" });
       }
       const commit = await repo.getCommit(commitId);
       if (!commit || commit.modelId !== model.id) {
