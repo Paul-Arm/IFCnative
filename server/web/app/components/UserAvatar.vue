@@ -49,6 +49,6 @@ const fill = computed(() =>
 
 <style scoped>
 .avatar-bg {
-  fill: light-dark(#f0f2f4, #1f2530);
+  fill: var(--avatar-bg);
 }
 </style>

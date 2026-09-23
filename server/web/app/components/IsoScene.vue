@@ -329,19 +329,19 @@ const viewBox = computed(() => {
 }
 
 .iso-face.top {
-  fill: light-dark(#ffffff, #10284a);
+  fill: var(--scene-top);
 }
 
 .iso-face.left {
-  fill: light-dark(#e3eefc, #0c2140);
+  fill: var(--scene-left);
 }
 
 .iso-face.right {
-  fill: light-dark(#cadff9, #091a33);
+  fill: var(--scene-right);
 }
 
 .iso-box.accent .iso-face.top {
-  fill: light-dark(#d9f5e1, #0f3a2a);
+  fill: var(--scene-accent-top);
 }
 
 .iso-box.accent .iso-face {

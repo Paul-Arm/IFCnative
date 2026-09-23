@@ -694,9 +694,9 @@
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
-  color: #e6edf3;
-  background: #0d1117;
-  border: 1px solid light-dark(#0d1117, var(--border));
+  color: var(--terminal-text);
+  background: var(--terminal-bg);
+  border: 1px solid light-dark(var(--terminal-bg), var(--border));
   border-radius: var(--radius);
   counter-reset: line;
 }

@@ -140,6 +140,20 @@
   --logo-graph: #ffffff;
   --logo-commit: #2da44e;
 
+  /* Isometrische Szenen (Hero, leere Zustände): Flächen + hervorgehobene Box */
+  --scene-top: light-dark(#ffffff, #10284a);
+  --scene-left: light-dark(#e3eefc, #0c2140);
+  --scene-right: light-dark(#cadff9, #091a33);
+  --scene-accent-top: light-dark(#d9f5e1, #0f3a2a);
+
+  /* Ordner-Symbole im Datei-Browser, Grund der Identicon-Avatare */
+  --folder-icon: light-dark(#54aeff, #7d8590);
+  --avatar-bg: light-dark(#f0f2f4, #1f2530);
+
+  /* Protokoll-Terminal der Runs — in beiden Modi dunkel */
+  --terminal-bg: #0d1117;
+  --terminal-text: #e6edf3;
+
   /* Beitragskalender: 5 Stufen (0 = keine Aktivität) */
   --heat-0: light-dark(#eff2f5, #151b23);
   --heat-1: light-dark(#aceebb, #033a16);

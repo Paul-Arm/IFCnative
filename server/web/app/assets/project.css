@@ -133,7 +133,7 @@ a.fb-name:hover,
 }
 
 .fb-folder-icon {
-  color: light-dark(#54aeff, #7d8590);
+  color: var(--folder-icon);
 }
 
 .fb-msg {
