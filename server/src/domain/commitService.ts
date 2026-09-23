@@ -15,6 +15,7 @@ import {
 } from "../ifc";
 import type { ObjectStore } from "../storage/objectStore";
 import type { Commit, Model, Repository } from "../repository/types";
+import { contentTypeForFileName, isNonIfcSchema } from "./fileTypes";
 import { IfcWorkerPool, defaultIfcWorkerPool } from "./ifcWorkerPool";
 
 /**
@@ -57,8 +58,9 @@ export interface CreateCommitInput {
   model: Model;
   branchName: string;
   /**
-   * Dateiinhalt: STEP bei kind "ifc", Markdown bei kind "md". Große IFCs
-   * bitte als Buffer übergeben — das erspart eine 100-MB-String-Kopie.
+   * Dateiinhalt: STEP bei kind "ifc", Markdown bei kind "md", Rohbytes bei
+   * kind "file". Große Dateien bitte als Buffer übergeben — das erspart eine
+   * 100-MB-String-Kopie.
    */
   text: string | Buffer;
   authorId: string;
@@ -110,8 +112,8 @@ export class CommitService {
   }
 
   async createCommit(input: CreateCommitInput): Promise<CreateCommitResult> {
-    if (input.model.kind === "md") {
-      return this.createMarkdownCommit(input);
+    if (input.model.kind === "md" || input.model.kind === "file") {
+      return this.createFileCommit(input);
     }
     const { model, branchName, authorId, message } = input;
     const bytes =
@@ -206,17 +208,18 @@ export class CommitService {
   }
 
   /**
-   * Markdown-Commit: kein IFC-Parsing, kein Objekt-Diff. Der sha256 des
-   * Inhalts dient als manifestHash, damit die Identisch-Erkennung
+   * Markdown-/Datei-Commit: kein IFC-Parsing, kein Objekt-Diff. Der sha256
+   * des Inhalts dient als manifestHash, damit die Identisch-Erkennung
    * (gleicher Stand erneut committet) genauso funktioniert wie bei IFC.
    */
-  private async createMarkdownCommit(
+  private async createFileCommit(
     input: CreateCommitInput,
   ): Promise<CreateCommitResult> {
     const { model, branchName, authorId, message } = input;
-    const text =
-      typeof input.text === "string" ? input.text : input.text.toString("utf8");
-    const contentHash = createHash("sha256").update(text, "utf8").digest("hex");
+    const isMd = model.kind === "md";
+    const bytes =
+      typeof input.text === "string" ? Buffer.from(input.text, "utf8") : input.text;
+    const contentHash = createHash("sha256").update(bytes).digest("hex");
 
     let branch = await this.repo.getBranch(model.id, branchName);
     if (!branch) {
@@ -232,7 +235,11 @@ export class CommitService {
 
     const commitId = randomUUID();
     const blobKey = this.blobKey(model.id, commitId);
-    await this.store.put(blobKey, text, "text/markdown");
+    await this.store.put(
+      blobKey,
+      bytes,
+      isMd ? "text/markdown" : contentTypeForFileName(model.name),
+    );
 
     const diff: GuidDiffSummary = {
       added: [],
@@ -251,7 +258,7 @@ export class CommitService {
       parentCommitId: parentCommit?.id ?? null,
       manifestHash: contentHash,
       blobKey,
-      schema: "markdown",
+      schema: isMd ? "markdown" : "file",
       authorId,
       message,
       createdAt: new Date().toISOString(),
@@ -303,7 +310,7 @@ export class CommitService {
    * -> Records speichern); danach kommt alles aus der Datenbank.
    */
   private async objectIndexOf(commit: Commit): Promise<ObjectIndexEntry[]> {
-    if (commit.schema === "markdown") {
+    if (isNonIfcSchema(commit.schema)) {
       return [];
     }
     if (!(await this.repo.hasObjectIndex(commit.id))) {
@@ -343,7 +350,7 @@ export class CommitService {
     // Zähler alter Commits (noch Entity-basiert) an den Objekt-Diff angleichen,
     // damit Commit-Liste und Commit-Seite dieselben Zahlen zeigen.
     if (
-      to.schema !== "markdown" &&
+      !isNonIfcSchema(to.schema) &&
       (to.parentCommitId ?? null) === (from?.id ?? null) &&
       (to.added !== changes.added.length ||
         to.removed !== changes.removed.length ||

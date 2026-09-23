@@ -152,14 +152,14 @@ const hiddenChanges = computed(() =>
     <div v-if="open" class="chg-detail">
       <div class="chg-detail-bar">
         <code class="commit-id" title="IFC GlobalId">{{ item.globalId }}</code>
-        <button class="link small" type="button" @click="copyGuid">
+        <button class="btn btn-invisible btn-xs" type="button" @click="copyGuid">
           <PhCopy :size="13" aria-hidden="true" />
           {{ copied ? "Kopiert" : "GUID kopieren" }}
         </button>
         <span class="topbar-spacer" />
         <button
           v-if="canLocate"
-          class="btn small"
+          class="btn btn-sm"
           type="button"
           @click="emit('locate')"
         >
@@ -169,7 +169,7 @@ const hiddenChanges = computed(() =>
       </div>
 
       <LoadingState v-if="detail === 'loading' || detail === undefined" text="Lade Details …" />
-      <div v-else-if="detail === 'error'" class="alert error" style="margin: 0">
+      <div v-else-if="detail === 'error'" class="flash flash-danger flash-sm" style="margin: 0">
         Details konnten nicht geladen werden.
       </div>
       <div v-else-if="!groups.length" class="muted small">

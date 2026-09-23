@@ -14,32 +14,56 @@ import {
   schemaStatements,
 } from "./sql/schema";
 import type { SqlClient } from "./sql/sqlClient";
-import type {
-  Action,
-  ActionKind,
-  ActionRun,
-  ActionRunStatus,
-  Branch,
-  LibraryFile,
-  Commit,
-  Issue,
-  IssueComment,
-  IssueKind,
-  IssueLinks,
-  IssueState,
-  Label,
-  Member,
-  Model,
-  ModelKind,
-  Project,
-  Repository,
-  Role,
-  User,
-  Visibility,
+import {
+  compareIssueEvents,
+  emptyProjectSummary,
+  type Action,
+  type ActionKind,
+  type ActionRun,
+  type ActionRunStatus,
+  type ActivityDayCount,
+  type Branch,
+  type CommentWithProject,
+  type CommitWithModel,
+  type LibraryFile,
+  type Commit,
+  type Issue,
+  type IssueComment,
+  type IssueEvent,
+  type IssueEventData,
+  type IssueEventKind,
+  type IssueFilter,
+  type IssueKind,
+  type IssueLinks,
+  type IssueState,
+  type Label,
+  type Member,
+  type Model,
+  type ModelKind,
+  type Project,
+  type ProjectSummary,
+  type RecentQuery,
+  type Repository,
+  type RepositoryCounts,
+  type Role,
+  type User,
+  type Visibility,
 } from "./types";
 
 /** Insert rows in chunks to stay well under Postgres' parameter limit. */
 const INSERT_CHUNK = 400;
+
+/** Platzhalter "$k+1, $k+2, …" für eine IN-Liste mit `count` Werten. */
+function placeholders(count: number, offset = 0): string {
+  return Array.from({ length: count }, (_, i) => `$${offset + i + 1}`).join(
+    ", ",
+  );
+}
+
+/** LIKE-Sonderzeichen maskieren (Abfragen nutzen `escape '\'`). */
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, "\\$&");
+}
 
 /** Reihenfolge der Facetten-Hashes in commit_objects.facets ("a|b|c|d|e"). */
 const FACET_COLUMNS: ChangeFacet[] = [
@@ -80,6 +104,23 @@ interface ProjectRow {
   owner_id: string;
   created_at: string;
   visibility: Visibility;
+  description: string | null;
+}
+interface LabelRow {
+  id: string;
+  project_id: string;
+  name: string;
+  color: string;
+  description: string | null;
+}
+interface IssueEventRow {
+  id: string;
+  issue_id: string;
+  project_id: string;
+  actor_id: string;
+  kind: IssueEventKind;
+  data: string | null;
+  created_at: string;
 }
 interface MemberRow {
   project_id: string;
@@ -135,9 +176,39 @@ function toProject(row: ProjectRow): Project {
     id: row.id,
     slug: row.slug,
     name: row.name,
+    description: row.description ?? "",
     ownerId: row.owner_id,
     createdAt: row.created_at,
     visibility: row.visibility,
+  };
+}
+function toLabel(row: LabelRow): Label {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    name: row.name,
+    color: row.color,
+    description: row.description ?? "",
+  };
+}
+function toIssueEvent(row: IssueEventRow): IssueEvent {
+  let data: IssueEventData = {};
+  try {
+    const parsed: unknown = JSON.parse(row.data ?? "{}");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      data = parsed as IssueEventData;
+    }
+  } catch {
+    // Kaputte Daten nicht über die ganze Zeitleiste stellen.
+  }
+  return {
+    id: row.id,
+    issueId: row.issue_id,
+    projectId: row.project_id,
+    actorId: row.actor_id,
+    kind: row.kind,
+    data,
+    createdAt: row.created_at,
   };
 }
 function toModel(row: ModelRow): Model {
@@ -320,6 +391,30 @@ export class SqlRepository implements Repository {
     return new Date().toISOString();
   }
 
+  /**
+   * WHERE-Teil + Parameter der "neueste zuerst"-Abfragen: Projekt-IN-Liste
+   * (Parameter $1…$n), optional strikt vor `before` und vom Akteur.
+   */
+  private recentWhere(
+    projectIds: string[],
+    query: RecentQuery,
+    columns: { project: string; createdAt: string; actor: string },
+  ): { where: string; params: unknown[] } {
+    const params: unknown[] = [...projectIds];
+    const conditions = [
+      `${columns.project} in (${placeholders(projectIds.length)})`,
+    ];
+    if (query.before !== undefined) {
+      params.push(query.before);
+      conditions.push(`${columns.createdAt} < $${params.length}`);
+    }
+    if (query.actorId !== undefined) {
+      params.push(query.actorId);
+      conditions.push(`${columns.actor} = $${params.length}`);
+    }
+    return { where: conditions.join(" and "), params };
+  }
+
   // ---- users -----------------------------------------------------------
 
   async createUser(input: Omit<User, "id" | "createdAt">): Promise<User> {
@@ -418,16 +513,19 @@ export class SqlRepository implements Repository {
   // ---- projects + membership ------------------------------------------
 
   async createProject(
-    input: Omit<Project, "id" | "createdAt">,
+    input: Omit<Project, "id" | "createdAt" | "description"> & {
+      description?: string;
+    },
   ): Promise<Project> {
     const project: Project = {
       ...input,
+      description: input.description ?? "",
       id: randomUUID(),
       createdAt: this.now(),
     };
     await this.sql.query(
-      `insert into projects (id, slug, name, owner_id, created_at, visibility)
-       values ($1, $2, $3, $4, $5, $6)`,
+      `insert into projects (id, slug, name, owner_id, created_at, visibility, description)
+       values ($1, $2, $3, $4, $5, $6, $7)`,
       [
         project.id,
         project.slug,
@@ -435,6 +533,7 @@ export class SqlRepository implements Repository {
         project.ownerId,
         project.createdAt,
         project.visibility,
+        project.description,
       ],
     );
     return project;
@@ -468,17 +567,99 @@ export class SqlRepository implements Repository {
 
   async updateProject(
     projectId: string,
-    patch: Partial<Pick<Project, "name" | "visibility">>,
+    patch: Partial<Pick<Project, "name" | "visibility" | "description">>,
   ): Promise<Project | null> {
     const { rows } = await this.sql.query<ProjectRow>(
       `update projects set
          name = coalesce($2, name),
-         visibility = coalesce($3, visibility)
+         visibility = coalesce($3, visibility),
+         description = coalesce($4, description)
        where id = $1
        returning *`,
-      [projectId, patch.name ?? null, patch.visibility ?? null],
+      [
+        projectId,
+        patch.name ?? null,
+        patch.visibility ?? null,
+        patch.description ?? null,
+      ],
     );
     return rows[0] ? toProject(rows[0]) : null;
+  }
+
+  async projectSummaries(
+    projectIds: string[],
+  ): Promise<Map<string, ProjectSummary>> {
+    const summaries = new Map<string, ProjectSummary>();
+    if (!projectIds.length) return summaries;
+    for (const id of projectIds) {
+      summaries.set(id, emptyProjectSummary());
+    }
+    const list = placeholders(projectIds.length);
+    const { rows: memberRows } = await this.sql.query<{
+      project_id: string;
+      n: number | string;
+    }>(
+      `select project_id, count(*) as n from project_members
+       where project_id in (${list}) group by project_id`,
+      projectIds,
+    );
+    for (const row of memberRows) {
+      const summary = summaries.get(row.project_id);
+      if (summary) summary.memberCount = Number(row.n);
+    }
+    const { rows: modelRows } = await this.sql.query<{
+      project_id: string;
+      n: number | string;
+    }>(
+      `select project_id, count(*) as n from models
+       where project_id in (${list}) group by project_id`,
+      projectIds,
+    );
+    for (const row of modelRows) {
+      const summary = summaries.get(row.project_id);
+      if (summary) summary.modelCount = Number(row.n);
+    }
+    const { rows: issueRows } = await this.sql.query<{
+      project_id: string;
+      state: IssueState;
+      n: number | string;
+      last_at: string | null;
+    }>(
+      `select project_id, state, count(*) as n, max(updated_at) as last_at
+       from issues where project_id in (${list})
+       group by project_id, state`,
+      projectIds,
+    );
+    for (const row of issueRows) {
+      const summary = summaries.get(row.project_id);
+      if (!summary) continue;
+      if (row.state === "open") {
+        summary.openIssueCount += Number(row.n);
+      } else {
+        summary.closedIssueCount += Number(row.n);
+      }
+      if (row.last_at && (!summary.lastIssueAt || row.last_at > summary.lastIssueAt)) {
+        summary.lastIssueAt = row.last_at;
+      }
+    }
+    const { rows: commitRows } = await this.sql.query<{
+      project_id: string;
+      n: number | string;
+      last_at: string | null;
+    }>(
+      `select m.project_id as project_id, count(*) as n, max(c.created_at) as last_at
+       from commits c join models m on m.id = c.model_id
+       where m.project_id in (${list})
+       group by m.project_id`,
+      projectIds,
+    );
+    for (const row of commitRows) {
+      const summary = summaries.get(row.project_id);
+      if (!summary) continue;
+      summary.commitCount = Number(row.n);
+      summary.lastCommitAt = row.last_at;
+    }
+    return summaries;
   }
 
   async addMember(member: Member): Promise<Member> {
@@ -664,6 +845,9 @@ export class SqlRepository implements Repository {
           [projectId],
         );
       }
+      await this.sql.query(`delete from issue_events where project_id = $1`, [
+        projectId,
+      ]);
       await this.sql.query(`delete from issues where project_id = $1`, [
         projectId,
       ]);
@@ -695,28 +879,80 @@ export class SqlRepository implements Repository {
 
   // ---- labels + issues -------------------------------------------------
 
-  async createLabel(input: Omit<Label, "id">): Promise<Label> {
-    const label: Label = { ...input, id: randomUUID() };
+  async createLabel(
+    input: Omit<Label, "id" | "description"> & { description?: string },
+  ): Promise<Label> {
+    const label: Label = {
+      ...input,
+      description: input.description ?? "",
+      id: randomUUID(),
+    };
     await this.sql.query(
-      `insert into labels (id, project_id, name, color) values ($1, $2, $3, $4)`,
-      [label.id, label.projectId, label.name, label.color],
+      `insert into labels (id, project_id, name, color, description)
+       values ($1, $2, $3, $4, $5)`,
+      [label.id, label.projectId, label.name, label.color, label.description],
     );
     return label;
   }
 
   async listLabels(projectId: string): Promise<Label[]> {
+    const { rows } = await this.sql.query<LabelRow>(
+      `select * from labels where project_id = $1 order by name`,
+      [projectId],
+    );
+    return rows.map(toLabel);
+  }
+
+  async getLabel(labelId: string): Promise<Label | null> {
+    const { rows } = await this.sql.query<LabelRow>(
+      `select * from labels where id = $1`,
+      [labelId],
+    );
+    return rows[0] ? toLabel(rows[0]) : null;
+  }
+
+  async updateLabel(
+    labelId: string,
+    patch: Partial<Pick<Label, "name" | "color" | "description">>,
+  ): Promise<Label | null> {
+    const { rows } = await this.sql.query<LabelRow>(
+      `update labels set
+         name = coalesce($2, name),
+         color = coalesce($3, color),
+         description = coalesce($4, description)
+       where id = $1
+       returning *`,
+      [
+        labelId,
+        patch.name ?? null,
+        patch.color ?? null,
+        patch.description ?? null,
+      ],
+    );
+    return rows[0] ? toLabel(rows[0]) : null;
+  }
+
+  async deleteLabel(labelId: string): Promise<void> {
+    await this.sql.transaction(async () => {
+      await this.sql.query(`delete from issue_label_links where label_id = $1`, [
+        labelId,
+      ]);
+      await this.sql.query(`delete from labels where id = $1`, [labelId]);
+    });
+  }
+
+  async countOpenIssuesByLabel(projectId: string): Promise<Map<string, number>> {
     const { rows } = await this.sql.query<{
-      id: string;
-      project_id: string;
-      name: string;
-      color: string;
-    }>(`select * from labels where project_id = $1 order by name`, [projectId]);
-    return rows.map((r) => ({
-      id: r.id,
-      projectId: r.project_id,
-      name: r.name,
-      color: r.color,
-    }));
+      label_id: string;
+      n: number | string;
+    }>(
+      `select l.label_id as label_id, count(*) as n
+       from issue_label_links l join issues i on i.id = l.issue_id
+       where i.project_id = $1 and i.state = 'open'
+       group by l.label_id`,
+      [projectId],
+    );
+    return new Map(rows.map((row) => [row.label_id, Number(row.n)]));
   }
 
   private toIssue(row: {
@@ -969,6 +1205,113 @@ export class SqlRepository implements Repository {
       });
     }
     return map;
+  }
+
+  async listIssuesByFilter(
+    projectIds: string[],
+    filter: IssueFilter,
+  ): Promise<Issue[]> {
+    if (!projectIds.length) return [];
+    const params: unknown[] = [...projectIds];
+    const conditions = [`i.project_id in (${placeholders(projectIds.length)})`];
+    if (filter.state !== undefined) {
+      params.push(filter.state);
+      conditions.push(`i.state = $${params.length}`);
+    }
+    if (filter.authorId !== undefined) {
+      params.push(filter.authorId);
+      conditions.push(`i.author_id = $${params.length}`);
+    }
+    if (filter.assigneeId !== undefined) {
+      params.push(filter.assigneeId);
+      conditions.push(
+        `exists (select 1 from issue_assignees a
+                 where a.issue_id = i.id and a.user_id = $${params.length})`,
+      );
+    }
+    params.push(filter.limit);
+    const { rows } = await this.sql.query<Parameters<SqlRepository["toIssue"]>[0]>(
+      `select i.* from issues i
+       where ${conditions.join(" and ")}
+       order by i.updated_at desc, i.id desc
+       limit $${params.length}`,
+      params,
+    );
+    return rows.map((row) => this.toIssue(row));
+  }
+
+  async countIssueComments(issueIds: string[]): Promise<Map<string, number>> {
+    const counts = new Map(issueIds.map((id) => [id, 0]));
+    if (!issueIds.length) return counts;
+    const { rows } = await this.sql.query<{
+      issue_id: string;
+      n: number | string;
+    }>(
+      `select issue_id, count(*) as n from issue_comments
+       where issue_id in (${placeholders(issueIds.length)}) group by issue_id`,
+      issueIds,
+    );
+    for (const row of rows) {
+      counts.set(row.issue_id, Number(row.n));
+    }
+    return counts;
+  }
+
+  async countSubIssues(issueIds: string[]): Promise<Map<string, number>> {
+    const counts = new Map(issueIds.map((id) => [id, 0]));
+    if (!issueIds.length) return counts;
+    const { rows } = await this.sql.query<{
+      parent_id: string;
+      n: number | string;
+    }>(
+      `select parent_id, count(*) as n from issues
+       where parent_id in (${placeholders(issueIds.length)}) group by parent_id`,
+      issueIds,
+    );
+    for (const row of rows) {
+      counts.set(row.parent_id, Number(row.n));
+    }
+    return counts;
+  }
+
+  // ---- Issue-Zeitleiste --------------------------------------------------
+
+  async createIssueEvents(
+    events: Omit<IssueEvent, "id" | "createdAt">[],
+  ): Promise<IssueEvent[]> {
+    if (!events.length) return [];
+    const createdAt = this.now();
+    const created: IssueEvent[] = events.map((event) => ({
+      ...event,
+      id: randomUUID(),
+      createdAt,
+    }));
+    await this.sql.transaction(async () => {
+      for (const event of created) {
+        await this.sql.query(
+          `insert into issue_events (id, issue_id, project_id, actor_id, kind, data, created_at)
+           values ($1, $2, $3, $4, $5, $6, $7)`,
+          [
+            event.id,
+            event.issueId,
+            event.projectId,
+            event.actorId,
+            event.kind,
+            JSON.stringify(event.data),
+            event.createdAt,
+          ],
+        );
+      }
+    });
+    return created;
+  }
+
+  async listIssueEvents(issueId: string): Promise<IssueEvent[]> {
+    const { rows } = await this.sql.query<IssueEventRow>(
+      `select * from issue_events where issue_id = $1 order by created_at`,
+      [issueId],
+    );
+    return rows.map(toIssueEvent).sort(compareIssueEvents);
   }
 
   private toIssueComment(row: {
@@ -1245,6 +1588,20 @@ export class SqlRepository implements Repository {
     return rows.map(toActionRun);
   }
 
+  async countActionRunsByStatus(
+    projectId: string,
+  ): Promise<Map<ActionRunStatus, number>> {
+    const { rows } = await this.sql.query<{
+      status: ActionRunStatus;
+      n: number | string;
+    }>(
+      `select status, count(*) as n from action_runs
+       where project_id = $1 group by status`,
+      [projectId],
+    );
+    return new Map(rows.map((row) => [row.status, Number(row.n)]));
+  }
+
   async updateActionRun(
     runId: string,
     patch: Partial<
@@ -1297,10 +1654,12 @@ export class SqlRepository implements Repository {
   }
 
   async removeFolder(projectId: string, path: string): Promise<void> {
+    // `escape` ausdrücklich angeben: SQLite kennt kein Standard-Escapezeichen
+    // (Postgres schon) — sonst bleiben Unterordner von „Hochbau_EG“ stehen.
     await this.sql.query(
       `delete from project_folders
-       where project_id = $1 and (path = $2 or path like $3)`,
-      [projectId, path, `${path.replace(/[%_\\]/g, "\\$&")}/%`],
+       where project_id = $1 and (path = $2 or path like $3 escape '\\')`,
+      [projectId, path, `${escapeLike(path)}/%`],
     );
   }
 
@@ -1388,6 +1747,318 @@ export class SqlRepository implements Repository {
             [modelId, branchName],
           );
     return rows.map(toCommit);
+  }
+
+  async countCommitsByAuthor(
+    projectId: string,
+  ): Promise<{ authorId: string; count: number }[]> {
+    const { rows } = await this.sql.query<{
+      author_id: string;
+      n: number | string;
+    }>(
+      `select c.author_id as author_id, count(*) as n
+       from commits c join models m on m.id = c.model_id
+       where m.project_id = $1
+       group by c.author_id
+       order by count(*) desc, c.author_id`,
+      [projectId],
+    );
+    return rows.map((row) => ({ authorId: row.author_id, count: Number(row.n) }));
+  }
+
+  // ---- Aktivitäts-Feed, Beiträge, Suche ---------------------------------
+
+  async listRecentCommits(
+    projectIds: string[],
+    query: RecentQuery,
+  ): Promise<CommitWithModel[]> {
+    if (!projectIds.length) return [];
+    const { where, params } = this.recentWhere(projectIds, query, {
+      project: "m.project_id",
+      createdAt: "c.created_at",
+      actor: "c.author_id",
+    });
+    params.push(query.limit);
+    // Modellspalten umbenannt, damit sie die gleichnamigen Commit-Spalten
+    // (id, created_at) nicht überschreiben.
+    const { rows } = await this.sql.query<
+      CommitRow & {
+        model_project_id: string;
+        model_slug: string;
+        model_name: string;
+        model_visibility: Visibility;
+        model_default_branch: string;
+        model_created_at: string;
+        model_folder: string;
+        model_kind: ModelKind;
+      }
+    >(
+      `select c.*,
+         m.project_id as model_project_id, m.slug as model_slug,
+         m.name as model_name, m.visibility as model_visibility,
+         m.default_branch as model_default_branch,
+         m.created_at as model_created_at, m.folder as model_folder,
+         m.kind as model_kind
+       from commits c join models m on m.id = c.model_id
+       where ${where}
+       order by c.created_at desc, c.id desc
+       limit $${params.length}`,
+      params,
+    );
+    return rows.map((row) => ({
+      commit: toCommit(row),
+      model: toModel({
+        id: row.model_id,
+        project_id: row.model_project_id,
+        slug: row.model_slug,
+        name: row.model_name,
+        visibility: row.model_visibility,
+        default_branch: row.model_default_branch,
+        created_at: row.model_created_at,
+        folder: row.model_folder,
+        kind: row.model_kind,
+      }),
+    }));
+  }
+
+  async listRecentIssues(
+    projectIds: string[],
+    query: RecentQuery,
+  ): Promise<Issue[]> {
+    if (!projectIds.length) return [];
+    const { where, params } = this.recentWhere(projectIds, query, {
+      project: "project_id",
+      createdAt: "created_at",
+      actor: "author_id",
+    });
+    params.push(query.limit);
+    const { rows } = await this.sql.query<Parameters<SqlRepository["toIssue"]>[0]>(
+      `select * from issues where ${where}
+       order by created_at desc, id desc
+       limit $${params.length}`,
+      params,
+    );
+    return rows.map((row) => this.toIssue(row));
+  }
+
+  async listRecentIssueEvents(
+    projectIds: string[],
+    query: RecentQuery & { kinds?: IssueEventKind[] },
+  ): Promise<IssueEvent[]> {
+    if (!projectIds.length || query.kinds?.length === 0) return [];
+    const { where, params } = this.recentWhere(projectIds, query, {
+      project: "project_id",
+      createdAt: "created_at",
+      actor: "actor_id",
+    });
+    let kindFilter = "";
+    if (query.kinds) {
+      kindFilter = ` and kind in (${placeholders(query.kinds.length, params.length)})`;
+      params.push(...query.kinds);
+    }
+    params.push(query.limit);
+    const { rows } = await this.sql.query<IssueEventRow>(
+      `select * from issue_events where ${where}${kindFilter}
+       order by created_at desc, id desc
+       limit $${params.length}`,
+      params,
+    );
+    return rows.map(toIssueEvent);
+  }
+
+  async listRecentComments(
+    projectIds: string[],
+    query: RecentQuery,
+  ): Promise<CommentWithProject[]> {
+    if (!projectIds.length) return [];
+    const { where, params } = this.recentWhere(projectIds, query, {
+      project: "i.project_id",
+      createdAt: "c.created_at",
+      actor: "c.author_id",
+    });
+    params.push(query.limit);
+    const { rows } = await this.sql.query<
+      Parameters<SqlRepository["toIssueComment"]>[0] & { project_id: string }
+    >(
+      `select c.*, i.project_id as project_id
+       from issue_comments c join issues i on i.id = c.issue_id
+       where ${where}
+       order by c.created_at desc, c.id desc
+       limit $${params.length}`,
+      params,
+    );
+    return rows.map((row) => ({
+      comment: this.toIssueComment(row),
+      projectId: row.project_id,
+    }));
+  }
+
+  async listRecentRuns(
+    projectIds: string[],
+    query: RecentQuery,
+  ): Promise<Omit<ActionRun, "log">[]> {
+    if (!projectIds.length) return [];
+    const { where, params } = this.recentWhere(projectIds, query, {
+      project: "project_id",
+      createdAt: "created_at",
+      actor: "triggered_by",
+    });
+    params.push(query.limit);
+    // Protokolle (bis 200 KB je Run) bleiben in der DB.
+    const { rows } = await this.sql.query<ActionRunRow>(
+      `select id, project_id, action_id, model_id, commit_id, number, status,
+         summary, '' as log, triggered_by, created_at, started_at,
+         finished_at, failed_guids
+       from action_runs where ${where}
+       order by created_at desc, id desc
+       limit $${params.length}`,
+      params,
+    );
+    return rows.map((row) => {
+      const { log: _log, ...run } = toActionRun(row);
+      return run;
+    });
+  }
+
+  async activityDayCounts(
+    projectIds: string[],
+    query: { since: string; actorId?: string },
+  ): Promise<ActivityDayCount[]> {
+    if (!projectIds.length) return [];
+    const sources: {
+      key: "commits" | "issues" | "comments";
+      from: string;
+      project: string;
+      createdAt: string;
+      actor: string;
+    }[] = [
+      {
+        key: "commits",
+        from: "commits c join models m on m.id = c.model_id",
+        project: "m.project_id",
+        createdAt: "c.created_at",
+        actor: "c.author_id",
+      },
+      {
+        key: "issues",
+        from: "issues i",
+        project: "i.project_id",
+        createdAt: "i.created_at",
+        actor: "i.author_id",
+      },
+      {
+        key: "comments",
+        from: "issue_comments c join issues i on i.id = c.issue_id",
+        project: "i.project_id",
+        createdAt: "c.created_at",
+        actor: "c.author_id",
+      },
+    ];
+    const byDay = new Map<string, ActivityDayCount>();
+    for (const source of sources) {
+      const params: unknown[] = [...projectIds, query.since];
+      let actorFilter = "";
+      if (query.actorId !== undefined) {
+        params.push(query.actorId);
+        actorFilter = ` and ${source.actor} = $${params.length}`;
+      }
+      // created_at ist ISO-Text: die ersten 10 Zeichen sind der UTC-Tag.
+      const { rows } = await this.sql.query<{ day: string; n: number | string }>(
+        `select substr(${source.createdAt}, 1, 10) as day, count(*) as n
+         from ${source.from}
+         where ${source.project} in (${placeholders(projectIds.length)})
+           and ${source.createdAt} >= $${projectIds.length + 1}${actorFilter}
+         group by substr(${source.createdAt}, 1, 10)`,
+        params,
+      );
+      for (const row of rows) {
+        const entry = byDay.get(row.day) ?? {
+          day: row.day,
+          commits: 0,
+          issues: 0,
+          comments: 0,
+        };
+        entry[source.key] += Number(row.n);
+        byDay.set(row.day, entry);
+      }
+    }
+    return [...byDay.values()].sort((a, b) => a.day.localeCompare(b.day));
+  }
+
+  async searchModels(
+    projectIds: string[],
+    text: string,
+    limit: number,
+  ): Promise<Model[]> {
+    if (!projectIds.length) return [];
+    const needle = escapeLike(text.toLowerCase());
+    const n = projectIds.length;
+    const { rows } = await this.sql.query<ModelRow>(
+      `select * from models
+       where project_id in (${placeholders(n)})
+         and (lower(name) like $${n + 1} escape '\\'
+           or lower(slug) like $${n + 1} escape '\\'
+           or lower(folder) like $${n + 1} escape '\\')
+       order by
+         case when lower(name) like $${n + 2} escape '\\'
+                or lower(slug) like $${n + 2} escape '\\' then 0 else 1 end,
+         lower(name), id
+       limit $${n + 3}`,
+      [...projectIds, `%${needle}%`, `${needle}%`, limit],
+    );
+    return rows.map(toModel);
+  }
+
+  async searchIssues(
+    projectIds: string[],
+    query: { text: string; number?: number; limit: number },
+  ): Promise<Issue[]> {
+    if (!projectIds.length) return [];
+    const needle = escapeLike(query.text.toLowerCase());
+    const n = projectIds.length;
+    const params: unknown[] = [...projectIds, `%${needle}%`, `${needle}%`];
+    let numberMatch = "";
+    let numberRank = "";
+    if (query.number !== undefined) {
+      params.push(query.number);
+      numberMatch = ` or number = $${params.length}`;
+      numberRank = `when number = $${params.length} then 0 `;
+    }
+    params.push(query.limit);
+    const { rows } = await this.sql.query<Parameters<SqlRepository["toIssue"]>[0]>(
+      `select * from issues
+       where project_id in (${placeholders(n)})
+         and (lower(title) like $${n + 1} escape '\\'${numberMatch})
+       order by
+         case ${numberRank}when lower(title) like $${n + 2} escape '\\' then 1 else 2 end,
+         created_at desc, id desc
+       limit $${params.length}`,
+      params,
+    );
+    return rows.map((row) => this.toIssue(row));
+  }
+
+  async counts(): Promise<RepositoryCounts> {
+    const { rows } = await this.sql.query<
+      Record<keyof RepositoryCounts, number | string>
+    >(
+      `select
+         (select count(*) from users) as users,
+         (select count(*) from projects) as projects,
+         (select count(*) from models) as models,
+         (select count(*) from commits) as commits,
+         (select count(*) from issues) as issues,
+         (select count(*) from action_runs) as runs`,
+    );
+    const row = rows[0];
+    return {
+      users: Number(row?.users ?? 0),
+      projects: Number(row?.projects ?? 0),
+      models: Number(row?.models ?? 0),
+      commits: Number(row?.commits ?? 0),
+      issues: Number(row?.issues ?? 0),
+      runs: Number(row?.runs ?? 0),
+    };
   }
 
   // ---- manifests (deduped entity store) --------------------------------

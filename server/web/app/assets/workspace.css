@@ -1,0 +1,374 @@
+/* ==========================================================================
+   Projekt-Arbeitsbereiche: Actions, 3D-Szene, Aktivität, Einstellungen
+   ========================================================================== */
+
+/* ---- Actions --------------------------------------------------------------- */
+
+.actions-side-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+
+.actions-side-head h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+}
+
+.actions-head {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.actions-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.actions-title h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-stretch: 104%;
+}
+
+.actions-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.actions-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.actions-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.run-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.run-line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.run-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.run-when {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  flex-shrink: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.action-form .form-group:last-of-type {
+  margin-bottom: var(--space-3);
+}
+
+/* ---- 3D-Szene (randlos) ------------------------------------------------------ */
+
+.scene {
+  position: relative;
+  height: calc(100vh - var(--header-h) - 104px);
+  min-height: 460px;
+}
+
+.scene-viewer,
+.scene .viewer-wrap {
+  height: 100%;
+  border-radius: 0;
+}
+
+.scene-panel {
+  position: absolute;
+  top: var(--space-3);
+  left: var(--space-3);
+  bottom: var(--space-3);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  width: 280px;
+  max-height: calc(100% - 24px);
+  height: fit-content;
+  background: color-mix(in srgb, var(--overlay-bg) 92%, transparent);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  animation: menu-in 0.18s ease-out;
+}
+
+.scene-panel-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-muted);
+}
+
+.scene-tree {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.scene-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 3px 6px;
+  font-size: var(--text-base);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.scene-row:hover {
+  background: var(--bg-hover);
+}
+
+.scene-row.disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.scene-folder {
+  font-weight: 600;
+  cursor: default;
+}
+
+.scene-caret,
+.scene-focus {
+  display: inline-flex;
+  padding: 2px;
+  color: var(--text-muted);
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+}
+
+.scene-focus {
+  opacity: 0;
+}
+
+.scene-row:hover .scene-focus {
+  opacity: 1;
+}
+
+.scene-focus:hover {
+  color: var(--accent);
+}
+
+.scene-panel-foot {
+  display: flex;
+  gap: 6px;
+  padding: var(--space-2);
+  border-top: 1px solid var(--border-muted);
+}
+
+.scene-panel-toggle {
+  top: var(--space-3);
+  left: 56px;
+}
+
+.scene .viewer-home {
+  left: auto;
+  right: var(--space-3);
+}
+
+.scene-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: var(--space-5);
+}
+
+.scene-empty .blankslate {
+  width: min(640px, 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+@media (max-width: 767px) {
+  .scene-panel {
+    right: var(--space-3);
+    width: auto;
+    max-height: 45%;
+  }
+}
+
+/* ---- Aktivität --------------------------------------------------------------- */
+
+.activity-stats {
+  margin-bottom: var(--space-5);
+}
+
+.activity-heat {
+  margin-bottom: var(--space-6);
+}
+
+.activity-layout {
+  gap: var(--space-6);
+}
+
+.contributor-row {
+  align-items: flex-start;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.contributor-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.contributor-bar {
+  height: 6px;
+  margin-top: 6px;
+}
+
+/* ---- Einstellungen ----------------------------------------------------------- */
+
+.settings-page .settings-stack {
+  gap: var(--space-3);
+}
+
+.settings-page .divided-head {
+  margin-top: var(--space-5);
+}
+
+.settings-page .settings-stack > .divided-head:first-child {
+  margin-top: 0;
+}
+
+.danger-head h2 {
+  color: var(--danger);
+}
+
+.settings-form {
+  max-width: 640px;
+}
+
+.settings-image {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-5);
+}
+
+.file-btn.disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.member-add .form-row {
+  align-items: flex-end;
+}
+
+.member-row {
+  min-height: 60px;
+}
+
+.member-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.labels-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.label-editor .label-preview {
+  margin-bottom: var(--space-3);
+}
+
+.label-row {
+  min-height: 56px;
+}
+
+.label-row-chip {
+  flex: 0 0 200px;
+  min-width: 0;
+}
+
+.label-row-desc {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.label-row-count {
+  flex: 0 0 140px;
+  text-align: right;
+}
+
+.label-row-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.label-edit-row {
+  background: var(--bg-subtle);
+}
+
+.label-edit-grid {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr) minmax(0, 1.4fr) auto auto;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+@media (max-width: 767px) {
+  .label-row-count {
+    display: none;
+  }
+
+  .label-row-chip {
+    flex-basis: auto;
+  }
+
+  .label-edit-grid {
+    grid-template-columns: 1fr;
+  }
+}

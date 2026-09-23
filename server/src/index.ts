@@ -72,6 +72,7 @@ async function main(): Promise<void> {
     store,
     jwtSecret: config.jwtSecret,
     storageMode: config.storage,
+    databaseMode: config.databaseUrl ? "postgres" : "sqlite",
     logRequests: config.logRequests,
   });
 
