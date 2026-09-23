@@ -148,14 +148,14 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="run-details">
-    <p v-if="run.summary" class="small" style="margin: 0.5rem 0">
+    <p v-if="run.summary" class="run-summary-full">
       {{ run.summary }}
     </p>
-    <p class="run-actions" style="margin: 0.5rem 0">
+    <p class="run-actions">
       <slot name="actions" />
       <button
         v-if="canWrite && isPending"
-        class="btn small danger"
+        class="btn btn-sm btn-danger"
         :disabled="busy !== null"
         @click="cancel"
       >
@@ -164,7 +164,7 @@ onBeforeUnmount(() => {
       </button>
       <button
         v-if="canWrite && !isPending"
-        class="btn small"
+        class="btn btn-sm"
         :disabled="busy !== null"
         @click="retry"
       >
@@ -175,7 +175,7 @@ onBeforeUnmount(() => {
         <span class="spinner" aria-hidden="true" /> Live-Protokoll
       </span>
     </p>
-    <div v-if="error" class="alert error" style="margin: 0.5rem 0">{{ error }}</div>
+    <div v-if="error" class="flash flash-danger flash-sm" style="margin: 0">{{ error }}</div>
     <LoadingState v-if="loading" text="Lade Protokoll …" />
     <pre v-else-if="log" ref="logEl" class="run-log" :class="{ live }">{{ log }}</pre>
     <div v-else-if="isPending" class="muted small">

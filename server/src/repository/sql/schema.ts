@@ -22,7 +22,8 @@ create table if not exists projects (
   name text not null,
   owner_id uuid not null references users(id),
   created_at text not null,
-  visibility text not null default 'public'
+  visibility text not null default 'public',
+  description text not null default ''
 );
 
 create table if not exists project_members (
@@ -125,6 +126,7 @@ create table if not exists labels (
   project_id uuid not null references projects(id),
   name text not null,
   color text not null,
+  description text not null default '',
   unique (project_id, name)
 );
 
@@ -178,6 +180,18 @@ create table if not exists issue_comments (
   created_at text not null
 );
 create index if not exists issue_comments_issue_idx on issue_comments(issue_id);
+
+create table if not exists issue_events (
+  id uuid primary key,
+  issue_id uuid not null,
+  project_id uuid not null,
+  actor_id uuid not null,
+  kind text not null,
+  data text not null default '{}',
+  created_at text not null
+);
+create index if not exists issue_events_issue_idx on issue_events(issue_id);
+create index if not exists issue_events_project_idx on issue_events(project_id, created_at);
 
 create table if not exists library_files (
   id uuid primary key,
@@ -236,6 +250,8 @@ export const COLUMN_MIGRATIONS: {
   definition: string;
 }[] = [
   { table: "issues", column: "parent_id", definition: "uuid references issues(id)" },
+  { table: "projects", column: "description", definition: "text not null default ''" },
+  { table: "labels", column: "description", definition: "text not null default ''" },
 ];
 
 /** Indizes auf nachgezogenen Spalten — erst nach COLUMN_MIGRATIONS anlegen. */

@@ -1,167 +1,107 @@
 <script setup lang="ts">
 import {
-    PhBookOpen,
-    PhCheckCircle,
-    PhCubeTransparent,
-    PhEye,
-    PhGear,
-    PhGitBranch,
-    PhGitCommit,
-    PhPencilSimple,
-    PhPlus,
-    PhRecord,
-    PhUploadSimple,
+  PhArrowLeft,
+  PhBookOpen,
+  PhCheck,
+  PhClockCounterClockwise,
+  PhCopy,
+  PhCubeTransparent,
+  PhDownloadSimple,
+  PhEye,
+  PhGear,
+  PhGitBranch,
+  PhGlobeSimple,
+  PhPencilSimple,
+  PhPlus,
+  PhRecord,
+  PhUploadSimple,
+  PhWarningCircle,
 } from "@phosphor-icons/vue";
 
-import type {
-    Branch,
-    Commit,
-    Issue,
-    Member,
-    Model,
-    Project,
-    Role,
-} from "~/types/api";
+import type { Branch, Commit, Issue, Model } from "~/types/api";
 
+/**
+ * Eine Datei bzw. ein Modell (GitHubs „Blob“-Ansicht): Inhalt (3D, Vorschau
+ * oder Markdown), Versionsverlauf mit Branch-Graph, verknüpfte Issues und
+ * Einstellungen. `?at=<commit>` zeigt einen älteren Stand.
+ */
 const route = useRoute();
 const router = useRouter();
-const { api } = useApi();
-const { token } = useAuth();
-const slug = route.params.project as string;
+const project = useProject();
+const { slug, detail, canWrite, isAdmin } = project;
 const modelSlug = route.params.model as string;
 const base = `/projects/${slug}/models/${modelSlug}`;
+const { api } = useApi();
+const { token } = useAuth();
+const toast = useToast();
+const { confirm } = useConfirm();
+const { track } = useRecent();
 
-// Modell + Rolle blockieren das erste Rendern (klein und schnell); alles
-// Weitere (Issues, Commits) lädt "lazy" mit sichtbaren Ladezuständen.
 const {
   data: modelData,
   refresh: refreshModel,
-  status: modelStatus,
   error: modelError,
 } = useAsyncData(
   `model-${slug}-${modelSlug}`,
   () => api<{ model: Model; branches: Branch[] }>(base),
   { lazy: true },
 );
-const { data: projectData } = useAsyncData(
-  `project-role-${slug}`,
-  () =>
-    api<{
-      project: Project;
-      members: Member[];
-      role: Role | null;
-      folders: string[];
-    }>(`/projects/${slug}`),
-  { lazy: true },
+const model = computed(() => modelData.value?.model ?? null);
+const branches = computed(() => modelData.value?.branches ?? []);
+
+const isMd = computed(() => model.value?.kind === "md");
+const isFile = computed(() => model.value?.kind === "file");
+const isIfc = computed(() => model.value?.kind === "ifc");
+const extension = computed(() => fileExtension(model.value?.name ?? ""));
+const downloadExt = computed(() => (isMd.value ? "md" : isIfc.value ? "ifc" : extension.value || "bin"));
+
+watch(
+  model,
+  (value) => {
+    if (value) {
+      track({
+        type: "model",
+        title: value.name,
+        subtitle: `${detail.value?.project.name ?? slug}${value.folder ? ` / ${value.folder}` : ""}`,
+        to: `/p/${slug}/m/${value.slug}`,
+        kind: value.kind,
+      });
+    }
+  },
+  { immediate: true },
 );
+useHead({ title: computed(() => (model.value ? `${model.value.name} · IFC Hub` : "IFC Hub")) });
 
-const isAdmin = computed(
-  () =>
-    projectData.value?.role === "owner" ||
-    projectData.value?.role === "maintainer",
-);
-const canWrite = computed(
-  () => isAdmin.value || projectData.value?.role === "contributor",
-);
-const isMd = computed(() => modelData.value?.model.kind === "md");
-const isFile = computed(() => modelData.value?.model.kind === "file");
-const isIfc = computed(() => !isMd.value && !isFile.value);
+// ---- Tabs -----------------------------------------------------------------
 
-/** Endung des Modellnamens ("" ohne Punkt) — legt bei Datei-Modellen die Dateiart fest. */
-const modelExtension = computed(() => {
-  const name = modelData.value?.model.name ?? "";
-  const idx = name.lastIndexOf(".");
-  return idx === -1 ? "" : name.slice(idx + 1).toLowerCase();
-});
-
-/** Dateiendung für Downloads: bei Datei-Modellen aus dem Namen, sonst fest. */
-const downloadExtension = computed(() => {
-  if (isMd.value) return "md";
-  if (!isFile.value) return "ifc";
-  return modelExtension.value || "bin";
-});
-
-/** accept-Filter des Datei-Dialogs für neue Versionen. */
-const commitAccept = computed(() => {
-  if (isIfc.value) return ".ifc,application/x-step";
-  if (isFile.value && modelExtension.value) return `.${modelExtension.value}`;
-  return undefined;
-});
-
-const folderCrumbs = computed(() => {
-  const folder = modelData.value?.model.folder ?? "";
-  if (!folder) return [];
-  const segments = folder.split("/");
-  return segments.map((segment, index) => ({
-    label: segment,
-    path: segments.slice(0, index + 1).join("/"),
-  }));
-});
-
-// ---- Tabs --------------------------------------------------------------
-
-type Tab = "inhalt" | "vorschau" | "commits" | "3d" | "issues" | "einstellungen";
+type Tab = "view" | "commits" | "issues" | "settings";
 const tab = computed<Tab>(() => {
   const value = route.query.tab;
-  if (value === "commits" || value === "issues" || value === "einstellungen") {
-    return value;
-  }
-  if (value === "inhalt" && isMd.value) return "inhalt";
-  if (value === "vorschau" && isFile.value) return "vorschau";
-  if (value === "3d" && isIfc.value) return "3d";
-  if (isMd.value) return "inhalt";
-  if (isFile.value) return "vorschau";
-  return "3d";
+  if (value === "commits") return "commits";
+  if (value === "issues") return "issues";
+  if (value === "einstellungen" || value === "settings") return "settings";
+  return "view";
 });
 
-function goTab(nextTab: Tab): void {
-  router.replace({ query: { ...route.query, tab: nextTab } });
+function goTab(next: Tab): void {
+  const query: Record<string, string> = {};
+  if (next !== "view") query.tab = next;
+  if (next === "view" && typeof route.query.at === "string") query.at = route.query.at;
+  void router.replace({ query });
 }
 
-// ---- Issues dieses Modells ---------------------------------------------
+const viewLabel = computed(() => (isIfc.value ? "3D" : isMd.value ? "Inhalt" : "Vorschau"));
 
-const { data: issuesData, status: issuesStatus } = useAsyncData(
-  `issues-${slug}`,
-  () =>
-    api<{ issues: Issue[]; openCount: number; closedCount: number }>(
-      `/projects/${slug}/issues`,
-    ),
-  { lazy: true },
-);
-
-/** Alle Issues, die mit DIESEM Modell verknüpft sind. */
-const modelIssues = computed(() =>
-  (issuesData.value?.issues ?? []).filter((issue) =>
-    issue.models.some((model) => model.slug === modelSlug),
-  ),
-);
-const issueFilter = ref<"open" | "closed">("open");
-const filteredModelIssues = computed(() =>
-  modelIssues.value.filter((issue) => issue.state === issueFilter.value),
-);
-const openModelIssueCount = computed(
-  () => modelIssues.value.filter((issue) => issue.state === "open").length,
-);
-const closedModelIssueCount = computed(
-  () => modelIssues.value.filter((issue) => issue.state === "closed").length,
-);
-
-/** Lesbare Textfarbe (schwarz/weiss) fuer eine Label-Hintergrundfarbe. */
-function labelTextColor(hex: string): string {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return 0.299 * r + 0.587 * g + 0.114 * b > 150 ? "#1f2328" : "#ffffff";
-}
-
-// ---- Branch-Auswahl + Commits -----------------------------------------
+// ---- Branch + Commits ------------------------------------------------------
 
 const selectedBranch = ref<string | null>(null);
-watchEffect(() => {
-  if (selectedBranch.value === null && modelData.value) {
-    selectedBranch.value = modelData.value.model.defaultBranch;
-  }
-});
+watch(
+  model,
+  (value) => {
+    if (value && selectedBranch.value === null) selectedBranch.value = value.defaultBranch;
+  },
+  { immediate: true },
+);
 
 const {
   data: commitsData,
@@ -170,8 +110,6 @@ const {
 } = useAsyncData(
   `commits-${slug}-${modelSlug}`,
   async () => {
-    // Erst, wenn der Standard-Branch bekannt ist — sonst würde die Liste
-    // einmal ohne Branch und gleich darauf mit Branch geladen.
     if (selectedBranch.value === null) return null;
     return api<{ commits: Commit[] }>(`${base}/commits`, {
       query: selectedBranch.value ? { branch: selectedBranch.value } : {},
@@ -179,6 +117,14 @@ const {
   },
   { lazy: true, watch: [selectedBranch] },
 );
+const commits = computed(() => commitsData.value?.commits ?? []);
+
+// „Alle Branches“ gibt es nur im Verlauf — die Ansicht zeigt immer einen Branch.
+watch(tab, (next) => {
+  if (next !== "commits" && selectedBranch.value === "" && model.value) {
+    selectedBranch.value = model.value.defaultBranch;
+  }
+});
 const commitsPending = computed(
   () =>
     commitsStatus.value === "pending" ||
@@ -186,1037 +132,633 @@ const commitsPending = computed(
     (commitsData.value === null && commitsStatus.value !== "error"),
 );
 
-// ---- Commit-Graph ------------------------------------------------------
-
-const ROW_H = 62;
-const LANE_W = 18;
-const LANE_COLORS = [
-  "#4493f8",
-  "#3fb950",
-  "#d29922",
-  "#a371f7",
-  "#f85149",
-  "#39c5cf",
-];
-
-function laneX(lane: number): number {
-  return 11 + lane * LANE_W;
-}
-
-function rowY(index: number): number {
-  return index * ROW_H + ROW_H / 2;
-}
-
-function laneColor(lane: number): string {
-  return LANE_COLORS[lane % LANE_COLORS.length]!;
-}
-
-const graph = computed(() => {
-  const commits = commitsData.value?.commits ?? [];
-  const laneOrder: string[] = [];
-  const defaultBranch = modelData.value?.model.defaultBranch;
-  if (defaultBranch && commits.some((c) => c.branchName === defaultBranch)) {
-    laneOrder.push(defaultBranch);
-  }
-  for (const commit of commits) {
-    if (!laneOrder.includes(commit.branchName)) {
-      laneOrder.push(commit.branchName);
-    }
-  }
-  const indexById = new Map(commits.map((c, i) => [c.id, i]));
-  const rows = commits.map((commit, index) => ({
-    commit,
-    index,
-    lane: Math.max(0, laneOrder.indexOf(commit.branchName)),
-  }));
-  const edges: { path: string; color: string }[] = [];
-  for (const row of rows) {
-    const parentIndex = row.commit.parentCommitId
-      ? indexById.get(row.commit.parentCommitId)
-      : undefined;
-    if (parentIndex === undefined) continue;
-    const parent = rows[parentIndex]!;
-    const x1 = laneX(row.lane);
-    const y1 = rowY(row.index);
-    const x2 = laneX(parent.lane);
-    const y2 = rowY(parent.index);
-    const path =
-      x1 === x2
-        ? `M ${x1} ${y1} L ${x2} ${y2}`
-        : `M ${x1} ${y1} L ${x1} ${y2 - ROW_H / 2} Q ${x1} ${y2} ${x2} ${y2}`;
-    edges.push({ path, color: laneColor(row.lane) });
-  }
-  return {
-    rows,
-    edges,
-    laneCount: Math.max(1, laneOrder.length),
-    width: 11 + Math.max(1, laneOrder.length) * LANE_W,
-    height: Math.max(rows.length * ROW_H, ROW_H),
-  };
-});
-
-// ---- Committen (Modal) -------------------------------------------------
-
-const showCommitModal = ref(false);
-const file = ref<File | null>(null);
-const fileInput = ref<HTMLInputElement | null>(null);
-const message = ref("");
-const commitBranch = ref<string>("");
-const newBranchName = ref("");
-const uploadError = ref<string | null>(null);
-const uploading = ref(false);
-/** Upload-Fortschritt 0..100; 100 = Server analysiert die Datei. */
-const uploadPercent = ref<number | null>(null);
-const dragOver = ref(false);
-
-watchEffect(() => {
-  if (!commitBranch.value && modelData.value) {
-    commitBranch.value = modelData.value.model.defaultBranch;
-  }
-});
-
-function openCommitModal(): void {
-  uploadError.value = null;
-  commitBranch.value = selectedBranch.value || modelData.value?.model.defaultBranch || "main";
-  showCommitModal.value = true;
-}
-
-function setCommitFile(next: File | null): void {
-  if (next && isIfc.value && !/\.ifc$/i.test(next.name)) {
-    uploadError.value = "Bitte eine .ifc-Datei wählen.";
-    return;
-  }
-  // Content-Type und Vorschau hängen an der Endung des Modellnamens — eine
-  // neue Version muss dieselbe Dateiart haben (der Server prüft das auch).
-  const expected = modelExtension.value;
-  if (next && isFile.value && expected && !next.name.toLowerCase().endsWith(`.${expected}`)) {
-    uploadError.value = `Bitte eine .${expected}-Datei wählen — die Dateiart bleibt über alle Versionen gleich.`;
-    return;
-  }
-  uploadError.value = null;
-  file.value = next;
-}
-
-function onFileChange(event: Event): void {
-  const input = event.target as HTMLInputElement;
-  setCommitFile(input.files?.[0] ?? null);
-}
-
-function onFileDrop(event: DragEvent): void {
-  dragOver.value = false;
-  setCommitFile(event.dataTransfer?.files?.[0] ?? null);
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-}
-
-/**
- * Upload per XMLHttpRequest — nur so gibt es einen Fortschritt. Große IFCs
- * brauchen erst Sekunden für den Upload und dann für die Analyse im Server;
- * beides soll sichtbar sein.
- */
-function uploadCommit(form: FormData): Promise<{ commit: Commit }> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", `/api${base}/commits?compact=1`);
-    if (token.value) {
-      xhr.setRequestHeader("authorization", `Bearer ${token.value}`);
-    }
-    xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable) {
-        uploadPercent.value = Math.round((event.loaded / event.total) * 100);
-      }
-    };
-    xhr.upload.onload = () => {
-      uploadPercent.value = 100;
-    };
-    xhr.onerror = () => reject(new Error("Verbindung zum Server fehlgeschlagen"));
-    xhr.onload = () => {
-      let body: { commit?: Commit; error?: string } = {};
-      try {
-        body = JSON.parse(xhr.responseText) as typeof body;
-      } catch {
-        // kein JSON — Statuscode entscheidet
-      }
-      if (xhr.status >= 200 && xhr.status < 300 && body.commit) {
-        resolve({ commit: body.commit });
-      } else {
-        reject(new Error(body.error ?? `Commit fehlgeschlagen (HTTP ${xhr.status})`));
-      }
-    };
-    xhr.send(form);
-  });
-}
-
-async function submitCommit(): Promise<void> {
-  if (!file.value || uploading.value) return;
-  uploadError.value = null;
-  const branch =
-    commitBranch.value === "__new__" ? newBranchName.value.trim() : commitBranch.value;
-  if (!branch) {
-    uploadError.value = "Branch-Name fehlt";
-    return;
-  }
-  uploading.value = true;
-  uploadPercent.value = 0;
+async function createBranch(name: string, from: string): Promise<void> {
   try {
-    const form = new FormData();
-    form.append("message", message.value.trim());
-    form.append("branch", branch);
-    form.append("file", file.value);
-    const result = await uploadCommit(form);
-    message.value = "";
-    file.value = null;
-    showCommitModal.value = false;
-    if (isIfc.value) {
-      // Direkt zum neuen Stand: dort steht, was sich geändert hat.
-      await navigateTo(`/p/${slug}/m/${modelSlug}/c/${result.commit.id}`);
-    } else {
-      // Dateien haben keinen Objekt-Diff — die neue Version direkt anzeigen.
-      await Promise.all([refreshModel(), refreshCommits()]);
-      goTab("vorschau");
-    }
-  } catch (e) {
-    uploadError.value = e instanceof Error ? e.message : apiErrorMessage(e);
-  } finally {
-    uploading.value = false;
-    uploadPercent.value = null;
-  }
-}
-
-// ---- Branch anlegen (Modal) --------------------------------------------
-
-const showBranchModal = ref(false);
-const branchName = ref("");
-const branchFrom = ref("");
-const branchError = ref<string | null>(null);
-
-function openBranchModal(): void {
-  branchError.value = null;
-  branchFrom.value =
-    selectedBranch.value || modelData.value?.model.defaultBranch || "main";
-  showBranchModal.value = true;
-}
-
-async function createBranch(): Promise<void> {
-  branchError.value = null;
-  try {
-    await api(`${base}/branches`, {
-      method: "POST",
-      body: { name: branchName.value.trim(), from: branchFrom.value },
-    });
-    branchName.value = "";
-    showBranchModal.value = false;
+    await api(`${base}/branches`, { method: "POST", body: { name, from } });
     await refreshModel();
+    selectedBranch.value = name;
+    toast.success(`Branch „${name}“ von „${from}“ erstellt.`);
   } catch (e) {
-    branchError.value = apiErrorMessage(e);
+    toast.error(apiErrorMessage(e));
   }
 }
 
-// ---- Markdown-Inhalt (nur kind "md") ----------------------------------
+// ---- Angezeigter Stand (?at= oder Branch-Head) -----------------------------
 
-const contentText = ref<string | null>(null);
-const contentHtml = ref<string | null>(null);
+const atId = computed(() => (typeof route.query.at === "string" ? route.query.at : null));
+const { data: atData } = useAsyncData(
+  `commit-at-${slug}-${modelSlug}`,
+  async () => (atId.value ? api<{ commit: Commit }>(`${base}/commits/${atId.value}`) : null),
+  { lazy: true, watch: [atId] },
+);
+const branchHead = computed(() => commits.value[0] ?? null);
+const shown = computed<Commit | null>(() => (atId.value ? (atData.value?.commit ?? null) : branchHead.value));
+const isOld = computed(() => Boolean(atId.value && shown.value && shown.value.id !== branchHead.value?.id));
+
+const { checks } = useProjectRuns(slug, () => ({ model: model.value?.id }));
+
+// ---- Markdown ---------------------------------------------------------------
+
+const mdText = ref<string | null>(null);
+const mdHtml = ref<string | null>(null);
 const editing = ref(false);
-const editDraft = ref("");
+const draft = ref("");
 const editMessage = ref("");
-const editBusy = ref(false);
-
-const headCommit = computed(() => commitsData.value?.commits[0] ?? null);
+/** Branch, aus dem der bearbeitete Inhalt stammt — dorthin wird committet. */
+const editBranch = ref("");
+const saving = ref(false);
 
 watch(
-  [headCommit, isMd],
-  async () => {
-    contentHtml.value = null;
-    contentText.value = null;
-    if (!isMd.value || !headCommit.value) return;
+  () => [shown.value?.id, isMd.value] as const,
+  async ([id, md], _previous, onCleanup) => {
+    // Schneller ?at=-Wechsel: nur die Antwort zum aktuellen Stand übernehmen.
+    let stale = false;
+    onCleanup(() => (stale = true));
+    mdText.value = null;
+    mdHtml.value = null;
+    if (!md || !id) return;
     try {
-      const text = await $fetch<string>(
-        `/api${base}/commits/${headCommit.value.id}/file`,
-        {
-          responseType: "text",
-          headers: token.value
-            ? { authorization: `Bearer ${token.value}` }
-            : {},
-        },
-      );
-      contentText.value = text;
-      contentHtml.value = renderMarkdown(text);
+      const text = await $fetch<string>(`/api${base}/commits/${id}/file`, {
+        responseType: "text",
+        headers: token.value ? { authorization: `Bearer ${token.value}` } : {},
+      });
+      if (stale) return;
+      mdText.value = text;
+      mdHtml.value = renderMarkdown(text);
     } catch {
-      contentHtml.value = null;
+      if (!stale) mdHtml.value = null;
     }
   },
   { immediate: true },
 );
 
+/**
+ * Bearbeitet wird nur der Kopf eines konkreten Branches: Bei „Alle Branches“
+ * kann der neueste Stand aus einem anderen Branch stammen, und ein älterer
+ * Stand (?at=) würde den Kopf beim Committen stillschweigend zurückdrehen.
+ */
+const editBlockedReason = computed(() => {
+  if (isOld.value) return "Älterer Stand — zum Bearbeiten zum aktuellen Stand wechseln";
+  if (selectedBranch.value === "") return "Zum Bearbeiten einen Branch wählen";
+  if (atId.value && !shown.value) return "Stand wird geladen …";
+  return null;
+});
+
 function startEdit(): void {
-  editDraft.value = contentText.value ?? "";
+  if (editBlockedReason.value) return;
+  draft.value = mdText.value ?? "";
   editMessage.value = "";
+  editBranch.value = shown.value?.branchName || selectedBranch.value || model.value?.defaultBranch || "";
   editing.value = true;
+  goTab("view");
 }
 
+/** Inhalt geladen (oder es gibt noch keinen Stand) — erst dann bearbeitbar. */
+const mdReady = computed(() => !commitsPending.value && (!shown.value || mdText.value !== null));
+
+// ?edit=1 (nach „Markdown-Datei anlegen“ oder README-Stift)
+watch(
+  () => [route.query.edit, isMd.value, mdReady.value] as const,
+  ([edit, md, ready]) => {
+    if (!edit || !md || !ready || editing.value) return;
+    startEdit();
+    const { edit: _e, ...rest } = route.query;
+    void router.replace({ query: rest });
+  },
+  { immediate: true },
+);
+
 async function saveEdit(): Promise<void> {
-  uploadError.value = null;
-  editBusy.value = true;
+  saving.value = true;
   try {
     await $fetch(`/api${base}/commits`, {
       method: "POST",
       query: {
-        branch: selectedBranch.value || modelData.value?.model.defaultBranch,
-        message: editMessage.value.trim() || "Aktualisiert",
+        branch: editBranch.value || model.value?.defaultBranch,
+        message: editMessage.value.trim() || (mdText.value === null ? "Erstellt" : "Aktualisiert"),
       },
-      body: editDraft.value,
+      body: draft.value,
       headers: {
         "content-type": "text/markdown",
         ...(token.value ? { authorization: `Bearer ${token.value}` } : {}),
       },
     });
     editing.value = false;
-    await Promise.all([refreshModel(), refreshCommits()]);
+    await Promise.all([refreshModel(), refreshCommits(), project.refreshModels()]);
+    toast.success("Änderungen committet.");
   } catch (e) {
-    uploadError.value = apiErrorMessage(e);
+    toast.error(apiErrorMessage(e));
   } finally {
-    editBusy.value = false;
+    saving.value = false;
   }
 }
 
-// ---- Einstellungen -----------------------------------------------------
+// ---- Neue Version -------------------------------------------------------------
 
-const settingsError = ref<string | null>(null);
-const settingsNotice = ref<string | null>(null);
-const folderDraft = ref<string | null>(null);
+const versionOpen = ref(false);
 
-watchEffect(() => {
-  if (folderDraft.value === null && modelData.value) {
-    folderDraft.value = modelData.value.model.folder ?? "";
+async function onCommitted(commit: Commit): Promise<void> {
+  await Promise.all([project.refreshModels(), project.refreshStats()]);
+  if (isIfc.value) {
+    toast.success("Neuer Stand committet — hier sind die Änderungen.");
+    await navigateTo(`/p/${slug}/m/${modelSlug}/c/${commit.id}`);
+  } else {
+    if (commit.branchName !== selectedBranch.value) selectedBranch.value = commit.branchName;
+    await Promise.all([refreshModel(), refreshCommits()]);
+    void router.replace({ query: {} });
+    toast.success("Neue Version hochgeladen.");
   }
-});
+}
 
-async function patchModel(patch: {
-  visibility?: "private" | "public";
-  defaultBranch?: string;
-  folder?: string;
-}): Promise<void> {
-  settingsError.value = null;
-  settingsNotice.value = null;
+// ---- Download ------------------------------------------------------------------
+
+async function download(commit: Commit | null): Promise<void> {
+  if (!commit) return;
+  try {
+    const blob = await $fetch<Blob>(`/api${base}/commits/${commit.id}/file`, {
+      responseType: "blob",
+      headers: token.value ? { authorization: `Bearer ${token.value}` } : {},
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download =
+      isFile.value || isMd.value
+        ? model.value!.name
+        : `${modelSlug}-${shortSha(commit.id)}.${downloadExt.value}`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    toast.error(apiErrorMessage(e));
+  }
+}
+
+// ---- Issues dieses Modells -------------------------------------------------------
+
+const { data: issuesData, status: issuesStatus } = useAsyncData(
+  `issues-${slug}`,
+  () => api<{ issues: Issue[]; openCount: number; closedCount: number }>(`/projects/${slug}/issues`),
+  { lazy: true },
+);
+const modelIssues = computed(() =>
+  (issuesData.value?.issues ?? []).filter((issue) => issue.models.some((m) => m.slug === modelSlug)),
+);
+const issueState = ref<"open" | "closed">("open");
+const openIssues = computed(() => modelIssues.value.filter((issue) => issue.state === "open"));
+const shownIssues = computed(() => modelIssues.value.filter((issue) => issue.state === issueState.value));
+
+// ---- Einstellungen -----------------------------------------------------------------
+
+const settingsName = ref("");
+const settingsFolder = ref("");
+const settingsBusy = ref(false);
+watch(
+  model,
+  (value) => {
+    if (value) {
+      settingsName.value = value.name;
+      settingsFolder.value = value.folder ?? "";
+    }
+  },
+  { immediate: true },
+);
+
+/** Neu rendern, damit abgelehnte Select-Änderungen zurückspringen. */
+const settingsKey = ref(0);
+
+async function patchModel(patch: Record<string, string>, message = "Gespeichert."): Promise<void> {
+  settingsBusy.value = true;
   try {
     await api(base, { method: "PATCH", body: patch });
-    settingsNotice.value = "Gespeichert.";
-    await refreshModel();
+    await Promise.all([refreshModel(), project.refreshModels(), project.refreshProject()]);
+    toast.success(message);
   } catch (e) {
-    settingsError.value = apiErrorMessage(e);
+    settingsKey.value += 1;
+    toast.error(apiErrorMessage(e));
+  } finally {
+    settingsBusy.value = false;
   }
 }
 
 async function deleteModel(): Promise<void> {
-  const model = modelData.value?.model;
-  if (!model) return;
-  if (
-    !window.confirm(
-      `„${model.name}" mit allen Branches und Versionsständen unwiderruflich löschen?`,
-    )
-  ) {
-    return;
-  }
-  settingsError.value = null;
+  if (!model.value) return;
+  const ok = await confirm({
+    title: `„${model.value.name}“ löschen?`,
+    message: "Alle Branches und Versionsstände werden unwiderruflich gelöscht. Verknüpfte Issues bleiben bestehen.",
+    confirmLabel: "Endgültig löschen",
+    danger: true,
+    typeToConfirm: model.value.name,
+  });
+  if (!ok) return;
   try {
     await api(base, { method: "DELETE" });
-    await navigateTo(`/p/${slug}`);
+    await Promise.all([project.refreshModels(), project.refreshStats()]);
+    toast.success(`„${model.value.name}“ gelöscht.`);
+    await navigateTo(`/p/${slug}${model.value.folder ? `?path=${encodeURIComponent(model.value.folder)}` : ""}`);
   } catch (e) {
-    settingsError.value = apiErrorMessage(e);
+    toast.error(apiErrorMessage(e));
   }
 }
 
-// ---- Download ----------------------------------------------------------
+// ---- Pfad kopieren ------------------------------------------------------------------
 
-async function downloadCommit(commit: Commit): Promise<void> {
-  const blob = await $fetch<Blob>(`/api${base}/commits/${commit.id}/file`, {
-    responseType: "blob",
-    headers: token.value ? { authorization: `Bearer ${token.value}` } : {},
-  });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${modelSlug}-${commit.id.slice(0, 8)}.${downloadExtension.value}`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-const dateFmt = new Intl.DateTimeFormat("de-DE", {
-  dateStyle: "medium",
-  timeStyle: "short",
+const crumbs = computed(() => {
+  const folder = model.value?.folder ?? "";
+  if (!folder) return [];
+  const segments = folder.split("/");
+  return segments.map((segment, index) => ({
+    label: segment,
+    path: segments.slice(0, index + 1).join("/"),
+  }));
 });
-const numberFmt = new Intl.NumberFormat("de-DE");
+
+const pathCopied = ref(false);
+async function copyPath(): Promise<void> {
+  if (!model.value) return;
+  try {
+    await navigator.clipboard.writeText(`${model.value.folder ? `${model.value.folder}/` : ""}${model.value.name}`);
+    pathCopied.value = true;
+    setTimeout(() => (pathCopied.value = false), 1500);
+  } catch {
+    // Zwischenablage nicht verfügbar
+  }
+}
 </script>
 
 <template>
-  <div v-if="modelError" class="alert error">
-    Modell konnte nicht geladen werden: {{ apiErrorMessage(modelError) }}
-  </div>
-  <div v-else-if="!modelData" class="card">
-    <div class="card-header">
-      <span class="skeleton" style="width: 30%; height: 1.2em" />
-    </div>
-    <SkeletonRows :rows="4" />
-  </div>
-  <div v-else>
-    <nav class="breadcrumbs">
-      <NuxtLink to="/">Projekte</NuxtLink>
-      <span>/</span>
-      <NuxtLink :to="`/p/${slug}`">
-        {{ projectData?.project.name ?? slug }}
-      </NuxtLink>
-      <template v-for="crumb in folderCrumbs" :key="crumb.path">
-        <span>/</span>
-        <NuxtLink :to="{ path: `/p/${slug}`, query: { path: crumb.path } }">
-          {{ crumb.label }}
-        </NuxtLink>
+  <div v-if="modelError" class="box">
+    <Blankslate :icon="PhWarningCircle" title="Datei nicht gefunden">
+      {{ apiErrorMessage(modelError) }}
+      <template #actions>
+        <NuxtLink :to="`/p/${slug}`" class="btn">Zurück zu den Dateien</NuxtLink>
       </template>
-      <span>/</span>
-      <strong>{{ modelData.model.name }}</strong>
-      <span
-        class="badge"
-        :class="modelData.model.visibility === 'public' ? 'success' : ''"
-      >
-        {{ modelData.model.visibility === "public" ? "öffentlich" : "privat" }}
-      </span>
-      <span v-if="isMd" class="badge">Markdown</span>
-      <span v-else-if="isFile" class="badge">Datei</span>
-    </nav>
+    </Blankslate>
+  </div>
 
-    <nav class="gh-tabs">
-      <button
-        v-if="isMd"
-        :class="{ active: tab === 'inhalt' }"
-        @click="goTab('inhalt')"
-      >
-        <PhBookOpen :size="16" aria-hidden="true" />
-        Inhalt
-      </button>
-      <button
-        v-if="isFile"
-        :class="{ active: tab === 'vorschau' }"
-        @click="goTab('vorschau')"
-      >
-        <PhEye :size="16" aria-hidden="true" />
-        Vorschau
-      </button>
-      <button
-        v-if="isIfc"
-        :class="{ active: tab === '3d' }"
-        @click="goTab('3d')"
-      >
-        <PhCubeTransparent :size="16" aria-hidden="true" />
-        3D
-      </button>
-      <button :class="{ active: tab === 'commits' }" @click="goTab('commits')">
-        <PhGitCommit :size="16" aria-hidden="true" />
-        Commits
-        <span class="counter" :class="{ pending: commitsPending }">{{
-          commitsPending ? "" : (commitsData?.commits.length ?? 0)
-        }}</span>
-      </button>
-      <button :class="{ active: tab === 'issues' }" @click="goTab('issues')">
-        <PhRecord :size="16" aria-hidden="true" />
-        Issues
-        <span class="counter">{{ openModelIssueCount }}</span>
-      </button>
-      <button
-        v-if="isAdmin"
-        :class="{ active: tab === 'einstellungen' }"
-        @click="goTab('einstellungen')"
-      >
-        <PhGear :size="16" aria-hidden="true" />
-        Einstellungen
-      </button>
-    </nav>
-
-    <div v-if="uploadError && !showCommitModal" class="alert error">
-      {{ uploadError }}
-    </div>
-
-    <!-- ================= Tab: Inhalt (Markdown) ================= -->
-    <div v-if="tab === 'inhalt' && isMd" class="card">
-      <div class="card-header">
-        <strong>{{ modelData.model.name }}</strong>
-        <span v-if="selectedBranch" class="badge">{{ selectedBranch }}</span>
-        <span class="topbar-spacer" />
-        <button v-if="!editing && canWrite" @click="startEdit">
-          <PhPencilSimple :size="14" aria-hidden="true" />
-          Bearbeiten
-        </button>
-      </div>
-      <template v-if="!editing">
-        <div
-          v-if="contentHtml"
-          class="card-body markdown-body"
-          v-html="contentHtml"
-        ></div>
-        <div v-else class="empty">
-          Noch kein Inhalt auf diesem Branch — über „Bearbeiten“ die erste
-          Version committen.
-        </div>
-      </template>
-      <div v-else class="card-body">
-        <div class="form-row">
-          <MarkdownEditor v-model="editDraft" min-height="20rem" />
-        </div>
-        <div class="form-inline">
-          <div>
-            <label for="edit-message">Commit-Nachricht</label>
-            <input
-              id="edit-message"
-              v-model="editMessage"
-              type="text"
-              placeholder="Was hat sich geändert?"
-            />
-          </div>
-          <div class="shrink">
-            <button class="primary" :disabled="editBusy" @click="saveEdit">
-              Committen
-            </button>
-          </div>
-          <div class="shrink">
-            <button :disabled="editBusy" @click="editing = false">
-              Abbrechen
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ================= Tab: Vorschau (Datei) ================= -->
-    <div v-else-if="tab === 'vorschau' && isFile" class="card">
-      <div class="card-header">
-        <strong>{{ modelData.model.name }}</strong>
-        <span v-if="selectedBranch" class="badge">{{ selectedBranch }}</span>
-        <span v-if="headCommit" class="commit-id">
-          {{ headCommit.message || "(ohne Nachricht)" }} ·
-          {{ headCommit.id.slice(0, 8) }}
-        </span>
-        <span class="topbar-spacer" />
-        <button v-if="headCommit" @click="downloadCommit(headCommit)">
-          Herunterladen
-        </button>
-        <button v-if="canWrite" class="primary" @click="openCommitModal">
-          <PhUploadSimple :size="14" aria-hidden="true" />
-          Neue Version
-        </button>
-      </div>
-      <LoadingState
-        v-if="commitsPending"
-        center
-        large
-        text="Lade Commit-Stand …"
-      />
-      <FilePreview
-        v-else-if="headCommit"
-        :key="headCommit.id"
-        :src="`/api${base}/commits/${headCommit.id}/file`"
-        :name="modelData.model.name"
-      />
-      <div v-else class="empty">
-        Noch keine Version auf diesem Branch — erst eine Datei hochladen.
-      </div>
-    </div>
-
-    <!-- ================= Tab: Commits (Graph) ================= -->
-    <div v-else-if="tab === 'commits'" class="card">
-      <div class="card-header">
-        <div class="tabs">
-          <button
-            v-for="branch in modelData.branches"
-            :key="branch.id"
-            :class="{ active: selectedBranch === branch.name }"
-            @click="selectedBranch = branch.name"
-          >
-            {{ branch.name }}
-          </button>
-          <button
-            :class="{ active: selectedBranch === '' }"
-            @click="selectedBranch = ''"
-          >
-            alle
-          </button>
-        </div>
-        <span class="topbar-spacer" />
-        <template v-if="canWrite">
-          <button @click="openBranchModal">
-            <PhGitBranch :size="14" aria-hidden="true" />
-            Neuer Branch
-          </button>
-          <button v-if="!isMd" class="primary" @click="openCommitModal">
-            <PhUploadSimple :size="14" aria-hidden="true" />
-            {{ isFile ? "Neue Version hochladen" : "Neuen Stand committen" }}
-          </button>
-          <button
-            v-else
-            class="primary"
-            @click="goTab('inhalt'); startEdit()"
-          >
-            Bearbeiten
-          </button>
+  <div v-else class="model-page">
+    <!-- ============ Kopf: Pfad + Werkzeuge ============ -->
+    <div class="model-head">
+      <nav class="crumbs model-crumbs" aria-label="Pfad">
+        <NuxtLink :to="`/p/${slug}`">{{ detail?.project.name ?? slug }}</NuxtLink>
+        <template v-for="crumb in crumbs" :key="crumb.path">
+          <span class="sep">/</span>
+          <NuxtLink :to="{ path: `/p/${slug}`, query: { path: crumb.path } }">{{ crumb.label }}</NuxtLink>
         </template>
+        <span class="sep">/</span>
+        <span v-if="model" class="current model-name">
+          <ModelIcon :kind="model.kind" :name="model.name" :size="18" />
+          {{ model.name }}
+        </span>
+        <span v-else class="skeleton" style="width: 160px; height: 18px" />
+        <button
+          v-if="model"
+          type="button"
+          class="btn btn-invisible btn-sm btn-icon"
+          :aria-label="pathCopied ? 'Kopiert' : 'Pfad kopieren'"
+          :data-tip="pathCopied ? 'Kopiert!' : 'Pfad kopieren'"
+          @click="copyPath"
+        >
+          <PhCheck v-if="pathCopied" :size="14" class="color-success" />
+          <PhCopy v-else :size="14" />
+        </button>
+      </nav>
+      <span v-if="model?.visibility === 'public'" class="tag" title="Auch ohne Anmeldung abrufbar">
+        <PhGlobeSimple :size="12" /> Öffentlich
+      </span>
+    </div>
+
+    <div class="model-toolbar">
+      <BranchMenu
+        v-if="model"
+        :model-value="selectedBranch ?? ''"
+        @update:model-value="(value) => (selectedBranch = value)"
+        :branches="branches"
+        :default-branch="model.defaultBranch"
+        :can-create="canWrite"
+        :allow-all="tab === 'commits'"
+        @create="createBranch"
+      />
+      <nav class="seg" aria-label="Ansicht">
+        <button type="button" :class="{ active: tab === 'view' }" @click="goTab('view')">
+          <PhCubeTransparent v-if="isIfc" :size="14" />
+          <PhBookOpen v-else-if="isMd" :size="14" />
+          <PhEye v-else :size="14" />
+          {{ viewLabel }}
+        </button>
+        <button type="button" :class="{ active: tab === 'commits' }" @click="goTab('commits')">
+          <PhClockCounterClockwise :size="14" />
+          Verlauf
+          <span v-if="commitsData" class="counter">{{ commits.length }}</span>
+        </button>
+        <button type="button" :class="{ active: tab === 'issues' }" @click="goTab('issues')">
+          <PhRecord :size="14" />
+          Issues
+          <span v-if="issuesData" class="counter">{{ openIssues.length }}</span>
+        </button>
+        <button
+          v-if="isAdmin"
+          type="button"
+          aria-label="Einstellungen"
+          :class="{ active: tab === 'settings' }"
+          @click="goTab('settings')"
+        >
+          <PhGear :size="14" />
+          <span class="hide-sm">Einstellungen</span>
+        </button>
+      </nav>
+      <span class="spacer" />
+      <button
+        type="button"
+        class="btn"
+        :disabled="!shown"
+        :aria-label="`${downloadExt} herunterladen`"
+        @click="download(shown)"
+      >
+        <PhDownloadSimple :size="16" />
+        <span class="hide-sm">.{{ downloadExt }}</span>
+      </button>
+      <template v-if="canWrite && model">
+        <button
+          v-if="isMd"
+          type="button"
+          class="btn btn-primary"
+          :disabled="editing || !mdReady || Boolean(editBlockedReason)"
+          :title="editBlockedReason ?? undefined"
+          @click="startEdit"
+        >
+          <PhPencilSimple :size="16" /> Bearbeiten
+        </button>
+        <button v-else type="button" class="btn btn-primary" @click="versionOpen = true">
+          <PhUploadSimple :size="16" />
+          {{ isIfc ? "Neuer Stand" : "Neue Version" }}
+        </button>
+      </template>
+    </div>
+
+    <!-- ============ Älterer Stand ============ -->
+    <div v-if="isOld && tab === 'view'" class="flash flash-warn">
+      <PhClockCounterClockwise :size="16" />
+      <div class="flash-body">
+        Du siehst einen älteren Stand vom <strong>{{ formatDateTime(shown!.createdAt) }}</strong>
+        (<span class="mono">{{ shortSha(shown!.id) }}</span> · {{ shown!.message || "ohne Nachricht" }}).
+      </div>
+      <NuxtLink :to="`/p/${slug}/m/${modelSlug}`" class="btn btn-sm">
+        <PhArrowLeft :size="14" /> Zum aktuellen Stand
+      </NuxtLink>
+    </div>
+
+    <!-- ============ Ansicht ============ -->
+    <div v-if="tab === 'view'" class="box model-view">
+      <div class="box-header model-commitbar">
+        <template v-if="shown">
+          <UserAvatar :user="shown.author ?? null" :size="24" />
+          <strong class="nowrap">{{ shown.author?.name ?? "?" }}</strong>
+          <NuxtLink
+            :to="isIfc ? `/p/${slug}/m/${modelSlug}/c/${shown.id}` : `/p/${slug}/m/${modelSlug}?tab=commits`"
+            class="model-commitbar-msg truncate"
+          >
+            {{ shown.message || "(ohne Nachricht)" }}
+          </NuxtLink>
+          <CommitStatus :check="checks.get(shown.id)" :slug="slug" />
+          <span class="spacer" />
+          <span v-if="isIfc" class="muted small nowrap hide-sm">
+            {{ shown.schema }} · {{ formatNumber(shown.entityCount) }} Entities
+          </span>
+          <NuxtLink
+            :to="isIfc ? `/p/${slug}/m/${modelSlug}/c/${shown.id}` : `/p/${slug}/m/${modelSlug}?tab=commits`"
+            class="sha"
+          >{{ shortSha(shown.id) }}</NuxtLink>
+          <span class="muted small nowrap"><RelTime :date="shown.createdAt" /></span>
+        </template>
+        <template v-else-if="commitsPending || !model">
+          <span class="skeleton dot" />
+          <span class="skeleton" style="max-width: 320px" />
+        </template>
+        <span v-else class="muted">Noch keine Version auf „{{ selectedBranch }}“.</span>
       </div>
 
-      <SkeletonRows v-if="commitsPending && !graph.rows.length" :rows="4" dots />
-      <div v-else-if="graph.rows.length" class="cg-wrap" :class="{ refreshing: commitsPending }">
-        <LoadingState v-if="commitsPending" text="Lade Commits …" />
-        <svg
-          class="cg-svg"
-          :width="graph.width"
-          :height="graph.height"
-          aria-hidden="true"
+      <template v-if="!model || (commitsPending && !shown)">
+        <LoadingState center large text="Lade Stand …" />
+      </template>
+      <template v-else-if="!shown">
+        <Blankslate
+          :icon="isIfc ? PhCubeTransparent : PhUploadSimple"
+          :title="isIfc ? 'Noch kein Stand committet' : 'Noch keine Version'"
+          blueprint
         >
-          <path
-            v-for="(edge, i) in graph.edges"
-            :key="i"
-            :d="edge.path"
-            :stroke="edge.color"
-            stroke-width="2"
-            fill="none"
-          />
-          <circle
-            v-for="row in graph.rows"
-            :key="row.commit.id"
-            :cx="laneX(row.lane)"
-            :cy="rowY(row.index)"
-            r="4.5"
-            :fill="laneColor(row.lane)"
-          />
-        </svg>
-        <div class="cg-rows">
-          <div v-for="row in graph.rows" :key="row.commit.id" class="cg-row">
-            <div class="cg-main">
-              <NuxtLink
-                class="cg-msg"
-                :to="`/p/${slug}/m/${modelSlug}/c/${row.commit.id}`"
-              >
-                {{ row.commit.message || "(ohne Nachricht)" }}
-              </NuxtLink>
-              <div class="cg-meta">
-                <span
-                  class="cg-branch"
-                  :style="{ color: laneColor(row.lane), borderColor: laneColor(row.lane) }"
-                >{{ row.commit.branchName }}</span>
-                {{ row.commit.author?.name ?? "?" }} ·
-                {{ dateFmt.format(new Date(row.commit.createdAt)) }} ·
-                <span class="mono">{{ row.commit.id.slice(0, 8) }}</span>
-              </div>
-            </div>
-            <span
-              v-if="isIfc"
-              class="diffstat"
-              title="Objekte: neu / geändert / entfernt"
-            >
-              <span class="add">+{{ numberFmt.format(row.commit.added) }}</span>
-              <span class="mod">~{{ numberFmt.format(row.commit.modified) }}</span>
-              <span class="del">−{{ numberFmt.format(row.commit.removed) }}</span>
-            </span>
-            <span v-if="isIfc" class="muted small cg-entities">
-              {{ numberFmt.format(row.commit.entityCount) }} Entities
-            </span>
-            <button class="link" @click="downloadCommit(row.commit)">
-              .{{ downloadExtension }}
+          {{
+            isIfc
+              ? "Committe die erste IFC-Datei — danach siehst du hier das Modell in 3D und bei jedem weiteren Stand, was sich geändert hat."
+              : isMd
+                ? "Schreibe den ersten Inhalt direkt im Browser."
+                : "Lade die erste Version hoch — PDF, Word, DWG/DXF und Bilder bekommen eine Vorschau."
+          }}
+          <template v-if="canWrite" #actions>
+            <button v-if="isMd" type="button" class="btn btn-primary" @click="startEdit">
+              <PhPencilSimple :size="16" /> Inhalt schreiben
+            </button>
+            <button v-else type="button" class="btn btn-primary" @click="versionOpen = true">
+              <PhUploadSimple :size="16" /> {{ isIfc ? "Ersten Stand committen" : "Datei hochladen" }}
+            </button>
+          </template>
+        </Blankslate>
+        <div v-if="isMd && editing" class="box-body md-edit">
+          <MarkdownEditor v-model="draft" min-height="22rem" />
+          <div class="md-edit-foot">
+            <span class="tag" title="Ziel-Branch"><PhGitBranch :size="12" /> {{ editBranch }}</span>
+            <input v-model="editMessage" type="text" placeholder="Commit-Nachricht (optional)" />
+            <button type="button" class="btn" :disabled="saving" @click="editing = false">Abbrechen</button>
+            <button type="button" class="btn btn-primary" :disabled="saving" @click="saveEdit">
+              <span v-if="saving" class="spinner" /> Committen
             </button>
           </div>
         </div>
-      </div>
-      <div v-else class="empty">
-        Noch keine Commits auf diesem Branch.
-      </div>
-    </div>
+      </template>
 
-    <!-- ================= Tab: 3D-Vorschau ================= -->
-    <div v-else-if="tab === '3d'" class="card">
-      <div class="card-header">
-        <strong>3D-Vorschau</strong>
-        <span v-if="selectedBranch" class="badge">{{ selectedBranch }}</span>
-        <span v-if="headCommit" class="commit-id">
-          {{ headCommit.message || "(ohne Nachricht)" }} ·
-          {{ headCommit.id.slice(0, 8) }}
-        </span>
-      </div>
-      <LoadingState
-        v-if="commitsPending"
-        center
-        large
-        text="Lade Commit-Stand …"
-      />
+      <!-- IFC: 3D -->
       <ModelViewer
-        v-else-if="headCommit"
-        :key="headCommit.id"
-        :sources="[
-          {
-            key: headCommit.id,
-            src: `/api${base}/commits/${headCommit.id}/fragments`,
-            label: modelData.model.name,
-          },
-        ]"
+        v-else-if="isIfc"
+        :key="shown.id"
+        class="model-viewer"
+        :sources="[{ key: shown.id, src: `/api${base}/commits/${shown.id}/fragments`, label: model.name }]"
       />
-      <div v-else class="empty">
-        Noch keine Commits auf diesem Branch — erst einen Stand committen.
-      </div>
-    </div>
 
-    <!-- ================= Tab: Issues (dieses Modells) ================= -->
-    <div v-else-if="tab === 'issues'" class="card">
-      <div class="card-header">
-        <div class="tabs">
-          <button
-            :class="{ active: issueFilter === 'open' }"
-            @click="issueFilter = 'open'"
-          >
-            <PhRecord :size="14" aria-hidden="true" />
-            {{ openModelIssueCount }} Offen
-          </button>
-          <button
-            :class="{ active: issueFilter === 'closed' }"
-            @click="issueFilter = 'closed'"
-          >
-            <PhCheckCircle :size="14" aria-hidden="true" />
-            {{ closedModelIssueCount }} Geschlossen
-          </button>
-        </div>
-        <span class="topbar-spacer" />
-        <NuxtLink
-          class="btn primary"
-          :to="`/p/${slug}?tab=issues&forModel=${modelData.model.id}`"
-          title="Neues Issue anlegen — dieses Modell ist vorverknüpft"
-        >
-          <PhPlus :size="14" aria-hidden="true" />
-          Neues Issue
-        </NuxtLink>
-      </div>
-
-      <SkeletonRows
-        v-if="(issuesStatus === 'pending' || issuesStatus === 'idle') && !issuesData"
-        :rows="3"
-        dots
+      <!-- Datei: Vorschau -->
+      <FilePreview
+        v-else-if="isFile"
+        :key="shown.id"
+        :src="`/api${base}/commits/${shown.id}/file`"
+        :name="model.name"
       />
-      <ul v-else-if="filteredModelIssues.length" class="list">
-        <li
-          v-for="issue in filteredModelIssues"
-          :key="issue.id"
-          class="list-item"
-        >
-          <span class="issue-state" :class="issue.state">
-            <PhRecord v-if="issue.state === 'open'" :size="18" />
-            <PhCheckCircle v-else :size="18" weight="fill" />
-          </span>
-          <div class="list-item-main">
-            <NuxtLink
-              :to="`/p/${slug}/i/${issue.number}`"
-              style="font-weight: 600"
-            >
-              {{ issue.title }}
-            </NuxtLink>
-            <span
-              v-if="issue.kind === 'bcf'"
-              class="badge accent"
-              title="Echtes IFC-Issue — als BCF exportierbar"
-            >BCF</span>
-            <span
-              v-for="label in issue.labels"
-              :key="label.id"
-              class="label-chip"
-              :style="{
-                backgroundColor: label.color,
-                color: labelTextColor(label.color),
-              }"
-            >{{ label.name }}</span>
-            <div class="muted small">
-              #{{ issue.number }} · {{ issue.author?.name ?? "?" }} ·
-              {{ dateFmt.format(new Date(issue.createdAt)) }}
-              <template v-if="issue.guids.length">
-                · {{ issue.guids.length }}
-                {{ issue.guids.length === 1 ? "Objekt verortet" : "Objekte verortet" }}
-              </template>
-              <!-- Versionsbezug dieses Modells -->
-              <template
-                v-for="linked in issue.models.filter((m) => m.slug === modelSlug)"
-                :key="`ref-${linked.id}`"
-              >
-                <template v-if="linked.foundCommit">
-                  · aufgefallen in
-                  <NuxtLink
-                    class="commit-id"
-                    :to="`/p/${slug}/m/${modelSlug}/c/${linked.foundCommit.id}`"
-                  >{{ linked.foundCommit.id.slice(0, 8) }}</NuxtLink>
-                </template>
-                <template v-if="linked.fixedCommit">
-                  · behoben in
-                  <NuxtLink
-                    class="commit-id"
-                    :to="`/p/${slug}/m/${modelSlug}/c/${linked.fixedCommit.id}`"
-                  >{{ linked.fixedCommit.id.slice(0, 8) }}</NuxtLink>
-                </template>
-              </template>
-            </div>
-          </div>
-          <span v-if="issue.assignees.length" class="muted small">
-            &rarr; {{ issue.assignees.map((a) => a.name).join(", ") }}
-          </span>
-        </li>
-      </ul>
-      <div v-else class="empty">
-        Keine {{ issueFilter === "open" ? "offenen" : "geschlossenen" }}
-        Issues zu diesem Modell — über „Neues Issue" eines anlegen oder auf
-        der Commit-Seite „Issue aus Run erstellen" nutzen.
-      </div>
-    </div>
 
-    <!-- ================= Tab: Einstellungen ================= -->
-    <template v-else-if="tab === 'einstellungen'">
-      <div class="card">
-        <div class="card-header"><h2>Einstellungen</h2></div>
-        <div class="card-body">
-          <div v-if="settingsError" class="alert error">{{ settingsError }}</div>
-          <div v-if="settingsNotice" class="alert success">{{ settingsNotice }}</div>
-          <div class="form-inline">
-            <div class="shrink">
-              <label for="settings-visibility">Sichtbarkeit</label>
-              <select
-                id="settings-visibility"
-                style="width: auto"
-                :value="modelData.model.visibility"
-                @change="
-                  patchModel({
-                    visibility: ($event.target as HTMLSelectElement)
-                      .value as 'private' | 'public',
-                  })
-                "
-              >
-                <option value="private">privat</option>
-                <option value="public">öffentlich</option>
-              </select>
-            </div>
-            <div class="shrink">
-              <label for="settings-default-branch">Standard-Branch</label>
-              <select
-                id="settings-default-branch"
-                style="width: auto"
-                :value="modelData.model.defaultBranch"
-                @change="
-                  patchModel({
-                    defaultBranch: ($event.target as HTMLSelectElement).value,
-                  })
-                "
-              >
-                <option
-                  v-for="branch in modelData.branches"
-                  :key="branch.id"
-                  :value="branch.name"
-                >
-                  {{ branch.name }}
-                </option>
-              </select>
-            </div>
-            <div>
-              <label for="settings-folder">Ordner ("" = Wurzel)</label>
-              <div class="form-inline" style="align-items: center">
-                <input
-                  id="settings-folder"
-                  v-model="folderDraft"
-                  type="text"
-                  list="project-folders"
-                  placeholder="z.B. Hochbau/EG"
-                  style="max-width: 260px"
-                />
-                <datalist id="project-folders">
-                  <option
-                    v-for="folder in projectData?.folders ?? []"
-                    :key="folder"
-                    :value="folder"
-                  />
-                </datalist>
-                <button
-                  class="shrink"
-                  :disabled="folderDraft === (modelData.model.folder ?? '')"
-                  @click="patchModel({ folder: folderDraft ?? '' })"
-                >
-                  Verschieben
-                </button>
-              </div>
-            </div>
+      <!-- Markdown: Inhalt / Bearbeiten -->
+      <template v-else>
+        <div v-if="editing" class="box-body md-edit">
+          <MarkdownEditor v-model="draft" min-height="22rem" />
+          <div class="md-edit-foot">
+            <span class="tag" title="Ziel-Branch"><PhGitBranch :size="12" /> {{ editBranch }}</span>
+            <input v-model="editMessage" type="text" placeholder="Was hat sich geändert? (optional)" />
+            <button type="button" class="btn" :disabled="saving" @click="editing = false">Abbrechen</button>
+            <button type="button" class="btn btn-primary" :disabled="saving" @click="saveEdit">
+              <span v-if="saving" class="spinner" /> Committen
+            </button>
           </div>
         </div>
-      </div>
+        <article v-else-if="mdHtml" class="box-body markdown-body readme-body" v-html="mdHtml" />
+        <LoadingState v-else center text="Lade Inhalt …" />
+      </template>
+    </div>
 
-      <div class="card" style="border-color: var(--danger)">
-        <div class="card-header">
-          <h2 style="color: var(--danger)">Gefahrenzone</h2>
-        </div>
-        <div class="card-body">
-          <p class="muted small" style="margin-top: 0">
-            Löscht „{{ modelData.model.name }}“ mit allen Branches und
-            Versionsständen — unwiderruflich.
-          </p>
-          <button class="danger" @click="deleteModel">
-            {{ isIfc ? "Modell" : "Datei" }} löschen
-          </button>
-        </div>
+    <!-- ============ Verlauf ============ -->
+    <template v-else-if="tab === 'commits'">
+      <SkeletonRows v-if="commitsPending && !commits.length" class="box" :rows="5" dots />
+      <CommitHistory
+        v-else-if="commits.length && model"
+        :commits="commits"
+        :slug="slug"
+        :model-slug="modelSlug"
+        :default-branch="model.defaultBranch"
+        :is-ifc="isIfc"
+        :show-branches="selectedBranch === ''"
+        :checks="checks"
+        :download-ext="downloadExt"
+        @download="download"
+      />
+      <div v-else class="box">
+        <Blankslate :icon="PhClockCounterClockwise" title="Noch keine Commits" compact>
+          Auf diesem Branch gibt es noch keinen Stand.
+        </Blankslate>
       </div>
     </template>
 
-    <!-- ================= Modal: Committen ================= -->
-    <div
-      v-if="showCommitModal"
-      class="modal-backdrop"
-      @click.self="uploading || (showCommitModal = false)"
-    >
-      <div class="card modal">
-        <div class="card-header">
-          <h2>{{ isFile ? "Neue Version hochladen" : "Neuen Stand committen" }}</h2>
-          <span class="topbar-spacer" />
-          <button class="link" :disabled="uploading" @click="showCommitModal = false">✕</button>
+    <!-- ============ Issues ============ -->
+    <div v-else-if="tab === 'issues'" class="box">
+      <div class="box-header">
+        <div class="subnav">
+          <button type="button" class="subnav-item" :class="{ active: issueState === 'open' }" @click="issueState = 'open'">
+            <PhRecord :size="16" /> {{ openIssues.length }} offen
+          </button>
+          <button
+            type="button"
+            class="subnav-item"
+            :class="{ active: issueState === 'closed' }"
+            @click="issueState = 'closed'"
+          >
+            <PhCheck :size="16" /> {{ modelIssues.length - openIssues.length }} geschlossen
+          </button>
         </div>
-        <div class="card-body">
-          <div v-if="uploadError" class="alert error">{{ uploadError }}</div>
-          <form @submit.prevent="submitCommit">
-            <label
-              class="dropzone"
-              :class="{ over: dragOver, filled: !!file, busy: uploading }"
-              for="commit-file"
-              @dragover.prevent="dragOver = true"
-              @dragleave.prevent="dragOver = false"
-              @drop.prevent="onFileDrop"
-            >
-              <input
-                id="commit-file"
-                ref="fileInput"
-                class="dropzone-input"
-                type="file"
-                :accept="commitAccept"
-                :disabled="uploading"
-                @change="onFileChange"
-              />
-              <PhUploadSimple :size="26" aria-hidden="true" />
-              <template v-if="file">
-                <strong>{{ file.name }}</strong>
-                <span class="muted small">
-                  {{ formatFileSize(file.size) }} · andere Datei wählen
-                </span>
-              </template>
-              <template v-else>
-                <strong>{{ isIfc ? "IFC-Datei" : "Datei" }} hierher ziehen</strong>
-                <span class="muted small">oder klicken, um eine Datei zu wählen</span>
-              </template>
-            </label>
-            <div class="form-row">
-              <label for="commit-message">Was hat sich geändert?</label>
-              <input
-                id="commit-message"
-                v-model="message"
-                type="text"
-                placeholder="z. B. Brandschutzklassen der Innenwände ergänzt"
-                :disabled="uploading"
-              />
-            </div>
-            <div class="form-inline">
-              <div class="shrink">
-                <label for="commit-branch">Branch</label>
-                <select id="commit-branch" v-model="commitBranch" style="width: auto">
-                  <option
-                    v-for="branch in modelData.branches"
-                    :key="branch.id"
-                    :value="branch.name"
-                  >
-                    {{ branch.name }}
-                  </option>
-                  <option
-                    v-if="!modelData.branches.length"
-                    :value="modelData.model.defaultBranch"
-                  >
-                    {{ modelData.model.defaultBranch }}
-                  </option>
-                  <option value="__new__">neuer Branch …</option>
-                </select>
-              </div>
-              <div v-if="commitBranch === '__new__'">
-                <label for="new-branch-name">Name des neuen Branch</label>
-                <input
-                  id="new-branch-name"
-                  v-model="newBranchName"
-                  type="text"
-                  placeholder="variante-a"
-                />
-              </div>
-              <div class="shrink" style="margin-left: auto">
-                <button class="primary" type="submit" :disabled="uploading || !file">
-                  <span v-if="uploading" class="spinner" aria-hidden="true" />
-                  {{ uploading ? "Wird committet …" : "Committen" }}
-                </button>
-              </div>
-            </div>
-            <div v-if="uploading" class="upload-progress" role="status">
-              <span
-                class="progress"
-                :class="{ indeterminate: uploadPercent === 100 }"
+        <span class="spacer" />
+        <NuxtLink
+          v-if="model"
+          :to="`/p/${slug}/issues/new?forModel=${model.id}`"
+          class="btn btn-primary btn-sm"
+        >
+          <PhPlus :size="14" /> Neues Issue
+        </NuxtLink>
+      </div>
+      <SkeletonRows v-if="issuesStatus === 'pending' && !issuesData" :rows="3" dots />
+      <template v-else-if="shownIssues.length">
+        <IssueRow
+          v-for="issue in shownIssues"
+          :key="issue.id"
+          :issue="issue"
+          :slug="slug"
+          :model-slug="modelSlug"
+        />
+      </template>
+      <Blankslate v-else :icon="PhRecord" :title="issueState === 'open' ? 'Keine offenen Issues' : 'Keine geschlossenen Issues'" compact>
+        Issues zu diesem Modell entstehen hier oder direkt aus fehlgeschlagenen Prüfungen.
+      </Blankslate>
+    </div>
+
+    <!-- ============ Einstellungen ============ -->
+    <div v-else-if="tab === 'settings' && model" class="settings-stack">
+      <div class="box">
+        <div class="box-header"><h2 class="box-title">Allgemein</h2></div>
+        <div class="box-body">
+          <form class="form-group" @submit.prevent="patchModel({ name: settingsName.trim() }, 'Umbenannt.')">
+            <label class="form-label" for="model-name">Name</label>
+            <div class="row">
+              <input id="model-name" v-model="settingsName" type="text" style="max-width: 360px" />
+              <button
+                type="submit"
+                class="btn"
+                :disabled="settingsBusy || !settingsName.trim() || settingsName.trim() === model.name"
               >
-                <span
-                  :style="{
-                    width: uploadPercent === 100 ? undefined : `${uploadPercent ?? 0}%`,
-                  }"
-                />
-              </span>
-              <span class="muted small">
-                <template v-if="uploadPercent !== null && uploadPercent < 100">
-                  Lade hoch … {{ uploadPercent }} %
-                </template>
-                <template v-else-if="isIfc">
-                  Server analysiert das Modell und ermittelt die Änderungen —
-                  bei großen Dateien dauert das einige Sekunden.
-                </template>
-                <template v-else>Server speichert die Datei …</template>
-              </span>
+                Umbenennen
+              </button>
+            </div>
+            <p class="form-hint">Die Adresse (<code>/m/{{ model.slug }}</code>) bleibt gleich.</p>
+          </form>
+          <form class="form-group" @submit.prevent="patchModel({ folder: settingsFolder.trim() }, 'Verschoben.')">
+            <label class="form-label" for="model-folder">Ordner</label>
+            <div class="row">
+              <input
+                id="model-folder"
+                v-model="settingsFolder"
+                type="text"
+                list="model-folders"
+                placeholder="leer = Projektwurzel"
+                style="max-width: 360px"
+              />
+              <datalist id="model-folders">
+                <option v-for="folder in detail?.folders ?? []" :key="folder" :value="folder" />
+              </datalist>
+              <button type="submit" class="btn" :disabled="settingsBusy || settingsFolder.trim() === (model.folder ?? '')">
+                Verschieben
+              </button>
             </div>
           </form>
+          <div :key="settingsKey" class="form-row">
+            <div class="shrink">
+              <label class="form-label" for="model-branch">Standard-Branch</label>
+              <select
+                id="model-branch"
+                class="auto"
+                :value="model.defaultBranch"
+                @change="patchModel({ defaultBranch: ($event.target as HTMLSelectElement).value })"
+              >
+                <option v-for="branch in branches" :key="branch.id" :value="branch.name">{{ branch.name }}</option>
+              </select>
+            </div>
+            <div class="shrink">
+              <label class="form-label" for="model-visibility">Sichtbarkeit</label>
+              <select
+                id="model-visibility"
+                class="auto"
+                :value="model.visibility"
+                @change="patchModel({ visibility: ($event.target as HTMLSelectElement).value })"
+              >
+                <option value="private">Nur angemeldete Projektleser</option>
+                <option value="public">Öffentlich (auch ohne Anmeldung)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="box box-danger">
+        <div class="box-header"><h2 class="box-title">Gefahrenzone</h2></div>
+        <div class="box-row danger-row">
+          <div>
+            <strong>{{ isIfc ? "Modell" : "Datei" }} löschen</strong>
+            <p class="muted small" style="margin: 2px 0 0">
+              Löscht „{{ model.name }}“ mit allen Branches und Versionsständen — unwiderruflich.
+            </p>
+          </div>
+          <button type="button" class="btn btn-danger" @click="deleteModel">Löschen</button>
         </div>
       </div>
     </div>
 
-    <!-- ================= Modal: Branch anlegen ================= -->
-    <div v-if="showBranchModal" class="modal-backdrop" @click.self="showBranchModal = false">
-      <div class="card modal">
-        <div class="card-header">
-          <h2>Branch anlegen</h2>
-          <span class="topbar-spacer" />
-          <button class="link" @click="showBranchModal = false">✕</button>
-        </div>
-        <div class="card-body">
-          <div v-if="branchError" class="alert error">{{ branchError }}</div>
-          <form class="form-inline" @submit.prevent="createBranch">
-            <div>
-              <label for="branch-name">Name</label>
-              <input
-                id="branch-name"
-                v-model="branchName"
-                type="text"
-                required
-                placeholder="variante-a"
-              />
-            </div>
-            <div class="shrink">
-              <label for="branch-from">Ausgehend von</label>
-              <select id="branch-from" v-model="branchFrom" style="width: auto">
-                <option
-                  v-for="branch in modelData.branches"
-                  :key="branch.id"
-                  :value="branch.name"
-                >
-                  {{ branch.name }}
-                </option>
-              </select>
-            </div>
-            <div class="shrink">
-              <button class="primary" type="submit">Anlegen</button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
+    <NewVersionDialog
+      v-if="model"
+      v-model:open="versionOpen"
+      :slug="slug"
+      :model="model"
+      :branches="branches"
+      :branch="selectedBranch ?? model.defaultBranch"
+      @committed="onCommitted"
+    />
   </div>
 </template>

@@ -30,6 +30,14 @@ export const ADMIN_ROLES: ReadonlySet<Role> = new Set<Role>([
   "maintainer",
 ]);
 
+/** All valid roles (validates request input). */
+export const ALL_ROLES: ReadonlySet<string> = new Set<Role>([
+  "owner",
+  "maintainer",
+  "contributor",
+  "viewer",
+]);
+
 export interface User {
   id: string;
   email: string;
@@ -44,6 +52,8 @@ export interface Project {
   id: string;
   slug: string;
   name: string;
+  /** Kurzbeschreibung (max. 500 Zeichen); "" = keine. */
+  description: string;
   ownerId: string;
   createdAt: string;
   /**
@@ -111,6 +121,8 @@ export interface Label {
   name: string;
   /** Hex-Farbe wie "#d73a4a". */
   color: string;
+  /** Kurzbeschreibung (max. 100 Zeichen); "" = keine. */
+  description: string;
 }
 
 export type IssueState = "open" | "closed";
@@ -172,6 +184,75 @@ export interface IssueLinks {
   models: IssueModelLink[];
   labelIds: string[];
   guids: string[];
+}
+
+/**
+ * Zeitleisten-Ereignis eines Issues (wie GitHub "closed this", "added the
+ * bug label"). Entsteht beim Ändern eines Issues, je tatsächlicher Änderung
+ * eines; `data` hält Namen als Schnappschuss zum Ereigniszeitpunkt, damit
+ * spätere Umbenennungen die Historie nicht verfälschen.
+ */
+export type IssueEventKind =
+  | "closed"
+  | "reopened"
+  | "renamed"
+  | "labeled"
+  | "unlabeled"
+  | "assigned"
+  | "unassigned"
+  | "linked_model"
+  | "unlinked_model"
+  | "parent_changed"
+  | "kind_changed";
+
+export interface IssueEventData {
+  /** renamed: alter/neuer Titel; kind_changed: "virtual"/"bcf". */
+  from?: string;
+  to?: string;
+  /** labeled/unlabeled — Schnappschuss zum Ereigniszeitpunkt. */
+  labels?: { id: string; name: string; color: string }[];
+  /** assigned/unassigned — Schnappschuss. */
+  users?: { id: string; name: string }[];
+  /** linked_model/unlinked_model — Schnappschuss. */
+  models?: { id: string; slug: string; name: string }[];
+  /** parent_changed: das NEUE übergeordnete Issue (null = gelöst). */
+  parent?: { number: number; title: string } | null;
+}
+
+export interface IssueEvent {
+  id: string;
+  issueId: string;
+  projectId: string;
+  actorId: string;
+  kind: IssueEventKind;
+  data: IssueEventData;
+  createdAt: string;
+}
+
+/**
+ * Reihenfolge gleichzeitiger Ereignisse — alle Ereignisse einer Änderung
+ * teilen sich `createdAt`; so zeigen alle Repository-Varianten sie gleich.
+ */
+const ISSUE_EVENT_ORDER: readonly IssueEventKind[] = [
+  "renamed",
+  "kind_changed",
+  "parent_changed",
+  "labeled",
+  "unlabeled",
+  "assigned",
+  "unassigned",
+  "linked_model",
+  "unlinked_model",
+  "closed",
+  "reopened",
+];
+
+/** Sortierung der Zeitleiste: chronologisch, gleichzeitige in fester Folge. */
+export function compareIssueEvents(a: IssueEvent, b: IssueEvent): number {
+  return (
+    a.createdAt.localeCompare(b.createdAt) ||
+    ISSUE_EVENT_ORDER.indexOf(a.kind) - ISSUE_EVENT_ORDER.indexOf(b.kind)
+  );
 }
 
 /**
@@ -273,6 +354,83 @@ export interface ActionRun {
   finishedAt: string | null;
 }
 
+/**
+ * Filter der projektübergreifenden "neueste zuerst"-Abfragen (Aktivitäts-
+ * Feed): höchstens `limit` Zeilen je Quelle, nach `createdAt` absteigend.
+ */
+export interface RecentQuery {
+  limit: number;
+  /** Nur Einträge strikt vor diesem Zeitpunkt (ISO-8601). */
+  before?: string;
+  /** Nur Einträge dieses Benutzers (Autor bzw. Auslöser). */
+  actorId?: string;
+}
+
+/** Commit samt seinem Modell (das Modell trägt die Projekt-Id). */
+export interface CommitWithModel {
+  commit: Commit;
+  model: Model;
+}
+
+/** Issue-Kommentar samt Projekt-Id seines Issues. */
+export interface CommentWithProject {
+  comment: IssueComment;
+  projectId: string;
+}
+
+/** Kennzahlen eines Projekts für Listen und Übersichten. */
+export interface ProjectSummary {
+  memberCount: number;
+  modelCount: number;
+  /** Offene Issues inkl. Unter-Issues. */
+  openIssueCount: number;
+  closedIssueCount: number;
+  commitCount: number;
+  /** Jüngster Commit eines Modells im Projekt (null = keiner). */
+  lastCommitAt: string | null;
+  /** Jüngstes `updatedAt` eines Issues (null = keine Issues). */
+  lastIssueAt: string | null;
+}
+
+export function emptyProjectSummary(): ProjectSummary {
+  return {
+    memberCount: 0,
+    modelCount: 0,
+    openIssueCount: 0,
+    closedIssueCount: 0,
+    commitCount: 0,
+    lastCommitAt: null,
+    lastIssueAt: null,
+  };
+}
+
+/** Beiträge eines UTC-Tages (Heatmap). */
+export interface ActivityDayCount {
+  /** "YYYY-MM-DD" (UTC). */
+  day: string;
+  commits: number;
+  issues: number;
+  comments: number;
+}
+
+/** Filter für Issue-Listen über mehrere Projekte. */
+export interface IssueFilter {
+  state?: IssueState;
+  authorId?: string;
+  assigneeId?: string;
+  limit: number;
+}
+
+/** Gesamtzahlen für die Admin-Systemübersicht. */
+export interface RepositoryCounts {
+  users: number;
+  projects: number;
+  models: number;
+  commits: number;
+  issues: number;
+  runs: number;
+}
+
 export interface Repository {
   /**
    * Führt `fn` atomar aus (SQL: BEGIN/COMMIT mit Rollback bei Fehler;
@@ -297,14 +455,24 @@ export interface Repository {
   listAllProjects(): Promise<Project[]>;
 
   // Projects + membership
-  createProject(input: Omit<Project, "id" | "createdAt">): Promise<Project>;
+  createProject(
+    input: Omit<Project, "id" | "createdAt" | "description"> & {
+      /** Standard: "" (keine Beschreibung). */
+      description?: string;
+    },
+  ): Promise<Project>;
   getProjectBySlug(slug: string): Promise<Project | null>;
   listProjectsForUser(userId: string): Promise<Project[]>;
   listPublicProjects(): Promise<Project[]>;
   updateProject(
     projectId: string,
-    patch: Partial<Pick<Project, "name" | "visibility">>,
+    patch: Partial<Pick<Project, "name" | "visibility" | "description">>,
   ): Promise<Project | null>;
+  /**
+   * Kennzahlen je Projekt (Mitglieder, Modelle, Issues, Commits, letzte
+   * Aktivität) in wenigen gruppierten Abfragen statt je Projekt einzeln.
+   */
+  projectSummaries(projectIds: string[]): Promise<Map<string, ProjectSummary>>;
   addMember(member: Member): Promise<Member>;
   getMember(projectId: string, userId: string): Promise<Member | null>;
   listMembers(projectId: string): Promise<Member[]>;
@@ -337,8 +505,19 @@ export interface Repository {
   removeFolder(projectId: string, path: string): Promise<void>;
 
   // Labels
-  createLabel(input: Omit<Label, "id">): Promise<Label>;
+  createLabel(
+    input: Omit<Label, "id" | "description"> & { description?: string },
+  ): Promise<Label>;
   listLabels(projectId: string): Promise<Label[]>;
+  getLabel(labelId: string): Promise<Label | null>;
+  updateLabel(
+    labelId: string,
+    patch: Partial<Pick<Label, "name" | "color" | "description">>,
+  ): Promise<Label | null>;
+  /** Löscht das Label und entfernt es von allen Issues. */
+  deleteLabel(labelId: string): Promise<void>;
+  /** Anzahl OFFENER Issues je Label-Id (Labels ohne offene Issues fehlen). */
+  countOpenIssuesByLabel(projectId: string): Promise<Map<string, number>>;
 
   // Issues
   createIssue(
@@ -367,6 +546,19 @@ export interface Repository {
   /** Ersetzt die jeweils übergebenen Zuordnungs-Mengen komplett. */
   setIssueLinks(issueId: string, links: Partial<IssueLinks>): Promise<void>;
   getIssueLinks(issueIds: string[]): Promise<Map<string, IssueLinks>>;
+  /** Issues mehrerer Projekte nach Filter, jüngste Aktivität (updatedAt) zuerst. */
+  listIssuesByFilter(projectIds: string[], filter: IssueFilter): Promise<Issue[]>;
+  /** Kommentare je Issue zählen (jede angefragte Id ist enthalten, ggf. 0). */
+  countIssueComments(issueIds: string[]): Promise<Map<string, number>>;
+  /** Direkte Unter-Issues je Issue zählen (jede angefragte Id ist enthalten). */
+  countSubIssues(issueIds: string[]): Promise<Map<string, number>>;
+
+  // Issue-Zeitleiste (alle Ereignisse eines Aufrufs teilen sich createdAt)
+  createIssueEvents(
+    events: Omit<IssueEvent, "id" | "createdAt">[],
+  ): Promise<IssueEvent[]>;
+  /** Ereignisse eines Issues, chronologisch (siehe compareIssueEvents). */
+  listIssueEvents(issueId: string): Promise<IssueEvent[]>;
 
   // Issue-Kommentare
   createIssueComment(
@@ -413,6 +605,10 @@ export interface Repository {
   ): Promise<ActionRun[]>;
   /** Alle Runs mit Status queued/running (projektübergreifend, älteste zuerst) — für die Recovery beim Start. */
   listUnfinishedActionRuns(): Promise<ActionRun[]>;
+  /** Runs eines Projekts je Status zählen (ohne Protokolle zu laden). */
+  countActionRunsByStatus(
+    projectId: string,
+  ): Promise<Map<ActionRunStatus, number>>;
   updateActionRun(
     runId: string,
     patch: Partial<
@@ -433,6 +629,54 @@ export interface Repository {
   createCommit(commit: Commit): Promise<Commit>;
   getCommit(id: string): Promise<Commit | null>;
   listCommits(modelId: string, branchName?: string): Promise<Commit[]>;
+  /** Commits aller Modelle eines Projekts je Autor zählen (meiste zuerst). */
+  countCommitsByAuthor(
+    projectId: string,
+  ): Promise<{ authorId: string; count: number }[]>;
+
+  // Aktivitäts-Feed: projektübergreifend, neueste zuerst, je Quelle
+  // höchstens `limit` Zeilen (der Aufrufer mischt und kürzt).
+  listRecentCommits(
+    projectIds: string[],
+    query: RecentQuery,
+  ): Promise<CommitWithModel[]>;
+  /** Eröffnete Issues (actorId = Autor). */
+  listRecentIssues(projectIds: string[], query: RecentQuery): Promise<Issue[]>;
+  listRecentIssueEvents(
+    projectIds: string[],
+    query: RecentQuery & { kinds?: IssueEventKind[] },
+  ): Promise<IssueEvent[]>;
+  listRecentComments(
+    projectIds: string[],
+    query: RecentQuery,
+  ): Promise<CommentWithProject[]>;
+  /** Runs ohne Protokoll (actorId = Auslöser). */
+  listRecentRuns(
+    projectIds: string[],
+    query: RecentQuery,
+  ): Promise<Omit<ActionRun, "log">[]>;
+  /** Commits, eröffnete Issues und Kommentare je UTC-Tag ab `since` ("YYYY-MM-DD"). */
+  activityDayCounts(
+    projectIds: string[],
+    query: { since: string; actorId?: string },
+  ): Promise<ActivityDayCount[]>;
+
+  // Suche (Befehlspalette): Teilstring ohne Groß-/Kleinschreibung,
+  // Präfix-Treffer zuerst.
+  /** Modelle nach Name/Slug/Ordner; danach alphabetisch nach Name. */
+  searchModels(
+    projectIds: string[],
+    text: string,
+    limit: number,
+  ): Promise<Model[]>;
+  /** Issues nach Titel oder exakter Nummer (die zuerst); danach neueste zuerst. */
+  searchIssues(
+    projectIds: string[],
+    query: { text: string; number?: number; limit: number },
+  ): Promise<Issue[]>;
+
+  /** Gesamtzahlen für die Admin-Systemübersicht. */
+  counts(): Promise<RepositoryCounts>;
 
   // Version manifests (content-addressable, deduped entity store)
   saveManifest(

@@ -50,6 +50,12 @@ let abort: AbortController | null = null;
 
 const { token } = useAuth();
 
+// Farbschema der App (nicht nur System): Hintergrund, Raster und Abblend-
+// Material folgen einem Umschalten im Benutzermenü ohne Neuladen.
+const { resolved: themeResolved } = useTheme();
+let applyTheme: ((dark: boolean) => void) | null = null;
+watch(themeResolved, (value) => applyTheme?.(value === "dark"));
+
 interface SpatialNode {
   category: string | null;
   localId: number | null;
@@ -268,7 +274,7 @@ onMounted(async () => {
     world.camera = new OBC.SimpleCamera(components);
     components.init();
 
-    const dark = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
+    const dark = themeResolved.value === "dark";
     world.scene.three.background = new THREE.Color(dark ? 0x0d1117 : 0xf6f8fa);
     world.camera.three.near = 0.1;
     world.camera.three.far = 1_000_000;
@@ -982,6 +988,14 @@ onMounted(async () => {
       }
     };
 
+    applyTheme = (isDark: boolean) => {
+      world.scene.three.background = new THREE.Color(isDark ? 0x0d1117 : 0xf6f8fa);
+      gridUniforms.uColor.value.set(isDark ? 0x3d444d : 0xc4ccd4);
+      dimMaterial.color.set(isDark ? 0x8b949e : 0x9aa4af);
+      if (dimItems) void reapplyColors();
+      requestUpdate?.();
+    };
+
     // GUID-Markierung (Issue-Verortung): rote Hervorhebung + Kamerafahrt.
     // GlobalIds -> ModelIdMap übernimmt der FragmentsManager (ThatOpen
     // guidsToModelIdMap, dieselbe Auflösung wie BCF-Viewpoints); leere
@@ -1382,6 +1396,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  applyTheme = null;
   abort?.abort();
   dispose?.();
 });

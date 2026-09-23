@@ -377,7 +377,7 @@ const show3d = ref(true);
 </script>
 
 <template>
-  <section class="sie card">
+  <section class="sie box">
     <!-- Kopf: Fortschritt + Kennzahlen -->
     <header class="sie-head">
       <div class="sie-head-title">
@@ -406,7 +406,7 @@ const show3d = ref(true);
         </span>
       </div>
       <span class="topbar-spacer" />
-      <button v-if="sources.length" class="btn small" @click="show3d = !show3d">
+      <button v-if="sources.length" class="btn btn-sm" @click="show3d = !show3d">
         {{ show3d ? "3D ausblenden" : "3D anzeigen" }}
       </button>
     </header>
@@ -592,10 +592,7 @@ const show3d = ref(true);
               :style="{ background: `hsl(${hueByCategory.get(row.category) ?? 0} 65% 50%)` }"
               :title="row.category"
             />
-            <span class="issue-state" :class="row.issue.state">
-              <PhRecord v-if="row.issue.state === 'open'" :size="14" />
-              <PhCheckCircle v-else :size="14" weight="fill" />
-            </span>
+            <IssueStateIcon :state="row.issue.state" :size="14" />
             <div class="sie-row-main">
               <div class="sie-row-title">
                 <span class="mono muted">#{{ row.issue.number }}</span>
@@ -621,15 +618,7 @@ const show3d = ref(true);
                   {{ row.issue.guids.length }}
                 </span>
                 <span v-else class="muted">ohne 3D</span>
-                <span
-                  v-for="label in row.issue.labels"
-                  :key="label.id"
-                  class="label-chip"
-                  :style="{
-                    backgroundColor: label.color,
-                    color: labelTextColor(label.color),
-                  }"
-                >{{ label.name }}</span>
+                <LabelChip v-for="label in row.issue.labels" :key="label.id" :label="label" />
               </div>
             </div>
             <NuxtLink
@@ -643,10 +632,10 @@ const show3d = ref(true);
           </li>
           <li v-if="!filtered.length" class="sie-empty">
             Keine Unter-Issues für diese Filter.
-            <button v-if="hasFilter" class="link" @click="resetFilters">Filter zurücksetzen</button>
+            <button v-if="hasFilter" class="link-btn" @click="resetFilters">Filter zurücksetzen</button>
           </li>
           <li v-if="filtered.length > visible.length" class="sie-more">
-            <button class="btn small" @click="limit += PAGE">
+            <button class="btn btn-sm" @click="limit += PAGE">
               Weitere {{ Math.min(PAGE, filtered.length - visible.length) }} anzeigen
               <span class="muted">({{ visible.length }} von {{ filtered.length }})</span>
             </button>

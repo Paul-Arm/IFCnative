@@ -12,6 +12,9 @@
     "typecheck": "nuxt typecheck"
   },
   "dependencies": {
+    "@fontsource-variable/hubot-sans": "^5.3.0",
+    "@fontsource-variable/mona-sans": "^5.3.0",
+    "@fontsource/monaspace-neon": "^5.3.0",
     "@mlightcad/cad-simple-viewer": "1.7.1",
     "@mlightcad/data-model": "^1.14.12",
     "@mlightcad/libredwg-converter": "^3.14.12",

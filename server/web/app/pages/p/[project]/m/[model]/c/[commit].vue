@@ -1,79 +1,179 @@
 <script setup lang="ts">
 import {
-    PhCheckCircle,
-    PhCopy,
-    PhDownloadSimple,
-    PhGitCommit,
-    PhGitDiff,
+  PhArrowLeft,
+  PhArrowRight,
+  PhCheck,
+  PhCheckCircle,
+  PhCopy,
+  PhCubeTransparent,
+  PhDownloadSimple,
+  PhGitBranch,
+  PhGitDiff,
+  PhPlay,
+  PhShieldCheck,
 } from "@phosphor-icons/vue";
 
-import {
-    actionAppliesTo,
-    type Action,
-    type ActionRun,
-    type Commit,
-    type Model,
-    type Role,
-} from "~/types/api";
+import { actionAppliesTo, type Action, type Commit, type Model } from "~/types/api";
 
 // Breites Layout: Liste und 3D-Vergleich stehen nebeneinander.
 definePageMeta({ wide: true });
 
+/**
+ * Ein Commit (Stand) eines Modells: Kopf mit Nachricht, Autor, Vorgänger,
+ * Prüfstatus; darunter die Änderungen (objektzentrierter Diff mit
+ * 3D-Vergleich) und die Prüfungen (Action-Runs) dieses Stands.
+ */
 const route = useRoute();
 const router = useRouter();
+const project = useProject();
+const { slug, canWrite } = project;
 const { api } = useApi();
 const { token } = useAuth();
-const slug = route.params.project as string;
+const toast = useToast();
 const modelSlug = route.params.model as string;
 const commitId = route.params.commit as string;
 const base = `/projects/${slug}/models/${modelSlug}`;
 
-// Alle Daten laden "lazy": Die Seite rendert sofort mit Platzhaltern und
-// füllt sich, sobald die einzelnen Antworten eintreffen — statt bis zur
-// langsamsten Antwort (Diff großer Modelle) komplett leer zu bleiben.
 const {
   data: commitData,
   status: commitStatus,
   error: commitError,
-} = useAsyncData(
-  `commit-${commitId}`,
-  () => api<{ commit: Commit }>(`${base}/commits/${commitId}`),
+} = useAsyncData(`commit-${commitId}`, () => api<{ commit: Commit }>(`${base}/commits/${commitId}`), {
+  lazy: true,
+});
+const commit = computed(() => commitData.value?.commit ?? null);
+
+const { data: modelData } = useAsyncData(
+  `model-${slug}-${modelSlug}`,
+  () => api<{ model: Model }>(base),
   { lazy: true },
 );
+const model = computed(() => modelData.value?.model ?? null);
 
-// Commit-Liste nur für die Vergleichsbasis-Auswahl — erst beim Öffnen laden.
+// Commit-Liste für Vergleichsbasis und Vor/Zurück — erst bei Bedarf laden.
 const {
   data: commitsData,
   status: commitsStatus,
   execute: loadCommits,
-} = useAsyncData(
-  `commits-all-${slug}-${modelSlug}`,
-  () => api<{ commits: Commit[] }>(`${base}/commits`),
-  { lazy: true, immediate: false },
-);
+} = useAsyncData(`commits-all-${slug}-${modelSlug}`, () => api<{ commits: Commit[] }>(`${base}/commits`), {
+  lazy: true,
+});
 
 function ensureCommits(): void {
-  if (commitsStatus.value === "idle") {
-    void loadCommits();
-  }
+  if (commitsStatus.value === "idle") void loadCommits();
 }
 
-/** Base of the shown diff: ?from= override, else the parent commit. */
+const isIfc = computed(() => {
+  const schema = commit.value?.schema;
+  return schema !== "markdown" && schema !== "file";
+});
+const isFile = computed(() => commit.value?.schema === "file");
+const downloadExt = computed(() => {
+  if (isIfc.value) return "ifc";
+  if (!isFile.value) return "md";
+  return fileExtension(model.value?.name ?? "") || "bin";
+});
+
+useHead({
+  title: computed(() =>
+    commit.value ? `${commit.value.message || shortSha(commitId)} · ${model.value?.name ?? modelSlug}` : "Commit",
+  ),
+});
+
+/** Vergleichsbasis: ?from= oder der Vorgänger. */
 const fromId = computed(
-  () =>
-    (route.query.from as string | undefined) ??
-    commitData.value?.commit.parentCommitId ??
-    null,
+  () => (route.query.from as string | undefined) ?? commit.value?.parentCommitId ?? null,
 );
 
 function changeBase(event: Event): void {
   const value = (event.target as HTMLSelectElement).value;
-  router.replace({ query: value ? { from: value } : {} });
+  void router.replace({ query: { ...route.query, from: value || undefined } });
 }
 
-const downloadBusy = ref(false);
+/** Nachfolger auf demselben Branch (für „Nächster Stand“) — Abzweigungen zählen nicht. */
+const child = computed(
+  () =>
+    (commitsData.value?.commits ?? []).find(
+      (entry) => entry.parentCommitId === commitId && entry.branchName === commit.value?.branchName,
+    ) ?? null,
+);
+
+// ---- Tabs ---------------------------------------------------------------
+
+type Tab = "changes" | "checks";
+const tab = computed<Tab>(() =>
+  route.query.tab === "pruefungen" && isIfc.value ? "checks" : "changes",
+);
+function goTab(next: Tab): void {
+  void router.replace({ query: { ...route.query, tab: next === "checks" ? "pruefungen" : undefined } });
+}
+
+// ---- Prüfungen ---------------------------------------------------------------
+
+const { data: actionsData } = useAsyncData(
+  `actions-${slug}`,
+  () => api<{ actions: Action[] }>(`/projects/${slug}/actions`),
+  { lazy: true },
+);
+const applicable = computed(() => {
+  if (!model.value) return [];
+  return (actionsData.value?.actions ?? []).filter((action) => actionAppliesTo(action, model.value!));
+});
+const runsApi = useProjectRuns(slug, () => ({ commit: commitId }));
+const runs = runsApi.runs;
+const check = computed(() => runsApi.checks.value.get(commitId) ?? null);
+
+const selected = reactive(new Set<string>());
+watch(
+  applicable,
+  (list) => {
+    if (!selected.size) for (const action of list) selected.add(action.id);
+  },
+  { immediate: true },
+);
+const validating = ref(false);
+
+async function validate(close: () => void): Promise<void> {
+  if (!selected.size) return;
+  validating.value = true;
+  close();
+  try {
+    await api(`${base}/commits/${commitId}/validate`, {
+      method: "POST",
+      body: { actionIds: [...selected] },
+    });
+    await runsApi.refresh();
+    goTab("checks");
+    toast.success(`${selected.size} Prüfung(en) gestartet.`);
+  } catch (e) {
+    toast.error(apiErrorMessage(e));
+  } finally {
+    validating.value = false;
+  }
+}
+
+const openRuns = reactive(new Set<string>());
+function toggleRun(id: string): void {
+  if (openRuns.has(id)) openRuns.delete(id);
+  else openRuns.add(id);
+}
+
+// ---- Kopieren / Download ------------------------------------------------------
+
+const copied = ref(false);
+async function copyId(): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(commitId);
+    copied.value = true;
+    setTimeout(() => (copied.value = false), 1500);
+  } catch {
+    // Zwischenablage nicht verfügbar
+  }
+}
+
+const downloading = ref(false);
 async function download(): Promise<void> {
-  downloadBusy.value = true;
+  downloading.value = true;
   try {
     const blob = await $fetch<Blob>(`/api${base}/commits/${commitId}/file`, {
       responseType: "blob",
@@ -82,479 +182,195 @@ async function download(): Promise<void> {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${modelSlug}-${commitId.slice(0, 8)}.${downloadExtension.value}`;
+    a.download = `${modelSlug}-${shortSha(commitId)}.${downloadExt.value}`;
     a.click();
     URL.revokeObjectURL(url);
-  } finally {
-    downloadBusy.value = false;
-  }
-}
-
-const dateFmt = new Intl.DateTimeFormat("de-DE", {
-  dateStyle: "long",
-  timeStyle: "short",
-});
-const numberFmt = new Intl.NumberFormat("de-DE");
-
-// ---- Prüfungen (Actions) ----------------------------------------------
-
-const isIfc = computed(() => {
-  const schema = commitData.value?.commit.schema;
-  return schema !== "markdown" && schema !== "file";
-});
-const isFile = computed(() => commitData.value?.commit.schema === "file");
-const downloadExtension = computed(() => {
-  if (isIfc.value) return "ifc";
-  if (!isFile.value) return "md";
-  const name = modelData.value?.model.name ?? "";
-  const idx = name.lastIndexOf(".");
-  return idx === -1 ? "bin" : name.slice(idx + 1).toLowerCase();
-});
-
-const { data: actionsData } = useAsyncData(
-  `actions-${slug}`,
-  () => api<{ actions: Action[] }>(`/projects/${slug}/actions`),
-  { lazy: true },
-);
-const { data: modelData } = useAsyncData(
-  `model-${slug}-${modelSlug}`,
-  () => api<{ model: Model }>(base),
-  { lazy: true },
-);
-// Rolle im Projekt — nur Schreibende dürfen Runs abbrechen/wiederholen.
-const { data: projectRole } = useAsyncData(
-  `project-role-${slug}`,
-  () => api<{ role: Role | null }>(`/projects/${slug}`),
-  { lazy: true },
-);
-const canWrite = computed(() =>
-  ["owner", "maintainer", "contributor"].includes(projectRole.value?.role ?? ""),
-);
-
-/** Nur Actions, deren Geltungsbereich dieses Modell abdeckt. */
-const applicableActions = computed(() => {
-  const model = modelData.value?.model;
-  if (!model) return [];
-  return (actionsData.value?.actions ?? []).filter((action) =>
-    actionAppliesTo(action, model),
-  );
-});
-const actionCount = computed(() => applicableActions.value.length);
-const actionsReady = computed(
-  () => !!modelData.value && !!actionsData.value,
-);
-const {
-  data: runsData,
-  status: runsStatus,
-  refresh: refreshRuns,
-} = useAsyncData(
-  `runs-${commitId}`,
-  () => api<{ runs: ActionRun[] }>(`/projects/${slug}/runs`, {
-    query: { commit: commitId },
-  }),
-  { lazy: true },
-);
-
-const RUN_STATUS: Record<
-  ActionRun["status"],
-  { label: string; cls: string }
-> = {
-  queued: { label: "Wartet", cls: "" },
-  running: { label: "Läuft …", cls: "accent" },
-  success: { label: "Bestanden", cls: "success" },
-  failed: { label: "Fehlgeschlagen", cls: "danger" },
-  error: { label: "Fehler", cls: "warn" },
-  cancelled: { label: "Abgebrochen", cls: "" },
-};
-
-const validateBusy = ref(false);
-const validateError = ref<string | null>(null);
-
-// Auswahl, WELCHE Actions laufen sollen (Standard: alle).
-const selectedActions = reactive(new Set<string>());
-watch(
-  applicableActions,
-  (actions) => {
-    if (!selectedActions.size) {
-      for (const action of actions) {
-        selectedActions.add(action.id);
-      }
-    }
-  },
-  { immediate: true },
-);
-const validateMenu = ref<HTMLDetailsElement | null>(null);
-
-function toggleAction(id: string, on: boolean): void {
-  if (on) {
-    selectedActions.add(id);
-  } else {
-    selectedActions.delete(id);
-  }
-}
-
-async function validateCommit(): Promise<void> {
-  if (!selectedActions.size) return;
-  validateError.value = null;
-  validateBusy.value = true;
-  if (validateMenu.value) {
-    validateMenu.value.open = false;
-  }
-  try {
-    await api(`${base}/commits/${commitId}/validate`, {
-      method: "POST",
-      body: { actionIds: [...selectedActions] },
-    });
-    await refreshRuns();
   } catch (e) {
-    validateError.value = apiErrorMessage(e);
+    toast.error(apiErrorMessage(e));
   } finally {
-    validateBusy.value = false;
+    downloading.value = false;
   }
 }
 
-// Run-Details (Protokoll, Live-Stream, Abbrechen) erst beim Aufklappen mounten.
-const openRuns = reactive(new Set<string>());
-
-function onRunToggle(event: Event, run: ActionRun): void {
-  if ((event.target as HTMLDetailsElement).open) {
-    openRuns.add(run.id);
-  } else {
-    openRuns.delete(run.id);
-  }
-}
-
-/** Statuswechsel aus dem Live-Stream direkt in die Liste übernehmen. */
-function applyRunUpdate(updated: ActionRun): void {
-  const current = runsData.value?.runs.find((run) => run.id === updated.id);
-  if (current) {
-    Object.assign(current, updated);
-  }
-}
-
-async function onRunRetried(): Promise<void> {
-  await refreshRuns();
-}
-
-// Solange Runs laufen, alle 3 s nachladen (Fallback zum Live-Stream).
-const hasPendingRuns = computed(() =>
-  (runsData.value?.runs ?? []).some(
-    (run) => run.status === "queued" || run.status === "running",
-  ),
-);
-let runsTimer: ReturnType<typeof setInterval> | undefined;
-onMounted(() => {
-  runsTimer = setInterval(() => {
-    if (hasPendingRuns.value) {
-      void refreshRuns();
-    }
-  }, 3000);
-});
-onBeforeUnmount(() => {
-  clearInterval(runsTimer);
-});
-
-// ---- Tabs -----------------------------------------------------------------
-
-type Tab = "aenderungen" | "pruefungen";
-const tab = computed<Tab>(() =>
-  route.query.tab === "pruefungen" && isIfc.value ? "pruefungen" : "aenderungen",
-);
-function goTab(next: Tab): void {
-  router.replace({
-    query: { ...route.query, tab: next === "aenderungen" ? undefined : next },
-  });
-}
-
-/** Schlechtester Status der jüngsten Runs je Action — Punkt am Tab. */
-const runsBadge = computed<{ cls: string; label: string } | null>(() => {
-  const runs = runsData.value?.runs ?? [];
-  if (!runs.length) return null;
-  const latest = new Map<string, ActionRun>();
-  for (const run of runs) {
-    const known = latest.get(run.actionId);
-    if (!known || known.number < run.number) latest.set(run.actionId, run);
-  }
-  const states = [...latest.values()].map((run) => run.status);
-  if (states.some((state) => state === "running" || state === "queued")) {
-    return { cls: "accent", label: "läuft" };
-  }
-  if (states.some((state) => state === "failed")) {
-    return { cls: "danger", label: "fehlgeschlagen" };
-  }
-  if (states.some((state) => state === "error")) {
-    return { cls: "warn", label: "Fehler" };
-  }
-  if (states.every((state) => state === "success")) {
-    return { cls: "success", label: "bestanden" };
-  }
-  return null;
-});
-
-const idCopied = ref(false);
-async function copyCommitId(): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(commitId);
-    idCopied.value = true;
-    setTimeout(() => (idCopied.value = false), 1500);
-  } catch {
-    // Zwischenablage nicht verfügbar
-  }
-}
-
-function initials(name: string | undefined): string {
-  return (name ?? "?")
-    .split(/\s+/)
-    .map((part) => part[0] ?? "")
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-}
+onMounted(ensureCommits);
 </script>
 
 <template>
-  <div>
-    <nav class="breadcrumbs">
-      <NuxtLink to="/">Projekte</NuxtLink>
-      <span>/</span>
-      <NuxtLink :to="`/p/${slug}`">{{ slug }}</NuxtLink>
-      <span>/</span>
-      <NuxtLink :to="`/p/${slug}/m/${modelSlug}`">{{ modelSlug }}</NuxtLink>
-      <span>/</span>
-      <NuxtLink :to="`/p/${slug}/m/${modelSlug}?tab=commits`">Commits</NuxtLink>
-      <span>/</span>
-      <span class="commit-id">{{ commitId.slice(0, 8) }}</span>
-    </nav>
-
-    <div v-if="commitError" class="alert error">
+  <div class="commit-page">
+    <div v-if="commitError" class="flash flash-danger">
       Commit konnte nicht geladen werden: {{ apiErrorMessage(commitError) }}
     </div>
 
-    <!-- ================= Kopf ================= -->
-    <header class="commit-head">
-      <template v-if="commitData">
-        <div class="commit-head-main">
-          <h1 class="commit-title">
-            <PhGitCommit :size="22" aria-hidden="true" />
-            {{ commitData.commit.message || "(ohne Nachricht)" }}
+    <!-- ============ Kopf ============ -->
+    <div class="compare-bar">
+      <NuxtLink :to="`/p/${slug}/m/${modelSlug}?tab=commits`" class="btn btn-sm btn-invisible">
+        <PhArrowLeft :size="14" /> Verlauf von {{ model?.name ?? modelSlug }}
+      </NuxtLink>
+    </div>
+
+    <div class="box commit-hero">
+      <template v-if="commit">
+        <div class="commit-hero-top">
+          <h1 class="commit-title" :class="{ untitled: !commit.message }">
+            {{ commit.message || "(ohne Nachricht)" }}
           </h1>
-          <div class="commit-meta">
-            <span class="avatar" aria-hidden="true">{{
-              initials(commitData.commit.author?.name)
-            }}</span>
-            <strong>{{ commitData.commit.author?.name ?? "?" }}</strong>
-            <span class="muted">
-              am {{ dateFmt.format(new Date(commitData.commit.createdAt)) }}
-            </span>
-            <span class="badge">{{ commitData.commit.branchName }}</span>
-            <button
-              class="commit-id commit-id-copy"
-              type="button"
-              title="Commit-Id kopieren"
-              @click="copyCommitId"
+          <div class="commit-hero-actions">
+            <NuxtLink
+              v-if="isIfc"
+              :to="`/p/${slug}/m/${modelSlug}?at=${commitId}`"
+              class="btn"
             >
-              {{ commitId.slice(0, 8) }}
-              <PhCheckCircle v-if="idCopied" :size="13" aria-hidden="true" />
-              <PhCopy v-else :size="13" aria-hidden="true" />
-            </button>
-            <span v-if="isIfc" class="muted small">
-              {{ commitData.commit.schema }} ·
-              {{ numberFmt.format(commitData.commit.entityCount) }} Entities
-            </span>
-          </div>
-        </div>
-        <div class="commit-head-actions">
-          <div class="compare-select">
-            <label for="diff-base" class="muted small">
-              <PhGitDiff :size="14" aria-hidden="true" />
-              Vergleichen mit
-            </label>
-            <select
-              id="diff-base"
-              :value="fromId ?? ''"
-              @focus="ensureCommits"
-              @mousedown="ensureCommits"
-              @change="changeBase"
-            >
-              <option
-                v-if="commitData.commit.parentCommitId"
-                :value="commitData.commit.parentCommitId"
-              >
-                Vorgänger-Commit
-              </option>
-              <option v-else-if="!fromId" value="">(kein Vorgänger)</option>
-              <option
-                v-if="fromId && fromId !== commitData.commit.parentCommitId && !commitsData"
-                :value="fromId"
-              >
-                {{ fromId.slice(0, 8) }}
-              </option>
-              <option v-if="commitsStatus === 'pending'" disabled value="__loading">
-                Lade Commits …
-              </option>
-              <option
-                v-for="other in (commitsData?.commits ?? []).filter((c) => c.id !== commitId && c.id !== commitData?.commit.parentCommitId)"
-                :key="other.id"
-                :value="other.id"
-              >
-                {{ other.id.slice(0, 8) }} · {{ other.message || "(ohne Nachricht)" }}
-              </option>
-            </select>
-          </div>
-          <button :disabled="downloadBusy" @click="download">
-            <span v-if="downloadBusy" class="spinner" aria-hidden="true" />
-            <PhDownloadSimple v-else :size="15" aria-hidden="true" />
-            {{ downloadBusy ? "Wird geladen …" : `.${downloadExtension}` }}
-          </button>
-        </div>
-      </template>
-      <template v-else-if="commitStatus === 'pending' || commitStatus === 'idle'">
-        <div class="commit-head-main">
-          <span class="skeleton" style="width: 45%; height: 1.6em" />
-          <span class="skeleton" style="width: 30%; height: 1em; margin-top: 0.6rem" />
-        </div>
-      </template>
-    </header>
-
-    <nav v-if="isIfc && commitData" class="gh-tabs">
-      <button :class="{ active: tab === 'aenderungen' }" @click="goTab('aenderungen')">
-        <PhGitDiff :size="16" aria-hidden="true" />
-        Änderungen
-      </button>
-      <button :class="{ active: tab === 'pruefungen' }" @click="goTab('pruefungen')">
-        <PhCheckCircle :size="16" aria-hidden="true" />
-        Prüfungen
-        <span v-if="runsBadge" class="badge" :class="runsBadge.cls">
-          {{ runsBadge.label }}
-        </span>
-        <span v-else-if="runsData" class="counter">{{ runsData.runs.length }}</span>
-      </button>
-    </nav>
-
-    <!-- ================= Prüfungen (Actions) ================= -->
-    <div v-if="isIfc && tab === 'pruefungen'" class="card">
-      <div class="card-header">
-        <h2>Prüfungen</h2>
-        <span v-if="hasPendingRuns" class="badge accent">läuft …</span>
-        <span class="topbar-spacer" />
-        <details v-if="actionCount" ref="validateMenu" class="menu">
-          <summary class="btn primary">
-            {{ validateBusy ? "Wird gestartet …" : "Jetzt prüfen" }}
-          </summary>
-          <div class="menu-list validate-menu">
-            <p class="muted small" style="margin: 0 0 0.25rem">
-              Mit welchen Actions prüfen?
-            </p>
-            <label
-              v-for="action in applicableActions"
-              :key="action.id"
-              class="pv-item"
-            >
-              <input
-                type="checkbox"
-                :checked="selectedActions.has(action.id)"
-                @change="
-                  toggleAction(
-                    action.id,
-                    ($event.target as HTMLInputElement).checked,
-                  )
-                "
-              />
-              <span class="pv-label">{{ action.name }}</span>
-              <span class="badge" :class="action.kind === 'ids' ? 'accent' : ''">
-                {{ action.kind === "ids" ? "IDS" : "Python" }}
-              </span>
-            </label>
-            <button
-              class="primary"
-              style="margin-top: 0.5rem; width: 100%"
-              :disabled="validateBusy || !selectedActions.size"
-              @click="validateCommit"
-            >
-              Prüfung starten ({{ selectedActions.size }})
+              <PhCubeTransparent :size="16" /> Stand in 3D
+            </NuxtLink>
+            <NuxtLink v-else :to="`/p/${slug}/m/${modelSlug}?at=${commitId}`" class="btn">
+              Stand ansehen
+            </NuxtLink>
+            <button type="button" class="btn" :disabled="downloading" @click="download">
+              <span v-if="downloading" class="spinner" />
+              <PhDownloadSimple v-else :size="16" />
+              .{{ downloadExt }}
             </button>
           </div>
-        </details>
-      </div>
-      <div v-if="validateError" class="card-body">
-        <div class="alert error" style="margin: 0">{{ validateError }}</div>
-      </div>
-      <LoadingState
-        v-if="!actionsReady || ((runsStatus === 'pending' || runsStatus === 'idle') && !runsData)"
-        text="Lade Prüfungen …"
-      />
-      <div v-else-if="!actionCount" class="empty">
-        Keine Actions mit passendem Geltungsbereich für dieses Modell —
-        <NuxtLink :to="`/p/${slug}?tab=actions`">im Tab „Actions"</NuxtLink>
-        eine anlegen (alle Modelle, Ordner oder dieses Modell).
-      </div>
-      <div v-else-if="!runsData?.runs.length" class="empty">
-        Dieser Commit wurde noch nicht geprüft.
-      </div>
-      <div v-else>
-        <details
-          v-for="run in runsData.runs"
-          :key="run.id"
-          class="tree-group"
-          @toggle="onRunToggle($event, run)"
-        >
-          <summary>
-            <span class="muted small">#{{ run.number }}</span>
-            <span class="badge" :class="RUN_STATUS[run.status].cls">
-              <span
-                v-if="run.status === 'running' || run.status === 'queued'"
-                class="spinner"
-                aria-hidden="true"
-              />
-              {{ RUN_STATUS[run.status].label }}
-            </span>
-            <strong>{{ run.action?.name ?? "(gelöschte Action)" }}</strong>
-            <span class="muted small">
-              {{ dateFmt.format(new Date(run.createdAt)) }}
-              <template v-if="run.triggeredBy">
-                · {{ run.triggeredBy.name }}
-              </template>
-            </span>
-          </summary>
-          <div class="tree-children">
-            <RunDetails
-              v-if="openRuns.has(run.id)"
-              :slug="slug"
-              :run="run"
-              :can-write="canWrite"
-              @updated="applyRunUpdate"
-              @retried="onRunRetried"
-            >
-              <template #actions>
-                <template v-if="run.status === 'failed' || run.status === 'error'">
-                  <NuxtLink
-                    class="btn small"
-                    :to="`/p/${slug}?tab=issues&fromRun=${run.id}`"
-                    title="Issue mit Prüfbericht, Modell-Verknüpfung und den GUIDs der Verstöße anlegen"
-                  >
-                    Issue aus Run erstellen
-                  </NuxtLink>
-                  <span v-if="run.failedGuids.length" class="muted small">
-                    {{ run.failedGuids.length }} betroffene Objekte werden verlinkt
-                  </span>
-                </template>
-              </template>
-            </RunDetails>
-          </div>
-        </details>
+        </div>
+        <div class="commit-hero-meta">
+          <UserAvatar :user="commit.author ?? null" :size="20" />
+          <span class="author">{{ commit.author?.name ?? "?" }}</span>
+          committete <RelTime :date="commit.createdAt" />
+          <span class="meta-sep" />
+          <span class="tag tag-mono"><PhGitBranch :size="12" /> {{ commit.branchName }}</span>
+          <CommitStatus :check="check" :slug="slug" />
+          <span class="commit-stats">
+            <template v-if="commit.parentCommitId">
+              <span class="hide-sm">Vorgänger</span>
+              <NuxtLink :to="`/p/${slug}/m/${modelSlug}/c/${commit.parentCommitId}`" class="sha">
+                {{ shortSha(commit.parentCommitId) }}
+              </NuxtLink>
+            </template>
+            <span v-else class="muted">erster Stand</span>
+            <span class="hide-sm">Commit</span>
+            <button type="button" class="sha" :title="`${commitId} kopieren`" @click="copyId">
+              {{ shortSha(commitId) }}
+              <PhCheck v-if="copied" :size="12" class="color-success" />
+              <PhCopy v-else :size="12" />
+            </button>
+          </span>
+        </div>
+      </template>
+      <div v-else-if="commitStatus === 'pending' || commitStatus === 'idle'" class="commit-hero-top">
+        <span class="skeleton" style="width: 45%; height: 24px" />
       </div>
     </div>
 
-    <!-- ================= Änderungen ================= -->
-    <div v-if="tab === 'aenderungen'" class="card">
-      <SkeletonRows v-if="!commitData" :rows="4" />
-      <div v-else-if="!isIfc" class="card-body">
-        <div class="alert" style="margin: 0">
-          {{ isFile ? "Datei" : "Markdown-Datei" }} — es gibt keinen Objekt-Diff.
-          Der Inhalt dieses Stands lässt sich oben herunterladen<template v-if="isFile">
-            oder in der
-            <NuxtLink :to="`/p/${slug}/m/${modelSlug}?tab=vorschau`">Vorschau</NuxtLink>
-            ansehen</template>.
+    <!-- ============ Tabs ============ -->
+    <div v-if="commit" class="commit-tabs">
+      <nav class="subnav">
+        <button
+          type="button"
+          class="subnav-item"
+          :class="{ active: tab === 'changes' }"
+          @click="goTab('changes')"
+        >
+          <PhGitDiff :size="16" /> Änderungen
+          <template v-if="isIfc">
+            <span class="diffstat">
+              <span class="add">+{{ formatNumber(commit.added) }}</span>
+              <span class="mod">~{{ formatNumber(commit.modified) }}</span>
+              <span class="del">−{{ formatNumber(commit.removed) }}</span>
+            </span>
+          </template>
+        </button>
+        <button
+          v-if="isIfc"
+          type="button"
+          class="subnav-item"
+          :class="{ active: tab === 'checks' }"
+          @click="goTab('checks')"
+        >
+          <PhShieldCheck :size="16" /> Prüfungen
+          <RunStatusIcon v-if="check" :status="check.status" :size="14" />
+          <span v-else class="counter">{{ runs.length }}</span>
+        </button>
+      </nav>
+      <span class="spacer" />
+      <template v-if="tab === 'changes' && isIfc">
+        <label for="diff-base" class="muted small nowrap">Vergleich mit</label>
+        <select
+          id="diff-base"
+          class="auto input-sm"
+          :value="fromId ?? ''"
+          @focus="ensureCommits"
+          @change="changeBase"
+        >
+          <option v-if="commit.parentCommitId" :value="commit.parentCommitId">
+            Vorgänger ({{ shortSha(commit.parentCommitId) }})
+          </option>
+          <option v-else-if="!fromId" value="">— erster Stand —</option>
+          <option v-if="fromId && fromId !== commit.parentCommitId && !commitsData" :value="fromId">
+            {{ shortSha(fromId) }}
+          </option>
+          <option
+            v-for="other in (commitsData?.commits ?? []).filter(
+              (c) => c.id !== commitId && c.id !== commit!.parentCommitId,
+            )"
+            :key="other.id"
+            :value="other.id"
+          >
+            {{ shortSha(other.id) }} · {{ other.branchName }} · {{ other.message || "(ohne Nachricht)" }}
+          </option>
+        </select>
+        <NuxtLink
+          v-if="child"
+          :to="`/p/${slug}/m/${modelSlug}/c/${child.id}`"
+          class="btn btn-sm"
+          title="Nächster Stand auf diesem Branch"
+        >
+          Nächster <PhArrowRight :size="14" />
+        </NuxtLink>
+      </template>
+      <UiMenu v-if="tab === 'checks' && applicable.length && canWrite" align="right" :close-on-click="false">
+        <template #trigger="{ toggle }">
+          <button type="button" class="btn btn-primary btn-sm" :disabled="validating" @click="toggle">
+            <span v-if="validating" class="spinner" />
+            <PhPlay v-else :size="14" />
+            Jetzt prüfen
+          </button>
+        </template>
+        <template #default="{ close }">
+          <div class="menu-heading">Mit welchen Actions prüfen?</div>
+          <label v-for="action in applicable" :key="action.id" class="menu-item" data-keep-open>
+            <input
+              type="checkbox"
+              :checked="selected.has(action.id)"
+              @change="
+                ($event.target as HTMLInputElement).checked
+                  ? selected.add(action.id)
+                  : selected.delete(action.id)
+              "
+            />
+            <span class="truncate" style="flex: 1">{{ action.name }}</span>
+            <span class="tag tag-mono">{{ action.kind === "ids" ? "IDS" : "PY" }}</span>
+          </label>
+          <div style="padding: 8px 12px 4px">
+            <button
+              type="button"
+              class="btn btn-primary btn-block btn-sm"
+              :disabled="!selected.size"
+              @click="validate(close)"
+            >
+              Prüfung starten ({{ selected.size }})
+            </button>
+          </div>
+        </template>
+      </UiMenu>
+    </div>
+
+    <!-- ============ Änderungen ============ -->
+    <div v-if="tab === 'changes'" class="box">
+      <SkeletonRows v-if="!commit" :rows="4" />
+      <div v-else-if="!isIfc" class="box-body">
+        <div class="flash" style="margin: 0">
+          {{ isFile ? "Datei" : "Markdown-Datei" }} — es gibt keinen Objekt-Diff. Diesen Stand kannst du oben
+          ansehen oder herunterladen.
         </div>
       </div>
       <CommitChanges
@@ -563,8 +379,65 @@ function initials(name: string | undefined): string {
         :base="base"
         :commit-id="commitId"
         :from-id="fromId"
-        :model-name="modelData?.model.name ?? modelSlug"
+        :model-name="model?.name ?? modelSlug"
       />
+    </div>
+
+    <!-- ============ Prüfungen ============ -->
+    <div v-else class="box">
+      <LoadingState v-if="runsApi.pending.value" text="Lade Prüfungen …" />
+      <Blankslate
+        v-else-if="!applicable.length && !runs.length"
+        :icon="PhShieldCheck"
+        title="Keine passenden Actions"
+        compact
+      >
+        Für dieses Modell ist keine Prüfung eingerichtet.
+        <template #actions>
+          <NuxtLink :to="`/p/${slug}/actions`" class="btn">Actions einrichten</NuxtLink>
+        </template>
+      </Blankslate>
+      <Blankslate v-else-if="!runs.length" :icon="PhShieldCheck" title="Noch nicht geprüft" compact>
+        Starte die Prüfung oben rechts mit „Jetzt prüfen“.
+      </Blankslate>
+      <template v-else>
+        <div v-for="run in runs" :key="run.id" class="run-item" :class="{ open: openRuns.has(run.id) }">
+          <button type="button" class="run-head" @click="toggleRun(run.id)">
+            <RunStatusIcon :status="run.status" :size="18" />
+            <span class="run-title">
+              <strong>{{ run.action?.name ?? "(gelöschte Action)" }}</strong>
+              <span class="muted">#{{ run.number }}</span>
+            </span>
+            <span class="run-summary truncate muted">{{ run.summary || RUN_STATUS_LABEL[run.status] }}</span>
+            <span class="muted small nowrap">
+              <RelTime :date="run.createdAt" />
+              <template v-if="runDuration(run) !== null"> · {{ formatDuration(runDuration(run)!) }}</template>
+            </span>
+          </button>
+          <div v-if="openRuns.has(run.id)" class="run-body">
+            <RunDetails
+              :slug="slug"
+              :run="run"
+              :can-write="canWrite"
+              @updated="runsApi.apply"
+              @retried="() => runsApi.refresh()"
+            >
+              <template #actions>
+                <NuxtLink
+                  v-if="run.status === 'failed' || run.status === 'error'"
+                  class="btn btn-sm"
+                  :to="`/p/${slug}/issues/new?fromRun=${run.id}`"
+                >
+                  <PhCheckCircle :size="14" /> Issue aus Run erstellen
+                </NuxtLink>
+                <span v-if="run.failedGuids.length" class="muted small">
+                  {{ run.failedGuids.length }} betroffene Objekte werden verlinkt
+                </span>
+              </template>
+            </RunDetails>
+          </div>
+        </div>
+      </template>
     </div>
   </div>
 </template>

@@ -1,0 +1,169 @@
+/* ==========================================================================
+   IFC Hub — Design-Tokens
+   --------------------------------------------------------------------------
+   Einzige Datei mit Farben, Schriften und Radien. Alle anderen Stylesheets
+   verwenden ausschließlich diese Variablen — ein Re-Branding (z. B. MKP-
+   Corporate-Design in der vapp) tauscht nur diese Datei aus.
+
+   Hell/Dunkel: jede Farbe ist ein light-dark()-Paar. Welche Seite gilt,
+   bestimmt `color-scheme` — per Default das System, per
+   <html data-theme="light|dark"> fest gewählt (useTheme.ts).
+   ========================================================================== */
+
+:root {
+  color-scheme: light dark;
+
+  /* ---- Schrift ----------------------------------------------------------- */
+  --font-sans: "Mona Sans Variable", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+  --font-display: "Hubot Sans Variable", var(--font-sans);
+  --font-mono: "Monaspace Neon", ui-monospace, SFMono-Regular, "Cascadia Mono",
+    Consolas, monospace;
+
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 14px;
+  --text-md: 16px;
+  --text-lg: 20px;
+  --text-xl: 24px;
+  --text-2xl: 32px;
+
+  /* ---- Abstände + Radien ------------------------------------------------- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 40px;
+  --space-8: 48px;
+
+  --radius-sm: 4px;
+  --radius: 6px;
+  --radius-lg: 12px;
+  --radius-full: 999px;
+
+  --page-max: 1280px;
+  --header-h: 56px;
+
+  /* ---- Flächen ----------------------------------------------------------- */
+  --bg: light-dark(#ffffff, #0d1117);
+  /* Kopfzeilen, Seitenleisten, Box-Köpfe */
+  --bg-subtle: light-dark(#f6f8fa, #151b23);
+  /* Vertiefte Flächen (Code, Eingabefelder in Leisten) */
+  --bg-inset: light-dark(#f6f8fa, #010409);
+  --bg-hover: light-dark(#eff2f5, #1d2430);
+  --bg-active: light-dark(#e6eaef, #262f3b);
+  /* Globaler Kopf */
+  --header-bg: light-dark(#f6f8fa, #010409);
+  /* Menüs, Dialoge, Toasts */
+  --overlay-bg: light-dark(#ffffff, #151b23);
+  --backdrop: light-dark(rgba(31, 35, 40, 0.45), rgba(1, 4, 9, 0.7));
+
+  --border: light-dark(#d1d9e0, #3d444d);
+  --border-muted: light-dark(#dde3e9, #2a313c);
+  --border-strong: light-dark(#afb8c1, #58616b);
+
+  /* ---- Text -------------------------------------------------------------- */
+  --text: light-dark(#1f2328, #f0f6fc);
+  --text-muted: light-dark(#59636e, #9198a1);
+  --text-subtle: light-dark(#818b98, #6e7681);
+  --text-on-emphasis: #ffffff;
+
+  /* ---- Semantik ---------------------------------------------------------- */
+  /* Akzent: Links, Fokus, Auswahl, Main-Linie im Logo */
+  --accent: light-dark(#0969da, #4493f8);
+  --accent-emphasis: light-dark(#0969da, #1f6feb);
+  --accent-muted: light-dark(rgba(84, 174, 255, 0.4), rgba(56, 139, 253, 0.4));
+  --accent-subtle: light-dark(#ddf4ff, rgba(56, 139, 253, 0.12));
+
+  /* Erfolg / offen / neu — und die Primäraktion (grün wie bei GitHub) */
+  --success: light-dark(#1a7f37, #3fb950);
+  --success-emphasis: light-dark(#1f883d, #238636);
+  --success-muted: light-dark(rgba(74, 194, 107, 0.4), rgba(46, 160, 67, 0.4));
+  --success-subtle: light-dark(#dafbe1, rgba(46, 160, 67, 0.15));
+
+  --danger: light-dark(#d1242f, #f85149);
+  --danger-emphasis: light-dark(#cf222e, #da3633);
+  --danger-muted: light-dark(rgba(255, 129, 130, 0.4), rgba(248, 81, 73, 0.4));
+  --danger-subtle: light-dark(#ffebe9, rgba(248, 81, 73, 0.1));
+
+  --attention: light-dark(#9a6700, #d29922);
+  --attention-emphasis: light-dark(#bf8700, #9e6a03);
+  --attention-muted: light-dark(rgba(212, 167, 44, 0.4), rgba(187, 128, 9, 0.4));
+  --attention-subtle: light-dark(#fff8c5, rgba(187, 128, 9, 0.15));
+
+  /* Erledigt / geschlossen (lila wie GitHub) */
+  --done: light-dark(#8250df, #ab7df8);
+  --done-emphasis: light-dark(#8250df, #8957e5);
+  --done-subtle: light-dark(#fbefff, rgba(171, 125, 248, 0.15));
+
+  --neutral-emphasis: light-dark(#59636e, #656c76);
+  --neutral-muted: light-dark(rgba(175, 184, 193, 0.2), rgba(101, 108, 118, 0.2));
+
+  /* ---- Buttons ----------------------------------------------------------- */
+  --btn-bg: light-dark(#f6f8fa, #212830);
+  --btn-hover: light-dark(#eff2f5, #262c36);
+  --btn-active: light-dark(#e6eaef, #2a313c);
+  --btn-border: light-dark(#d1d9e0, #3d444d);
+  --btn-primary-bg: var(--success-emphasis);
+  --btn-primary-hover: light-dark(#1c8139, #29903b);
+  --btn-primary-border: light-dark(rgba(31, 35, 40, 0.15), rgba(240, 246, 252, 0.1));
+
+  /* ---- Schatten ---------------------------------------------------------- */
+  /* light-dark() liefert nur Farben — daher Schattenfarben als Tokens. */
+  --shadow-color-sm: light-dark(rgba(31, 35, 40, 0.04), transparent);
+  --shadow-color: light-dark(rgba(140, 149, 159, 0.2), #010409);
+  --shadow-color-strong: light-dark(rgba(31, 35, 40, 0.18), #010409);
+  --shadow-sm: 0 1px 0 var(--shadow-color-sm);
+  --shadow-md: 0 3px 6px var(--shadow-color);
+  --shadow-lg: 0 8px 24px var(--shadow-color);
+  --shadow-xl: 0 12px 48px var(--shadow-color-strong);
+  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+
+  /* ---- Signatur: Blueprint ----------------------------------------------- */
+  /* Raster-Hintergrund für Hero-Flächen (Login, Dashboard, leere Zustände) */
+  --blueprint-bg: light-dark(#f3f7fe, #0a1628);
+  --blueprint-line: light-dark(rgba(9, 105, 218, 0.07), rgba(88, 166, 255, 0.07));
+  --blueprint-line-strong: light-dark(rgba(9, 105, 218, 0.13), rgba(88, 166, 255, 0.13));
+  --blueprint-ink: light-dark(#0969da, #58a6ff);
+  /* Verlauf der aktiven Tab-Unterstreichung: Main-Linie -> Branch (Logo) */
+  --brand-gradient: linear-gradient(90deg, var(--accent), var(--success));
+
+  /* Logo (HubLogo.vue): Würfel mit Dach-Verlauf, zwei Seiten, Git-Graph.
+     favicon.svg ist eine statische Kopie — beim Umfärben mitziehen. */
+  --logo-roof-1: #56d364;
+  --logo-roof-2: #2da44e;
+  --logo-left: #0969da;
+  /* Die dunkle Seite hebt sich im Dunkelmodus sonst kaum vom Grund ab. */
+  --logo-right: light-dark(#0a3069, #1f4f99);
+  --logo-graph: #ffffff;
+  --logo-commit: #2da44e;
+
+  /* Beitragskalender: 5 Stufen (0 = keine Aktivität) */
+  --heat-0: light-dark(#eff2f5, #151b23);
+  --heat-1: light-dark(#aceebb, #033a16);
+  --heat-2: light-dark(#4ac26b, #196c2e);
+  --heat-3: light-dark(#2da44e, #2ea043);
+  --heat-4: light-dark(#116329, #56d364);
+
+  /* ---- 3D-Viewer (THREE liest die aufgelöste Farbe über eine Probe) ------ */
+  --viewer-bg: light-dark(#f6f8fa, #0d1117);
+  --viewer-grid: light-dark(#c4ccd4, #3d444d);
+
+  /* ---- Änderungsarten (Diff, 3D-Vergleich) ------------------------------- */
+  --diff-added: var(--success);
+  --diff-added-bg: var(--success-subtle);
+  --diff-modified: var(--attention);
+  --diff-modified-bg: var(--attention-subtle);
+  --diff-removed: var(--danger);
+  --diff-removed-bg: var(--danger-subtle);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}

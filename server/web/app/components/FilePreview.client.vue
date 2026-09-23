@@ -292,7 +292,7 @@ onBeforeUnmount(() => {
       <div class="file-preview-toolbar">
         <span class="muted small">Mausrad: Zoom · Ziehen: Verschieben</span>
         <span class="topbar-spacer" />
-        <button title="Ganze Zeichnung zeigen" :disabled="status !== 'ready'" @click="fitDrawing">
+        <button class="btn btn-sm" title="Ganze Zeichnung zeigen" :disabled="status !== 'ready'" @click="fitDrawing">
           <PhCornersOut :size="15" aria-hidden="true" />
           Einpassen
         </button>
@@ -306,7 +306,7 @@ onBeforeUnmount(() => {
     <div v-else-if="status === 'error'" class="viewer-overlay error file-preview-overlay">
       <div>
         <p>{{ error }}</p>
-        <button @click="download">
+        <button class="btn" @click="download">
           <PhDownloadSimple :size="15" aria-hidden="true" />
           Herunterladen
         </button>
@@ -337,7 +337,7 @@ onBeforeUnmount(() => {
             Für <strong>.{{ extension || "?" }}</strong>-Dateien gibt es keine
             Vorschau im Browser.
           </p>
-          <button class="primary" @click="download">
+          <button class="btn btn-primary" @click="download">
             <PhDownloadSimple :size="15" aria-hidden="true" />
             {{ name }} herunterladen
           </button>

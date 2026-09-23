@@ -1,0 +1,377 @@
+/* ==========================================================================
+   Issues: Detailseite (Timeline), Neues Issue, Seitenleiste
+   ========================================================================== */
+
+/* ---- Kopf ---------------------------------------------------------------- */
+
+.issue-header {
+  padding-bottom: var(--space-4);
+  margin-bottom: var(--space-5);
+  border-bottom: 1px solid var(--border-muted);
+}
+
+.issue-header-top {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.issue-h1 {
+  flex: 1 1 24rem;
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-weight: 400;
+  font-stretch: 102%;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+.issue-number {
+  font-weight: 300;
+  color: var(--text-subtle);
+}
+
+.issue-header-actions {
+  display: flex;
+  gap: var(--space-2);
+  padding-top: 6px;
+}
+
+.issue-title-edit {
+  display: flex;
+  flex: 1;
+  gap: var(--space-2);
+}
+
+.input-lg {
+  min-height: 40px;
+  font-size: var(--text-md);
+}
+
+.issue-header-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.issue-layout {
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: var(--space-6);
+}
+
+/* Schmal: Avatare neben den Beiträgen weglassen (wie GitHub mobil) */
+@media (max-width: 767px) {
+  .issue-h1 {
+    font-size: var(--text-xl);
+  }
+
+  .discussion {
+    padding-left: 0;
+  }
+
+  .discussion::before {
+    left: 15px;
+  }
+
+  .discussion .comment > .avatar,
+  .discussion .comment-box::before,
+  .discussion .comment-box::after {
+    display: none;
+  }
+
+  .tl-break {
+    margin-left: 0;
+  }
+}
+
+@media (max-width: 1011px) {
+  .issue-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---- Seitenleiste -------------------------------------------------------- */
+
+.issue-side {
+  display: flex;
+  flex-direction: column;
+}
+
+.side-section {
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border-muted);
+}
+
+.side-section:first-child {
+  padding-top: 0;
+}
+
+.side-section .menu-anchor {
+  display: flex;
+}
+
+.side-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  margin-bottom: 6px;
+  padding: 2px 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-muted);
+  background: none;
+  border: 0;
+  text-align: left;
+}
+
+.side-head-btn {
+  cursor: pointer;
+}
+
+.side-head-btn:hover {
+  color: var(--accent);
+}
+
+.side-head-btn svg {
+  color: var(--text-muted);
+}
+
+.side-head-btn:hover svg {
+  color: var(--accent);
+}
+
+.side-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.side-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  font-weight: 600;
+}
+
+.side-empty {
+  display: inline;
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.side-self {
+  font-size: var(--text-sm);
+}
+
+.side-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.side-version {
+  display: grid;
+  gap: 4px;
+  margin-top: var(--space-3);
+  padding: var(--space-2);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius);
+}
+
+.side-version-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.side-version-row {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+}
+
+.side-version-row .sha {
+  justify-self: start;
+}
+
+.side-seg {
+  display: flex;
+}
+
+.side-seg button {
+  flex: 1;
+  justify-content: center;
+}
+
+.side-bcf {
+  margin-top: var(--space-2);
+}
+
+.side-people {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.issue-side select {
+  width: 100%;
+}
+
+/* ---- Timeline-Ergänzungen ------------------------------------------------- */
+
+.tl-event .tl-badge {
+  margin-left: 0;
+}
+
+.tl-text {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 5px;
+}
+
+.tl-text del {
+  color: var(--text-subtle);
+}
+
+.compose-edit {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.compose-comment .comment-box::after {
+  background: var(--bg-subtle);
+}
+
+.compose-comment .form-actions {
+  margin-top: var(--space-3);
+}
+
+/* 3D-Verortung als Timeline-Eintrag */
+.comment.locate {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.locate-badge {
+  flex-shrink: 0;
+  margin-top: 8px;
+}
+
+.locate-box {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.locate-box .viewer-wrap {
+  height: min(60vh, 560px);
+}
+
+.guid-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-muted);
+}
+
+.guid-chip {
+  height: 22px;
+  padding: 0 8px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+}
+
+.guid-chip:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.guid-chip.active {
+  color: var(--text-on-emphasis);
+  background: var(--danger-emphasis);
+  border-color: var(--danger-emphasis);
+}
+
+/* ---- Neues Issue ---------------------------------------------------------- */
+
+.compose {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+
+.compose-avatar {
+  margin-top: 4px;
+}
+
+.compose-box {
+  flex: 1;
+  min-width: 0;
+}
+
+.compose-label-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: 6px;
+}
+
+.compose-templates {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.compose-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-muted);
+}
+
+.compose-kind-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.issue-new .layout {
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: var(--space-6);
+}
+
+@media (max-width: 1011px) {
+  .issue-new .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

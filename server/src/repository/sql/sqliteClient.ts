@@ -13,6 +13,9 @@ import type { SqlClient } from "./sqlClient";
  * minimal übersetzt:
  * - "$N"-Platzhalter -> "?N" (nummerierte SQLite-Parameter, wiederverwendbar)
  * - "::jsonb"-Casts entfernt (Summary wird als TEXT gespeichert)
+ * - lower() ist durch eine Unicode-fähige Variante ersetzt (SQLite kennt nur
+ *   ASCII) — sonst fände die Suche "über" nicht in "Überbau", anders als
+ *   unter Postgres.
  *
  * Transaktionen: Es gibt genau EINE Verbindung. Damit parallele Requests
  * nicht in eine fremde offene Transaktion hineinschreiben, serialisiert ein
@@ -36,6 +39,9 @@ export class SqliteClient implements SqlClient {
     this.db = new DatabaseSync(path);
     this.db.exec("pragma journal_mode = WAL;");
     this.db.exec("pragma foreign_keys = ON;");
+    this.db.function("lower", { deterministic: true }, (value) =>
+      typeof value === "string" ? value.toLowerCase() : value,
+    );
   }
 
   private run<T>(text: string, params: unknown[]): { rows: T[] } {

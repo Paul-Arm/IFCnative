@@ -44,15 +44,22 @@ import { registerRequestLog } from "./requestLog";
 import {
   actionAppliesTo,
   ADMIN_ROLES,
+  ALL_ROLES,
+  emptyProjectSummary,
   type Action,
   type ActionRun,
   type Commit,
   type Issue,
+  type IssueEvent,
+  type IssueEventData,
+  type IssueEventKind,
   type IssueLinks,
+  type Label,
   type Member,
   type Model,
   type ModelKind,
   type Project,
+  type RecentQuery,
   type Repository,
   type Role,
   type User,
@@ -67,6 +74,8 @@ export interface AppDeps {
   jwtSecret: string;
   /** Reported by /api/health so clients can tell the storage mode. */
   storageMode?: "filesystem" | "azure";
+  /** Metadaten-DB für die Admin-Systemübersicht (Standard: "memory"). */
+  databaseMode?: "sqlite" | "postgres" | "memory";
   /** Führt Action-Runs aus; ohne Angabe wird ein Standard-Runner gebaut. */
   runner?: ActionRunner;
   /** Worker-Pool für Parsing/Konvertierung; Standard: prozessweiter Pool. */
@@ -105,6 +114,110 @@ function publicUser(user: User) {
     name: user.name,
     isAdmin: user.isAdmin,
   };
+}
+
+type PublicUser = ReturnType<typeof publicUser>;
+
+/** Art eines Eintrags im Aktivitäts-Feed. */
+type ActivityType =
+  | "commit"
+  | "issue_opened"
+  | "issue_closed"
+  | "issue_reopened"
+  | "comment"
+  | "run"
+  | "project_created";
+
+/** Eintrag im Aktivitäts-Feed (`GET /api/activity`). */
+interface ActivityEvent {
+  /** Eindeutig über alle Quellen, z. B. `commit:<commitId>`. */
+  id: string;
+  type: ActivityType;
+  /** Zeitpunkt für die Sortierung (neueste zuerst). */
+  at: string;
+  actor: PublicUser | null;
+  project: { slug: string; name: string };
+  model?: { slug: string; name: string; kind: ModelKind; folder: string };
+  commit?: {
+    id: string;
+    message: string;
+    branchName: string;
+    added: number;
+    removed: number;
+    modified: number;
+    schema: string;
+  };
+  issue?: {
+    number: number;
+    title: string;
+    state: Issue["state"];
+    kind: Issue["kind"];
+  };
+  comment?: { id: string; excerpt: string };
+  run?: {
+    id: string;
+    number: number;
+    status: string;
+    summary: string;
+    actionName: string;
+    commitId: string;
+  };
+}
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Ganzzahliger Query-Parameter, auf [min, max] begrenzt; fehlt/ungültig: `fallback`. */
+function intParam(
+  raw: string | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const value = raw === undefined || raw === "" ? Number.NaN : Number(raw);
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.min(max, Math.max(min, Math.trunc(value)));
+}
+
+/** Freitext (Beschreibung): String, getrimmt, höchstens `max` Zeichen — sonst null. */
+function normalizeText(raw: unknown, max: number): string | null {
+  if (typeof raw !== "string") {
+    return null;
+  }
+  const text = raw.trim();
+  return text.length <= max ? text : null;
+}
+
+/**
+ * Kurzfassung eines Markdown-Texts für Feeds: Syntax grob entfernt,
+ * Leerraum zusammengefasst, höchstens `max` Zeichen (dann mit "…").
+ */
+function markdownExcerpt(markdown: string, max = 160): string {
+  const plain = markdown
+    .replace(/```[^\n]*\n?/g, " ") // Code-Fences (Inhalt bleibt)
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1") // Bilder -> Alt-Text
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1") // Links -> Linktext
+    .replace(/^\s{0,3}(?:#{1,6}|>|[-*+]|\d+[.)])\s+/gm, "") // Überschriften, Zitate, Listen
+    .replace(/(\*\*|__|~~)(.+?)\1/g, "$2") // fett, durchgestrichen
+    .replace(/(^|[^\w*])\*(?!\s)(.+?)\*(?!\w)/g, "$1$2") // kursiv
+    .replace(/`([^`]*)`/g, "$1") // Inline-Code
+    .replace(/<[^>]+>/g, " ") // HTML-Tags
+    .replace(/\s+/g, " ")
+    .trim();
+  const chars = [...plain];
+  return chars.length > max
+    ? `${chars.slice(0, max).join("").trimEnd()}…`
+    : plain;
+}
+
+/** Jüngster von mehreren ISO-Zeitpunkten; null/undefined zählen nicht. */
+function latestTimestamp(...values: (string | null | undefined)[]): string {
+  return values.reduce<string>(
+    (latest, value) => (value && value > latest ? value : latest),
+    "",
+  );
 }
 
 /**
@@ -338,6 +451,98 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     });
   }
 
+  /**
+   * Projekte, die der Benutzer sieht: eigene (Mitgliedschaft) plus alle
+   * öffentlichen; globale Admins sehen alles.
+   */
+  async function accessibleProjects(user: User): Promise<Project[]> {
+    if (user.isAdmin) {
+      return repo.listAllProjects();
+    }
+    const mine = await repo.listProjectsForUser(user.id);
+    const seen = new Set(mine.map((project) => project.id));
+    return [
+      ...mine,
+      ...(await repo.listPublicProjects()).filter(
+        (project) => !seen.has(project.id),
+      ),
+    ];
+  }
+
+  /**
+   * Projekte für Listen anreichern: Rolle des Benutzers, Kennzahlen,
+   * letzte Aktivität (Commit, Issue-Änderung oder Anlage) und Projektbild.
+   */
+  async function enrichProjects(user: User, projects: Project[]) {
+    const summaries = await repo.projectSummaries(
+      projects.map((project) => project.id),
+    );
+    return Promise.all(
+      projects.map(async (project) => {
+        const member = await repo.getMember(project.id, user.id);
+        const summary = summaries.get(project.id) ?? emptyProjectSummary();
+        return {
+          ...project,
+          role: member?.role ?? null,
+          modelCount: summary.modelCount,
+          memberCount: summary.memberCount,
+          openIssueCount: summary.openIssueCount,
+          lastActivityAt: latestTimestamp(
+            project.createdAt,
+            summary.lastCommitAt,
+            summary.lastIssueAt,
+          ),
+          hasImage: await store.exists(projectImageKey(project.id)),
+        };
+      }),
+    );
+  }
+
+  /**
+   * Geltungsbereich der projektübergreifenden Übersichten: alle zugänglichen
+   * Projekte oder nur das per `?project=` gewählte — 404, wenn es fehlt oder
+   * nicht zugänglich ist (private Projekte existieren für Fremde nicht).
+   * null = Antwort schon gesendet.
+   */
+  async function projectScope(
+    user: User,
+    slug: string | undefined,
+    reply: FastifyReply,
+  ): Promise<Project[] | null> {
+    const projects = await accessibleProjects(user);
+    if (!slug) {
+      return projects;
+    }
+    const project = projects.find((entry) => entry.slug === slug);
+    if (!project) {
+      reply.code(404).send({ error: "Project not found" });
+      return null;
+    }
+    return [project];
+  }
+
+  /**
+   * `?user=` der Übersichten: "me" = der Angemeldete, sonst eine
+   * Benutzer-Id; fehlt er, zählen alle. null = 400 schon gesendet.
+   */
+  function resolveActor(
+    user: User,
+    raw: string | undefined,
+    reply: FastifyReply,
+  ): { actorId: string | undefined } | null {
+    if (!raw) {
+      return { actorId: undefined };
+    }
+    if (raw === "me") {
+      return { actorId: user.id };
+    }
+    if (!UUID_PATTERN.test(raw)) {
+      reply.code(400).send({ error: "user must be 'me' or a user id" });
+      return null;
+    }
+    return { actorId: raw.toLowerCase() };
+  }
+
   // ---- routes ----------------------------------------------------------
 
   const api = "/api";
@@ -507,38 +712,39 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return reply.code(204).send();
   });
 
+  // Systemübersicht (Version, Speicher, Laufzeit, Warteschlangen, Mengen).
+  app.get(`${api}/admin/system`, async (request, reply) => {
+    const admin = await requireAdmin(request, reply);
+    if (!admin) return reply;
+    const memory = process.memoryUsage();
+    return reply.send({
+      version: SERVER_VERSION,
+      storage: deps.storageMode ?? "filesystem",
+      database: deps.databaseMode ?? "memory",
+      node: process.version,
+      uptimeSec: Math.floor(process.uptime()),
+      memory: {
+        rss: memory.rss,
+        heapUsed: memory.heapUsed,
+        heapTotal: memory.heapTotal,
+      },
+      workers: workers.size,
+      runner: {
+        queued: runner.queueLength,
+        running: runner.isRunning ? 1 : 0,
+      },
+      counts: await repo.counts(),
+    });
+  });
+
   // ---- projects --------------------------------------------------------
 
   app.get(`${api}/projects`, async (request, reply) => {
     const user = await requireUser(request, reply);
     if (!user) return reply;
     // Eigene Projekte plus alle oeffentlichen; globale Admins sehen alles.
-    let projects;
-    if (user.isAdmin) {
-      projects = await repo.listAllProjects();
-    } else {
-      const mine = await repo.listProjectsForUser(user.id);
-      const seen = new Set(mine.map((project) => project.id));
-      projects = [
-        ...mine,
-        ...(await repo.listPublicProjects()).filter(
-          (project) => !seen.has(project.id),
-        ),
-      ];
-    }
-    const enriched = await Promise.all(
-      projects.map(async (project) => {
-        const member = await repo.getMember(project.id, user.id);
-        const models = await repo.listModels(project.id);
-        return {
-          ...project,
-          role: member?.role ?? null,
-          modelCount: models.length,
-          hasImage: await store.exists(projectImageKey(project.id)),
-        };
-      }),
-    );
-    return reply.send({ projects: enriched });
+    const projects = await accessibleProjects(user);
+    return reply.send({ projects: await enrichProjects(user, projects) });
   });
 
   app.post(`${api}/projects`, async (request, reply) => {
@@ -548,12 +754,22 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       name?: string;
       slug?: string;
       visibility?: "private" | "public";
+      description?: unknown;
     };
     if (!body.name) {
       return reply.code(400).send({ error: "name required" });
     }
     if (body.visibility && !["private", "public"].includes(body.visibility)) {
       return reply.code(400).send({ error: "Invalid visibility" });
+    }
+    const description =
+      body.description === undefined
+        ? ""
+        : normalizeText(body.description, 500);
+    if (description === null) {
+      return reply
+        .code(400)
+        .send({ error: "Description must be text (max 500 characters)" });
     }
     const slug = slugify(body.slug ?? body.name);
     if (!slug) {
@@ -568,6 +784,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       ownerId: user.id,
       // Neu angelegte Projekte sind fuer alle angemeldeten Benutzer sichtbar.
       visibility: body.visibility ?? "public",
+      description,
     });
     await repo.addMember({
       projectId: project.id,
@@ -591,7 +808,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const members = await repo.listMembers(project.id);
     const users = await usersById(members.map((m) => m.userId));
     return reply.send({
-      project,
+      project: { ...project, hasImage: await store.exists(projectImageKey(project.id)) },
       members: members.map((m) => {
         const memberUser = users.get(m.userId);
         return { ...m, user: memberUser ? publicUser(memberUser) : null };
@@ -601,9 +818,193 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     });
   });
 
+  // Kennzahlen für die Projektübersicht (Commits, Beitragende, Dateiarten,
+  // Issues, Runs, letzter Commit, Objekte in den Head-Ständen).
+  app.get(`${api}/projects/:slug/stats`, async (request, reply) => {
+    const { slug } = request.params as { slug: string };
+    const project = await resolveProject(slug, reply);
+    if (!project) return reply;
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    if (!(await requireMember(project, user, reply, "read"))) return reply;
+    const [models, summaries, authorCounts, runCounts, latest, folders] =
+      await Promise.all([
+        repo.listModels(project.id),
+        repo.projectSummaries([project.id]),
+        repo.countCommitsByAuthor(project.id),
+        repo.countActionRunsByStatus(project.id),
+        repo.listRecentCommits([project.id], { limit: 1 }),
+        collectFolders(project.id),
+      ]);
+    const summary = summaries.get(project.id) ?? emptyProjectSummary();
+
+    // Branches zählen; Objekte = Summe der Head-Commits (Standard-Branch)
+    // aller IFC-Modelle.
+    let branchCount = 0;
+    const headIds: string[] = [];
+    for (const model of models) {
+      const branches = await repo.listBranches(model.id);
+      branchCount += branches.length;
+      const head = branches.find(
+        (branch) => branch.name === model.defaultBranch,
+      )?.headCommitId;
+      if (model.kind === "ifc" && head) {
+        headIds.push(head);
+      }
+    }
+    const heads = await commitsById(headIds);
+    const entityCount = headIds.reduce(
+      (sum, id) => sum + (heads.get(id)?.entityCount ?? 0),
+      0,
+    );
+
+    // Dateiarten: IFC/Markdown nach Art, beliebige Dateien nach Endung.
+    const kinds = new Map<
+      string,
+      { kind: ModelKind; extension: string; count: number }
+    >();
+    for (const model of models) {
+      const extension =
+        model.kind === "file" ? fileExtension(model.name) : model.kind;
+      const key = `${model.kind}:${extension}`;
+      const entry = kinds.get(key) ?? { kind: model.kind, extension, count: 0 };
+      entry.count += 1;
+      kinds.set(key, entry);
+    }
+
+    const runs = {
+      total: 0,
+      success: 0,
+      failed: 0,
+      error: 0,
+      running: 0,
+      queued: 0,
+      cancelled: 0,
+    };
+    for (const [status, count] of runCounts) {
+      if (status in runs) runs[status] += count;
+      runs.total += count;
+    }
+
+    const authors = await usersById(authorCounts.map((entry) => entry.authorId));
+    const [last] = latest;
+    const [lastWithAuthor] = last ? await withAuthors([last.commit]) : [];
+    return reply.send({
+      commitCount: summary.commitCount,
+      branchCount,
+      contributors: authorCounts.map((entry) => {
+        const author = authors.get(entry.authorId);
+        return {
+          user: author ? publicUser(author) : null,
+          commits: entry.count,
+        };
+      }),
+      kinds: [...kinds.values()].sort(
+        (a, b) =>
+          b.count - a.count ||
+          a.kind.localeCompare(b.kind) ||
+          a.extension.localeCompare(b.extension),
+      ),
+      issues: {
+        open: summary.openIssueCount,
+        closed: summary.closedIssueCount,
+      },
+      runs,
+      lastCommit:
+        last && lastWithAuthor
+          ? {
+              ...lastWithAuthor,
+              model: {
+                slug: last.model.slug,
+                name: last.model.name,
+                kind: last.model.kind,
+                folder: last.model.folder,
+              },
+            }
+          : null,
+      entityCount,
+      modelCount: models.length,
+      folderCount: folders.length,
+      memberCount: summary.memberCount,
+    });
+  });
+
   // ---- Labels + Issues (wie GitHub) ------------------------------------
 
   const LABEL_COLOR = /^#[0-9a-fA-F]{6}$/;
+
+  interface LabelBody {
+    name?: unknown;
+    color?: unknown;
+    description?: unknown;
+  }
+
+  /**
+   * Label-Felder prüfen — beim Anlegen (`existing` null) sind Name und Farbe
+   * Pflicht, beim Ändern ist alles optional. Name 1..40 Zeichen und im
+   * Projekt eindeutig (ohne Groß-/Kleinschreibung, das Label selbst
+   * ausgenommen), Farbe #rrggbb, Beschreibung max. 100 Zeichen.
+   * null = Antwort schon gesendet.
+   */
+  async function validateLabelBody(
+    project: Project,
+    body: LabelBody,
+    existing: Label | null,
+    reply: FastifyReply,
+  ): Promise<Partial<Pick<Label, "name" | "color" | "description">> | null> {
+    const fields: Partial<Pick<Label, "name" | "color" | "description">> = {};
+    if (existing === null || body.name !== undefined) {
+      const name = typeof body.name === "string" ? body.name.trim() : "";
+      if (!name || name.length > 40) {
+        reply.code(400).send({ error: "Label name required (max 40)" });
+        return null;
+      }
+      fields.name = name;
+    }
+    if (existing === null || body.color !== undefined) {
+      if (typeof body.color !== "string" || !LABEL_COLOR.test(body.color)) {
+        reply.code(400).send({ error: "Color required (#rrggbb)" });
+        return null;
+      }
+      fields.color = body.color;
+    }
+    if (body.description !== undefined) {
+      const description = normalizeText(body.description, 100);
+      if (description === null) {
+        reply
+          .code(400)
+          .send({ error: "Description must be text (max 100 characters)" });
+        return null;
+      }
+      fields.description = description;
+    }
+    if (fields.name !== undefined) {
+      const lower = fields.name.toLowerCase();
+      const taken = (await repo.listLabels(project.id)).some(
+        (label) => label.id !== existing?.id && label.name.toLowerCase() === lower,
+      );
+      if (taken) {
+        reply.code(409).send({ error: "Label name taken" });
+        return null;
+      }
+    }
+    return fields;
+  }
+
+  /** Label des Projekts laden; 404, wenn es fehlt oder woanders hingehört. */
+  async function resolveLabel(
+    project: Project,
+    labelId: string,
+    reply: FastifyReply,
+  ): Promise<Label | null> {
+    // Keine UUID: Postgres würde am uuid-Vergleich scheitern (500 statt 404).
+    const label = UUID_PATTERN.test(labelId) ? await repo.getLabel(labelId) : null;
+    if (!label || label.projectId !== project.id) {
+      reply.code(404).send({ error: "Label not found" });
+      return null;
+    }
+    return label;
+  }
 
   app.get(`${api}/projects/:slug/labels`, async (request, reply) => {
     const { slug } = request.params as { slug: string };
@@ -612,7 +1013,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const user = await requireUser(request, reply);
     if (!user) return reply;
     if (!(await requireMember(project, user, reply, "read"))) return reply;
-    return reply.send({ labels: await repo.listLabels(project.id) });
+    const [labels, openCounts] = await Promise.all([
+      repo.listLabels(project.id),
+      repo.countOpenIssuesByLabel(project.id),
+    ]);
+    // issueCount = offene Issues mit diesem Label.
+    return reply.send({
+      labels: labels.map((label) => ({
+        ...label,
+        issueCount: openCounts.get(label.id) ?? 0,
+      })),
+    });
   });
 
   app.post(`${api}/projects/:slug/labels`, async (request, reply) => {
@@ -622,25 +1033,67 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const user = await requireUser(request, reply);
     if (!user) return reply;
     if (!(await requireMember(project, user, reply, "write"))) return reply;
-    const body = (request.body ?? {}) as { name?: string; color?: string };
-    const name = body.name?.trim();
-    if (!name || name.length > 40) {
-      return reply.code(400).send({ error: "Label name required (max 40)" });
-    }
-    if (!body.color || !LABEL_COLOR.test(body.color)) {
-      return reply.code(400).send({ error: "Color required (#rrggbb)" });
-    }
-    const existing = await repo.listLabels(project.id);
-    if (existing.some((label) => label.name.toLowerCase() === name.toLowerCase())) {
-      return reply.code(409).send({ error: "Label name taken" });
-    }
+    const fields = await validateLabelBody(
+      project,
+      (request.body ?? {}) as LabelBody,
+      null,
+      reply,
+    );
+    if (!fields) return reply;
     const label = await repo.createLabel({
       projectId: project.id,
-      name,
-      color: body.color,
+      name: fields.name!,
+      color: fields.color!,
+      description: fields.description,
     });
     return reply.code(201).send({ label });
   });
+
+  app.patch(
+    `${api}/projects/:slug/labels/:labelId`,
+    async (request, reply) => {
+      const { slug, labelId } = request.params as {
+        slug: string;
+        labelId: string;
+      };
+      const project = await resolveProject(slug, reply);
+      if (!project) return reply;
+      const user = await requireUser(request, reply);
+      if (!user) return reply;
+      if (!(await requireMember(project, user, reply, "write"))) return reply;
+      const label = await resolveLabel(project, labelId, reply);
+      if (!label) return reply;
+      const fields = await validateLabelBody(
+        project,
+        (request.body ?? {}) as LabelBody,
+        label,
+        reply,
+      );
+      if (!fields) return reply;
+      const updated = await repo.updateLabel(label.id, fields);
+      return reply.send({ label: updated ?? label });
+    },
+  );
+
+  // Label löschen — verschwindet dabei von allen Issues.
+  app.delete(
+    `${api}/projects/:slug/labels/:labelId`,
+    async (request, reply) => {
+      const { slug, labelId } = request.params as {
+        slug: string;
+        labelId: string;
+      };
+      const project = await resolveProject(slug, reply);
+      if (!project) return reply;
+      const user = await requireUser(request, reply);
+      if (!user) return reply;
+      if (!(await requireMember(project, user, reply, "write"))) return reply;
+      const label = await resolveLabel(project, labelId, reply);
+      if (!label) return reply;
+      await repo.deleteLabel(label.id);
+      return reply.code(204).send();
+    },
+  );
 
   /** Issues mit Autor/Assignees/Modellen/Labels für die UI anreichern. */
   async function enrichIssues(projectId: string, issues: Issue[]) {
@@ -698,6 +1151,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }
         : null;
     };
+    // Kommentarzahl je Issue — eine gruppierte Abfrage statt je Issue.
+    const commentCounts = await repo.countIssueComments(
+      issues.map((issue) => issue.id),
+    );
     return issues.map((issue) => {
       const link = links.get(issue.id);
       const author = users.get(issue.authorId);
@@ -707,6 +1164,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         parent: parentRef(issue.parentId),
         subIssueCount: counts.total,
         openSubIssueCount: counts.open,
+        commentCount: commentCounts.get(issue.id) ?? 0,
         author: author ? publicUser(author) : null,
         assignees: (link?.assigneeIds ?? [])
           .map((id) => users.get(id))
@@ -860,6 +1318,112 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return parent.id;
   }
 
+  /**
+   * Zeitleisten-Ereignisse einer Issue-Änderung: je tatsächlich geänderter
+   * Eigenschaft eines, Namen als Schnappschuss. Reine Body-Änderungen und
+   * geänderte Commit-Bezüge (aufgefallen/behoben in) erzeugen keines.
+   */
+  async function issueChangeEvents(
+    project: Project,
+    actorId: string,
+    before: Issue,
+    after: Issue,
+    beforeLinks: IssueLinks,
+    links: Partial<IssueLinks>,
+  ): Promise<Omit<IssueEvent, "id" | "createdAt">[]> {
+    const events: Omit<IssueEvent, "id" | "createdAt">[] = [];
+    const record = (kind: IssueEventKind, data: IssueEventData = {}) => {
+      events.push({ issueId: after.id, projectId: project.id, actorId, kind, data });
+    };
+    /** Hinzugekommene/entfernte Ids einer (ggf. ersetzten) Zuordnungs-Menge. */
+    const changes = (
+      previous: string[],
+      next: string[] | undefined,
+    ): { added: string[]; removed: string[] } => {
+      if (next === undefined) {
+        return { added: [], removed: [] };
+      }
+      const was = new Set(previous);
+      const now = new Set(next);
+      return {
+        added: [...now].filter((id) => !was.has(id)),
+        removed: [...was].filter((id) => !now.has(id)),
+      };
+    };
+
+    if (after.title !== before.title) {
+      record("renamed", { from: before.title, to: after.title });
+    }
+    if (after.kind !== before.kind) {
+      record("kind_changed", { from: before.kind, to: after.kind });
+    }
+    if (after.parentId !== before.parentId) {
+      const parent = after.parentId
+        ? await repo.getIssueById(after.parentId)
+        : null;
+      record("parent_changed", {
+        parent: parent ? { number: parent.number, title: parent.title } : null,
+      });
+    }
+
+    const labels = changes(beforeLinks.labelIds, links.labelIds);
+    if (labels.added.length || labels.removed.length) {
+      const byId = new Map(
+        (await repo.listLabels(project.id)).map((label) => [label.id, label]),
+      );
+      const snapshot = (ids: string[]) =>
+        ids.flatMap((id) => {
+          const label = byId.get(id);
+          return label ? [{ id: label.id, name: label.name, color: label.color }] : [];
+        });
+      if (labels.added.length) {
+        record("labeled", { labels: snapshot(labels.added) });
+      }
+      if (labels.removed.length) {
+        record("unlabeled", { labels: snapshot(labels.removed) });
+      }
+    }
+
+    const assignees = changes(beforeLinks.assigneeIds, links.assigneeIds);
+    if (assignees.added.length || assignees.removed.length) {
+      const users = await usersById([...assignees.added, ...assignees.removed]);
+      const snapshot = (ids: string[]) =>
+        ids.map((id) => ({ id, name: users.get(id)?.name ?? "" }));
+      if (assignees.added.length) {
+        record("assigned", { users: snapshot(assignees.added) });
+      }
+      if (assignees.removed.length) {
+        record("unassigned", { users: snapshot(assignees.removed) });
+      }
+    }
+
+    const models = changes(
+      beforeLinks.models.map((link) => link.modelId),
+      links.models?.map((link) => link.modelId),
+    );
+    if (models.added.length || models.removed.length) {
+      const byId = new Map(
+        (await repo.listModels(project.id)).map((model) => [model.id, model]),
+      );
+      const snapshot = (ids: string[]) =>
+        ids.flatMap((id) => {
+          const model = byId.get(id);
+          return model ? [{ id: model.id, slug: model.slug, name: model.name }] : [];
+        });
+      if (models.added.length) {
+        record("linked_model", { models: snapshot(models.added) });
+      }
+      if (models.removed.length) {
+        record("unlinked_model", { models: snapshot(models.removed) });
+      }
+    }
+
+    if (after.state !== before.state) {
+      record(after.state === "closed" ? "closed" : "reopened");
+    }
+    return events;
+  }
+
   app.get(`${api}/projects/:slug/issues`, async (request, reply) => {
     const { slug } = request.params as { slug: string };
     const project = await resolveProject(slug, reply);
@@ -950,10 +1514,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const children = (await repo.listIssues(project.id))
       .filter((entry) => entry.parentId === issue.id)
       .sort((a, b) => a.number - b.number);
+    // Zeitleiste (geschlossen, umbenannt, Labels, …) mit Akteur.
+    const events = await repo.listIssueEvents(issue.id);
+    const actors = await usersById(events.map((event) => event.actorId));
     return reply.send({
       issue: enriched,
       subIssues: await enrichIssues(project.id, children),
       comments: await enrichComments(issue.id),
+      events: events.map((event) => {
+        const actor = actors.get(event.actorId);
+        return { ...event, actor: actor ? publicUser(actor) : null };
+      }),
     });
   });
 
@@ -1061,14 +1632,38 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (body.parentId !== undefined && parentId === undefined) return reply;
     const links = await validateIssueLinks(project, body, reply);
     if (!links) return reply;
-    const updated = await repo.updateIssue(issue.id, {
-      title: body.title?.trim(),
-      body: body.body,
-      state: body.state as "open" | "closed" | undefined,
-      kind: body.kind as Issue["kind"] | undefined,
-      parentId,
+    // Vorher-Stand für die Zeitleiste festhalten — das MemoryRepository
+    // ändert das Issue-Objekt beim Update in place.
+    const before = { ...issue };
+    const beforeLinks = (await repo.getIssueLinks([issue.id])).get(issue.id) ?? {
+      assigneeIds: [],
+      models: [],
+      labelIds: [],
+      guids: [],
+    };
+    // Änderung, Zuordnungen und Zeitleisten-Ereignisse atomar.
+    const updated = await repo.transaction(async () => {
+      const result = await repo.updateIssue(issue.id, {
+        title: body.title?.trim(),
+        body: body.body,
+        state: body.state as "open" | "closed" | undefined,
+        kind: body.kind as Issue["kind"] | undefined,
+        parentId,
+      });
+      await repo.setIssueLinks(issue.id, links);
+      const events = await issueChangeEvents(
+        project,
+        user.id,
+        before,
+        result ?? before,
+        beforeLinks,
+        links,
+      );
+      if (events.length) {
+        await repo.createIssueEvents(events);
+      }
+      return result;
     });
-    await repo.setIssueLinks(issue.id, links);
     const [enriched] = await enrichIssues(project.id, [updated ?? issue]);
     return reply.send({ issue: enriched });
   });
@@ -1498,17 +2093,27 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const member = await requireMember(project, user, reply, "admin");
     if (!member) return reply;
     const body = (request.body ?? {}) as { email?: string; role?: Role };
+    const role = body.role ?? "contributor";
+    if (!ALL_ROLES.has(role)) {
+      return reply.code(400).send({ error: "Invalid role" });
+    }
     const target = body.email ? await repo.getUserByEmail(body.email) : null;
     if (!target) {
       return reply.code(404).send({ error: "User not found" });
     }
-    if (target.id === project.ownerId && body.role && body.role !== "owner") {
+    if (target.id === project.ownerId && role !== "owner") {
       return reply.code(400).send({ error: "Cannot change the owner's role" });
+    }
+    // Nur Owner vergeben oder entziehen die Owner-Rolle — sonst könnte sich
+    // ein Maintainer selbst zum Owner machen und das Projekt löschen.
+    const current = await repo.getMember(project.id, target.id);
+    if ((role === "owner" || current?.role === "owner") && member.role !== "owner") {
+      return reply.code(403).send({ error: "Only owners can grant or revoke the owner role" });
     }
     const added = await repo.addMember({
       projectId: project.id,
       userId: target.id,
-      role: body.role ?? "contributor",
+      role,
     });
     return reply.code(201).send({ member: { ...added, user: publicUser(target) } });
   });
@@ -1519,9 +2124,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (!project) return reply;
     const user = await requireUser(request, reply);
     if (!user) return reply;
-    if (!(await requireMember(project, user, reply, "admin"))) return reply;
+    const member = await requireMember(project, user, reply, "admin");
+    if (!member) return reply;
     if (userId === project.ownerId) {
       return reply.code(400).send({ error: "Cannot remove the project owner" });
+    }
+    const target = await repo.getMember(project.id, userId);
+    if (target?.role === "owner" && member.role !== "owner") {
+      return reply.code(403).send({ error: "Only owners can remove owners" });
     }
     await repo.removeMember(project.id, userId);
     return reply.code(204).send();
@@ -1574,8 +2184,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const user = await optionalUser(request);
     const member = user ? await repo.getMember(project.id, user.id) : null;
     const models = await repo.listModels(project.id);
+    // Wie canReadModel: globale Admins sehen alles, auch ohne Mitgliedschaft.
     const readAll =
-      Boolean(member) || (user !== null && project.visibility === "public");
+      Boolean(member) ||
+      Boolean(user?.isAdmin) ||
+      (user !== null && project.visibility === "public");
     const visible = readAll
       ? models
       : models.filter((m) => m.visibility === "public");
@@ -1734,7 +2347,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   });
 
   // Projekt löschen — nur der Owner.
-  // Projekt-Einstellungen (Name, Sichtbarkeit) — admin.
+  // Projekt-Einstellungen (Name, Sichtbarkeit, Beschreibung) — admin.
   app.patch(`${api}/projects/:slug`, async (request, reply) => {
     const { slug } = request.params as { slug: string };
     const project = await resolveProject(slug, reply);
@@ -1745,6 +2358,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const body = (request.body ?? {}) as {
       name?: string;
       visibility?: "private" | "public";
+      description?: unknown;
     };
     if (body.visibility && !["private", "public"].includes(body.visibility)) {
       return reply.code(400).send({ error: "Invalid visibility" });
@@ -1752,9 +2366,20 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (body.name !== undefined && !body.name.trim()) {
       return reply.code(400).send({ error: "Name must not be empty" });
     }
+    // Beschreibung: "" löscht sie.
+    const description =
+      body.description === undefined
+        ? undefined
+        : normalizeText(body.description, 500);
+    if (description === null) {
+      return reply
+        .code(400)
+        .send({ error: "Description must be text (max 500 characters)" });
+    }
     const updated = await repo.updateProject(project.id, {
       name: body.name?.trim(),
       visibility: body.visibility,
+      description,
     });
     return reply.send({ project: updated });
   });
@@ -3071,6 +3696,393 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       });
     },
   );
+
+  // ---- Übersichten: Aktivität, Beiträge, Suche, eigene Issues -----------
+  // Alle projektübergreifend über die zugänglichen Projekte (eigene +
+  // öffentliche, Admins alle).
+
+  const ACTIVITY_LIMIT_DEFAULT = 40;
+  const CONTRIBUTION_DAYS_DEFAULT = 371;
+  const SEARCH_LIMIT_DEFAULT = 8;
+  const MY_ISSUES_LIMIT = 30;
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  /**
+   * Aktivitäts-Feed aus allen Quellen: je Quelle die `limit` neuesten
+   * Einträge (Repository), dann gemeinsam absteigend sortiert und gekürzt —
+   * die insgesamt neuesten `limit` sind darin sicher enthalten.
+   */
+  async function activityFeed(
+    projects: Project[],
+    query: RecentQuery,
+  ): Promise<ActivityEvent[]> {
+    const projectById = new Map(projects.map((project) => [project.id, project]));
+    const projectIds = [...projectById.keys()];
+    const [commitRows, openedIssues, stateEvents, commentRows, runs] =
+      await Promise.all([
+        repo.listRecentCommits(projectIds, query),
+        repo.listRecentIssues(projectIds, query),
+        repo.listRecentIssueEvents(projectIds, {
+          ...query,
+          kinds: ["closed", "reopened"],
+        }),
+        repo.listRecentComments(projectIds, query),
+        repo.listRecentRuns(projectIds, query),
+      ]);
+    const createdProjects = projects
+      .filter(
+        (project) =>
+          (query.before === undefined || project.createdAt < query.before) &&
+          (query.actorId === undefined || project.ownerId === query.actorId),
+      )
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, query.limit);
+
+    // Issues der Zustandswechsel und Kommentare (nur die fehlenden) laden.
+    const issueById = new Map(openedIssues.map((issue) => [issue.id, issue]));
+    const missingIssueIds = new Set(
+      [
+        ...stateEvents.map((event) => event.issueId),
+        ...commentRows.map(({ comment }) => comment.issueId),
+      ].filter((id) => !issueById.has(id)),
+    );
+    for (const id of missingIssueIds) {
+      const issue = await repo.getIssueById(id);
+      if (issue) issueById.set(id, issue);
+    }
+    // Modelle + Action-Namen der Runs je beteiligtem Projekt.
+    const modelById = new Map<string, Model>();
+    const actionNameById = new Map<string, string>();
+    for (const projectId of new Set(runs.map((run) => run.projectId))) {
+      for (const model of await repo.listModels(projectId)) {
+        modelById.set(model.id, model);
+      }
+      for (const action of await repo.listActions(projectId)) {
+        actionNameById.set(action.id, action.name);
+      }
+    }
+    const users = await usersById([
+      ...commitRows.map(({ commit }) => commit.authorId),
+      ...openedIssues.map((issue) => issue.authorId),
+      ...stateEvents.map((event) => event.actorId),
+      ...commentRows.map(({ comment }) => comment.authorId),
+      ...runs.map((run) => run.triggeredById),
+      ...createdProjects.map((project) => project.ownerId),
+    ]);
+
+    const actorOf = (userId: string) => {
+      const actor = users.get(userId);
+      return actor ? publicUser(actor) : null;
+    };
+    const modelRef = (model: Model) => ({
+      slug: model.slug,
+      name: model.name,
+      kind: model.kind,
+      folder: model.folder,
+    });
+    const issueRef = (issue: Issue) => ({
+      number: issue.number,
+      title: issue.title,
+      state: issue.state,
+      kind: issue.kind,
+    });
+    const events: ActivityEvent[] = [];
+    const add = (projectId: string, event: Omit<ActivityEvent, "project">) => {
+      const project = projectById.get(projectId);
+      if (project) {
+        events.push({ ...event, project: { slug: project.slug, name: project.name } });
+      }
+    };
+
+    for (const { commit, model } of commitRows) {
+      add(model.projectId, {
+        id: `commit:${commit.id}`,
+        type: "commit",
+        at: commit.createdAt,
+        actor: actorOf(commit.authorId),
+        model: modelRef(model),
+        commit: {
+          id: commit.id,
+          message: commit.message,
+          branchName: commit.branchName,
+          added: commit.added,
+          removed: commit.removed,
+          modified: commit.modified,
+          schema: commit.schema,
+        },
+      });
+    }
+    for (const issue of openedIssues) {
+      add(issue.projectId, {
+        id: `issue:${issue.id}`,
+        type: "issue_opened",
+        at: issue.createdAt,
+        actor: actorOf(issue.authorId),
+        issue: issueRef(issue),
+      });
+    }
+    for (const event of stateEvents) {
+      const issue = issueById.get(event.issueId);
+      if (!issue) continue;
+      add(event.projectId, {
+        id: `event:${event.id}`,
+        type: event.kind === "closed" ? "issue_closed" : "issue_reopened",
+        at: event.createdAt,
+        actor: actorOf(event.actorId),
+        issue: issueRef(issue),
+      });
+    }
+    for (const { comment, projectId } of commentRows) {
+      const issue = issueById.get(comment.issueId);
+      if (!issue) continue;
+      add(projectId, {
+        id: `comment:${comment.id}`,
+        type: "comment",
+        at: comment.createdAt,
+        actor: actorOf(comment.authorId),
+        issue: issueRef(issue),
+        comment: { id: comment.id, excerpt: markdownExcerpt(comment.body) },
+      });
+    }
+    for (const run of runs) {
+      const model = modelById.get(run.modelId);
+      add(run.projectId, {
+        id: `run:${run.id}`,
+        type: "run",
+        at: run.createdAt,
+        actor: actorOf(run.triggeredById),
+        ...(model ? { model: modelRef(model) } : {}),
+        run: {
+          id: run.id,
+          number: run.number,
+          status: run.status,
+          summary: run.summary,
+          actionName: actionNameById.get(run.actionId) ?? "",
+          commitId: run.commitId,
+        },
+      });
+    }
+    for (const project of createdProjects) {
+      add(project.id, {
+        id: `project:${project.id}`,
+        type: "project_created",
+        at: project.createdAt,
+        actor: actorOf(project.ownerId),
+      });
+    }
+    return events
+      .sort((a, b) => b.at.localeCompare(a.at) || b.id.localeCompare(a.id))
+      .slice(0, query.limit);
+  }
+
+  // Aktivitäts-Feed, neueste zuerst; blättern mit `before` = `nextBefore`.
+  app.get(`${api}/activity`, async (request, reply) => {
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    const query = request.query as {
+      project?: string;
+      user?: string;
+      limit?: string;
+      before?: string;
+    };
+    const limit = intParam(query.limit, ACTIVITY_LIMIT_DEFAULT, 1, 100);
+    let before: string | undefined;
+    if (query.before) {
+      const parsed = new Date(query.before);
+      if (Number.isNaN(parsed.getTime())) {
+        return reply
+          .code(400)
+          .send({ error: "before must be an ISO timestamp" });
+      }
+      // Einheitliches ISO-Format — die Zeitstempel werden als Text verglichen.
+      before = parsed.toISOString();
+    }
+    const actor = resolveActor(user, query.user, reply);
+    if (!actor) return reply;
+    const projects = await projectScope(user, query.project, reply);
+    if (!projects) return reply;
+    const events = await activityFeed(projects, {
+      limit,
+      before,
+      actorId: actor.actorId,
+    });
+    return reply.send({
+      events,
+      nextBefore: events.length === limit ? (events.at(-1)?.at ?? null) : null,
+    });
+  });
+
+  // Beiträge je UTC-Tag (Heatmap): Commits, eröffnete Issues, Kommentare.
+  app.get(`${api}/contributions`, async (request, reply) => {
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    const query = request.query as {
+      project?: string;
+      user?: string;
+      days?: string;
+    };
+    const dayCount = intParam(query.days, CONTRIBUTION_DAYS_DEFAULT, 7, 400);
+    const actor = resolveActor(user, query.user, reply);
+    if (!actor) return reply;
+    const projects = await projectScope(user, query.project, reply);
+    if (!projects) return reply;
+    // Lückenlose Tage, der letzte ist heute (UTC).
+    const now = new Date();
+    const firstDay =
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) -
+      (dayCount - 1) * DAY_MS;
+    const dates = Array.from({ length: dayCount }, (_, index) =>
+      new Date(firstDay + index * DAY_MS).toISOString().slice(0, 10),
+    );
+    const from = dates[0]!;
+    const counts = new Map(
+      (
+        await repo.activityDayCounts(
+          projects.map((project) => project.id),
+          { since: from, actorId: actor.actorId },
+        )
+      ).map((entry) => [entry.day, entry]),
+    );
+    const days = dates.map((date) => {
+      const entry = counts.get(date);
+      const commits = entry?.commits ?? 0;
+      const issues = entry?.issues ?? 0;
+      const comments = entry?.comments ?? 0;
+      return { date, commits, issues, comments, total: commits + issues + comments };
+    });
+    return reply.send({
+      days,
+      total: days.reduce((sum, day) => sum + day.total, 0),
+      from,
+      to: dates[dates.length - 1],
+    });
+  });
+
+  // Befehlspalette: Projekte, Modelle, Issues (Teilstring, Präfix zuerst).
+  app.get(`${api}/search`, async (request, reply) => {
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    const query = request.query as { q?: string; limit?: string };
+    const text = (query.q ?? "").trim();
+    const limit = intParam(query.limit, SEARCH_LIMIT_DEFAULT, 1, 20);
+    if (!text) {
+      return reply.send({ projects: [], models: [], issues: [] });
+    }
+    const projects = await accessibleProjects(user);
+    const projectById = new Map(projects.map((project) => [project.id, project]));
+    const projectIds = [...projectById.keys()];
+    const projectRef = (projectId: string) => {
+      const project = projectById.get(projectId);
+      return { slug: project?.slug ?? "", name: project?.name ?? "" };
+    };
+    const needle = text.toLowerCase();
+    const matchedProjects = projects
+      .filter((project) =>
+        [project.name, project.slug, project.description].some((value) =>
+          value.toLowerCase().includes(needle),
+        ),
+      )
+      .map((project) => ({
+        project,
+        rank:
+          project.name.toLowerCase().startsWith(needle) ||
+          project.slug.startsWith(needle)
+            ? 0
+            : 1,
+      }))
+      .sort(
+        (a, b) => a.rank - b.rank || a.project.name.localeCompare(b.project.name),
+      )
+      .slice(0, limit)
+      .map((entry) => entry.project);
+    // "#12" oder "12" trifft zusätzlich Issue Nummer 12.
+    const numberMatch = /^#?(\d{1,9})$/.exec(text);
+    const [models, issues] = await Promise.all([
+      repo.searchModels(projectIds, text, limit),
+      repo.searchIssues(projectIds, {
+        text,
+        number: numberMatch ? Number(numberMatch[1]) : undefined,
+        limit,
+      }),
+    ]);
+    return reply.send({
+      projects: await enrichProjects(user, matchedProjects),
+      models: models.map((model) => ({
+        id: model.id,
+        slug: model.slug,
+        name: model.name,
+        kind: model.kind,
+        folder: model.folder,
+        project: projectRef(model.projectId),
+      })),
+      issues: issues.map((issue) => ({
+        id: issue.id,
+        number: issue.number,
+        title: issue.title,
+        state: issue.state,
+        kind: issue.kind,
+        createdAt: issue.createdAt,
+        project: projectRef(issue.projectId),
+      })),
+    });
+  });
+
+  // Offene Issues, die mir zugewiesen sind bzw. die ich eröffnet habe.
+  app.get(`${api}/me/issues`, async (request, reply) => {
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    const projects = await accessibleProjects(user);
+    const projectById = new Map(projects.map((project) => [project.id, project]));
+    const projectIds = [...projectById.keys()];
+    const [assigned, created] = await Promise.all([
+      repo.listIssuesByFilter(projectIds, {
+        state: "open",
+        assigneeId: user.id,
+        limit: MY_ISSUES_LIMIT,
+      }),
+      repo.listIssuesByFilter(projectIds, {
+        state: "open",
+        authorId: user.id,
+        limit: MY_ISSUES_LIMIT,
+      }),
+    ]);
+    const issueIds = [...new Set([...assigned, ...created].map((issue) => issue.id))];
+    const [links, commentCounts, subIssueCounts] = await Promise.all([
+      repo.getIssueLinks(issueIds),
+      repo.countIssueComments(issueIds),
+      repo.countSubIssues(issueIds),
+    ]);
+    const labelById = new Map<string, Label>();
+    for (const projectId of new Set(
+      [...assigned, ...created].map((issue) => issue.projectId),
+    )) {
+      for (const label of await repo.listLabels(projectId)) {
+        labelById.set(label.id, label);
+      }
+    }
+    const toMyIssue = (issue: Issue) => {
+      const project = projectById.get(issue.projectId);
+      return {
+        id: issue.id,
+        number: issue.number,
+        title: issue.title,
+        state: issue.state,
+        kind: issue.kind,
+        createdAt: issue.createdAt,
+        updatedAt: issue.updatedAt,
+        project: { slug: project?.slug ?? "", name: project?.name ?? "" },
+        labels: (links.get(issue.id)?.labelIds ?? [])
+          .map((id) => labelById.get(id))
+          .filter((label): label is Label => label !== undefined),
+        commentCount: commentCounts.get(issue.id) ?? 0,
+        subIssueCount: subIssueCounts.get(issue.id) ?? 0,
+      };
+    };
+    return reply.send({
+      assigned: assigned.map(toMyIssue),
+      created: created.map(toMyIssue),
+    });
+  });
 
   return app;
 }

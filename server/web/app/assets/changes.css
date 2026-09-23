@@ -1,107 +1,102 @@
-/* ======================================================================
+/* ==========================================================================
    Commit-Seite + Änderungen (objektzentrierter Diff)
-   ====================================================================== */
+   ========================================================================== */
 
-.container.wide {
-  max-width: 1520px;
+/* ---- Kopf ---------------------------------------------------------------- */
+
+.commit-hero {
+  margin-bottom: var(--space-4);
+  overflow: hidden;
 }
 
-/* ---- Kopf --------------------------------------------------------------- */
-
-.commit-head {
+.commit-hero-top {
   display: flex;
+  align-items: flex-start;
   flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 0.75rem 1.5rem;
-  margin: 0.25rem 0 1rem;
-}
-
-.commit-head-main {
-  flex: 1 1 28rem;
-  min-width: 0;
-  display: grid;
-  gap: 0.45rem;
+  gap: var(--space-3);
+  padding: var(--space-4);
 }
 
 .commit-title {
+  flex: 1 1 24rem;
+  min-width: 0;
   margin: 0;
-  display: flex;
-  align-items: flex-start;
-  gap: 0.5rem;
-  font-size: 1.35rem;
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: 600;
   line-height: 1.3;
   overflow-wrap: anywhere;
 }
 
-.commit-title > svg {
-  flex: none;
-  margin-top: 0.22rem;
+.commit-title.untitled {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.commit-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.commit-hero-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-base);
+  color: var(--text-muted);
+  background: var(--bg-subtle);
+  border-top: 1px solid var(--border-muted);
+}
+
+.commit-hero-meta .author {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.commit-hero-meta .meta-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+}
+
+.commit-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+/* Vergleichsleiste über den Änderungen */
+.compare-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  font-size: var(--text-base);
   color: var(--text-muted);
 }
 
-.commit-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.35rem 0.6rem;
-}
-
-.avatar {
-  width: 1.6rem;
-  height: 1.6rem;
-  border-radius: 50%;
-  display: inline-grid;
-  place-items: center;
-  background: var(--accent);
-  color: var(--accent-contrast);
-  font-size: 0.65rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-}
-
-.commit-id-copy {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 0.05rem 0.55rem;
-  background: var(--surface);
-  cursor: pointer;
-}
-
-.commit-id-copy:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.commit-head-actions {
-  display: flex;
-  align-items: flex-end;
-  gap: 0.5rem;
-}
-
-.compare-select {
-  display: grid;
-  gap: 0.15rem;
-}
-
-.compare-select label {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  margin: 0;
-}
-
-.compare-select select {
+.compare-bar select {
   width: auto;
-  max-width: 22rem;
+  max-width: 26rem;
+  min-height: 28px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+  font-size: var(--text-sm);
 }
 
-/* ---- Zusammenfassung ------------------------------------------------------ */
+.compare-bar .compare-arrow {
+  color: var(--text-subtle);
+}
+
+/* ---- Zusammenfassung ----------------------------------------------------- */
 
 .chg-summary {
-  padding: 1rem;
+  padding: var(--space-4);
   border-bottom: 1px solid var(--border);
 }
 
@@ -109,36 +104,38 @@
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 0.35rem 1.25rem;
+  gap: 6px 20px;
 }
 
 .chg-total {
-  font-size: 1rem;
+  font-size: var(--text-md);
 }
 
 .chg-total strong {
-  font-size: 1.15rem;
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
   font-variant-numeric: tabular-nums;
 }
 
 .chg-statfilters {
   display: inline-flex;
   flex-wrap: wrap;
-  gap: 0.15rem 0.35rem;
+  gap: 2px 6px;
 }
 
-/* Status-Filter: schlichte Text-Schalter mit Farbpunkt, keine Karten. */
+/* Status-Filter: Text-Schalter mit Farbpunkt */
 .chg-statfilter {
   --stat: var(--text-muted);
+  --stat-bg: var(--bg-subtle);
   display: inline-flex;
   align-items: baseline;
-  gap: 0.35rem;
-  padding: 0.1rem 0.5rem;
-  border: none;
-  border-radius: 6px;
-  background: none;
+  gap: 6px;
+  padding: 2px 8px;
+  font-size: var(--text-base);
   color: var(--text);
-  font: inherit;
+  background: none;
+  border: 0;
+  border-radius: var(--radius);
   cursor: pointer;
 }
 
@@ -147,22 +144,22 @@
 }
 
 .chg-statfilter.is-added {
-  --stat: var(--success);
-  --stat-bg: var(--success-bg);
+  --stat: var(--diff-added);
+  --stat-bg: var(--diff-added-bg);
 }
 
 .chg-statfilter.is-modified {
-  --stat: var(--warn);
-  --stat-bg: var(--warn-bg);
+  --stat: var(--diff-modified);
+  --stat-bg: var(--diff-modified-bg);
 }
 
 .chg-statfilter.is-removed {
-  --stat: var(--danger);
-  --stat-bg: var(--danger-bg);
+  --stat: var(--diff-removed);
+  --stat-bg: var(--diff-removed-bg);
 }
 
 .chg-statfilter:hover:not(:disabled) {
-  background: var(--surface-2);
+  background: var(--bg-hover);
 }
 
 .chg-statfilter.active {
@@ -181,8 +178,8 @@
 
 .chg-dot {
   align-self: center;
-  width: 0.55rem;
-  height: 0.55rem;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
   background: var(--stat);
 }
@@ -190,50 +187,58 @@
 .chg-bar {
   display: flex;
   gap: 2px;
-  height: 4px;
-  margin-top: 0.6rem;
-  border-radius: 999px;
+  height: 6px;
+  margin-top: var(--space-3);
   overflow: hidden;
+  border-radius: var(--radius-full);
 }
 
 .chg-bar > span {
   flex-basis: 0;
   min-width: 3px;
-  background: var(--border);
+  background: var(--bg-active);
 }
 
 .chg-bar > .is-added {
-  background: var(--success);
+  background: var(--diff-added);
 }
 
 .chg-bar > .is-modified {
-  background: var(--warn);
+  background: var(--attention-emphasis);
 }
 
 .chg-bar > .is-removed {
-  background: var(--danger);
+  background: var(--diff-removed);
 }
 
 .chg-facet-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.4rem;
-  margin-top: 0.85rem;
+  gap: 6px;
+  margin-top: var(--space-4);
 }
 
 .facet-chip {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
-  padding: 0.2rem 0.6rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface);
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  font-size: var(--text-sm);
+  font-weight: 500;
   color: var(--text);
-  font: inherit;
-  font-size: 0.82rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
   cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    background-color 0.12s ease;
+}
+
+.facet-chip > svg {
+  color: var(--text-muted);
 }
 
 .facet-chip:hover:not(:disabled) {
@@ -246,9 +251,13 @@
 }
 
 .facet-chip.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-contrast);
+  color: var(--text-on-emphasis);
+  background: var(--accent-emphasis);
+  border-color: var(--accent-emphasis);
+}
+
+.facet-chip.active > svg {
+  color: currentColor;
 }
 
 .facet-count {
@@ -256,30 +265,30 @@
   font-weight: 600;
 }
 
-/* ---- Werkzeugleiste --------------------------------------------------------- */
+/* ---- Werkzeugleiste ------------------------------------------------------ */
 
 .chg-toolbar {
   position: sticky;
-  top: 0;
+  top: var(--header-h);
   z-index: 5;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.6rem 1rem;
-  background: var(--surface);
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  background: var(--bg);
   border-bottom: 1px solid var(--border);
 }
 
 .chg-search {
   position: relative;
   flex: 1 1 16rem;
-  max-width: 24rem;
+  max-width: 26rem;
 }
 
 .chg-search > svg {
   position: absolute;
-  left: 0.55rem;
+  left: 10px;
   top: 50%;
   transform: translateY(-50%);
   color: var(--text-muted);
@@ -288,14 +297,15 @@
 
 .chg-search > input {
   width: 100%;
-  padding-left: 1.9rem;
+  padding-left: 32px;
 }
 
 .chg-toolbar select {
+  width: auto;
   max-width: 17rem;
 }
 
-/* ---- Liste + 3D ------------------------------------------------------------- */
+/* ---- Liste + 3D ---------------------------------------------------------- */
 
 .chg-split {
   display: grid;
@@ -307,58 +317,60 @@
 }
 
 .chg-count {
-  padding: 0.5rem 1rem 0.25rem;
+  padding: var(--space-2) var(--space-4) var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
 }
 
 .chg-list {
-  list-style: none;
   margin: 0;
   padding: 0;
+  list-style: none;
 }
 
 .chg-row {
-  --stat: var(--warn);
-  border-top: 1px solid var(--border);
+  --stat: var(--diff-modified);
+  border-top: 1px solid var(--border-muted);
   border-left: 3px solid transparent;
 }
 
 .chg-row.is-added {
-  --stat: var(--success);
+  --stat: var(--diff-added);
 }
 
 .chg-row.is-removed {
-  --stat: var(--danger);
+  --stat: var(--diff-removed);
 }
 
 .chg-row.open,
 .chg-row.located {
+  background: var(--bg-subtle);
   border-left-color: var(--stat);
-  background: var(--surface-2);
 }
 
 .chg-head {
-  width: 100%;
   display: flex;
   align-items: flex-start;
-  gap: 0.65rem;
-  padding: 0.6rem 1rem 0.6rem 0.8rem;
-  border: none;
-  border-radius: 0;
-  background: none;
-  color: inherit;
+  gap: 10px;
+  width: 100%;
+  padding: 10px var(--space-4) 10px 13px;
   font: inherit;
+  color: inherit;
   text-align: left;
+  background: none;
+  border: 0;
+  border-radius: 0;
   cursor: pointer;
 }
 
 .chg-head:hover {
-  background: var(--surface-2);
+  background: var(--bg-subtle);
 }
 
 .chg-status {
   flex: none;
   display: inline-flex;
-  margin-top: 0.1rem;
+  margin-top: 1px;
   color: var(--stat);
 }
 
@@ -366,14 +378,14 @@
   flex: 1;
   min-width: 0;
   display: grid;
-  gap: 0.3rem;
+  gap: 4px;
 }
 
 .chg-title {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 0.15rem 0.55rem;
+  gap: 2px 8px;
 }
 
 .chg-name {
@@ -387,14 +399,14 @@
 }
 
 .chg-type {
-  font-family: var(--mono);
-  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
   color: var(--text-muted);
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
 }
 
 .chg-container {
-  font-size: 0.8rem;
+  font-size: var(--text-sm);
   color: var(--text-muted);
 }
 
@@ -404,22 +416,22 @@
 
 .chg-highlights {
   display: grid;
-  gap: 0.15rem;
-  font-size: 0.85rem;
+  gap: 2px;
+  font-size: var(--text-sm);
 }
 
 .chg-facts {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.1rem 0.9rem;
-  font-size: 0.85rem;
+  gap: 2px 14px;
+  font-size: var(--text-sm);
 }
 
 .chg-hl {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 0.1rem 0.6rem;
+  gap: 2px 8px;
 }
 
 .chg-hl-field {
@@ -430,26 +442,26 @@
   display: inline-flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 0.35rem;
-  font-family: var(--mono);
-  font-size: 0.8rem;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
 }
 
 .val-before,
 .val-after {
-  padding: 0 0.3rem;
-  border-radius: 4px;
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
   overflow-wrap: anywhere;
 }
 
 .val-before {
-  background: var(--danger-bg);
+  background: var(--diff-removed-bg);
   text-decoration: line-through;
   text-decoration-color: color-mix(in srgb, var(--danger) 55%, transparent);
 }
 
 .val-after {
-  background: var(--success-bg);
+  background: var(--diff-added-bg);
 }
 
 .chg-arrow {
@@ -461,31 +473,36 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 0.25rem;
+  gap: 4px;
   max-width: 14rem;
 }
 
 .facet-tag {
-  padding: 0 0.45rem;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  font-size: 0.72rem;
-  line-height: 1.5;
-  color: var(--text-muted);
+  padding: 0 7px;
+  font-size: var(--text-xs);
+  line-height: 18px;
   white-space: nowrap;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
 }
 
 .facet-tag.facet-geometry,
 .facet-tag.facet-placement {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
   color: var(--accent);
+  border-color: var(--accent-muted);
+}
+
+.facet-tag.facet-properties {
+  color: var(--done);
+  border-color: color-mix(in srgb, var(--done) 40%, transparent);
 }
 
 .chg-caret {
   flex: none;
-  margin-top: 0.25rem;
+  margin-top: 3px;
   color: var(--text-muted);
-  transition: transform 0.12s;
+  transition: transform 0.12s ease;
 }
 
 .chg-row.open .chg-caret {
@@ -493,105 +510,97 @@
 }
 
 .chg-detail {
-  padding: 0.25rem 1rem 1rem 2.6rem;
   display: grid;
-  gap: 0.6rem;
+  gap: 10px;
+  padding: 4px var(--space-4) var(--space-4) 42px;
 }
 
 .chg-detail-bar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.6rem;
+  gap: 10px;
 }
 
 .chg-groups {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr));
-  gap: 0.75rem;
+  gap: var(--space-3);
 }
 
 .chg-group {
+  overflow: hidden;
+  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--surface);
-  overflow: hidden;
 }
 
 .chg-group > h4 {
   margin: 0;
-  padding: 0.35rem 0.7rem;
-  font-size: 0.78rem;
+  padding: 6px var(--space-3);
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--text-muted);
-  background: var(--surface-2);
+  background: var(--bg-subtle);
   border-bottom: 1px solid var(--border);
 }
 
 .chg-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.82rem;
+  font-size: var(--text-sm);
 }
 
 .chg-table th,
 .chg-table td {
-  padding: 0.28rem 0.7rem;
+  padding: 5px var(--space-3);
   text-align: left;
   vertical-align: top;
-  border-top: 1px solid var(--border);
-  border-bottom: none;
+  border-top: 1px solid var(--border-muted);
   overflow-wrap: anywhere;
 }
 
 .chg-table tr:first-child > * {
-  border-top: none;
+  border-top: 0;
 }
 
 .chg-table th {
   width: 34%;
   font-weight: 500;
-  font-size: 0.82rem;
   color: var(--text-muted);
-  text-transform: none;
-  letter-spacing: 0;
-}
-
-.chg-table tr:last-child > * {
-  border-bottom: none;
 }
 
 .chg-table td {
-  font-family: var(--mono);
-  font-size: 0.78rem;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
 }
 
 .chg-table .val-before-cell {
-  background: var(--danger-bg);
+  background: var(--diff-removed-bg);
 }
 
 .chg-table .val-after-cell {
-  background: var(--success-bg);
+  background: var(--diff-added-bg);
 }
 
 .chg-table .chg-arrow-cell {
-  width: 1.4rem;
-  padding-left: 0.2rem;
-  padding-right: 0.2rem;
-  color: var(--text-muted);
+  width: 22px;
+  padding-left: 2px;
+  padding-right: 2px;
   text-align: center;
+  color: var(--text-muted);
 }
 
 .chg-sentinel {
-  padding: 0.6rem 1rem 1rem;
   min-height: 1px;
+  padding: 10px var(--space-4) var(--space-4);
 }
 
-/* ---- 3D-Vergleich ------------------------------------------------------------ */
+/* ---- 3D-Vergleich -------------------------------------------------------- */
 
 .chg-3d {
   position: sticky;
-  top: 3.2rem;
+  top: calc(var(--header-h) + 48px);
   align-self: start;
   border-left: 1px solid var(--border);
 }
@@ -605,22 +614,23 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.3rem 0.45rem;
-  padding: 0.5rem 0.8rem;
+  gap: 4px 8px;
+  padding: var(--space-2) var(--space-3);
   border-top: 1px solid var(--border);
 }
 
 .legend-dot {
-  width: 0.7rem;
-  height: 0.7rem;
+  width: 10px;
+  height: 10px;
+  margin-left: 6px;
   border-radius: 50%;
-  margin-left: 0.35rem;
 }
 
 .legend-dot:first-child {
   margin-left: 0;
 }
 
+/* Feste Farben — identisch zu den Einfärbungen im 3D-Viewer. */
 .legend-dot.is-added {
   background: #2da44e;
 }
@@ -636,56 +646,14 @@
 .chg-3d-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 0.3rem;
+  gap: 6px;
   margin: 0;
-  font-weight: 400;
   cursor: pointer;
-}
-
-.chg-3d-toggle input {
-  width: auto;
-  margin: 0;
 }
 
 .chg-3d-note {
   margin: 0;
-  padding: 0 0.8rem 0.6rem;
-}
-
-.viewer-home {
-  position: absolute;
-  top: 0.6rem;
-  left: 0.6rem;
-  z-index: 2;
-  display: inline-grid;
-  place-items: center;
-  width: 2rem;
-  height: 2rem;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--text);
-  box-shadow: var(--shadow);
-  cursor: pointer;
-}
-
-.viewer-home:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.viewer-late {
-  position: absolute;
-  left: 0.6rem;
-  bottom: 0.6rem;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.25rem 0.6rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface);
+  padding: 0 var(--space-3) 10px;
 }
 
 @media (max-width: 1100px) {
@@ -696,7 +664,7 @@
   .chg-3d {
     position: static;
     order: -1;
-    border-left: none;
+    border-left: 0;
     border-bottom: 1px solid var(--border);
   }
 
@@ -711,69 +679,57 @@
   }
 }
 
-/* ---- Commit-Dialog: Dropzone + Fortschritt ------------------------------------ */
+/* ---- Diffstat (+ / ~ / −) ------------------------------------------------ */
 
-.dropzone {
-  display: grid;
-  justify-items: center;
-  gap: 0.2rem;
-  margin: 0 0 0.9rem;
-  padding: 1.4rem 1rem;
-  border: 2px dashed var(--border);
-  border-radius: var(--radius);
-  background: var(--surface-2);
-  color: var(--text-muted);
-  text-align: center;
-  font-weight: 400;
-  cursor: pointer;
-  transition:
-    border-color 0.12s,
-    background 0.12s;
+.diffstat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
-.dropzone strong {
-  color: var(--text);
-  overflow-wrap: anywhere;
+.diffstat .add {
+  color: var(--diff-added);
 }
 
-.dropzone:hover,
-.dropzone.over {
-  border-color: var(--accent);
+.diffstat .mod {
+  color: var(--diff-modified);
 }
 
-.dropzone.over {
-  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+.diffstat .del {
+  color: var(--diff-removed);
 }
 
-.dropzone.filled {
-  border-style: solid;
-  color: var(--success);
+/* Fünf Kästchen wie bei GitHub (Anteil neu/geändert/entfernt) */
+.diffblocks {
+  display: inline-flex;
+  gap: 1px;
 }
 
-.dropzone.busy {
-  pointer-events: none;
-  opacity: 0.7;
+.diffblocks > span {
+  width: 8px;
+  height: 8px;
+  border-radius: 1px;
+  background: var(--bg-active);
 }
 
-.dropzone-input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  pointer-events: none;
+.diffblocks > .add {
+  background: var(--diff-added);
 }
 
-.dropzone:focus-within {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+.diffblocks > .mod {
+  background: var(--attention-emphasis);
+}
+
+.diffblocks > .del {
+  background: var(--diff-removed);
 }
 
 .upload-progress {
   display: grid;
-  gap: 0.35rem;
-  margin-top: 0.9rem;
-}
-
-.diffstat > span + span {
-  margin-left: 0.45em;
+  gap: 6px;
+  margin-top: var(--space-3);
 }

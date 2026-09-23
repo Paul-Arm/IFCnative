@@ -1,134 +1,62 @@
 <script setup lang="ts">
 import {
-    PhArrowElbowLeftUp,
-    PhBlueprint,
-    PhBookOpen,
-    PhCaretDown,
-    PhCaretRight,
-    PhCheckCircle,
-    PhCrosshairSimple,
-    PhCube,
-    PhCubeTransparent,
-    PhDownloadSimple,
-    PhFile,
-    PhFileArrowUp,
-    PhFileDoc,
-    PhFileImage,
-    PhFileMd,
-    PhFilePdf,
-    PhFileText,
-    PhFolder,
-    PhFolderPlus,
-    PhFolders,
-    PhGear,
-    PhImage,
-    PhPlayCircle,
-    PhPlus,
-    PhRecord,
-    PhShieldCheck,
-    PhUploadSimple,
-    PhUsers,
+  PhArrowElbowLeftUp,
+  PhBookOpen,
+  PhCaretDown,
+  PhClockCounterClockwise,
+  PhCube,
+  PhFileArrowUp,
+  PhFileMd,
+  PhFolderPlus,
+  PhFolderSimple,
+  PhGlobeSimple,
+  PhMagnifyingGlass,
+  PhPencilSimple,
+  PhPlus,
+  PhTrash,
+  PhUploadSimple,
+  PhX,
 } from "@phosphor-icons/vue";
-import hljs from "highlight.js/lib/core";
-import pythonLang from "highlight.js/lib/languages/python";
 
-import type {
-    Action,
-    ActionKind,
-    ActionRun,
-    Commit,
-    Issue,
-    IssueKind,
-    Label,
-    LibraryFile,
-    Member,
-    Model,
-    ModelKind,
-    Project,
-    Role,
-} from "~/types/api";
+import type { Model } from "~/types/api";
 
+/**
+ * Projekt-Startseite („Code“-Tab bei GitHub): Ordner und Dateien mit dem
+ * jeweils letzten Commit, README des Ordners, Info-Seitenleiste.
+ */
 const route = useRoute();
 const router = useRouter();
+const project = useProject();
+const { slug, detail, models, stats, canWrite, modelsPending } = project;
 const { api } = useApi();
-const { user } = useAuth();
-const slug = route.params.project as string;
+const { token } = useAuth();
+const toast = useToast();
+const { confirm } = useConfirm();
 
-// Alle Daten laden "lazy": Die Seite rendert sofort und füllt sich Tab für
-// Tab, statt bis zur langsamsten der sieben Antworten leer zu bleiben.
-const {
-  data: projectData,
-  refresh: refreshProject,
-  status: projectStatus,
-  error: projectError,
-} = useAsyncData(
-  `project-${slug}`,
-  () =>
-    api<{
-      project: Project;
-      members: Member[];
-      role: Role | null;
-      folders: string[];
-    }>(`/projects/${slug}`),
-  { lazy: true },
-);
-const {
-  data: modelsData,
-  refresh: refreshModels,
-  status: modelsStatus,
-} = useAsyncData(
-  `models-${slug}`,
-  () => api<{ models: Model[] }>(`/projects/${slug}/models`),
-  { lazy: true },
-);
-const modelsPending = computed(
-  () =>
-    (modelsStatus.value === "pending" || modelsStatus.value === "idle") &&
-    !modelsData.value,
-);
-
-const isAdmin = computed(
-  () =>
-    projectData.value?.role === "owner" ||
-    projectData.value?.role === "maintainer",
-);
-const canWrite = computed(
-  () => isAdmin.value || projectData.value?.role === "contributor",
-);
-const isOwner = computed(() => projectData.value?.role === "owner");
-
-// ---- Tabs + aktueller Ordnerpfad --------------------------------------
-
-type Tab =
-  | "modelle"
-  | "3d"
-  | "issues"
-  | "actions"
-  | "mitglieder"
-  | "einstellungen";
-const tab = computed<Tab>(() => {
-  const value = route.query.tab;
-  return value === "3d" ||
-    value === "issues" ||
-    value === "actions" ||
-    value === "mitglieder" ||
-    value === "einstellungen"
-    ? value
-    : "modelle";
-});
-
-const currentPath = computed(() =>
-  typeof route.query.path === "string" ? route.query.path : "",
-);
-
-function goTo(nextTab: Tab, path = ""): void {
+// Alte Links (?tab=issues etc.) auf die neuen Unterseiten umleiten.
+const LEGACY_TABS: Record<string, string> = {
+  issues: "/issues",
+  actions: "/actions",
+  "3d": "/3d",
+  mitglieder: "/settings/members",
+  einstellungen: "/settings",
+};
+if (typeof route.query.tab === "string" && LEGACY_TABS[route.query.tab]) {
+  const target = `/p/${slug}${LEGACY_TABS[route.query.tab]}`;
   const query: Record<string, string> = {};
-  if (nextTab !== "modelle") query.tab = nextTab;
-  if (path) query.path = path;
-  router.replace({ query });
+  if (typeof route.query.fromRun === "string") query.fromRun = route.query.fromRun;
+  if (typeof route.query.forModel === "string") query.forModel = route.query.forModel;
+  const withNew = route.query.tab === "issues" && (query.fromRun || query.forModel);
+  await navigateTo({ path: withNew ? `${target}/new` : target, query }, { replace: true });
 }
 
-const breadcrumb = computed(() => {
+const currentPath = computed(() => (typeof route.query.path === "string" ? route.query.path : ""));
+
+function goPath(path: string): void {
+  router.push({ query: path ? { path } : {} });
+}
+
+const crumbs = computed(() => {
   if (!currentPath.value) return [];
   const segments = currentPath.value.split("/");
   return segments.map((segment, index) => ({
@@ -137,2349 +65,604 @@ const breadcrumb = computed(() => {
   }));
 });
 
-// ---- Datei-Browser: Unterordner + Modelle im aktuellen Pfad ------------
+// ---- Inhalt des aktuellen Ordners ---------------------------------------
+
+function under(model: Model, path: string): boolean {
+  const folder = model.folder ?? "";
+  return !path || folder === path || folder.startsWith(`${path}/`);
+}
+
+function latestHead(list: Model[]): Model | null {
+  let best: Model | null = null;
+  for (const model of list) {
+    if (!model.head) continue;
+    if (!best?.head || model.head.createdAt > best.head.createdAt) best = model;
+  }
+  return best;
+}
 
 const childFolders = computed(() => {
-  const folders = projectData.value?.folders ?? [];
+  const folders = detail.value?.folders ?? [];
   const prefix = currentPath.value ? `${currentPath.value}/` : "";
   return folders
-    .filter((folder) => {
-      if (!folder.startsWith(prefix) || folder === currentPath.value) {
-        return false;
-      }
-      return !folder.slice(prefix.length).includes("/");
+    .filter((folder) => folder.startsWith(prefix) && folder !== currentPath.value)
+    .filter((folder) => !folder.slice(prefix.length).includes("/"))
+    .map((folder) => {
+      const contained = (models.value ?? []).filter((model) => under(model, folder));
+      return {
+        path: folder,
+        name: folder.slice(prefix.length),
+        count: contained.length,
+        latest: latestHead(contained),
+      };
     })
-    .map((folder) => ({
-      path: folder,
-      name: folder.slice(prefix.length),
-      modelCount: (modelsData.value?.models ?? []).filter(
-        (model) =>
-          model.folder === folder || model.folder.startsWith(`${folder}/`),
-      ).length,
-    }));
+    .sort((a, b) => a.name.localeCompare(b.name, "de"));
 });
 
-const modelsInPath = computed(() =>
-  (modelsData.value?.models ?? []).filter(
-    (model) => (model.folder ?? "") === currentPath.value,
-  ),
+const filesHere = computed(() =>
+  (models.value ?? [])
+    .filter((model) => (model.folder ?? "") === currentPath.value)
+    .sort((a, b) => a.name.localeCompare(b.name, "de")),
 );
 
-// ---- Ordner anlegen / löschen ------------------------------------------
+const latestHere = computed(() =>
+  latestHead((models.value ?? []).filter((model) => under(model, currentPath.value))),
+);
 
-const showFolderForm = ref(false);
-const folderName = ref("");
-const browserError = ref<string | null>(null);
-const newMenu = ref<HTMLDetailsElement | null>(null);
+const isEmptyProject = computed(
+  () => !modelsPending.value && !(models.value ?? []).length && !(detail.value?.folders ?? []).length,
+);
 
-function openCreateForm(which: "model" | "file" | "folder"): void {
-  showModelForm.value = which === "model";
-  showFileForm.value = which === "file";
-  showFolderForm.value = which === "folder";
-  if (newMenu.value) {
-    newMenu.value.open = false;
+// ---- Datei finden (wie GitHubs „Go to file“) -----------------------------
+
+const finder = ref("");
+const finderInput = ref<HTMLInputElement | null>(null);
+const finderResults = computed(() => {
+  const needle = finder.value.trim().toLowerCase();
+  if (!needle) return [];
+  return (models.value ?? [])
+    .filter((model) =>
+      `${model.folder ? `${model.folder}/` : ""}${model.name}`.toLowerCase().includes(needle),
+    )
+    .slice(0, 50);
+});
+
+function onFinderKey(event: KeyboardEvent): void {
+  if (event.key === "Escape") {
+    finder.value = "";
+    finderInput.value?.blur();
+  } else if (event.key === "Enter" && finderResults.value[0]) {
+    void router.push(`/p/${slug}/m/${finderResults.value[0].slug}`);
   }
 }
 
-async function createFolder(): Promise<void> {
-  browserError.value = null;
-  const name = folderName.value.trim();
-  if (!name) return;
+// „t“ fokussiert die Dateisuche (wie bei GitHub).
+function onGlobalKey(event: KeyboardEvent): void {
+  const target = event.target as HTMLElement;
+  if (event.key !== "t" || event.ctrlKey || event.metaKey || event.altKey) return;
+  if (["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName) || target.isContentEditable) return;
+  if (document.querySelector(".dialog-backdrop, .palette-backdrop")) return;
+  event.preventDefault();
+  finderInput.value?.focus();
+}
+onMounted(() => document.addEventListener("keydown", onGlobalKey));
+onBeforeUnmount(() => document.removeEventListener("keydown", onGlobalKey));
+
+// ---- Prüfstatus der Head-Commits ------------------------------------------
+
+const { checks } = useProjectRuns(slug);
+
+// ---- Hochladen (Dialog + Drop auf die Liste) ------------------------------
+
+const uploadOpen = ref(false);
+const droppedFiles = ref<File[]>([]);
+const dropActive = ref(false);
+let dragDepth = 0;
+
+function openUpload(files: File[] = []): void {
+  droppedFiles.value = files;
+  uploadOpen.value = true;
+}
+
+function hasFiles(event: DragEvent): boolean {
+  return Array.from(event.dataTransfer?.types ?? []).includes("Files");
+}
+
+function onDragEnter(event: DragEvent): void {
+  if (!canWrite.value || !hasFiles(event)) return;
+  dragDepth += 1;
+  dropActive.value = true;
+}
+
+function onDragLeave(): void {
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (!dragDepth) dropActive.value = false;
+}
+
+function onDrop(event: DragEvent): void {
+  dragDepth = 0;
+  dropActive.value = false;
+  if (!canWrite.value) return;
+  const files = Array.from(event.dataTransfer?.files ?? []);
+  if (files.length) openUpload(files);
+}
+
+async function onUploaded(): Promise<void> {
+  await Promise.all([project.refreshModels(), project.refreshProject(), project.refreshStats()]);
+}
+
+// ---- Anlegen: IFC-Modell, Markdown-Datei, Ordner ---------------------------
+
+type CreateKind = "model" | "markdown" | "folder";
+const createKind = ref<CreateKind | null>(null);
+const createName = ref("");
+const createVisibility = ref<"private" | "public">("private");
+const createBusy = ref(false);
+const createError = ref<string | null>(null);
+
+function openCreate(kind: CreateKind): void {
+  createKind.value = kind;
+  createError.value = null;
+  createVisibility.value = "private";
+  const hasReadme = filesHere.value.some((model) => model.name.toLowerCase() === "readme.md");
+  createName.value = kind === "markdown" && !hasReadme ? "README.md" : "";
+}
+
+// ?upload=1 / ?create=… (aus Kopf-Menü und Befehlspalette). Die Rolle steht
+// erst fest, wenn das Projekt geladen ist — bis dahin warten.
+watch(
+  () => [route.query.upload, route.query.create, detail.value ? canWrite.value : null] as const,
+  ([upload, create, write]) => {
+    if ((!upload && !create) || write === null) return;
+    if (!write) {
+      toast.error("Du hast in diesem Projekt keine Schreibrechte.");
+    } else {
+      if (upload) openUpload();
+      if (create === "model" || create === "folder" || create === "markdown") openCreate(create);
+    }
+    const { upload: _u, create: _c, ...rest } = route.query;
+    void router.replace({ query: rest });
+  },
+  { immediate: true },
+);
+
+const createTitle = computed(() =>
+  createKind.value === "model"
+    ? "Neues IFC-Modell"
+    : createKind.value === "markdown"
+      ? "Neue Markdown-Datei"
+      : "Neuer Ordner",
+);
+
+async function submitCreate(): Promise<void> {
+  const name = createName.value.trim();
+  if (!name || !createKind.value) return;
+  createBusy.value = true;
+  createError.value = null;
   try {
-    const path = currentPath.value ? `${currentPath.value}/${name}` : name;
-    await api(`/projects/${slug}/folders`, { method: "POST", body: { path } });
-    folderName.value = "";
-    showFolderForm.value = false;
-    await refreshProject();
+    if (createKind.value === "folder") {
+      const path = currentPath.value ? `${currentPath.value}/${name}` : name;
+      await api(`/projects/${slug}/folders`, { method: "POST", body: { path } });
+      await project.refreshProject();
+      createKind.value = null;
+      goPath(path);
+      toast.success(`Ordner „${name}“ angelegt.`);
+      return;
+    }
+    const markdown = createKind.value === "markdown";
+    const fileName = markdown && !/\.(md|markdown)$/i.test(name) ? `${name}.md` : name;
+    const { model } = await api<{ model: Model }>(`/projects/${slug}/models`, {
+      method: "POST",
+      body: {
+        name: fileName,
+        kind: markdown ? "md" : "ifc",
+        visibility: createVisibility.value,
+        folder: currentPath.value,
+      },
+    });
+    await Promise.all([project.refreshModels(), project.refreshProject()]);
+    createKind.value = null;
+    await navigateTo(
+      markdown ? `/p/${slug}/m/${model.slug}?edit=1` : `/p/${slug}/m/${model.slug}`,
+    );
   } catch (e) {
-    browserError.value = apiErrorMessage(e);
+    createError.value = apiErrorMessage(e);
+  } finally {
+    createBusy.value = false;
   }
 }
 
 async function deleteFolder(path: string): Promise<void> {
-  if (!window.confirm(`Ordner „${path}" löschen?`)) return;
-  browserError.value = null;
+  const ok = await confirm({
+    title: "Ordner löschen?",
+    message: `Der leere Ordner „${path}“ wird entfernt.`,
+    confirmLabel: "Ordner löschen",
+    danger: true,
+  });
+  if (!ok) return;
   try {
-    await api(`/projects/${slug}/folders`, {
-      method: "DELETE",
-      query: { path },
-    });
-    await refreshProject();
+    await api(`/projects/${slug}/folders`, { method: "DELETE", query: { path } });
+    await project.refreshProject();
+    toast.success("Ordner gelöscht.");
   } catch (e) {
-    browserError.value = apiErrorMessage(e);
+    toast.error(apiErrorMessage(e));
   }
 }
 
-// ---- Modell anlegen (im aktuellen Ordner) ------------------------------
+// ---- README des Ordners -----------------------------------------------------
 
-const showModelForm = ref(false);
-const modelName = ref("");
-const modelVisibility = ref<"private" | "public">("private");
-const modelBusy = ref(false);
-
-async function createModel(): Promise<void> {
-  browserError.value = null;
-  modelBusy.value = true;
-  try {
-    await api(`/projects/${slug}/models`, {
-      method: "POST",
-      body: {
-        name: modelName.value,
-        visibility: modelVisibility.value,
-        folder: currentPath.value,
-      },
-    });
-    modelName.value = "";
-    showModelForm.value = false;
-    await Promise.all([refreshModels(), refreshProject()]);
-  } catch (e) {
-    browserError.value = apiErrorMessage(e);
-  } finally {
-    modelBusy.value = false;
-  }
-}
-
-// ---- Datei hochladen (beliebiger Typ; .md/.ifc landen in ihrer Art) ----
-
-const showFileForm = ref(false);
-const uploadFile = ref<File | null>(null);
-const fileMessage = ref("");
-const fileBusy = ref(false);
-const fileDragOver = ref(false);
-const { token } = useAuth();
-
-function fileExtension(name: string): string {
-  const idx = name.lastIndexOf(".");
-  return idx === -1 ? "" : name.slice(idx + 1).toLowerCase();
-}
-
-function modelKindForFile(name: string): ModelKind {
-  const ext = fileExtension(name);
-  if (ext === "md" || ext === "markdown") return "md";
-  if (ext === "ifc") return "ifc";
-  return "file";
-}
-
-/** Listen-Icon je Dateiart/-endung. */
-function modelIcon(model: Model) {
-  if (model.kind === "ifc") return PhCube;
-  if (model.kind === "md") return PhFileMd;
-  const ext = fileExtension(model.name);
-  if (ext === "pdf") return PhFilePdf;
-  if (ext === "doc" || ext === "docx") return PhFileDoc;
-  if (ext === "dwg" || ext === "dxf") return PhBlueprint;
-  if (["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(ext)) return PhFileImage;
-  if (["txt", "csv", "json", "xml", "ids"].includes(ext)) return PhFileText;
-  return PhFile;
-}
-
-function onUploadFileChange(event: Event): void {
-  const input = event.target as HTMLInputElement;
-  uploadFile.value = input.files?.[0] ?? null;
-}
-
-function onUploadFileDrop(event: DragEvent): void {
-  fileDragOver.value = false;
-  uploadFile.value = event.dataTransfer?.files?.[0] ?? null;
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-}
-
-async function uploadNewFile(): Promise<void> {
-  const file = uploadFile.value;
-  if (!file || fileBusy.value) return;
-  browserError.value = null;
-  fileBusy.value = true;
-  try {
-    const { model } = await api<{ model: Model }>(`/projects/${slug}/models`, {
-      method: "POST",
-      body: {
-        name: file.name,
-        kind: modelKindForFile(file.name),
-        folder: currentPath.value,
-      },
-    });
-    const form = new FormData();
-    form.append("message", fileMessage.value.trim() || "Erste Version");
-    form.append("file", file);
-    try {
-      await $fetch(`/api/projects/${slug}/models/${model.slug}/commits`, {
-        method: "POST",
-        query: { compact: 1 },
-        body: form,
-        headers: token.value ? { authorization: `Bearer ${token.value}` } : {},
-      });
-    } catch (e) {
-      // Kein leeres Modell zurücklassen (best effort — braucht Admin-Rolle).
-      await api(`/projects/${slug}/models/${model.slug}`, { method: "DELETE" }).catch(
-        () => undefined,
-      );
-      throw e;
-    }
-    uploadFile.value = null;
-    fileMessage.value = "";
-    showFileForm.value = false;
-    await Promise.all([refreshModels(), refreshProject()]);
-  } catch (e) {
-    browserError.value = apiErrorMessage(e);
-  } finally {
-    fileBusy.value = false;
-  }
-}
-
-// ---- README-Anzeige (wie GitHub) ---------------------------------------
-
-const readmeModel = computed(
+const readme = computed(
   () =>
-    modelsInPath.value.find(
-      (model) =>
-        model.kind === "md" && model.name.toLowerCase() === "readme.md",
+    filesHere.value.find(
+      (model) => model.kind === "md" && model.name.toLowerCase() === "readme.md",
     ) ?? null,
 );
 const readmeHtml = ref<string | null>(null);
 
 watch(
-  [readmeModel, currentPath],
-  async () => {
+  () => readme.value?.head?.id,
+  async (headId, _previous, onCleanup) => {
+    // Schneller Ordnerwechsel: die README des vorigen Ordners verwerfen.
+    let stale = false;
+    onCleanup(() => (stale = true));
     readmeHtml.value = null;
-    const model = readmeModel.value;
-    if (!model?.head) return;
+    const model = readme.value;
+    if (!model || !headId) return;
     try {
       const text = await $fetch<string>(
-        `/api/projects/${slug}/models/${model.slug}/commits/${model.head.id}/file`,
+        `/api/projects/${slug}/models/${model.slug}/commits/${headId}/file`,
         {
           responseType: "text",
-          headers: token.value
-            ? { authorization: `Bearer ${token.value}` }
-            : {},
+          headers: token.value ? { authorization: `Bearer ${token.value}` } : {},
         },
       );
-      readmeHtml.value = renderMarkdown(text);
+      if (!stale) readmeHtml.value = renderMarkdown(text);
     } catch {
-      readmeHtml.value = null;
+      if (!stale) readmeHtml.value = null;
     }
   },
   { immediate: true },
 );
 
-// ---- Projekt-3D: alle IFC-Modelle in einer Szene -----------------------
-
-const viewerModels = computed(() =>
-  (modelsData.value?.models ?? []).filter(
-    (model) => model.kind === "ifc",
-  ),
-);
-const viewerSources = computed(() =>
-  viewerModels.value
-    .filter((model) => model.head)
-    .map((model) => ({
-      key: model.id,
-      src: `/api/projects/${slug}/models/${model.slug}/commits/${model.head!.id}/fragments`,
-      label: model.folder ? `${model.folder}/${model.name}` : model.name,
-    })),
-);
-const projectViewer = ref<{
-  setVisible: (key: string, visible: boolean) => void;
-  focusModel: (key: string) => Promise<void>;
-  captureImage: () => string | null;
-} | null>(null);
-const hiddenModels = reactive(new Set<string>());
-
-function toggleViewerModel(modelId: string, visible: boolean): void {
-  if (visible) {
-    hiddenModels.delete(modelId);
-  } else {
-    hiddenModels.add(modelId);
-  }
-  projectViewer.value?.setVisible(modelId, visible);
+function commitLink(model: Model): string {
+  return model.head && model.kind === "ifc"
+    ? `/p/${slug}/m/${model.slug}/c/${model.head.id}`
+    : `/p/${slug}/m/${model.slug}?tab=commits`;
 }
-
-// Sidebar als Ordner-Baum
-interface TreeRow {
-  kind: "folder" | "model";
-  depth: number;
-  path?: string;
-  name?: string;
-  state?: "all" | "some" | "none";
-  model?: Model;
-}
-
-const collapsedFolders = reactive(new Set<string>());
-
-function viewerModelsUnder(path: string): Model[] {
-  return viewerModels.value.filter((model) => {
-    const folder = model.folder ?? "";
-    return folder === path || folder.startsWith(`${path}/`);
-  });
-}
-
-const treeRows = computed<TreeRow[]>(() => {
-  const rows: TreeRow[] = [];
-  const walk = (path: string, depth: number) => {
-    const prefix = path ? `${path}/` : "";
-    const subNames = [
-      ...new Set(
-        viewerModels.value
-          .map((model) => model.folder ?? "")
-          .filter((folder) => folder.startsWith(prefix) && folder !== path)
-          .map((folder) => folder.slice(prefix.length).split("/")[0]!),
-      ),
-    ].sort();
-    for (const name of subNames) {
-      const subPath = prefix + name;
-      const loadable = viewerModelsUnder(subPath).filter((model) => model.head);
-      const visible = loadable.filter(
-        (model) => !hiddenModels.has(model.id),
-      ).length;
-      rows.push({
-        kind: "folder",
-        depth,
-        path: subPath,
-        name,
-        state:
-          !loadable.length || visible === 0
-            ? "none"
-            : visible === loadable.length
-              ? "all"
-              : "some",
-      });
-      if (!collapsedFolders.has(subPath)) {
-        walk(subPath, depth + 1);
-      }
-    }
-    for (const model of viewerModels.value.filter(
-      (m) => (m.folder ?? "") === path,
-    )) {
-      rows.push({ kind: "model", depth, model });
-    }
-  };
-  walk("", 0);
-  return rows;
-});
-
-function toggleCollapsed(path: string): void {
-  if (collapsedFolders.has(path)) {
-    collapsedFolders.delete(path);
-  } else {
-    collapsedFolders.add(path);
-  }
-}
-
-function toggleFolder(path: string, visible: boolean): void {
-  for (const model of viewerModelsUnder(path)) {
-    if (model.head) {
-      toggleViewerModel(model.id, visible);
-    }
-  }
-}
-
-// Szene als Bild sichern / als Projektbild setzen
-const imageBusy = ref(false);
-const imageNotice = ref<string | null>(null);
-
-async function saveProjectImage(): Promise<void> {
-  const dataUrl = projectViewer.value?.captureImage();
-  if (!dataUrl) return;
-  imageBusy.value = true;
-  imageNotice.value = null;
-  try {
-    const blob = await (await fetch(dataUrl)).blob();
-    await $fetch(`/api/projects/${slug}/image`, {
-      method: "PUT",
-      body: blob,
-      headers: {
-        "content-type": "image/png",
-        ...(token.value ? { authorization: `Bearer ${token.value}` } : {}),
-      },
-    });
-    imageNotice.value = "Projektbild gespeichert.";
-  } catch (e) {
-    imageNotice.value = apiErrorMessage(e);
-  } finally {
-    imageBusy.value = false;
-  }
-}
-
-function downloadSceneImage(): void {
-  const dataUrl = projectViewer.value?.captureImage();
-  if (!dataUrl) return;
-  const a = document.createElement("a");
-  a.href = dataUrl;
-  a.download = `${slug}-szene.png`;
-  a.click();
-}
-
-// ---- Issues ------------------------------------------------------------
-
-const {
-  data: issuesData,
-  refresh: refreshIssues,
-  status: issuesStatus,
-} = useAsyncData(
-  `issues-${slug}`,
-  () =>
-    api<{ issues: Issue[]; openCount: number; closedCount: number }>(
-      `/projects/${slug}/issues`,
-    ),
-  { lazy: true },
-);
-const issuesPending = computed(
-  () =>
-    (issuesStatus.value === "pending" || issuesStatus.value === "idle") &&
-    !issuesData.value,
-);
-const { data: labelsData, refresh: refreshLabels } = useAsyncData(
-  `labels-${slug}`,
-  () => api<{ labels: Label[] }>(`/projects/${slug}/labels`),
-  { lazy: true },
-);
-
-const issueFilter = ref<"open" | "closed">("open");
-/**
- * Zeilen der Liste: Issues im gewählten Zustand. Unter-Issues bekommen nur
- * dann eine eigene Zeile, wenn ihr Eltern-Issue nicht selbst in der Liste
- * steht — sonst klappen sie unter dem Eltern-Issue auf.
- */
-const filteredIssues = computed(() => {
-  const matching = (issuesData.value?.issues ?? []).filter(
-    (issue) => issue.state === issueFilter.value,
-  );
-  const visibleIds = new Set(matching.map((issue) => issue.id));
-  return matching.filter(
-    (issue) => !issue.parentId || !visibleIds.has(issue.parentId),
-  );
-});
-/** Unter-Issues je Eltern-Issue (alle Zustände, nach Nummer aufsteigend). */
-const childrenByParent = computed(() => {
-  const map = new Map<string, Issue[]>();
-  for (const issue of issuesData.value?.issues ?? []) {
-    if (!issue.parentId) continue;
-    const list = map.get(issue.parentId) ?? [];
-    list.push(issue);
-    map.set(issue.parentId, list);
-  }
-  for (const list of map.values()) {
-    list.sort((a, b) => a.number - b.number);
-  }
-  return map;
-});
-/** Aufgeklappte Eltern-Issues (Unter-Issues sichtbar). */
-const expandedIssues = reactive(new Set<string>());
-/** Vorschau-Zeilen je Eltern-Issue; der Rest lebt im Explorer der Detailseite. */
-const CHILD_PREVIEW = 8;
-function toggleChildren(issueId: string): void {
-  if (expandedIssues.has(issueId)) {
-    expandedIssues.delete(issueId);
-  } else {
-    expandedIssues.add(issueId);
-  }
-}
-
-const showIssueForm = ref(false);
-const issueTitle = ref("");
-const issueBody = ref("");
-/** "virtual" = nur im Server; "bcf" = echtes IFC-Issue (BCF-exportierbar). */
-const issueKind = ref<IssueKind>("virtual");
-const issueAssignees = reactive(new Set<string>());
-const issueModels = reactive(new Set<string>());
-const issueLabels = reactive(new Set<string>());
-/** Betroffene GlobalIds (aus einem Prüf-Run) — verorten das Issue in 3D. */
-const issueGuids = ref<string[]>([]);
-const issueFromRun = ref<number | null>(null);
-const issueBusy = ref(false);
-const issueError = ref<string | null>(null);
-
-// ---- Versionsbezug: "Aufgefallen in" Commit je gewähltem Modell --------
-
-/** Commits je Modell (lazy geladen, sobald ein Modell angehakt wird). */
-const commitsByModel = reactive(new Map<string, Commit[]>());
-/** Gewählter "Aufgefallen in"-Commit je Modell-Id ("" = keiner). */
-const issueFoundCommits = reactive(new Map<string, string>());
-
-async function loadModelCommits(modelId: string): Promise<void> {
-  if (commitsByModel.has(modelId)) return;
-  const model = (modelsData.value?.models ?? []).find(
-    (entry) => entry.id === modelId,
-  );
-  if (!model) return;
-  commitsByModel.set(modelId, []);
-  try {
-    const result = await api<{ commits: Commit[] }>(
-      `/projects/${slug}/models/${model.slug}/commits`,
-    );
-    commitsByModel.set(modelId, result.commits);
-  } catch {
-    commitsByModel.delete(modelId);
-  }
-}
-
-function toggleIssueModel(modelId: string, on: boolean): void {
-  toggleSet(issueModels, modelId, on);
-  if (on) {
-    void loadModelCommits(modelId);
-  } else {
-    issueFoundCommits.delete(modelId);
-  }
-}
-
-const commitShort = (commit: Commit) =>
-  `${commit.id.slice(0, 8)} · ${commit.message || "(ohne Nachricht)"} · ${new Date(commit.createdAt).toLocaleDateString("de-DE")}`;
-
-// "Issue aus Run erstellen": befüllt das Formular mit Prüfbericht,
-// Modell-Verknüpfung und den GUIDs der Verstöße (Button an fehlgeschlagenen
-// Runs bzw. ?fromRun=<id> von der Commit-Seite aus).
-async function prefillIssueFromRun(runId: string): Promise<void> {
-  try {
-    const { run } = await api<{ run: ActionRun }>(
-      `/projects/${slug}/runs/${runId}`,
-    );
-    showIssueForm.value = true;
-    issueFromRun.value = run.number;
-    // Prüf-Issues mit Verortung sind echte IFC-Issues (BCF) — vorbelegen.
-    issueKind.value = "bcf";
-    issueTitle.value = `Prüfung fehlgeschlagen: ${run.action?.name ?? "Action"}`;
-    if (run.modelId) {
-      issueModels.add(run.modelId);
-      // Der geprüfte Commit ist der Stand, in dem der Fehler aufgefallen ist.
-      issueFoundCommits.set(run.modelId, run.commitId);
-      void loadModelCommits(run.modelId);
-    }
-    issueGuids.value = run.failedGuids ?? [];
-    const model = (modelsData.value?.models ?? []).find(
-      (entry) => entry.id === run.modelId,
-    );
-    const lines = [
-      `Die Prüfung **${run.action?.name ?? "?"}** (Run #${run.number}) ist fehlgeschlagen.`,
-      "",
-      `- Modell: **${run.model?.name ?? "?"}**`,
-      model
-        ? `- Commit: [\`${run.commitId.slice(0, 8)}\`](/p/${slug}/m/${model.slug}/c/${run.commitId})`
-        : `- Commit: \`${run.commitId.slice(0, 8)}\``,
-      `- Ergebnis: ${run.summary || "siehe Protokoll"}`,
-    ];
-    if (run.log) {
-      lines.push(
-        "",
-        "```",
-        run.log.length > 3000 ? `${run.log.slice(0, 3000)}\n… (gekürzt)` : run.log,
-        "```",
-      );
-    }
-    issueBody.value = lines.join("\n");
-    // Formular in den Blick holen.
-    goTo("issues");
-  } catch (e) {
-    issueError.value = apiErrorMessage(e);
-  }
-}
-
-onMounted(() => {
-  const fromRun = route.query.fromRun;
-  if (typeof fromRun === "string" && fromRun) {
-    void prefillIssueFromRun(fromRun);
-  }
-  // Von der Modellseite: Formular öffnen, Modell vorverknüpfen.
-  const forModel = route.query.forModel;
-  if (typeof forModel === "string" && forModel) {
-    showIssueForm.value = true;
-    issueModels.add(forModel);
-    void loadModelCommits(forModel);
-    goTo("issues");
-  }
-});
-
-const hasBcfIssues = computed(() =>
-  (issuesData.value?.issues ?? []).some((issue) => issue.kind === "bcf"),
-);
-const issueNotice = ref<string | null>(null);
-/** Sammel-Issue des letzten BCF-Imports (Link in der Erfolgsmeldung). */
-const bcfParent = ref<{ id: string; number: number } | null>(null);
-const bcfImportBusy = ref(false);
-
-/**
- * .bcfzip hochladen — alle Topics werden Unter-Issues eines virtuellen
- * Sammel-Issues (Titel aus dem Dateinamen), jedes mit 3D-Verortung, soweit
- * der Server die Objekte über Viewpoint, GUID oder Objektname findet.
- */
-async function importBcf(event: Event): Promise<void> {
-  const input = event.target as HTMLInputElement;
-  const file = input.files?.[0];
-  input.value = "";
-  if (!file) return;
-  issueError.value = null;
-  issueNotice.value = null;
-  bcfParent.value = null;
-  bcfImportBusy.value = true;
-  try {
-    const result = await $fetch<{
-      imported: number;
-      skipped: number;
-      located: number;
-      parent: { id: string; number: number } | null;
-    }>(`/api/projects/${slug}/issues/bcf?name=${encodeURIComponent(file.name)}`, {
-      method: "POST",
-      body: await file.arrayBuffer(),
-      headers: {
-        "content-type": "application/zip",
-        ...(token.value ? { authorization: `Bearer ${token.value}` } : {}),
-      },
-    });
-    bcfParent.value = result.parent;
-    issueNotice.value = result.parent
-      ? `BCF-Import: ${result.imported} Unter-Issue(s) angelegt, ${result.located} davon mit 3D-Verortung` +
-        (result.skipped
-          ? `, ${result.skipped} übersprungen (bereits vorhanden).`
-          : ".")
-      : `BCF-Import: nichts importiert — ${result.skipped} Topic(s) bereits vorhanden.`;
-    if (result.parent) {
-      expandedIssues.add(result.parent.id);
-    }
-    await refreshIssues();
-  } catch (e) {
-    issueError.value = apiErrorMessage(e);
-  } finally {
-    bcfImportBusy.value = false;
-  }
-}
-
-/** Alle BCF-Issues des Projekts als .bcfzip herunterladen. */
-async function downloadProjectBcf(): Promise<void> {
-  issueError.value = null;
-  try {
-    const blob = await $fetch<Blob>(`/api/projects/${slug}/issues/bcf`, {
-      responseType: "blob",
-      headers: token.value ? { authorization: `Bearer ${token.value}` } : {},
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${slug}-issues.bcfzip`;
-    a.click();
-    URL.revokeObjectURL(url);
-  } catch (e) {
-    issueError.value = apiErrorMessage(e);
-  }
-}
-
-function toggleSet(set: Set<string>, id: string, on: boolean): void {
-  if (on) {
-    set.add(id);
-  } else {
-    set.delete(id);
-  }
-}
-
-async function createIssue(): Promise<void> {
-  issueError.value = null;
-  issueBusy.value = true;
-  try {
-    await api(`/projects/${slug}/issues`, {
-      method: "POST",
-      body: {
-        title: issueTitle.value,
-        body: issueBody.value,
-        kind: issueKind.value,
-        assigneeIds: [...issueAssignees],
-        modelLinks: [...issueModels].map((modelId) => ({
-          modelId,
-          foundCommitId: issueFoundCommits.get(modelId) || null,
-        })),
-        labelIds: [...issueLabels],
-        guids: issueGuids.value,
-      },
-    });
-    issueTitle.value = "";
-    issueBody.value = "";
-    issueKind.value = "virtual";
-    issueFoundCommits.clear();
-    issueAssignees.clear();
-    issueModels.clear();
-    issueLabels.clear();
-    issueGuids.value = [];
-    issueFromRun.value = null;
-    showIssueForm.value = false;
-    issueFilter.value = "open";
-    await refreshIssues();
-  } catch (e) {
-    issueError.value = apiErrorMessage(e);
-  } finally {
-    issueBusy.value = false;
-  }
-}
-
-async function createProjectLabel(
-  name: string,
-  color: string,
-): Promise<Label | null> {
-  issueError.value = null;
-  try {
-    const { label } = await api<{ label: Label }>(`/projects/${slug}/labels`, {
-      method: "POST",
-      body: { name, color },
-    });
-    await refreshLabels();
-    return label;
-  } catch (e) {
-    issueError.value = apiErrorMessage(e);
-    return null;
-  }
-}
-
-/** Lesbare Textfarbe (schwarz/weiss) fuer eine Label-Hintergrundfarbe. */
-function labelTextColor(hex: string): string {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return 0.299 * r + 0.587 * g + 0.114 * b > 150 ? "#1f2328" : "#ffffff";
-}
-
-// ---- Mitglieder --------------------------------------------------------
-
-const memberEmail = ref("");
-const memberRole = ref<Role>("contributor");
-const memberError = ref<string | null>(null);
-const memberBusy = ref(false);
-
-async function addMember(): Promise<void> {
-  memberError.value = null;
-  memberBusy.value = true;
-  try {
-    await api(`/projects/${slug}/members`, {
-      method: "POST",
-      body: { email: memberEmail.value, role: memberRole.value },
-    });
-    memberEmail.value = "";
-    await refreshProject();
-  } catch (e) {
-    memberError.value = apiErrorMessage(e);
-  } finally {
-    memberBusy.value = false;
-  }
-}
-
-async function changeRole(member: Member, role: Role): Promise<void> {
-  memberError.value = null;
-  try {
-    await api(`/projects/${slug}/members`, {
-      method: "POST",
-      body: { email: member.user?.email, role },
-    });
-    await refreshProject();
-  } catch (e) {
-    memberError.value = apiErrorMessage(e);
-  }
-}
-
-async function removeMember(member: Member): Promise<void> {
-  memberError.value = null;
-  try {
-    await api(`/projects/${slug}/members/${member.userId}`, {
-      method: "DELETE",
-    });
-    await refreshProject();
-  } catch (e) {
-    memberError.value = apiErrorMessage(e);
-  }
-}
-
-const roles: Role[] = ["owner", "maintainer", "contributor", "viewer"];
-
-// ---- Projekt löschen ---------------------------------------------------
-
-// ---- Actions (Prüf-Workflows wie bei GitHub) ---------------------------
-
-const {
-  data: actionsData,
-  refresh: refreshActions,
-  status: actionsStatus,
-} = useAsyncData(
-  `actions-${slug}`,
-  () => api<{ actions: Action[] }>(`/projects/${slug}/actions`),
-  { lazy: true },
-);
-const actionsPending = computed(
-  () =>
-    (actionsStatus.value === "pending" || actionsStatus.value === "idle") &&
-    !actionsData.value,
-);
-// Zentrale Bibliothek für den "Aus Bibliothek"-Picker im Anlege-Formular.
-const { data: libraryData } = useAsyncData(
-  "library",
-  () => api<{ files: LibraryFile[] }>("/library"),
-  { lazy: true },
-);
-const {
-  data: runsData,
-  refresh: refreshRuns,
-  status: runsStatus,
-} = useAsyncData(
-  `runs-${slug}`,
-  () => api<{ runs: ActionRun[] }>(`/projects/${slug}/runs`),
-  { lazy: true },
-);
-const runsPending = computed(
-  () =>
-    (runsStatus.value === "pending" || runsStatus.value === "idle") &&
-    !runsData.value,
-);
-
-const RUN_STATUS: Record<
-  ActionRun["status"],
-  { label: string; cls: string }
-> = {
-  queued: { label: "Wartet", cls: "" },
-  running: { label: "Läuft …", cls: "accent" },
-  success: { label: "Bestanden", cls: "success" },
-  failed: { label: "Fehlgeschlagen", cls: "danger" },
-  error: { label: "Fehler", cls: "warn" },
-  cancelled: { label: "Abgebrochen", cls: "" },
-};
-
-const showActionForm = ref(false);
-const actionName = ref("");
-const actionKind = ref<ActionKind>("ids");
-const actionRunOnCommit = ref(true);
-const actionFile = ref<File | null>(null);
-/** Quelle der Prüfdatei: eigener Upload oder zentraler Bibliothekseintrag. */
-const actionSource = ref<"upload" | "library">("upload");
-const actionLibraryId = ref("");
-/** Geltungsbereich: alle Modelle, ein Ordner oder ein einzelnes Modell. */
-const actionScopeType = ref<"project" | "folder" | "model">("project");
-const actionScopeFolder = ref("");
-const actionScopeModelId = ref("");
-const actionBusy = ref(false);
-const actionError = ref<string | null>(null);
-
-/** Beschreibt den Geltungsbereich einer Action für die Tabelle. */
-function scopeLabel(action: Action): string {
-  if (action.scopeModelId) {
-    return `Modell: ${action.scopeModelName ?? action.scopeModelId}`;
-  }
-  if (action.scopeFolder) {
-    return `Ordner: ${action.scopeFolder}/`;
-  }
-  return "Alle Modelle";
-}
-
-function onActionFile(event: Event): void {
-  actionFile.value = (event.target as HTMLInputElement).files?.[0] ?? null;
-  if (!actionName.value && actionFile.value) {
-    actionName.value = actionFile.value.name.replace(/\.(ids|xml|py)$/i, "");
-  }
-}
-
-// ---- Python-Skript-Vorlage ---------------------------------------------
-
-const showPyTemplate = ref(false);
-const pyTemplateCopied = ref(false);
-
-const PY_TEMPLATE = `#!/usr/bin/env python3
-"""Prüfskript-Vorlage für IFC-Hub-Actions.
-
-Aufruf durch den Hub:   python check.py <pfad/zur/modell.ifc>
-- Der IFC-Pfad kommt als Argument 1 und als Umgebungsvariable IFC_PATH.
-- Exit-Code 0  = Prüfung bestanden, alles andere = fehlgeschlagen.
-- stdout/stderr landen im Run-Protokoll; die erste Zeile wird das Kurzfazit.
-- Zeilen im Format "GUID: <GlobalId>" markieren betroffene Objekte:
-  sie werden am Run gespeichert, in Issues übernommen und im
-  3D-Viewer verortet.
-"""
-import re
-import sys
-
-ifc_path = sys.argv[1]
-with open(ifc_path, encoding="utf-8", errors="replace") as handle:
-    text = handle.read()
-
-# --- Beispiel: alle IfcWall ohne Namen melden --------------------------
-# (durch eigene Prüf-Logik ersetzen)
-fehler: list[str] = []
-for match in re.finditer(r"IFCWALL\\('([^']{22})',[^,]*,\\s*(\\$|'')", text):
-    fehler.append(match.group(1))
-
-if fehler:
-    print(f"{len(fehler)} Wand/Wände ohne Namen")
-    for guid in fehler:
-        print(f"GUID: {guid}")
-    sys.exit(1)
-
-print("Alle Prüfungen bestanden")
-sys.exit(0)
-`;
-
-hljs.registerLanguage("python", pythonLang);
-
-/** Vorlage mit Syntax-Highlighting (hljs-Klassen, gestylt in main.css). */
-const pyTemplateHtml = computed(
-  () => hljs.highlight(PY_TEMPLATE, { language: "python" }).value,
-);
-
-async function copyPyTemplate(): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(PY_TEMPLATE);
-    pyTemplateCopied.value = true;
-    setTimeout(() => {
-      pyTemplateCopied.value = false;
-    }, 2000);
-  } catch {
-    actionError.value = "Kopieren nicht möglich — Vorlage manuell markieren.";
-  }
-}
-
-/** Vorlage direkt als Datei ins Formular übernehmen. */
-function usePyTemplate(): void {
-  actionFile.value = new File([PY_TEMPLATE], "check.py", {
-    type: "text/x-python",
-  });
-  if (!actionName.value) {
-    actionName.value = "check";
-  }
-  showPyTemplate.value = false;
-}
-
-/** Formular schließen und alle Eingaben zurücksetzen. */
-function resetActionForm(): void {
-  showActionForm.value = false;
-  actionError.value = null;
-  actionName.value = "";
-  actionKind.value = "ids";
-  actionSource.value = "upload";
-  actionFile.value = null;
-  actionLibraryId.value = "";
-  actionScopeType.value = "project";
-  actionScopeFolder.value = "";
-  actionScopeModelId.value = "";
-  actionRunOnCommit.value = true;
-  showPyTemplate.value = false;
-}
-
-async function createAction(): Promise<void> {
-  actionError.value = null;
-  // Geltungsbereich zusammenstellen und prüfen.
-  const scope: Record<string, string> = {};
-  if (actionScopeType.value === "folder") {
-    if (!actionScopeFolder.value) {
-      actionError.value = "Bitte einen Ordner als Geltungsbereich wählen.";
-      return;
-    }
-    scope.scopeFolder = actionScopeFolder.value;
-  } else if (actionScopeType.value === "model") {
-    if (!actionScopeModelId.value) {
-      actionError.value = "Bitte ein Modell als Geltungsbereich wählen.";
-      return;
-    }
-    scope.scopeModelId = actionScopeModelId.value;
-  }
-  let body: Record<string, unknown>;
-  if (actionSource.value === "library") {
-    if (!actionLibraryId.value) {
-      actionError.value = "Bitte einen Bibliothekseintrag auswählen.";
-      return;
-    }
-    body = {
-      name: actionName.value,
-      libraryFileId: actionLibraryId.value,
-      runOnCommit: actionRunOnCommit.value,
-      ...scope,
-    };
-  } else {
-    if (!actionFile.value) {
-      actionError.value = "Bitte eine Datei auswählen.";
-      return;
-    }
-    body = {
-      name: actionName.value,
-      kind: actionKind.value,
-      fileName: actionFile.value.name,
-      content: await actionFile.value.text(),
-      runOnCommit: actionRunOnCommit.value,
-      ...scope,
-    };
-  }
-  actionBusy.value = true;
-  try {
-    await api(`/projects/${slug}/actions`, { method: "POST", body });
-    resetActionForm();
-    await refreshActions();
-  } catch (e) {
-    actionError.value = apiErrorMessage(e);
-  } finally {
-    actionBusy.value = false;
-  }
-}
-
-// Name vorbelegen, wenn ein Bibliothekseintrag gewählt wird.
-watch(actionLibraryId, (id) => {
-  const entry = libraryData.value?.files.find((file) => file.id === id);
-  if (entry && !actionName.value) {
-    actionName.value = entry.name;
-  }
-});
-
-async function toggleRunOnCommit(action: Action): Promise<void> {
-  actionError.value = null;
-  try {
-    await api(`/projects/${slug}/actions/${action.id}`, {
-      method: "PATCH",
-      body: { runOnCommit: !action.runOnCommit },
-    });
-    await refreshActions();
-  } catch (e) {
-    actionError.value = apiErrorMessage(e);
-  }
-}
-
-async function removeAction(action: Action): Promise<void> {
-  if (
-    !window.confirm(
-      `Action „${action.name}" samt aller bisherigen Runs löschen?`,
-    )
-  ) {
-    return;
-  }
-  actionError.value = null;
-  try {
-    await api(`/projects/${slug}/actions/${action.id}`, { method: "DELETE" });
-    await Promise.all([refreshActions(), refreshRuns()]);
-  } catch (e) {
-    actionError.value = apiErrorMessage(e);
-  }
-}
-
-async function downloadActionFile(action: Action): Promise<void> {
-  const blob = await $fetch<Blob>(
-    `/api/projects/${slug}/actions/${action.id}/file`,
-    {
-      responseType: "blob",
-      headers: token.value ? { authorization: `Bearer ${token.value}` } : {},
-    },
-  );
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = action.fileName;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-// Run-Details (Protokoll, Live-Stream, Abbrechen) erst beim Aufklappen
-// mounten — sonst würde die Liste sofort alle Protokolle laden.
-const openRuns = reactive(new Set<string>());
-
-function onRunToggle(event: Event, run: ActionRun): void {
-  if ((event.target as HTMLDetailsElement).open) {
-    openRuns.add(run.id);
-  } else {
-    openRuns.delete(run.id);
-  }
-}
-
-/** Statuswechsel aus dem Live-Stream direkt in die Liste übernehmen. */
-function applyRunUpdate(updated: ActionRun): void {
-  const current = runsData.value?.runs.find((run) => run.id === updated.id);
-  if (current) {
-    Object.assign(current, updated);
-  }
-}
-
-async function onRunRetried(): Promise<void> {
-  await refreshRuns();
-}
-
-// Solange Runs laufen, die Liste alle 3 s nachladen (Fallback zum
-// Live-Stream der aufgeklappten Runs).
-const hasPendingRuns = computed(() =>
-  (runsData.value?.runs ?? []).some(
-    (run) => run.status === "queued" || run.status === "running",
-  ),
-);
-let runsTimer: ReturnType<typeof setInterval> | undefined;
-onMounted(() => {
-  runsTimer = setInterval(() => {
-    if (hasPendingRuns.value) {
-      void refreshRuns();
-    }
-  }, 3000);
-});
-onBeforeUnmount(() => clearInterval(runsTimer));
-
-const deleteError = ref<string | null>(null);
-const settingsError = ref<string | null>(null);
-const settingsNotice = ref<string | null>(null);
-
-async function patchProject(
-  visibility: "private" | "public",
-): Promise<void> {
-  settingsError.value = null;
-  settingsNotice.value = null;
-  try {
-    await api(`/projects/${slug}`, {
-      method: "PATCH",
-      body: { visibility },
-    });
-    settingsNotice.value = "Gespeichert.";
-    await refreshProject();
-  } catch (e) {
-    settingsError.value = apiErrorMessage(e);
-  }
-}
-
-async function deleteProject(): Promise<void> {
-  const project = projectData.value?.project;
-  if (!project) return;
-  if (
-    !window.confirm(
-      `Projekt „${project.name}" mit allen Modellen und Versionsständen unwiderruflich löschen?`,
-    )
-  ) {
-    return;
-  }
-  deleteError.value = null;
-  try {
-    await api(`/projects/${slug}`, { method: "DELETE" });
-    await navigateTo("/");
-  } catch (e) {
-    deleteError.value = apiErrorMessage(e);
-  }
-}
-
-const dateFmt = new Intl.DateTimeFormat("de-DE", {
-  dateStyle: "medium",
-  timeStyle: "short",
-});
 </script>
 
 <template>
-  <div v-if="projectError" class="alert error">
-    Projekt konnte nicht geladen werden: {{ apiErrorMessage(projectError) }}
-  </div>
-  <div v-else-if="!projectData" class="card">
-    <div class="card-header">
-      <span class="skeleton" style="width: 30%; height: 1.2em" />
-    </div>
-    <SkeletonRows :rows="5" dots />
-  </div>
-  <div v-else>
-    <nav class="breadcrumbs">
-      <NuxtLink to="/">Projekte</NuxtLink>
-      <span>/</span>
-      <strong>{{ projectData.project.name }}</strong>
-      <span v-if="projectData.role" class="badge accent">{{ projectData.role }}</span>
-    </nav>
+  <div :class="{ layout: !currentPath && !isEmptyProject }">
+    <div class="layout-main">
+      <!-- ============ Leeres Projekt: Schnellstart ============ -->
+      <div v-if="isEmptyProject" class="box quickstart">
+        <Blankslate title="Dieses Projekt ist noch leer" blueprint>
+          <template #art>
+            <IsoScene :size="180" variant="empty" />
+          </template>
+          Lege IFC-Modelle, Pläne und Dokumente ab — jede Datei bekommt ihre
+          eigene Versionshistorie mit Änderungsübersicht.
+          <template v-if="canWrite" #actions>
+            <button type="button" class="btn btn-primary" @click="openUpload()">
+              <PhUploadSimple :size="16" /> Dateien hochladen
+            </button>
+            <button type="button" class="btn" @click="openCreate('model')">
+              <PhCube :size="16" /> IFC-Modell anlegen
+            </button>
+            <button type="button" class="btn" @click="openCreate('markdown')">
+              <PhFileMd :size="16" /> README schreiben
+            </button>
+          </template>
+        </Blankslate>
+      </div>
 
-    <nav class="gh-tabs">
-      <button :class="{ active: tab === 'modelle' }" @click="goTo('modelle')">
-        <PhFolders :size="16" aria-hidden="true" />
-        Modelle
-        <span class="counter" :class="{ pending: modelsPending }">{{
-          modelsPending ? "" : (modelsData?.models.length ?? 0)
-        }}</span>
-      </button>
-      <button :class="{ active: tab === '3d' }" @click="goTo('3d')">
-        <PhCubeTransparent :size="16" aria-hidden="true" />
-        3D
-        <span class="counter">{{ viewerSources.length }}</span>
-      </button>
-      <button :class="{ active: tab === 'issues' }" @click="goTo('issues')">
-        <PhRecord :size="16" aria-hidden="true" />
-        Issues
-        <span class="counter" :class="{ pending: issuesPending }">{{
-          issuesPending ? "" : (issuesData?.openCount ?? 0)
-        }}</span>
-      </button>
-      <button :class="{ active: tab === 'actions' }" @click="goTo('actions')">
-        <PhPlayCircle :size="16" aria-hidden="true" />
-        Actions
-        <span class="counter" :class="{ pending: actionsPending }">{{
-          actionsPending ? "" : (actionsData?.actions.length ?? 0)
-        }}</span>
-      </button>
-      <button :class="{ active: tab === 'mitglieder' }" @click="goTo('mitglieder')">
-        <PhUsers :size="16" aria-hidden="true" />
-        Mitglieder
-        <span class="counter">{{ projectData.members.length }}</span>
-      </button>
-      <button
-        :class="{ active: tab === 'einstellungen' }"
-        @click="goTo('einstellungen')"
-      >
-        <PhGear :size="16" aria-hidden="true" />
-        Einstellungen
-      </button>
-    </nav>
-
-    <!-- ================= Tab: Modelle (Datei-Browser) ================= -->
-    <template v-if="tab === 'modelle'">
-      <div v-if="browserError" class="alert error">{{ browserError }}</div>
-
-      <div class="card">
-        <div class="card-header fb-toolbar">
-          <div class="fb-breadcrumb">
-            <a
-              href="#"
-              @click.prevent="goTo('modelle')"
-              :class="{ current: !currentPath }"
-            >{{ projectData.project.name }}</a>
-            <template v-for="crumb in breadcrumb" :key="crumb.path">
-              <span class="muted">/</span>
+      <template v-else>
+        <!-- ============ Werkzeugleiste ============ -->
+        <div class="fb-toolbar">
+          <nav class="crumbs fb-crumbs" aria-label="Ordnerpfad">
+            <a href="#" :class="{ current: !currentPath }" @click.prevent="goPath('')">
+              {{ detail?.project.name ?? slug }}
+            </a>
+            <template v-for="crumb in crumbs" :key="crumb.path">
+              <span class="sep">/</span>
               <a
+                v-if="crumb.path !== currentPath"
                 href="#"
-                :class="{ current: crumb.path === currentPath }"
-                @click.prevent="goTo('modelle', crumb.path)"
+                @click.prevent="goPath(crumb.path)"
               >{{ crumb.label }}</a>
+              <span v-else class="current">{{ crumb.label }}</span>
             </template>
-          </div>
-          <span class="topbar-spacer" />
-          <details v-if="canWrite" ref="newMenu" class="menu">
-            <summary class="btn primary">＋ Neu</summary>
-            <div class="menu-list">
-              <button class="menu-item" @click="openCreateForm('model')">
-                <PhCube :size="16" aria-hidden="true" />
-                IFC-Modell
-              </button>
-              <button class="menu-item" @click="openCreateForm('file')">
-                <PhFileArrowUp :size="16" aria-hidden="true" />
-                Datei hochladen
-              </button>
-              <button class="menu-item" @click="openCreateForm('folder')">
-                <PhFolderPlus :size="16" aria-hidden="true" />
-                Ordner
-              </button>
-            </div>
-          </details>
-        </div>
-
-        <div v-if="showFolderForm" class="card-body" style="border-bottom: 1px solid var(--border)">
-          <form class="form-inline" @submit.prevent="createFolder">
-            <div>
-              <label for="folder-name">
-                Ordnername
-                <span v-if="currentPath" class="muted">(in {{ currentPath }}/)</span>
-              </label>
-              <input
-                id="folder-name"
-                v-model="folderName"
-                type="text"
-                required
-                placeholder="z.B. Hochbau"
-              />
-            </div>
-            <div class="shrink">
-              <button class="primary" type="submit">Anlegen</button>
-            </div>
-          </form>
-        </div>
-
-        <div v-if="showFileForm" class="card-body" style="border-bottom: 1px solid var(--border)">
-          <p class="muted small" style="margin-top: 0">
-            Beliebige Datei (PDF, Word, DWG, Bilder, Markdown …) mit eigener
-            Versionshistorie. PDF, DOCX und DWG/DXF haben eine Vorschau im
-            Browser; eine <code>README.md</code> wird wie bei GitHub unter der
-            Dateiliste angezeigt<span v-if="currentPath">
-              (wird in „{{ currentPath }}“ angelegt)</span>.
-          </p>
-          <form @submit.prevent="uploadNewFile">
-            <label
-              class="dropzone"
-              :class="{ over: fileDragOver, filled: !!uploadFile, busy: fileBusy }"
-              for="upload-file"
-              @dragover.prevent="fileDragOver = true"
-              @dragleave.prevent="fileDragOver = false"
-              @drop.prevent="onUploadFileDrop"
-            >
-              <input
-                id="upload-file"
-                class="dropzone-input"
-                type="file"
-                :disabled="fileBusy"
-                @change="onUploadFileChange"
-              />
-              <PhUploadSimple :size="26" aria-hidden="true" />
-              <template v-if="uploadFile">
-                <strong>{{ uploadFile.name }}</strong>
-                <span class="muted small">
-                  {{ formatFileSize(uploadFile.size) }} · andere Datei wählen
-                </span>
-              </template>
-              <template v-else>
-                <strong>Datei hierher ziehen</strong>
-                <span class="muted small">oder klicken, um eine Datei zu wählen</span>
-              </template>
-            </label>
-            <div class="form-inline">
-              <div>
-                <label for="file-message">Commit-Nachricht</label>
-                <input
-                  id="file-message"
-                  v-model="fileMessage"
-                  type="text"
-                  placeholder="Erste Version"
-                  :disabled="fileBusy"
-                />
-              </div>
-              <div class="shrink" style="align-self: flex-end">
-                <button class="primary" type="submit" :disabled="fileBusy || !uploadFile">
-                  <span v-if="fileBusy" class="spinner" aria-hidden="true" />
-                  {{ fileBusy ? "Wird hochgeladen …" : "Hochladen" }}
-                </button>
-              </div>
-            </div>
-          </form>
-        </div>
-
-        <div v-if="showModelForm" class="card-body" style="border-bottom: 1px solid var(--border)">
-          <p class="muted small" style="margin-top: 0">
-            Ein Modell ist eine IFC-Datei mit eigener Versionshistorie und
-            eigenen Branches<span v-if="currentPath">
-              — wird in „{{ currentPath }}“ angelegt</span>.
-          </p>
-          <form class="form-inline" @submit.prevent="createModel">
-            <div>
-              <label for="model-name">Name</label>
-              <input
-                id="model-name"
-                v-model="modelName"
-                type="text"
-                required
-                placeholder="z.B. Architektur"
-              />
-            </div>
-            <div class="shrink">
-              <label for="model-visibility">Sichtbarkeit</label>
-              <select id="model-visibility" v-model="modelVisibility">
-                <option value="private">privat</option>
-                <option value="public">öffentlich</option>
-              </select>
-            </div>
-            <div class="shrink">
-              <button class="primary" type="submit" :disabled="modelBusy">
-                Anlegen
-              </button>
-            </div>
-          </form>
-        </div>
-
-        <div v-if="childFolders.length || modelsInPath.length || currentPath" class="fb-rows">
-          <a
-            v-if="currentPath"
-            href="#"
-            class="fb-row"
-            @click.prevent="
-              goTo('modelle', currentPath.split('/').slice(0, -1).join('/'))
-            "
-          >
-            <span class="fb-icon" aria-hidden="true">
-              <PhArrowElbowLeftUp :size="18" />
-            </span>
-            <span class="fb-name">..</span>
-          </a>
-          <div v-for="folder in childFolders" :key="folder.path" class="fb-row">
-            <span class="fb-icon folder" aria-hidden="true">
-              <PhFolder :size="18" weight="fill" />
-            </span>
-            <a
-              href="#"
-              class="fb-name"
-              @click.prevent="goTo('modelle', folder.path)"
-            >{{ folder.name }}</a>
-            <span class="fb-meta muted small">
-              {{ folder.modelCount }}
-              {{ folder.modelCount === 1 ? "Modell" : "Modelle" }}
-            </span>
-            <button
-              v-if="canWrite && folder.modelCount === 0"
-              class="link fb-action danger"
-              title="Leeren Ordner löschen"
-              @click="deleteFolder(folder.path)"
-            >
-              löschen
-            </button>
-          </div>
-          <div v-for="model in modelsInPath" :key="model.id" class="fb-row">
-            <span class="fb-icon" aria-hidden="true">
-              <component :is="modelIcon(model)" :size="18" />
-            </span>
-            <NuxtLink :to="`/p/${slug}/m/${model.slug}`" class="fb-name">
-              {{ model.name }}
-            </NuxtLink>
-            <span class="fb-commit muted small">
-              <template v-if="model.head">
-                {{ model.head.message || "(ohne Nachricht)" }}
-              </template>
-              <template v-else>Noch keine Commits</template>
-            </span>
-            <span
-              v-if="model.visibility === 'public'"
-              class="badge success"
-            >öffentlich</span>
-            <span class="fb-meta muted small">
-              <template v-if="model.head">
-                <strong class="fb-author">{{ model.head.author?.name ?? "?" }}</strong>
-                · {{ dateFmt.format(new Date(model.head.createdAt)) }}
-              </template>
-            </span>
-          </div>
-        </div>
-        <div v-else class="empty">
-          Noch keine Modelle in diesem Projekt. Jedes Modell ist eine IFC-Datei
-          mit eigener Versionshistorie — mit Ordnern lassen sich die Dateien
-          sortieren.
-        </div>
-      </div>
-
-      <!-- README des aktuellen Ordners, wie bei GitHub -->
-      <div v-if="readmeHtml && readmeModel" class="card">
-        <div class="card-header">
-          <PhBookOpen :size="16" aria-hidden="true" style="color: var(--text-muted)" />
-          <strong>{{ readmeModel.name }}</strong>
-          <span class="topbar-spacer" />
-          <NuxtLink
-            :to="`/p/${slug}/m/${readmeModel.slug}`"
-            class="small"
-          >Historie & Bearbeiten</NuxtLink>
-        </div>
-        <div class="card-body markdown-body" v-html="readmeHtml"></div>
-      </div>
-    </template>
-
-    <!-- ================= Tab: 3D (alle Modelle in einer Szene) ========= -->
-    <template v-else-if="tab === '3d'">
-      <div class="card">
-        <div class="card-header">
-          <strong>3D — alle Modelle</strong>
-          <span class="muted small">
-            Head-Commits der Standard-Branches, gemeinsame Szene
-          </span>
-        </div>
-        <div v-if="viewerSources.length" class="pv-wrap">
-          <div class="pv-side">
-            <div class="pv-tree">
-              <template
-                v-for="row in treeRows"
-                :key="row.kind + (row.path ?? row.model?.id ?? '')"
-              >
-                <div
-                  v-if="row.kind === 'folder'"
-                  class="pv-item pv-folder"
-                  :style="{ paddingLeft: `${row.depth * 0.9 + 0.3}rem` }"
-                >
-                  <button
-                    class="pv-caret"
-                    type="button"
-                    @click="toggleCollapsed(row.path!)"
-                  >
-                    <PhCaretRight
-                      v-if="collapsedFolders.has(row.path!)"
-                      :size="12"
-                    />
-                    <PhCaretDown v-else :size="12" />
-                  </button>
-                  <input
-                    type="checkbox"
-                    :checked="row.state === 'all'"
-                    :indeterminate="row.state === 'some'"
-                    @change="
-                      toggleFolder(
-                        row.path!,
-                        ($event.target as HTMLInputElement).checked,
-                      )
-                    "
-                  />
-                  <PhFolder :size="14" weight="fill" class="pv-foldericon" />
-                  <span class="pv-label">{{ row.name }}</span>
-                </div>
-                <label
-                  v-else
-                  class="pv-item"
-                  :class="{ disabled: !row.model!.head }"
-                  :style="{ paddingLeft: `${row.depth * 0.9 + 1.35}rem` }"
-                >
-                  <input
-                    type="checkbox"
-                    :disabled="!row.model!.head"
-                    :checked="
-                      !!row.model!.head && !hiddenModels.has(row.model!.id)
-                    "
-                    @change="
-                      toggleViewerModel(
-                        row.model!.id,
-                        ($event.target as HTMLInputElement).checked,
-                      )
-                    "
-                  />
-                  <span class="pv-label">
-                    {{ row.model!.name }}
-                    <span v-if="!row.model!.head" class="muted small">
-                      (keine Commits)</span
-                    >
-                  </span>
-                  <button
-                    v-if="row.model!.head"
-                    class="pv-focus"
-                    type="button"
-                    title="Kamera auf dieses Modell"
-                    @click.prevent.stop="projectViewer?.focusModel(row.model!.id)"
-                  >
-                    <PhCrosshairSimple :size="14" />
-                  </button>
-                </label>
-              </template>
-            </div>
-            <div v-if="imageNotice" class="pv-notice muted small">
-              {{ imageNotice }}
-            </div>
-            <div class="pv-actions">
-              <button :disabled="imageBusy" @click="saveProjectImage">
-                <PhImage :size="14" aria-hidden="true" />
-                Als Projektbild
-              </button>
-              <button
-                class="link"
-                title="Szene als PNG herunterladen"
-                @click="downloadSceneImage"
-              >
-                <PhDownloadSimple :size="16" aria-hidden="true" />
-              </button>
-            </div>
-          </div>
-          <div class="pv-main">
-            <ModelViewer ref="projectViewer" :sources="viewerSources" />
-          </div>
-        </div>
-        <div v-else class="empty">
-          Noch keine IFC-Modelle mit Commits in diesem Projekt.
-        </div>
-      </div>
-    </template>
-
-    <!-- ================= Tab: Issues ================= -->
-    <template v-else-if="tab === 'issues'">
-      <div v-if="issueError" class="alert error">{{ issueError }}</div>
-      <div v-if="issueNotice" class="alert success">
-        {{ issueNotice }}
-        <NuxtLink v-if="bcfParent" :to="`/p/${slug}/i/${bcfParent.number}`">
-          Sammel-Issue #{{ bcfParent.number }} öffnen
-        </NuxtLink>
-      </div>
-      <div class="card">
-        <div class="card-header">
-          <div class="tabs">
-            <button
-              :class="{ active: issueFilter === 'open' }"
-              @click="issueFilter = 'open'"
-            >
-              <PhRecord :size="14" aria-hidden="true" />
-              {{ issuesData?.openCount ?? 0 }} Offen
-            </button>
-            <button
-              :class="{ active: issueFilter === 'closed' }"
-              @click="issueFilter = 'closed'"
-            >
-              <PhCheckCircle :size="14" aria-hidden="true" />
-              {{ issuesData?.closedCount ?? 0 }} Geschlossen
-            </button>
-          </div>
-          <span class="topbar-spacer" />
-          <label
-            v-if="canWrite"
-            class="btn"
-            :style="bcfImportBusy ? 'opacity: 0.6; pointer-events: none' : ''"
-            title=".bcfzip importieren — alle Topics werden Unter-Issues eines Sammel-Issues, jedes mit Kommentaren und 3D-Verortung"
-          >
-            {{ bcfImportBusy ? "Importiere …" : "BCF-Import" }}
+          </nav>
+          <span class="spacer" />
+          <div class="input-icon fb-finder">
+            <PhMagnifyingGlass :size="16" />
             <input
-              type="file"
-              accept=".bcf,.bcfzip,.zip"
-              style="display: none"
-              @change="importBcf"
+              ref="finderInput"
+              v-model="finder"
+              type="search"
+              placeholder="Datei finden"
+              aria-label="Datei finden"
+              @keydown="onFinderKey"
             />
-          </label>
-          <button
-            v-if="hasBcfIssues"
-            title="Alle IFC-Issues (BCF) als .bcfzip exportieren"
-            @click="downloadProjectBcf"
-          >
-            BCF-Export
-          </button>
-          <button class="primary" @click="showIssueForm = !showIssueForm">
-            <PhPlus :size="14" aria-hidden="true" />
-            Neues Issue
-          </button>
-        </div>
-
-        <div
-          v-if="showIssueForm"
-          class="card-body"
-          style="border-bottom: 1px solid var(--border)"
-        >
-          <form @submit.prevent="createIssue">
-            <div class="form-inline">
-              <div>
-                <label for="issue-title">Titel</label>
-                <input
-                  id="issue-title"
-                  v-model="issueTitle"
-                  type="text"
-                  required
-                  placeholder="Kurz und praezise"
-                />
-              </div>
-              <div class="shrink">
-                <label for="issue-kind">Art</label>
-                <select
-                  id="issue-kind"
-                  v-model="issueKind"
-                  style="width: auto"
-                  title="Virtuelle Issues leben nur im Server; IFC-Issues sind als BCF exportierbar (Austausch mit anderen BIM-Werkzeugen)"
-                >
-                  <option value="virtual">Virtuell (nur Server)</option>
-                  <option value="bcf">IFC-Issue (BCF)</option>
-                </select>
-              </div>
-            </div>
-            <div class="form-row">
-              <label>Beschreibung (Markdown)</label>
-              <MarkdownEditor
-                v-model="issueBody"
-                placeholder="Was ist das Problem?"
-                min-height="8rem"
-              />
-            </div>
-            <p v-if="issueGuids.length" class="muted small" style="margin: 0.5rem 0 0">
-              3D-Verortung:
-              <strong>{{ issueGuids.length }}</strong>
-              Objekt-GUIDs
-              <template v-if="issueFromRun !== null">
-                aus Run #{{ issueFromRun }}
-              </template>
-              werden mit dem Issue verlinkt.
-            </p>
-            <div class="issue-pickers">
-              <div class="issue-picker">
-                <label>Zugewiesen an</label>
-                <label
-                  v-for="member in projectData.members"
-                  :key="member.userId"
-                  class="pv-item"
-                >
-                  <input
-                    type="checkbox"
-                    :checked="issueAssignees.has(member.userId)"
-                    @change="
-                      toggleSet(
-                        issueAssignees,
-                        member.userId,
-                        ($event.target as HTMLInputElement).checked,
-                      )
-                    "
-                  />
-                  <span class="pv-label">{{ member.user?.name ?? member.userId }}</span>
-                </label>
-              </div>
-              <div class="issue-picker">
-                <label>Modelle</label>
-                <label
-                  v-for="model in modelsData?.models ?? []"
-                  :key="model.id"
-                  class="pv-item"
-                >
-                  <input
-                    type="checkbox"
-                    :checked="issueModels.has(model.id)"
-                    @change="
-                      toggleIssueModel(
-                        model.id,
-                        ($event.target as HTMLInputElement).checked,
-                      )
-                    "
-                  />
-                  <span class="pv-label">
-                    {{ model.folder ? `${model.folder}/` : "" }}{{ model.name }}
-                  </span>
-                </label>
-                <!-- Versionsbezug: in welchem Stand ist der Fehler aufgefallen? -->
-                <template v-for="modelId in [...issueModels]" :key="`fc-${modelId}`">
-                  <div class="issue-found-commit">
-                    <span class="muted small">
-                      {{
-                        (modelsData?.models ?? []).find((m) => m.id === modelId)
-                          ?.name ?? "?"
-                      }}
-                      — aufgefallen in:
-                    </span>
-                    <select
-                      style="width: 100%"
-                      :value="issueFoundCommits.get(modelId) ?? ''"
-                      @change="
-                        ($event.target as HTMLSelectElement).value
-                          ? issueFoundCommits.set(
-                              modelId,
-                              ($event.target as HTMLSelectElement).value,
-                            )
-                          : issueFoundCommits.delete(modelId)
-                      "
-                    >
-                      <option value="">— kein Commit —</option>
-                      <option
-                        v-for="commit in commitsByModel.get(modelId) ?? []"
-                        :key="commit.id"
-                        :value="commit.id"
-                      >
-                        {{ commitShort(commit) }}
-                      </option>
-                    </select>
-                  </div>
-                </template>
-              </div>
-              <div class="issue-picker">
-                <label>Labels</label>
-                <LabelPicker
-                  :labels="labelsData?.labels ?? []"
-                  :selected-ids="[...issueLabels]"
-                  editable
-                  :create-label="canWrite ? createProjectLabel : undefined"
-                  @update="
-                    (ids) => {
-                      issueLabels.clear();
-                      for (const id of ids) issueLabels.add(id);
-                    }
-                  "
-                />
-              </div>
-            </div>
-            <button class="primary" type="submit" :disabled="issueBusy">
-              Issue erstellen
+            <kbd v-if="!finder" class="fb-finder-kbd">t</kbd>
+          </div>
+          <UiMenu v-if="canWrite" align="right">
+            <template #trigger="{ toggle, open }">
+              <button type="button" class="btn" :aria-expanded="open" @click="toggle">
+                <PhPlus :size="16" /> Hinzufügen <PhCaretDown :size="12" />
+              </button>
+            </template>
+            <button type="button" class="menu-item" @click="openUpload()">
+              <PhFileArrowUp :size="16" />
+              <span>Dateien hochladen<span class="menu-item-desc">IFC, PDF, DWG, Bilder …</span></span>
             </button>
-          </form>
+            <button type="button" class="menu-item" @click="openCreate('model')">
+              <PhCube :size="16" />
+              <span>IFC-Modell anlegen<span class="menu-item-desc">leer, Stände später committen</span></span>
+            </button>
+            <button type="button" class="menu-item" @click="openCreate('markdown')">
+              <PhFileMd :size="16" />
+              <span>Markdown-Datei<span class="menu-item-desc">Notizen, README, Protokolle</span></span>
+            </button>
+            <div class="menu-sep" />
+            <button type="button" class="menu-item" @click="openCreate('folder')">
+              <PhFolderPlus :size="16" /> Ordner anlegen
+            </button>
+          </UiMenu>
         </div>
 
-        <SkeletonRows v-if="issuesPending" :rows="4" dots />
-        <ul v-else-if="filteredIssues.length" class="list">
-          <li
-            v-for="issue in filteredIssues"
-            :key="issue.id"
-            class="list-item"
+        <!-- ============ Datei-Finder-Ergebnisse ============ -->
+        <div v-if="finder.trim()" class="box">
+          <div class="box-header">
+            <span class="box-title">{{ finderResults.length }} Treffer für „{{ finder.trim() }}“</span>
+            <span class="spacer" />
+            <button type="button" class="btn btn-invisible btn-sm" @click="finder = ''">
+              <PhX :size="14" /> Zurücksetzen
+            </button>
+          </div>
+          <NuxtLink
+            v-for="model in finderResults"
+            :key="model.id"
+            :to="`/p/${slug}/m/${model.slug}`"
+            class="box-row hoverable fb-row"
           >
-            <span class="issue-state" :class="issue.state">
-              <PhRecord v-if="issue.state === 'open'" :size="18" />
-              <PhCheckCircle v-else :size="18" weight="fill" />
+            <ModelIcon :kind="model.kind" :name="model.name" />
+            <span class="fb-name">
+              <span v-if="model.folder" class="muted">{{ model.folder }}/</span>{{ model.name }}
             </span>
-            <div class="list-item-main">
-              <NuxtLink
-                :to="`/p/${slug}/i/${issue.number}`"
-                style="font-weight: 600"
-              >
-                {{ issue.title }}
-              </NuxtLink>
-              <span
-                v-if="issue.kind === 'bcf'"
-                class="badge accent"
-                title="Echtes IFC-Issue — als BCF exportierbar"
-              >BCF</span>
-              <button
-                v-if="issue.subIssueCount"
-                type="button"
-                class="issue-progress"
-                :title="`${issue.subIssueCount - issue.openSubIssueCount} von ${issue.subIssueCount} Unter-Issues erledigt — ${expandedIssues.has(issue.id) ? 'zuklappen' : 'aufklappen'}`"
-                @click="toggleChildren(issue.id)"
-              >
-                <PhCaretDown v-if="expandedIssues.has(issue.id)" :size="12" aria-hidden="true" />
-                <PhCaretRight v-else :size="12" aria-hidden="true" />
-                <span class="issue-progress-bar" aria-hidden="true">
-                  <span
-                    :style="{
-                      width: `${Math.round(((issue.subIssueCount - issue.openSubIssueCount) / issue.subIssueCount) * 100)}%`,
-                    }"
-                  />
-                </span>
-                {{ issue.subIssueCount - issue.openSubIssueCount }}/{{ issue.subIssueCount }}
-              </button>
-              <span
-                v-for="label in issue.labels"
-                :key="label.id"
-                class="label-chip"
-                :style="{
-                  backgroundColor: label.color,
-                  color: labelTextColor(label.color),
-                }"
-              >{{ label.name }}</span>
-              <div class="muted small">
-                #{{ issue.number }} · {{ issue.author?.name ?? "?" }} ·
-                {{ dateFmt.format(new Date(issue.createdAt)) }}
-                <template v-if="issue.models.length">
-                  · {{ issue.models.map((m) => m.name).join(", ") }}
-                </template>
-                <template v-if="issue.parent">
-                  · Unter-Issue von
-                  <NuxtLink :to="`/p/${slug}/i/${issue.parent.number}`">
-                    #{{ issue.parent.number }}
-                  </NuxtLink>
-                </template>
-              </div>
-            </div>
-            <span v-if="issue.assignees.length" class="muted small">
-              &rarr; {{ issue.assignees.map((a) => a.name).join(", ") }}
+            <span class="fb-time muted small">
+              <RelTime v-if="model.head" :date="model.head.createdAt" />
             </span>
-
-            <!-- Unter-Issues (aufgeklappt): kompakte Vorschau, Rest im Explorer -->
-            <ul
-              v-if="issue.subIssueCount && expandedIssues.has(issue.id)"
-              class="issue-children"
-            >
-              <li
-                v-for="child in (childrenByParent.get(issue.id) ?? []).slice(0, CHILD_PREVIEW)"
-                :key="child.id"
-                class="list-item"
-              >
-                <span class="issue-state" :class="child.state">
-                  <PhRecord v-if="child.state === 'open'" :size="14" />
-                  <PhCheckCircle v-else :size="14" weight="fill" />
-                </span>
-                <div class="list-item-main">
-                  <span class="mono muted small">#{{ child.number }}</span>
-                  <NuxtLink :to="`/p/${slug}/i/${child.number}`" :title="child.title">
-                    {{ issueTitleCore(child.title) }}
-                  </NuxtLink>
-                  <span
-                    v-if="issueObjectName(child.body)"
-                    class="sie-object"
-                  >{{ issueObjectName(child.body) }}</span>
-                  <span
-                    v-if="child.guids.length"
-                    class="sie-located"
-                    :title="`${child.guids.length} Objekt(e) im 3D-Viewer verortet`"
-                  >
-                    <PhCube :size="12" aria-hidden="true" />
-                    {{ child.guids.length }}
-                  </span>
-                </div>
-              </li>
-              <li
-                v-if="(childrenByParent.get(issue.id)?.length ?? 0) > CHILD_PREVIEW"
-                class="issue-children-more"
-              >
-                <NuxtLink :to="`/p/${slug}/i/${issue.number}`">
-                  Alle {{ issue.subIssueCount }} Unter-Issues mit Suche, Fehlerarten und 3D-Verortung öffnen &rarr;
-                </NuxtLink>
-              </li>
-            </ul>
-          </li>
-        </ul>
-        <div v-else class="empty">
-          Keine {{ issueFilter === "open" ? "offenen" : "geschlossenen" }}
-          Issues.
-        </div>
-      </div>
-    </template>
-
-    <!-- ================= Tab: Actions (Prüf-Workflows) ================= -->
-    <template v-else-if="tab === 'actions'">
-      <div v-if="actionError" class="alert error">{{ actionError }}</div>
-
-      <div class="card">
-        <div class="card-header">
-          <h2>Actions</h2>
-          <span class="topbar-spacer" />
-          <button
-            v-if="canWrite"
-            class="btn primary"
-            @click="showActionForm = !showActionForm"
-          >
-            ＋ Neue Action
-          </button>
+          </NuxtLink>
+          <div v-if="!finderResults.length" class="box-row muted">Keine Datei gefunden.</div>
         </div>
 
+        <!-- ============ Datei-Liste ============ -->
         <div
-          v-if="showActionForm"
-          class="card-body"
-          style="border-bottom: 1px solid var(--border)"
+          v-else
+          class="box fb"
+          :class="{ 'drop-active': dropActive }"
+          @dragenter.prevent="onDragEnter"
+          @dragover.prevent
+          @dragleave="onDragLeave"
+          @drop.prevent="onDrop"
         >
-          <form class="action-form" @submit.prevent="createAction">
-            <div class="af-row">
-              <label>Prüfdatei</label>
-              <div class="af-control">
-                <div class="seg">
-                  <button
-                    type="button"
-                    :class="{ active: actionSource === 'upload' }"
-                    @click="actionSource = 'upload'"
-                  >
-                    Datei hochladen
-                  </button>
-                  <button
-                    type="button"
-                    :class="{ active: actionSource === 'library' }"
-                    @click="actionSource = 'library'"
-                  >
-                    Aus zentraler Bibliothek
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <template v-if="actionSource === 'upload'">
-              <div class="af-row">
-                <label>Art</label>
-                <div class="af-control">
-                  <div class="seg">
-                    <button
-                      type="button"
-                      :class="{ active: actionKind === 'ids' }"
-                      @click="actionKind = 'ids'"
-                    >
-                      IDS-Prüfung
-                    </button>
-                    <button
-                      type="button"
-                      :class="{ active: actionKind === 'python' }"
-                      @click="actionKind = 'python'"
-                    >
-                      Python-Skript
-                    </button>
-                  </div>
-                  <p v-if="actionKind === 'ids'" class="field-hint">
-                    buildingSMART-IDS-XML — läuft komplett auf dem Server.
-                  </p>
-                  <p v-else class="field-hint">
-                    Läuft auf dem Server; Exit-Code 0 = bestanden.
-                    <button
-                      type="button"
-                      class="link-btn"
-                      @click="showPyTemplate = true"
-                    >
-                      Skript-Vorlage anzeigen
-                    </button>
-                  </p>
-                </div>
-              </div>
-              <div class="af-row">
-                <label>Datei</label>
-                <div class="af-control">
-                  <label class="file-pick">
-                    <input
-                      type="file"
-                      :accept="actionKind === 'ids' ? '.ids,.xml' : '.py'"
-                      @change="onActionFile"
-                    />
-                    <span class="btn">
-                      <PhUploadSimple :size="14" aria-hidden="true" />
-                      {{ actionKind === "ids" ? ".ids wählen …" : ".py wählen …" }}
-                    </span>
-                    <span v-if="actionFile" class="file-name mono">
-                      {{ actionFile.name }}
-                    </span>
-                    <span v-else class="muted small">keine Datei gewählt</span>
-                  </label>
-                </div>
-              </div>
+          <div class="box-header fb-latest">
+            <template v-if="latestHere?.head">
+              <UserAvatar :user="latestHere.head.author" :size="24" />
+              <span class="author">{{ latestHere.head.author?.name ?? "?" }}</span>
+              <NuxtLink :to="commitLink(latestHere)" class="fb-latest-msg truncate">
+                {{ latestHere.head.message || "(ohne Nachricht)" }}
+              </NuxtLink>
+              <span class="spacer" />
+              <NuxtLink :to="commitLink(latestHere)" class="sha hide-sm">
+                {{ shortSha(latestHere.head.id) }}
+              </NuxtLink>
+              <span class="muted small nowrap hide-sm">
+                <RelTime :date="latestHere.head.createdAt" />
+              </span>
+              <NuxtLink
+                v-if="stats && !currentPath"
+                :to="`/p/${slug}/activity`"
+                class="btn btn-invisible btn-sm"
+              >
+                <PhClockCounterClockwise :size="16" />
+                <strong>{{ formatNumber(stats.commitCount) }}</strong>
+                <span class="hide-sm">Commits</span>
+              </NuxtLink>
             </template>
+            <template v-else-if="modelsPending">
+              <span class="skeleton dot" />
+              <span class="skeleton" style="max-width: 320px" />
+            </template>
+            <span v-else class="muted">Noch keine Commits in diesem Ordner.</span>
+          </div>
 
-            <div v-else class="af-row">
-              <label for="action-library">Bibliothekseintrag</label>
-              <div class="af-control">
-                <select
-                  id="action-library"
-                  v-model="actionLibraryId"
-                  :disabled="!libraryData?.files.length"
-                >
-                  <option value="" disabled>
-                    {{ libraryData?.files.length ? "bitte wählen …" : "Bibliothek ist leer" }}
-                  </option>
-                  <option
-                    v-for="entry in libraryData?.files ?? []"
-                    :key="entry.id"
-                    :value="entry.id"
-                  >
-                    {{ entry.kind === "ids" ? "IDS" : "Python" }} ·
-                    {{ entry.name }} ({{ entry.fileName }})
-                  </option>
-                </select>
-                <p class="field-hint">
-                  Zentrale Dateien gelten projektübergreifend; Aktualisierungen
-                  in der <NuxtLink to="/library">Bibliothek</NuxtLink> wirken
-                  sofort in allen verknüpften Actions.
-                </p>
-              </div>
-            </div>
-
-            <div class="af-row">
-              <label for="action-name">Name</label>
-              <div class="af-control">
-                <input
-                  id="action-name"
-                  v-model="actionName"
-                  :placeholder="actionKind === 'ids' ? 'z. B. IDS Hochbau' : 'z. B. Kollisions-Check'"
-                  required
-                />
-              </div>
-            </div>
-
-            <div class="af-row">
-              <label>Gilt für</label>
-              <div class="af-control af-control-row">
-                <select v-model="actionScopeType" style="width: auto">
-                  <option value="project">Alle Modelle des Projekts</option>
-                  <option value="folder">Einen Ordner (inkl. Unterordner)</option>
-                  <option value="model">Ein einzelnes Modell</option>
-                </select>
-                <select
-                  v-if="actionScopeType === 'folder'"
-                  v-model="actionScopeFolder"
-                  style="flex: 1; min-width: 180px"
-                >
-                  <option value="" disabled>Ordner wählen …</option>
-                  <option
-                    v-for="folder in projectData.folders"
-                    :key="folder"
-                    :value="folder"
-                  >
-                    {{ folder }}/
-                  </option>
-                </select>
-                <select
-                  v-if="actionScopeType === 'model'"
-                  v-model="actionScopeModelId"
-                  style="flex: 1; min-width: 180px"
-                >
-                  <option value="" disabled>Modell wählen …</option>
-                  <option
-                    v-for="model in (modelsData?.models ?? []).filter((m) => m.kind === 'ifc')"
-                    :key="model.id"
-                    :value="model.id"
-                  >
-                    {{ model.folder ? `${model.folder}/` : "" }}{{ model.name }}
-                  </option>
-                </select>
-              </div>
-            </div>
-
-            <div class="af-row">
-              <label>Automatik</label>
-              <div class="af-control">
-                <label class="action-form-check">
-                  <input
-                    v-model="actionRunOnCommit"
-                    type="checkbox"
-                    style="width: auto"
-                  />
-                  Bei jedem neuen Commit im Geltungsbereich automatisch ausführen
-                </label>
-              </div>
-            </div>
-
-            <div class="action-form-footer">
-              <button class="btn primary" type="submit" :disabled="actionBusy">
-                {{ actionBusy ? "Wird angelegt …" : "Action anlegen" }}
-              </button>
+          <SkeletonRows v-if="modelsPending" :rows="5" dots />
+          <template v-else>
+            <a
+              v-if="currentPath"
+              href="#"
+              class="box-row hoverable fb-row"
+              @click.prevent="goPath(currentPath.split('/').slice(0, -1).join('/'))"
+            >
+              <PhArrowElbowLeftUp :size="16" class="muted" />
+              <span class="fb-name">..</span>
+            </a>
+            <div
+              v-for="folder in childFolders"
+              :key="folder.path"
+              class="box-row hoverable fb-row"
+              @click="goPath(folder.path)"
+            >
+              <PhFolderSimple :size="16" weight="fill" class="fb-folder-icon" />
+              <a href="#" class="fb-name" @click.prevent.stop="goPath(folder.path)">{{ folder.name }}</a>
+              <span class="fb-msg truncate muted">
+                <template v-if="folder.latest?.head">
+                  {{ folder.latest.head.message || "(ohne Nachricht)" }}
+                </template>
+                <template v-else>{{ folder.count ? plural(folder.count, "Datei", "Dateien") : "leer" }}</template>
+              </span>
               <button
-                class="btn"
+                v-if="canWrite && !folder.count"
                 type="button"
-                :disabled="actionBusy"
-                @click="resetActionForm"
+                class="btn btn-invisible btn-xs btn-icon fb-row-action"
+                aria-label="Leeren Ordner löschen"
+                title="Leeren Ordner löschen"
+                @click.stop="deleteFolder(folder.path)"
               >
-                Abbrechen
+                <PhTrash :size="14" />
               </button>
+              <span class="fb-time muted small">
+                <RelTime v-if="folder.latest?.head" :date="folder.latest.head.createdAt" />
+              </span>
             </div>
-          </form>
-        </div>
-
-        <SkeletonRows v-if="actionsPending" :rows="3" />
-        <div v-else-if="!actionsData?.actions.length" class="empty empty-rich">
-          <PhShieldCheck :size="30" aria-hidden="true" class="empty-icon" />
-          <div class="empty-title">Noch keine Actions konfiguriert</div>
-          <p>
-            Actions prüfen deine IFC-Modelle automatisch — mit
-            <strong>IDS-Dateien</strong> oder <strong>Python-Skripten</strong>,
-            bei jedem Commit oder auf Knopfdruck.
-          </p>
-          <button v-if="canWrite" class="btn primary" @click="showActionForm = true">
-            ＋ Erste Action anlegen
-          </button>
-        </div>
-        <div v-else class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Art</th>
-                <th>Gilt für</th>
-                <th>Datei</th>
-                <th>Bei Commit</th>
-                <th v-if="canWrite"></th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="action in actionsData.actions" :key="action.id">
-                <td><strong>{{ action.name }}</strong></td>
-                <td>
-                  <span class="badge" :class="action.kind === 'ids' ? 'accent' : ''">
-                    {{ action.kind === "ids" ? "IDS" : "Python" }}
-                  </span>
-                </td>
-                <td class="small">
-                  <span
-                    class="badge"
-                    :class="!action.scopeFolder && !action.scopeModelId ? '' : 'accent'"
-                  >{{ scopeLabel(action) }}</span>
-                </td>
-                <td class="small mono">
-                  <a href="#" @click.prevent="downloadActionFile(action)">
-                    {{ action.fileName }}
-                  </a>
-                  <span v-if="action.libraryFileId" class="badge" title="Datei kommt aus der zentralen Bibliothek">
-                    Bibliothek{{ action.libraryName ? `: ${action.libraryName}` : "" }}
-                  </span>
-                </td>
-                <td>
-                  <input
-                    type="checkbox"
-                    style="width: auto"
-                    :checked="action.runOnCommit"
-                    :disabled="!canWrite"
-                    @change="toggleRunOnCommit(action)"
-                  />
-                </td>
-                <td v-if="canWrite" style="text-align: right">
-                  <button class="btn danger small" @click="removeAction(action)">
-                    Löschen
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-header">
-          <h2>Runs</h2>
-          <span v-if="hasPendingRuns" class="badge accent">läuft …</span>
-        </div>
-        <SkeletonRows v-if="runsPending" :rows="3" />
-        <div v-else-if="!runsData?.runs.length" class="empty empty-rich">
-          <PhPlayCircle :size="30" aria-hidden="true" class="empty-icon" />
-          <div class="empty-title">Noch keine Runs</div>
-          <p>
-            Runs entstehen automatisch bei Commits (Actions mit
-            „Bei Commit ausführen") oder über „Jetzt prüfen" auf der
-            Commit-Seite.
-          </p>
-        </div>
-        <div v-else>
-          <details
-            v-for="run in runsData.runs"
-            :key="run.id"
-            class="tree-group"
-            @toggle="onRunToggle($event, run)"
-          >
-            <summary>
-              <span class="muted small">#{{ run.number }}</span>
-              <span class="badge" :class="RUN_STATUS[run.status].cls">
-                <span
-                  v-if="run.status === 'running' || run.status === 'queued'"
-                  class="spinner"
-                  aria-hidden="true"
+            <div v-for="model in filesHere" :key="model.id" class="box-row hoverable fb-row">
+              <ModelIcon :kind="model.kind" :name="model.name" />
+              <NuxtLink :to="`/p/${slug}/m/${model.slug}`" class="fb-name">
+                {{ model.name
+                }}<PhGlobeSimple
+                  v-if="model.visibility === 'public'"
+                  :size="12"
+                  class="fb-lock"
+                  aria-label="Öffentlich — auch ohne Anmeldung abrufbar"
                 />
-                {{ RUN_STATUS[run.status].label }}
-              </span>
-              <strong>{{ run.action?.name ?? "(gelöschte Action)" }}</strong>
-              <span class="muted small">
-                {{ run.model?.name ?? "?" }} ·
-                <NuxtLink
-                  v-if="run.model"
-                  :to="`/p/${slug}/m/${run.model.slug}/c/${run.commitId}`"
-                  class="commit-id"
-                >{{ run.commitId.slice(0, 8) }}</NuxtLink>
-                · {{ dateFmt.format(new Date(run.createdAt)) }}
-                <template v-if="run.triggeredBy">
-                  · {{ run.triggeredBy.name }}
+              </NuxtLink>
+              <span class="fb-msg truncate">
+                <template v-if="model.head">
+                  <NuxtLink :to="commitLink(model)" class="fb-msg-link">
+                    {{ model.head.message || "(ohne Nachricht)" }}
+                  </NuxtLink>
+                  <CommitStatus :check="checks.get(model.head.id)" :slug="slug" :size="14" />
                 </template>
+                <span v-else class="subtle">Noch keine Version</span>
               </span>
-            </summary>
-            <div class="tree-children">
-              <RunDetails
-                v-if="openRuns.has(run.id)"
-                :slug="slug"
-                :run="run"
-                :can-write="canWrite"
-                @updated="applyRunUpdate"
-                @retried="onRunRetried"
-              >
-                <template #actions>
-                  <template v-if="run.status === 'failed' || run.status === 'error'">
-                    <button
-                      class="btn small"
-                      title="Issue mit Prüfbericht, Modell-Verknüpfung und den GUIDs der Verstöße anlegen"
-                      @click="prefillIssueFromRun(run.id)"
-                    >
-                      Issue aus Run erstellen
-                    </button>
-                    <span v-if="run.failedGuids.length" class="muted small">
-                      {{ run.failedGuids.length }} betroffene Objekte werden verlinkt
-                    </span>
-                  </template>
-                </template>
-              </RunDetails>
+              <span class="fb-time muted small">
+                <RelTime v-if="model.head" :date="model.head.createdAt" />
+              </span>
             </div>
-          </details>
-        </div>
-      </div>
-    </template>
+            <div v-if="!childFolders.length && !filesHere.length" class="box-row muted">
+              Dieser Ordner ist leer.
+            </div>
+          </template>
 
-    <!-- ================= Tab: Mitglieder ================= -->
-    <template v-else-if="tab === 'mitglieder'">
-      <div class="card">
-        <div v-if="memberError" class="card-body" style="padding-bottom: 0">
-          <div class="alert error">{{ memberError }}</div>
-        </div>
-        <ul class="list">
-          <li
-            v-for="member in projectData.members"
-            :key="member.userId"
-            class="list-item"
-          >
-            <div class="list-item-main">
-              <strong>{{ member.user?.name ?? member.userId }}</strong>
-              <div class="muted small">{{ member.user?.email }}</div>
-            </div>
-            <template v-if="isAdmin && member.userId !== projectData.project.ownerId">
-              <select
-                class="shrink"
-                style="width: auto"
-                :value="member.role"
-                @change="changeRole(member, ($event.target as HTMLSelectElement).value as Role)"
-              >
-                <option v-for="role in roles" :key="role" :value="role">
-                  {{ role }}
-                </option>
-              </select>
-              <button
-                v-if="member.userId !== user?.id"
-                class="danger"
-                @click="removeMember(member)"
-              >
-                Entfernen
-              </button>
-            </template>
-            <span v-else class="badge accent">{{ member.role }}</span>
-          </li>
-        </ul>
-        <div v-if="isAdmin" class="card-body" style="border-top: 1px solid var(--border)">
-          <form class="form-inline" @submit.prevent="addMember">
-            <div>
-              <label for="member-email">E-Mail (registrierter Benutzer)</label>
-              <input
-                id="member-email"
-                v-model="memberEmail"
-                type="email"
-                required
-                placeholder="kollege@firma.de"
-              />
-            </div>
-            <div class="shrink">
-              <label for="member-role">Rolle</label>
-              <select id="member-role" v-model="memberRole">
-                <option value="maintainer">maintainer</option>
-                <option value="contributor">contributor</option>
-                <option value="viewer">viewer</option>
-              </select>
-            </div>
-            <div class="shrink">
-              <button class="primary" type="submit" :disabled="memberBusy">
-                Hinzufügen
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </template>
-
-    <!-- ================= Tab: Einstellungen ================= -->
-    <template v-else>
-      <div v-if="isAdmin" class="card">
-        <div class="card-header"><h2>Allgemein</h2></div>
-        <div class="card-body">
-          <div v-if="settingsError" class="alert error">{{ settingsError }}</div>
-          <div v-if="settingsNotice" class="alert success">{{ settingsNotice }}</div>
-          <div class="form-inline">
-            <div class="shrink">
-              <label for="project-visibility">Sichtbarkeit</label>
-              <select
-                id="project-visibility"
-                style="width: auto"
-                :value="projectData.project.visibility"
-                @change="
-                  patchProject(
-                    ($event.target as HTMLSelectElement).value as
-                      | 'private'
-                      | 'public',
-                  )
-                "
-              >
-                <option value="public">öffentlich (alle angemeldeten Benutzer)</option>
-                <option value="private">privat (nur Mitglieder)</option>
-              </select>
-            </div>
+          <div v-if="dropActive" class="fb-drop">
+            <PhUploadSimple :size="28" />
+            <strong>Loslassen zum Hochladen</strong>
+            <span>nach {{ currentPath ? `/${currentPath}` : "die Projektwurzel" }}</span>
           </div>
         </div>
-      </div>
 
-      <div v-if="isOwner" class="card" style="border-color: var(--danger)">
-        <div class="card-header">
-          <h2 style="color: var(--danger)">Gefahrenzone</h2>
+        <!-- ============ README ============ -->
+        <div v-if="readme && readmeHtml && !finder.trim()" class="box readme">
+          <div class="box-header">
+            <PhBookOpen :size="16" class="muted" />
+            <span class="box-title">{{ readme.name }}</span>
+            <span class="spacer" />
+            <NuxtLink
+              v-if="canWrite"
+              :to="`/p/${slug}/m/${readme.slug}?edit=1`"
+              class="btn btn-invisible btn-sm btn-icon"
+              aria-label="README bearbeiten"
+              data-tip="Bearbeiten"
+            >
+              <PhPencilSimple :size="16" />
+            </NuxtLink>
+          </div>
+          <article class="box-body markdown-body readme-body" v-html="readmeHtml" />
         </div>
-        <div class="card-body">
-          <div v-if="deleteError" class="alert error">{{ deleteError }}</div>
-          <p class="muted small" style="margin-top: 0">
-            Löscht das Projekt mit allen Modellen, Branches und Versionsständen —
-            unwiderruflich.
-          </p>
-          <button class="danger" @click="deleteProject">Projekt löschen</button>
+        <div
+          v-else-if="!currentPath && !readme && canWrite && !finder.trim() && !modelsPending"
+          class="box readme-hint"
+        >
+          <div class="box-body row">
+            <PhBookOpen :size="20" class="muted" />
+            <span class="muted">
+              Hilf anderen, sich zurechtzufinden — eine <strong>README.md</strong> erscheint hier wie bei GitHub.
+            </span>
+            <span class="spacer" />
+            <button type="button" class="btn btn-sm" @click="openCreate('markdown')">README anlegen</button>
+          </div>
         </div>
-      </div>
-      <div v-else class="card">
-        <div class="card-body muted">
-          Projekteinstellungen kann nur der Owner ändern.
-        </div>
-      </div>
-    </template>
-
-    <!-- Modal: Python-Skript-Vorlage (mit Syntax-Highlighting) -->
-    <div
-      v-if="showPyTemplate"
-      class="modal-backdrop"
-      @click.self="showPyTemplate = false"
-    >
-      <div class="card modal modal-wide">
-        <div class="card-header">
-          <h2>Python-Skript-Vorlage</h2>
-          <span class="muted small mono">check.py</span>
-          <span class="topbar-spacer" />
-          <button type="button" class="btn small" @click="copyPyTemplate">
-            {{ pyTemplateCopied ? "Kopiert ✓" : "Kopieren" }}
-          </button>
-          <button
-            type="button"
-            class="btn small primary"
-            title="Vorlage direkt als Prüfdatei ins Formular übernehmen"
-            @click="usePyTemplate"
-          >
-            Als Datei übernehmen
-          </button>
-          <button
-            type="button"
-            class="link"
-            title="Schließen"
-            @click="showPyTemplate = false"
-          >
-            ✕
-          </button>
-        </div>
-        <pre class="py-code"><code v-html="pyTemplateHtml"></code></pre>
-      </div>
+      </template>
     </div>
+
+    <ProjectAbout v-if="!currentPath && !isEmptyProject" class="layout-side" />
+
+    <!-- ============ Dialoge ============ -->
+    <UploadDialog
+      v-model:open="uploadOpen"
+      :slug="slug"
+      :folder="currentPath"
+      :models="models ?? []"
+      :initial-files="droppedFiles"
+      @done="onUploaded"
+    />
+
+    <UiDialog
+      :open="createKind !== null"
+      :title="createTitle"
+      :subtitle="currentPath ? `in /${currentPath}` : 'in der Projektwurzel'"
+      :persistent="createBusy"
+      @update:open="(value) => !value && (createKind = null)"
+    >
+      <form @submit.prevent="submitCreate">
+        <div v-if="createError" class="flash flash-danger flash-sm">{{ createError }}</div>
+        <div class="form-group">
+          <label class="form-label" for="create-name">
+            {{ createKind === "folder" ? "Ordnername" : "Name" }}
+          </label>
+          <input
+            id="create-name"
+            v-model="createName"
+            type="text"
+            required
+            autocomplete="off"
+            :placeholder="
+              createKind === 'folder'
+                ? 'z. B. Tragwerk'
+                : createKind === 'markdown'
+                  ? 'z. B. Besprechung-2026-09.md'
+                  : 'z. B. Architektur'
+            "
+          />
+          <p v-if="createKind === 'model'" class="form-hint">
+            Ein IFC-Modell hat eine eigene Versionshistorie und Branches; die
+            erste IFC-Datei committest du im nächsten Schritt.
+          </p>
+        </div>
+        <div v-if="createKind !== 'folder'" class="choice-list">
+          <label class="choice">
+            <input v-model="createVisibility" type="radio" value="private" />
+            <span class="choice-text">
+              <strong>Privat</strong>
+              <span>Nur für Projektmitglieder und angemeldete Nutzer öffentlicher Projekte.</span>
+            </span>
+          </label>
+          <label class="choice">
+            <input v-model="createVisibility" type="radio" value="public" />
+            <span class="choice-text">
+              <strong>Öffentlich</strong>
+              <span>Auch ohne Anmeldung per Link abrufbar (z. B. für Viewer-Einbindungen).</span>
+            </span>
+          </label>
+        </div>
+        <button type="submit" hidden />
+      </form>
+      <template #footer>
+        <button type="button" class="btn" :disabled="createBusy" @click="createKind = null">
+          Abbrechen
+        </button>
+        <button
+          type="button"
+          class="btn btn-primary"
+          :disabled="createBusy || !createName.trim()"
+          @click="submitCreate"
+        >
+          <span v-if="createBusy" class="spinner" />
+          Anlegen
+        </button>
+      </template>
+    </UiDialog>
   </div>
 </template>
