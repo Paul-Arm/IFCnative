@@ -6,7 +6,7 @@ use egui::{Color32, Pos2, Rect, Vec2};
 use glam::Vec3;
 use rustc_hash::FxHashMap;
 
-pub fn show(ui: &mut egui::Ui, s: &mut Session, _app: &mut AppCtx) {
+pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
     let doc = &s.doc;
     ui.heading("Statistik");
     egui::Grid::new("st-top").num_columns(2).striped(true).show(ui, |ui| {
@@ -41,19 +41,29 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, _app: &mut AppCtx) {
         }
     });
     ui.separator();
-    // per class: count, triangles, volume, area
-    let mut per: FxHashMap<String, (usize, usize, f64, f64)> = FxHashMap::default();
-    for o in &s.scene.objects {
-        let Some(g) = &o.geom else { continue };
-        let e = per.entry(doc.type_camel(o.id).unwrap_or("?").to_string()).or_default();
-        e.0 += 1;
-        e.1 += g.tri_count();
-        let (v, a) = volume_area(g);
-        e.2 += v;
-        e.3 += a;
+    // per class: count, triangles, volume, area (cached per scene revision)
+    let key = (s.uid, s.scene.revision);
+    if app.panel_state.stats_cache.as_ref().map(|c| c.0 != key).unwrap_or(true) {
+        use rayon::prelude::*;
+        let per_obj: Vec<(String, usize, f64, f64)> = s.scene.objects.par_iter().filter_map(|o| {
+            let g = o.geom.as_ref()?;
+            let (v, a) = volume_area(g);
+            Some((doc.type_camel(o.id).unwrap_or("?").to_string(), g.tri_count(), v, a))
+        })
+        .collect();
+        let mut per: FxHashMap<String, (usize, usize, f64, f64)> = FxHashMap::default();
+        for (c, t, v, a) in per_obj {
+            let e = per.entry(c).or_default();
+            e.0 += 1;
+            e.1 += t;
+            e.2 += v;
+            e.3 += a;
+        }
+        let mut rows: Vec<(String, (usize, usize, f64, f64))> = per.into_iter().collect();
+        rows.sort_by(|a, b| b.1 .0.cmp(&a.1 .0));
+        app.panel_state.stats_cache = Some((key, rows));
     }
-    let mut rows: Vec<(String, (usize, usize, f64, f64))> = per.into_iter().collect();
-    rows.sort_by(|a, b| b.1 .0.cmp(&a.1 .0));
+    let rows = app.panel_state.stats_cache.as_ref().map(|c| c.1.clone()).unwrap_or_default();
     let max = rows.first().map(|r| r.1 .0).unwrap_or(1).max(1);
     ui.strong("Klassen (Geometrie aus der Triangulierung)");
     egui::Grid::new("st-classes").num_columns(6).striped(true).show(ui, |ui| {

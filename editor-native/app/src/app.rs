@@ -119,6 +119,7 @@ pub struct IfcApp {
     applied_args: bool,
     last_autosave: std::time::Instant,
     exit_confirmed: bool,
+    recovery: Vec<PathBuf>,
 }
 
 struct NewProjectDialog {
@@ -178,6 +179,7 @@ impl IfcApp {
             applied_args: false,
             last_autosave: std::time::Instant::now(),
             exit_confirmed: false,
+            recovery: Settings::recovery_dir().and_then(|d| std::fs::read_dir(d).ok()).map(|rd| rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().map(|x| x == "ifc").unwrap_or(false)).collect()).unwrap_or_default(),
         };
         for f in &args.files {
             app.open_path(f.clone(), &cc.egui_ctx);
@@ -988,6 +990,43 @@ impl IfcApp {
         }
     }
 
+    fn recovery_dialog(&mut self, ctx: &egui::Context) {
+        if self.recovery.is_empty() || self.args.screenshot.is_some() || self.args.view_screenshot.is_some() {
+            return;
+        }
+        let mut open_all = false;
+        let mut discard = false;
+        egui::Window::new("Wiederherstellung").collapsible(false).resizable(false).show(ctx, |ui| {
+            ui.label(format!("Es wurden {} automatisch gesicherte, ungespeicherte Dokumente gefunden.", self.recovery.len()));
+            for p in &self.recovery {
+                let when = std::fs::metadata(p).and_then(|m| m.modified()).ok().map(|t| chrono::DateTime::<chrono::Local>::from(t).format("%d.%m.%Y %H:%M").to_string()).unwrap_or_default();
+                ui.weak(format!("• {} ({when})", p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()));
+            }
+            ui.horizontal(|ui| {
+                if ui.button("Öffnen").clicked() {
+                    open_all = true;
+                }
+                if ui.button("Verwerfen").clicked() {
+                    discard = true;
+                }
+            });
+        });
+        if open_all {
+            let dir = Settings::recovery_dir().unwrap_or_default().join("restored");
+            let _ = std::fs::create_dir_all(&dir);
+            for p in std::mem::take(&mut self.recovery) {
+                let target = dir.join(p.file_name().unwrap_or_default());
+                if std::fs::rename(&p, &target).is_ok() {
+                    self.open_path(target, ctx);
+                }
+            }
+        } else if discard {
+            for p in std::mem::take(&mut self.recovery) {
+                let _ = std::fs::remove_file(p);
+            }
+        }
+    }
+
     fn toasts(&mut self, ctx: &egui::Context) {
         self.ctx_state.toasts.retain(|t| t.1.elapsed().as_secs_f32() < 4.0);
         if self.ctx_state.toasts.is_empty() {
@@ -1227,6 +1266,7 @@ impl eframe::App for IfcApp {
             });
         }
         self.dialogs(&ctx);
+        self.recovery_dialog(&ctx);
         self.process_actions(&ctx);
         self.toasts(&ctx);
         self.autosave();

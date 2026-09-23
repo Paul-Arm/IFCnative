@@ -5,19 +5,24 @@ use crate::icons as ic;
 use crate::session::Session;
 use rustc_hash::FxHashMap;
 
-pub fn show(ui: &mut egui::Ui, s: &mut Session, _app: &mut AppCtx) {
-    // count products with geometry per class
-    let mut counts: FxHashMap<String, (usize, String)> = FxHashMap::default();
-    for o in &s.scene.objects {
-        if o.geom.is_none() {
-            continue;
+pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
+    // count products with geometry per class (cached per scene revision)
+    let key = (s.uid, s.scene.revision, s.doc.revision());
+    if app.panel_state.class_cache.0 != key {
+        let mut counts: FxHashMap<u16, usize> = FxHashMap::default();
+        for o in &s.scene.objects {
+            if o.geom.is_none() {
+                continue;
+            }
+            if let Some(t) = s.doc.type_idx_of(o.id) {
+                *counts.entry(t).or_default() += 1;
+            }
         }
-        let t = s.doc.type_name(o.id).unwrap_or("?").to_string();
-        let camel = s.doc.type_camel(o.id).unwrap_or("?").to_string();
-        counts.entry(t).or_insert((0, camel)).0 += 1;
+        let mut list: Vec<(String, usize, String)> = counts.into_iter().map(|(t, n)| (s.doc.types[t as usize].name.clone(), n, s.doc.types[t as usize].camel.clone())).collect();
+        list.sort_by(|a, b| a.2.cmp(&b.2));
+        app.panel_state.class_cache = (key, list);
     }
-    let mut list: Vec<(String, usize, String)> = counts.into_iter().map(|(k, (n, c))| (k, n, c)).collect();
-    list.sort_by(|a, b| a.2.cmp(&b.2));
+    let list = app.panel_state.class_cache.1.clone();
     ui.horizontal(|ui| {
         if ui.small_button(format!("{} Alle", ic::SHOW)).clicked() {
             s.class_hidden.clear();

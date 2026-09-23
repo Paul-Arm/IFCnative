@@ -37,6 +37,7 @@ lto = "thin"
 codegen-units = 16
 debug = false
 panic = "unwind"
+strip = "symbols"
 
 [profile.dev]
 opt-level = 1

@@ -194,6 +194,37 @@ impl Scene {
         bb
     }
 
+    /// Bounding box of visible objects ignoring far outliers (e.g. georeference markers).
+    pub fn robust_visible_bbox(&self) -> Option<(Vec3, Vec3)> {
+        let vis: Vec<&SceneObject> = self.objects.iter().enumerate().filter(|(i, o)| o.geom.is_some() && self.state[*i][0] & flags::HIDDEN == 0).map(|(_, o)| o).collect();
+        if vis.len() < 3 {
+            return self.visible_bbox();
+        }
+        let centers: Vec<Vec3> = vis.iter().map(|o| (o.min + o.max) * 0.5).collect();
+        let med = |axis: usize| -> f32 {
+            let mut v: Vec<f32> = centers.iter().map(|c| c[axis]).collect();
+            v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            v[v.len() / 2]
+        };
+        let m = Vec3::new(med(0), med(1), med(2));
+        let mut d: Vec<f32> = centers.iter().map(|c| c.distance(m)).collect();
+        d.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let p80 = d[((d.len() - 1) as f32 * 0.8) as usize];
+        let limit = p80 * 3.0 + 2.0;
+        let mut bb: Option<(Vec3, Vec3)> = None;
+        for (o, c) in vis.iter().zip(centers.iter()) {
+            let size = (o.max - o.min).length();
+            // keep everything close to the cluster, and large objects anywhere
+            if c.distance(m) <= limit || size > limit {
+                bb = Some(match bb {
+                    Some((a, b)) => (a.min(o.min), b.max(o.max)),
+                    None => (o.min, o.max),
+                });
+            }
+        }
+        bb.or_else(|| self.visible_bbox())
+    }
+
     /// Bounding box of visible objects.
     pub fn visible_bbox(&self) -> Option<(Vec3, Vec3)> {
         let mut bb: Option<(Vec3, Vec3)> = None;

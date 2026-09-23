@@ -22,6 +22,7 @@ bytemuck.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 regex.workspace = true
+chrono.workspace = true
 eframe = { version = "0.36.2", default-features = false, features = ["wgpu", "default_fonts", "persistence", "x11", "wayland"] }
 egui = "0.36.2"
 egui_extras = { version = "0.36.2", features = ["all_loaders"] }
@@ -32,5 +33,5 @@ pollster = "0.4"
 directories = "6.0"
 image = { version = "0.25", default-features = false, features = ["png"] }
 
-[target.'cfg(windows)'.build-dependencies]
+[build-dependencies]
 winresource = "0.1"

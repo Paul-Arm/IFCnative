@@ -240,7 +240,7 @@ impl Session {
         if changed {
             self.apply_visibility();
             if self.needs_fit && self.scene.bbox.is_some() && self.loading.as_ref().map(|l| l.meshed > 0).unwrap_or(false) {
-                if let Some((lo, hi)) = self.scene.visible_bbox() {
+                if let Some((lo, hi)) = self.scene.robust_visible_bbox() {
                     self.camera.fit(lo, hi);
                 }
                 if finished {
@@ -268,24 +268,28 @@ impl Session {
         let sel: FxHashSet<u32> = self.selection.iter().copied().collect();
         let n = self.scene.objects.len();
         let doc = &self.doc;
+        // per type index: hidden by class filter
+        let type_hidden: Vec<bool> = doc.types.iter().map(|t| self.class_hidden.contains(&t.name)).collect();
+        let any_hidden = !self.hidden.is_empty();
         for i in 0..n {
-            let o = &self.scene.objects[i];
-            let id = o.id;
-            let ty = doc.type_name(id).unwrap_or("");
-            let mut hidden = self.hidden.contains(&id) || self.class_hidden.contains(ty);
+            let id = self.scene.objects[i].id;
+            let th = doc.type_idx_of(id).map(|t| type_hidden[t as usize]).unwrap_or(false);
+            let is_sel = !sel.is_empty() && sel.contains(&id);
+            let user_hidden = any_hidden && self.hidden.contains(&id);
+            let mut hidden = user_hidden || th;
             if let Some(iso) = &self.isolated {
                 if !iso.contains(&id) {
                     hidden = true;
                 }
             }
-            if sel.contains(&id) && self.class_hidden.contains(ty) && !self.hidden.contains(&id) {
+            if is_sel && th && !user_hidden {
                 hidden = false;
             }
             let mut f = self.scene.state[i][0] & flags::OVERRIDE;
             if hidden {
                 f |= flags::HIDDEN;
             }
-            if sel.contains(&id) {
+            if is_sel {
                 f |= flags::SELECTED;
             } else if self.xray {
                 f |= flags::GHOST;
@@ -358,7 +362,7 @@ impl Session {
         for &s in &self.selection {
             ids.extend(self.tree.subtree(s));
         }
-        let bb = if ids.is_empty() { self.scene.visible_bbox() } else { self.scene.bbox_of(ids) };
+        let bb = if ids.is_empty() { self.scene.robust_visible_bbox() } else { self.scene.bbox_of(ids) };
         if let Some((lo, hi)) = bb {
             self.camera.fit(lo, hi);
             self.view_dirty = true;
@@ -366,7 +370,7 @@ impl Session {
     }
 
     pub fn fit_all(&mut self) {
-        if let Some((lo, hi)) = self.scene.visible_bbox() {
+        if let Some((lo, hi)) = self.scene.robust_visible_bbox() {
             self.camera.fit(lo, hi);
             self.view_dirty = true;
         }
