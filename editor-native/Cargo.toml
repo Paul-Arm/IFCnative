@@ -1,0 +1,45 @@
+[workspace]
+resolver = "2"
+members = ["crates/ifc-doc", "crates/ifc-geom", "app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "UNLICENSED"
+authors = ["IFCnative"]
+
+[workspace.dependencies]
+ifc-doc = { path = "crates/ifc-doc" }
+ifc-geom = { path = "crates/ifc-geom" }
+rayon = "1.12"
+rustc-hash = "2.1"
+smallvec = "1.16"
+memchr = "2.8"
+memmap2 = "0.9"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+thiserror = "2.0"
+parking_lot = "0.12"
+crossbeam-channel = "0.5"
+glam = { version = "0.33", features = ["bytemuck", "serde"] }
+bytemuck = { version = "1.25", features = ["derive"] }
+regex = "1.13"
+quick-xml = "0.42"
+calamine = "0.36"
+rust_xlsxwriter = "0.99"
+zip = { version = "8.6", default-features = false, features = ["deflate"] }
+chrono = "0.4"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 16
+debug = false
+panic = "unwind"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

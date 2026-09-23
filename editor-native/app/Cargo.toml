@@ -1,0 +1,35 @@
+[package]
+name = "ifcnative-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "IFCnative – native IFC editor"
+
+[[bin]]
+name = "IFCnative"
+path = "src/main.rs"
+
+[dependencies]
+ifc-doc.workspace = true
+ifc-geom.workspace = true
+rayon.workspace = true
+rustc-hash.workspace = true
+anyhow.workspace = true
+parking_lot.workspace = true
+crossbeam-channel.workspace = true
+glam.workspace = true
+bytemuck.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+eframe = { version = "0.36.2", default-features = false, features = ["wgpu", "default_fonts", "persistence", "x11", "wayland"] }
+egui = "0.36.2"
+egui_extras = { version = "0.36.2", features = ["all_loaders"] }
+egui_dock = "0.21.1"
+egui-phosphor = "0.14.0"
+rfd = "0.17"
+pollster = "0.4"
+directories = "6.0"
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"

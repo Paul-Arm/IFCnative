@@ -1,0 +1,16 @@
+[package]
+name = "ifc-geom"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "IFCnative geometry kernel: placements, profiles, extrusions, breps, tessellation, booleans"
+
+[dependencies]
+ifc-doc.workspace = true
+rayon.workspace = true
+rustc-hash.workspace = true
+anyhow.workspace = true
+glam.workspace = true
+smallvec.workspace = true
+parking_lot.workspace = true
+earcutr = "0.5"
