@@ -85,11 +85,11 @@ impl<'a> Engine<'a> {
         e
     }
 
-    /// Same engine settings with a fixed origin (for incremental updates).
-    pub fn with_origin(doc: &'a Document, opts: GeomOptions, origin: DVec3) -> Engine<'a> {
-        let mut e = Engine::new(doc, opts);
-        e.origin = origin;
-        e
+    /// Engine with a fixed origin and precomputed styles (for incremental updates).
+    pub fn with_parts(doc: &'a Document, opts: GeomOptions, origin: DVec3, styles: StyleMap) -> Engine<'a> {
+        let unit = model::length_unit(doc).0;
+        let angle_unit = model::unit_of_type(doc, "PLANEANGLEUNIT").map(|u| u.0).unwrap_or(1.0);
+        Engine { doc, unit, angle_unit, origin, opts, styles, eps: 1e-6 / unit.max(1e-12) }
     }
 
     fn compute_origin(&self) -> DVec3 {

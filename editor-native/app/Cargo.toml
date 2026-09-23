@@ -21,6 +21,7 @@ glam.workspace = true
 bytemuck.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+regex.workspace = true
 eframe = { version = "0.36.2", default-features = false, features = ["wgpu", "default_fonts", "persistence", "x11", "wayland"] }
 egui = "0.36.2"
 egui_extras = { version = "0.36.2", features = ["all_loaders"] }
