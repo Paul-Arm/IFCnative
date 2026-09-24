@@ -46,6 +46,7 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
             ui.weak("Element in der 3D-Ansicht oder Struktur anklicken.");
         });
         project_summary(ui, s);
+        georef_section(ui, s, app);
         return;
     };
     if !s.doc.exists(id) {
@@ -150,6 +151,86 @@ fn project_summary(ui: &mut egui::Ui, s: &Session) {
             ui.end_row();
         }
     });
+}
+
+/// Georeferencing (IfcMapConversion/IfcProjectedCRS) view and editor.
+fn georef_section(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
+    use ifc_doc::georef::{self, Georef};
+    ui.add_space(8.0);
+    let current = georef::read(&s.doc);
+    let key = ui.id().with(("georef-edit", s.uid, s.doc.revision()));
+    let mut edit: Option<Georef> = ui.data_mut(|d| d.get_temp::<Option<Georef>>(key)).flatten();
+    let mut apply: Option<Georef> = None;
+    egui::CollapsingHeader::new(RichText::new(format!("{} Georeferenzierung", ic::ph::GLOBE_HEMISPHERE_WEST)).strong()).id_salt("georef").default_open(true).show(ui, |ui| {
+        if let Some((lat, lon, elev)) = georef::site_reference(&s.doc) {
+            ui.horizontal(|ui| {
+                ui.weak("Grundstück");
+                ui.label(format!("{lat:.6}° N, {lon:.6}° E{}", elev.map(|e| format!(", {e:.2}")).unwrap_or_default()));
+                if ui.small_button(ic::COPY).on_hover_text("Koordinaten kopieren").clicked() {
+                    ui.ctx().copy_text(format!("{lat:.7}, {lon:.7}"));
+                }
+            });
+        }
+        let ifc2x3 = s.doc.schema_id == ifc_doc::SchemaId::Ifc2x3;
+        match (&current, &mut edit) {
+            (None, None) => {
+                ui.weak(if ifc2x3 { "IFC2x3: keine IfcMapConversion (nur Breite/Länge am Grundstück)." } else { "Keine Kartenprojektion (IfcMapConversion) hinterlegt." });
+                if !ifc2x3 && ui.button(format!("{} Georeferenzierung anlegen", ic::PLUS)).clicked() {
+                    edit = Some(Georef::new_default(&s.doc));
+                }
+            }
+            (_, e) => {
+                let mut g = e.clone().unwrap_or_else(|| current.clone().unwrap_or_default());
+                let before = g.clone();
+                egui::Grid::new("georef-grid").num_columns(2).spacing([10.0, 4.0]).show(ui, |ui| {
+                    let mut num = |ui: &mut egui::Ui, label: &str, v: &mut f64, dec: usize, tip: &str| {
+                        ui.weak(label).on_hover_text(tip);
+                        ui.add(egui::DragValue::new(v).speed(0.01).max_decimals(dec).min_decimals(dec.min(3)));
+                        ui.end_row();
+                    };
+                    num(ui, "Rechtswert (E)", &mut g.eastings, 4, "Eastings des Projektursprungs");
+                    num(ui, "Hochwert (N)", &mut g.northings, 4, "Northings des Projektursprungs");
+                    num(ui, "Höhe", &mut g.height, 4, "OrthogonalHeight");
+                    let mut rot = g.rotation_deg();
+                    ui.weak("Drehung °").on_hover_text("Winkel der lokalen x-Achse gegen Gitter-Ost (gegen den Uhrzeigersinn)");
+                    if ui.add(egui::DragValue::new(&mut rot).speed(0.05).max_decimals(6)).changed() {
+                        g.set_rotation_deg(rot);
+                    }
+                    ui.end_row();
+                    num(ui, "Maßstab", &mut g.scale, 6, "Projekt-Einheit → Karteneinheit (z. B. 0.001 bei mm → m)");
+                    for (label, v) in [("CRS", &mut g.crs_name), ("Beschreibung", &mut g.crs_description), ("Geod. Datum", &mut g.geodetic_datum), ("Höhenbezug", &mut g.vertical_datum), ("Projektion", &mut g.projection), ("Zone", &mut g.zone)] {
+                        ui.weak(label);
+                        ui.add(egui::TextEdit::singleline(v).desired_width(200.0));
+                        ui.end_row();
+                    }
+                });
+                if g != before || e.is_some() {
+                    *e = Some(g.clone());
+                }
+                if e.is_some() {
+                    ui.horizontal(|ui| {
+                        if ui.button(RichText::new(format!("{} Übernehmen", ic::CHECK)).strong()).clicked() {
+                            apply = Some(g.clone());
+                        }
+                        if ui.button("Verwerfen").clicked() {
+                            *e = None;
+                        }
+                    });
+                }
+                if let Some(c) = &current {
+                    let o = c.to_map([0.0; 3], model::length_unit(&s.doc).0);
+                    ui.weak(format!("Projektursprung → E {:.3}  N {:.3}  H {:.3}", o[0], o[1], o[2]));
+                }
+            }
+        }
+    });
+    if let Some(g) = apply {
+        if s.edit("Georeferenzierung", |doc| georef::write(doc, &g)).is_some() {
+            app.toast("Georeferenzierung gespeichert");
+        }
+        edit = None;
+    }
+    ui.data_mut(|d| d.insert_temp(key, edit));
 }
 
 fn attributes(ui: &mut egui::Ui, s: &mut Session, id: u32, navigate: &mut Option<u32>) {

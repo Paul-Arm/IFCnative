@@ -224,9 +224,19 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx, others: &mut [
                     if let Some(pos) = r.pos {
                         s.picked_coord = Some(pos);
                         let w = pos.as_dvec3() + s.scene.origin;
-                        let json = format!("{{\"x\": {:.4}, \"y\": {:.4}, \"z\": {:.4}}}", w.x, w.y, w.z);
-                        ui.ctx().copy_text(json);
-                        s.status = format!("Koordinate kopiert: X {:.4}  Y {:.4}  Z {:.4} m", w.x, w.y, w.z);
+                        match ifc_doc::georef::read(&s.doc) {
+                            Some(g) => {
+                                let m = g.to_map([w.x, w.y, w.z], ifc_doc::model::length_unit(&s.doc).0);
+                                let json = format!("{{\"x\": {:.4}, \"y\": {:.4}, \"z\": {:.4}, \"E\": {:.4}, \"N\": {:.4}, \"H\": {:.4}, \"crs\": \"{}\"}}", w.x, w.y, w.z, m[0], m[1], m[2], g.crs_name);
+                                ui.ctx().copy_text(json);
+                                s.status = format!("Koordinate kopiert: X {:.3}  Y {:.3}  Z {:.3} m  ·  {} E {:.3}  N {:.3}  H {:.3}", w.x, w.y, w.z, g.crs_name, m[0], m[1], m[2]);
+                            }
+                            None => {
+                                let json = format!("{{\"x\": {:.4}, \"y\": {:.4}, \"z\": {:.4}}}", w.x, w.y, w.z);
+                                ui.ctx().copy_text(json);
+                                s.status = format!("Koordinate kopiert: X {:.4}  Y {:.4}  Z {:.4} m", w.x, w.y, w.z);
+                            }
+                        }
                         app.panel_state.builder_pick = Some(w);
                     }
                 }

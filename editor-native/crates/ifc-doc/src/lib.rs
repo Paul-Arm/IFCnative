@@ -11,6 +11,7 @@ pub mod material;
 pub mod merge;
 pub mod model;
 pub mod ops;
+pub mod georef;
 pub mod guid;
 pub mod io;
 pub mod schema;
