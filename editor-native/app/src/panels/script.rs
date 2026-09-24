@@ -219,6 +219,14 @@ pub fn run(cmd: &str, app: &mut IfcApp, _ctx: &egui::Context) {
                 }
             }
         }
+        "duplicate" => {
+            if let Some(s) = app.session() {
+                let sel = s.selection.clone();
+                if let Some(ids) = s.edit("Duplizieren", |doc| ifc_doc::ops::duplicate(doc, &sel, [0.0, 0.0, 0.0])) {
+                    s.select(ids, false);
+                }
+            }
+        }
         "federate" => {
             app.ctx_state.federated = arg != "off";
             app.ctx_state.federated_dim = arg == "dim";

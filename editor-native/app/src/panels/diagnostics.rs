@@ -25,6 +25,7 @@ pub enum Fix {
     DeleteEmptyPsets,
     NameFromClass,
     ProxyClasses,
+    DeleteDuplicates,
 }
 
 #[derive(Default)]
@@ -51,6 +52,24 @@ pub fn run_checks(doc: &Document, s: &Session) -> Vec<Finding> {
             ids,
             fix: None,
         });
+    }
+    // geometrically identical elements of the same class (copy & paste errors)
+    {
+        let mut groups: FxHashMap<(u16, [i64; 6], u32), Vec<u32>> = FxHashMap::default();
+        for o in s.scene.objects.iter().filter(|o| o.geom.is_some() && o.tris > 0) {
+            let q = |v: f32| (v * 100.0).round() as i64;
+            let key = (doc.type_idx_of(o.id).unwrap_or(0), [q(o.min.x), q(o.min.y), q(o.min.z), q(o.max.x), q(o.max.y), q(o.max.z)], o.tris);
+            groups.entry(key).or_default().push(o.id);
+        }
+        let mut dups: Vec<u32> = groups.values().filter(|g| g.len() > 1).flat_map(|g| {
+            let mut g = g.clone();
+            g.sort_unstable();
+            g.into_iter().skip(1)
+        }).collect();
+        dups.sort_unstable();
+        if !dups.is_empty() {
+            out.push(Finding { severity: Severity::Warning, title: "Doppelte Elemente".into(), detail: format!("{} deckungsgleich mit einem Element derselben Klasse", dups.len()), ids: dups, fix: Some(Fix::DeleteDuplicates) });
+        }
     }
     // proxies whose name reveals the class
     let proxies = doc.ids_of_type("IFCBUILDINGELEMENTPROXY");
@@ -208,6 +227,7 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
                         Fix::DeleteEmptyPsets => "leere Psets löschen",
                         Fix::NameFromClass => "Namen aus Klasse setzen",
                         Fix::ProxyClasses => "Klassen zuweisen",
+                        Fix::DeleteDuplicates => "Duplikate löschen",
                     };
                     if ui.small_button(format!("{} {label}", ic::EDIT)).clicked() {
                         fix = Some((fx, f.ids.clone()));
@@ -246,6 +266,12 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
                     }
                     Ok(())
                 });
+            }
+            Fix::DeleteDuplicates => {
+                let n = ids.len();
+                if s.edit("Duplikate löschen", |doc| ifc_doc::ops::delete_entities(doc, &ids, true).map(|_| ())).is_some() {
+                    app.toast(format!("{n} doppelte Elemente gelöscht (je eines bleibt erhalten)"));
+                }
             }
             Fix::ProxyClasses => {
                 if let Some(n) = s.edit("Proxy-Klassen zuweisen", |doc| {
