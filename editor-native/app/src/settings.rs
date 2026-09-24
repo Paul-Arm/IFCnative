@@ -34,6 +34,8 @@ pub struct Settings {
     pub show_grid: bool,
     /// Saved views per document path.
     pub views: std::collections::HashMap<String, Vec<SavedView>>,
+    /// Smooth camera transitions (fit, presets, saved views).
+    pub animate_camera: bool,
 }
 
 /// A saved viewpoint: camera (world coordinates), sections, visibility, selection.
@@ -85,6 +87,7 @@ impl Default for Settings {
             show_selection_box: false,
             show_grid: true,
             views: Default::default(),
+            animate_camera: true,
         }
     }
 }

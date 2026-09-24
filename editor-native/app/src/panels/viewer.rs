@@ -342,6 +342,38 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx, others: &mut [
     }
     let settings = RenderSettings { hover_obj: s.hover_obj, ..settings };
 
+    // ---------------------------------------------------------------- camera transitions
+    // A camera change without direct interaction (fit, preset, saved view, BCF …) is animated.
+    if app.animate && app.settings.animate_camera {
+        let interactive = resp.dragged() || ui.input(|i| i.smooth_scroll_delta.length() > 0.0 || i.zoom_delta() != 1.0 || [egui::Key::W, egui::Key::A, egui::Key::S, egui::Key::D, egui::Key::Q, egui::Key::E].iter().any(|k| i.key_down(*k)));
+        let last = app.cam_last.as_ref().filter(|(u, _)| *u == s.uid).map(|x| x.1.clone());
+        if let Some(last) = last {
+            let changed_externally = !s.camera.same_view(&last);
+            if changed_externally {
+                if interactive || s.gizmo_drag.is_some() {
+                    app.cam_anim = None;
+                } else {
+                    let target = s.camera.clone();
+                    app.cam_anim = Some((last.clone(), target, std::time::Instant::now()));
+                    s.camera = last;
+                }
+            }
+            if let Some((from, to, t0)) = app.cam_anim.clone() {
+                let t = (t0.elapsed().as_secs_f32() / 0.35).min(1.0);
+                s.camera = if t >= 1.0 { to } else { crate::viewer::camera::Camera::lerp(&from, &to, t) };
+                s.view_dirty = true;
+                if t >= 1.0 {
+                    app.cam_anim = None;
+                } else {
+                    ui.ctx().request_repaint();
+                }
+            }
+        } else {
+            app.cam_anim = None;
+        }
+        app.cam_last = Some((s.uid, s.camera.clone()));
+    }
+
     // ---------------------------------------------------------------- render
     renderer.begin_layers();
     let mut layers_changed = renderer.sync_layer(s.uid, 0, &mut s.scene, Vec3::ZERO, false);

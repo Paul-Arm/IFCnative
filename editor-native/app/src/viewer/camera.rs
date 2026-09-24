@@ -30,6 +30,31 @@ pub enum ViewPreset {
 }
 
 impl Camera {
+    /// Visually equal (no transition needed).
+    pub fn same_view(&self, o: &Camera) -> bool {
+        (self.target - o.target).length() <= 1e-4 * self.dist.max(1.0) && (self.yaw - o.yaw).abs() < 1e-5 && (self.pitch - o.pitch).abs() < 1e-5 && (self.dist - o.dist).abs() <= 1e-4 * self.dist.max(1.0) && self.ortho == o.ortho && (self.fov_y - o.fov_y).abs() < 1e-5
+    }
+
+    /// Interpolated camera for a transition (t in 0..1, eased).
+    pub fn lerp(a: &Camera, b: &Camera, t: f32) -> Camera {
+        let e = t * t * (3.0 - 2.0 * t);
+        let mut dy = b.yaw - a.yaw;
+        while dy > std::f32::consts::PI {
+            dy -= std::f32::consts::TAU;
+        }
+        while dy < -std::f32::consts::PI {
+            dy += std::f32::consts::TAU;
+        }
+        Camera {
+            target: a.target.lerp(b.target, e),
+            yaw: a.yaw + dy * e,
+            pitch: a.pitch + (b.pitch - a.pitch) * e,
+            dist: (a.dist.max(1e-3).ln() + (b.dist.max(1e-3).ln() - a.dist.max(1e-3).ln()) * e).exp(),
+            fov_y: a.fov_y + (b.fov_y - a.fov_y) * e,
+            ortho: if e < 0.5 { a.ortho } else { b.ortho },
+        }
+    }
+
     pub fn dir(&self) -> Vec3 {
         Vec3::new(self.pitch.cos() * self.yaw.cos(), self.pitch.cos() * self.yaw.sin(), self.pitch.sin())
     }

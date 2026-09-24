@@ -81,6 +81,11 @@ pub struct AppCtx {
     pub hires_screenshot: Option<u32>,
     /// Hover info: last pointer position, time it came to rest, pick done.
     pub hover_rest: Option<(egui::Pos2, std::time::Instant, bool)>,
+    /// Camera animation: camera at the end of the last frame (per document) and running transition.
+    pub cam_last: Option<(u64, crate::viewer::camera::Camera)>,
+    pub cam_anim: Option<(crate::viewer::camera::Camera, crate::viewer::camera::Camera, std::time::Instant)>,
+    /// false in screenshot/automation mode
+    pub animate: bool,
     pub force_redraw: bool,
     pub last_view_size: (u32, u32),
     pub color_pset: String,
@@ -121,6 +126,8 @@ pub enum Action {
     ExportCsv,
     ExportXlsx,
     ExportJson,
+    /// Split into one IFC per storey (false) or per class (true).
+    ExportSplit(bool),
     ExportObj,
     ImportTable,
     /// Export the current plan/section cut (true = DXF, false = SVG).
@@ -253,6 +260,9 @@ impl IfcApp {
                 request_view_screenshot: false,
                 hires_screenshot: None,
                 hover_rest: None,
+                cam_last: None,
+                cam_anim: None,
+                animate: args.screenshot.is_none() && args.view_screenshot.is_none() && args.script.is_empty(),
                 force_redraw: true,
                 last_view_size: (0, 0),
                 color_pset: String::new(),
@@ -582,6 +592,46 @@ impl IfcApp {
                         st.open = true;
                     }
                 }
+                Action::ExportSplit(by_class) => {
+                    if let Some(s) = self.sessions.get(self.active) {
+                        if let Some(dir) = rfd::FileDialog::new().set_title("Zielordner wählen").pick_folder() {
+                            let t0 = std::time::Instant::now();
+                            let doc = &s.doc;
+                            let base = s.path.as_ref().and_then(|p| p.file_stem()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Modell".into());
+                            let clean = |t: &str| t.chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' || c == ' ' { c } else { '_' }).collect::<String>().trim().to_string();
+                            let mut parts: Vec<(String, Vec<u32>)> = Vec::new();
+                            if by_class {
+                                let mut m: std::collections::BTreeMap<String, Vec<u32>> = Default::default();
+                                for id in doc.ids_with_flag(ifc_doc::tflags::ELEMENT) {
+                                    if !doc.has_flag(id, ifc_doc::tflags::OPENING) {
+                                        m.entry(doc.type_camel(id).unwrap_or("Ifc").to_string()).or_default().push(id);
+                                    }
+                                }
+                                parts.extend(m);
+                            } else {
+                                for st in doc.ids_of_type("IFCBUILDINGSTOREY") {
+                                    let ids: Vec<u32> = s.tree.subtree(st).into_iter().filter(|&x| doc.has_flag(x, ifc_doc::tflags::PRODUCT) && !doc.has_flag(x, ifc_doc::tflags::SPATIAL)).collect();
+                                    if !ids.is_empty() {
+                                        parts.push((ifc_doc::model::label(doc, st), ids));
+                                    }
+                                }
+                            }
+                            let mut n = 0;
+                            let mut err = None;
+                            for (name, ids) in &parts {
+                                let p = dir.join(format!("{base}_{}.ifc", clean(name)));
+                                match std::fs::write(&p, ifc_doc::ops::export_subset(doc, ids)) {
+                                    Ok(()) => n += 1,
+                                    Err(e) => err = Some(e.to_string()),
+                                }
+                            }
+                            match err {
+                                Some(e) => self.ctx_state.error(e),
+                                None => self.ctx_state.toast(format!("{n} Dateien geschrieben ({:.1} s)", t0.elapsed().as_secs_f64())),
+                            }
+                        }
+                    }
+                }
                 Action::ExportJson => {
                     if let Some(s) = self.sessions.get(self.active) {
                         let ids: Vec<u32> = if s.selection.is_empty() { s.doc.ids_with_flag(ifc_doc::tflags::PRODUCT) } else { s.selection.iter().flat_map(|&id| s.tree.subtree(id)).filter(|&id| s.doc.has_flag(id, ifc_doc::tflags::PRODUCT)).collect() };
@@ -821,6 +871,14 @@ impl IfcApp {
                 ui.menu_button(format!("{} Exportieren", ic::EXPORT), |ui| {
                     if ui.button("Auswahl als IFC …").clicked() {
                         self.ctx_state.actions.push(Action::ExportSubset);
+                        ui.close();
+                    }
+                    if ui.button("Je Geschoss als IFC …").on_hover_text("Eine IFC-Datei pro Geschoss (mit Raumstruktur, Psets, Typen, Materialien)").clicked() {
+                        self.ctx_state.actions.push(Action::ExportSplit(false));
+                        ui.close();
+                    }
+                    if ui.button("Je Klasse als IFC …").on_hover_text("Eine IFC-Datei pro Bauteilklasse").clicked() {
+                        self.ctx_state.actions.push(Action::ExportSplit(true));
                         ui.close();
                     }
                     if ui.button("Eigenschaften als CSV …").clicked() {
@@ -1187,6 +1245,7 @@ impl IfcApp {
                     ui.label("Navigation");
                     ui.vertical(|ui| {
                         changed |= ui.checkbox(&mut st.orbit_around_pick, "Um angeklickten Punkt drehen").changed();
+                        changed |= ui.checkbox(&mut st.animate_camera, "Weiche Kamerafahrten").changed();
                         changed |= ui.checkbox(&mut st.invert_zoom, "Zoomrichtung umkehren").changed();
                     });
                     ui.end_row();
