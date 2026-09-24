@@ -22,6 +22,14 @@ pub struct Settings {
     pub autosave_minutes: u32,
     pub show_welcome: bool,
     pub show_edges: bool,
+    pub follow_system_theme: bool,
+    pub notes: std::collections::HashMap<String, String>,
+    /// path -> (schema, entities, opened unix time)
+    pub recent_meta: std::collections::HashMap<String, (String, usize, i64)>,
+    pub workspaces: Vec<(String, serde_json::Value)>,
+    pub active_workspace: String,
+    pub author: String,
+    pub organization: String,
 }
 
 impl Default for Settings {
@@ -43,6 +51,13 @@ impl Default for Settings {
             autosave_minutes: 5,
             show_welcome: true,
             show_edges: true,
+            follow_system_theme: false,
+            notes: Default::default(),
+            recent_meta: Default::default(),
+            workspaces: Vec::new(),
+            active_workspace: "Editor".into(),
+            author: String::new(),
+            organization: String::new(),
         }
     }
 }

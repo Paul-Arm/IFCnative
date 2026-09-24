@@ -28,7 +28,7 @@ chrono.workspace = true
 eframe = { version = "0.36.2", default-features = false, features = ["wgpu", "default_fonts", "persistence", "x11", "wayland"] }
 egui = "0.36.2"
 egui_extras = { version = "0.36.2", features = ["all_loaders"] }
-egui_dock = "0.21.1"
+egui_dock = { version = "0.21.1", features = ["serde"] }
 egui-phosphor = "0.14.0"
 rfd = "0.17"
 pollster = "0.4"

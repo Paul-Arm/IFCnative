@@ -29,6 +29,8 @@ pub enum Tab {
     Table,
     Stats,
     Clash,
+    Notes,
+    Recent,
 }
 
 impl Tab {
@@ -51,10 +53,12 @@ impl Tab {
             Tab::Table => (ic::TABLE, "Tabelle"),
             Tab::Stats => (ic::CHART, "Statistik"),
             Tab::Clash => (ic::CLASH, "Kollisionen"),
+            Tab::Notes => (ic::EDIT, "Notizen"),
+            Tab::Recent => (ic::HISTORY, "Zuletzt geöffnet"),
         };
         format!("{i} {t}")
     }
-    pub const ALL: [Tab; 17] = [Tab::Viewer, Tab::Structure, Tab::Classes, Tab::Search, Tab::Inspector, Tab::History, Tab::Diagnostics, Tab::Graph, Tab::Batch, Tab::Builder, Tab::Ids, Tab::Diff, Tab::Groups, Tab::Materials, Tab::Table, Tab::Stats, Tab::Clash];
+    pub const ALL: [Tab; 19] = [Tab::Viewer, Tab::Structure, Tab::Classes, Tab::Search, Tab::Inspector, Tab::History, Tab::Diagnostics, Tab::Graph, Tab::Batch, Tab::Builder, Tab::Ids, Tab::Diff, Tab::Groups, Tab::Materials, Tab::Table, Tab::Stats, Tab::Clash, Tab::Notes, Tab::Recent];
 }
 
 /// State shared with panels.
@@ -138,8 +142,47 @@ enum Cmd {
 
 struct NewProjectDialog {
     name: String,
+    file_name: String,
+    file_name_edited: bool,
+    site: String,
+    building: String,
+    author: String,
+    organization: String,
+    sample: bool,
     schema: ifc_doc::SchemaId,
     storeys: Vec<(String, f64)>,
+}
+
+pub const WORKSPACES: [&str; 5] = ["Editor", "Review", "Prüfung", "Build", "Koordination"];
+
+/// Built-in workspace layouts.
+pub fn workspace_dock(name: &str) -> DockState<Tab> {
+    let mut dock = DockState::new(vec![Tab::Viewer]);
+    let tree = dock.main_surface_mut();
+    match name {
+        "Review" => {
+            let [c, _] = tree.split_left(NodeIndex::root(), 0.2, vec![Tab::Structure, Tab::Classes]);
+            let [c, _] = tree.split_right(c, 0.74, vec![Tab::Inspector, Tab::Notes]);
+            let _ = tree.split_below(c, 0.75, vec![Tab::Table, Tab::Stats]);
+        }
+        "Prüfung" => {
+            let [c, _] = tree.split_left(NodeIndex::root(), 0.2, vec![Tab::Structure, Tab::Search]);
+            let [c, _] = tree.split_right(c, 0.7, vec![Tab::Inspector]);
+            let _ = tree.split_below(c, 0.6, vec![Tab::Diagnostics, Tab::Ids, Tab::Clash]);
+        }
+        "Build" => {
+            let [c, _] = tree.split_left(NodeIndex::root(), 0.2, vec![Tab::Structure]);
+            let [c, _] = tree.split_right(c, 0.68, vec![Tab::Builder, Tab::Inspector, Tab::Materials]);
+            let _ = tree.split_below(c, 0.78, vec![Tab::History, Tab::Batch]);
+        }
+        "Koordination" => {
+            let [c, _] = tree.split_left(NodeIndex::root(), 0.2, vec![Tab::Structure, Tab::Groups, Tab::Recent]);
+            let [c, _] = tree.split_right(c, 0.72, vec![Tab::Inspector, Tab::Graph]);
+            let _ = tree.split_below(c, 0.7, vec![Tab::Clash, Tab::Diff, Tab::Notes]);
+        }
+        _ => return default_dock(),
+    }
+    dock
 }
 
 pub fn default_dock() -> DockState<Tab> {
@@ -252,7 +295,7 @@ impl IfcApp {
                     d = d.set_file_name(n.to_string_lossy());
                 }
             } else {
-                d = d.set_file_name("Modell.ifc");
+                d = d.set_file_name(s.pending_new_name.clone().unwrap_or_else(|| "Modell.ifc".into()));
             }
             match d.save_file() {
                 Some(p) => p,
@@ -323,7 +366,18 @@ impl IfcApp {
                 Action::Open(p) => self.open_path(p, ctx),
                 Action::OpenDialog => self.open_dialog(ctx),
                 Action::New => {
-                    self.new_dialog = Some(NewProjectDialog { name: "Neues Projekt".into(), schema: ifc_doc::SchemaId::Ifc4, storeys: vec![("Erdgeschoss".into(), 0.0), ("1. Obergeschoss".into(), 3.0)] })
+                    self.new_dialog = Some(NewProjectDialog {
+                        name: "Neues Projekt".into(),
+                        file_name: "Neues Projekt.ifc".into(),
+                        file_name_edited: false,
+                        site: "Grundstück".into(),
+                        building: "Gebäude".into(),
+                        author: self.ctx_state.settings.author.clone(),
+                        organization: self.ctx_state.settings.organization.clone(),
+                        sample: false,
+                        schema: ifc_doc::SchemaId::Ifc4,
+                        storeys: vec![("Erdgeschoss".into(), 0.0), ("1. Obergeschoss".into(), 3.0)],
+                    })
                 }
                 Action::Save => self.save(false),
                 Action::SaveAs => self.save(true),
@@ -462,6 +516,9 @@ impl IfcApp {
         }
         if sc(ctx, cmd, Key::F) {
             self.open_tab(Tab::Search);
+        }
+        if sc(ctx, cmd, Key::Comma) {
+            self.show_settings = true;
         }
         if ctx.egui_wants_keyboard_input() {
             return;
@@ -651,21 +708,92 @@ impl IfcApp {
                     }
                 }
             });
+            ui.menu_button("Fenster", |ui| {
+                ui.set_min_width(240.0);
+                for t in Tab::ALL {
+                    let mut open = self.dock.find_tab(&t).is_some();
+                    if ui.checkbox(&mut open, t.title()).changed() {
+                        if open {
+                            self.open_tab(t);
+                        } else if t != Tab::Viewer {
+                            if let Some(path) = self.dock.find_tab(&t) {
+                                self.dock.remove_tab(path);
+                            }
+                        }
+                    }
+                }
+            });
             ui.menu_button("Ansicht", |ui| {
                 ui.set_min_width(240.0);
-                ui.label(RichText::new("Fenster").weak());
-                for t in Tab::ALL {
-                    if ui.button(t.title()).clicked() {
-                        self.open_tab(t);
+                ui.label(RichText::new(format!("Workspace: {}", self.ctx_state.settings.active_workspace)).weak());
+                for w in WORKSPACES {
+                    if ui.selectable_label(self.ctx_state.settings.active_workspace == w, w).clicked() {
+                        self.dock = workspace_dock(w);
+                        self.ctx_state.settings.active_workspace = w.to_string();
+                        self.ctx_state.settings.save();
                         ui.close();
+                    }
+                }
+                let customs = self.ctx_state.settings.workspaces.clone();
+                for (n, v) in &customs {
+                    if ui.selectable_label(&self.ctx_state.settings.active_workspace == n, format!("{n} (eigener)")).clicked() {
+                        if let Ok(d) = serde_json::from_value::<DockState<Tab>>(v.clone()) {
+                            self.dock = d;
+                            self.ctx_state.settings.active_workspace = n.clone();
+                            self.ctx_state.settings.save();
+                        }
+                        ui.close();
+                    }
+                }
+                ui.horizontal(|ui| {
+                    let k = egui::Id::new("ws-name");
+                    let mut name: String = ui.data_mut(|d| d.get_temp(k)).unwrap_or_default();
+                    ui.add(egui::TextEdit::singleline(&mut name).hint_text("Name").desired_width(100.0));
+                    if ui.add_enabled(!name.trim().is_empty(), egui::Button::new("Als Workspace speichern")).clicked() {
+                        if let Ok(v) = serde_json::to_value(&self.dock) {
+                            let n = name.trim().to_string();
+                            self.ctx_state.settings.workspaces.retain(|w| w.0 != n);
+                            self.ctx_state.settings.workspaces.push((n.clone(), v));
+                            self.ctx_state.settings.active_workspace = n;
+                            self.ctx_state.settings.save();
+                        }
+                        name.clear();
+                    }
+                    ui.data_mut(|d| d.insert_temp(k, name));
+                });
+                let active = self.ctx_state.settings.active_workspace.clone();
+                if customs.iter().any(|w| w.0 == active) {
+                    if ui.button(format!("Workspace „{active}“ aktualisieren")).clicked() {
+                        if let Ok(v) = serde_json::to_value(&self.dock) {
+                            for w in self.ctx_state.settings.workspaces.iter_mut() {
+                                if w.0 == active {
+                                    w.1 = v.clone();
+                                }
+                            }
+                            self.ctx_state.settings.save();
+                        }
+                    }
+                    if ui.button(format!("Workspace „{active}“ löschen")).clicked() {
+                        self.ctx_state.settings.workspaces.retain(|w| w.0 != active);
+                        self.ctx_state.settings.active_workspace = "Editor".into();
+                        self.ctx_state.settings.save();
                     }
                 }
                 ui.separator();
                 if ui.button("Layout zurücksetzen").clicked() {
-                    self.dock = default_dock();
+                    let a = self.ctx_state.settings.active_workspace.clone();
+                    self.dock = match self.ctx_state.settings.workspaces.iter().find(|w| w.0 == a).and_then(|w| serde_json::from_value(w.1.clone()).ok()) {
+                        Some(d) => d,
+                        None => workspace_dock(&a),
+                    };
+                }
+                if ui.checkbox(&mut self.ctx_state.settings.follow_system_theme, "Design wie System").changed() {
+                    self.ctx_state.settings.save();
+                    apply_style(ui.ctx(), &self.ctx_state.settings);
+                    self.ctx_state.force_redraw = true;
                 }
                 let mut dark = self.ctx_state.settings.dark;
-                if ui.checkbox(&mut dark, "Dunkles Design").changed() {
+                if ui.add_enabled(!self.ctx_state.settings.follow_system_theme, egui::Checkbox::new(&mut dark, "Dunkles Design")).changed() {
                     self.ctx_state.settings.dark = dark;
                     self.ctx_state.settings.save();
                     apply_style(ui.ctx(), &self.ctx_state.settings);
@@ -754,7 +882,7 @@ impl IfcApp {
             let mut close = None;
             for (i, s) in self.sessions.iter().enumerate() {
                 let title = s.title();
-                let resp = ui.selectable_label(i == self.active, &title);
+                let resp = ui.selectable_label(i == self.active, &title).on_hover_text(format!("{}\n{} · {} Entities", s.path.as_ref().map(|p| p.display().to_string()).unwrap_or_default(), s.doc.schema_id.display(), crate::session::fmt_count(s.doc.len())));
                 if resp.clicked() {
                     switch = Some(i);
                 }
@@ -764,6 +892,9 @@ impl IfcApp {
                 if ui.small_button(ic::CLOSE).on_hover_text("Schließen").clicked() {
                     close = Some(i);
                 }
+            }
+            if ui.small_button(ic::PLUS).on_hover_text("IFC-Datei hinzufügen").clicked() {
+                self.ctx_state.actions.push(Action::OpenDialog);
             }
             if let Some(i) = switch {
                 self.switch_to(i);
@@ -776,6 +907,18 @@ impl IfcApp {
 
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
+            let mut scale = self.ctx_state.settings.ui_scale;
+            egui::ComboBox::from_id_salt("uiscale").selected_text(format!("{:.0} %", scale * 100.0)).width(64.0).show_ui(ui, |ui| {
+                for v in [0.8f32, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0] {
+                    ui.selectable_value(&mut scale, v, format!("{:.0} %", v * 100.0));
+                }
+            });
+            if scale != self.ctx_state.settings.ui_scale {
+                self.ctx_state.settings.ui_scale = scale;
+                self.ctx_state.settings.save();
+                apply_style(ui.ctx(), &self.ctx_state.settings);
+            }
+            ui.separator();
             if let Some(s) = self.sessions.get(self.active) {
                 if let Some(l) = &s.loading {
                     if !l.geometry_done {
@@ -789,6 +932,10 @@ impl IfcApp {
                     ui.label(format!("{} Entities · {} Objekte · {} Dreiecke · {}", crate::session::fmt_count(s.doc.len()), crate::session::fmt_count(s.scene.objects.len()), crate::session::fmt_count(s.scene.total_tris), s.doc.schema_id.display()));
                     ui.separator();
                     ui.label(format!("Auswahl: {}", s.selection.len()));
+                    if let Some(&p) = s.selection.first() {
+                        ui.separator();
+                        ui.label(format!("#{p} {} · {}", s.doc.type_camel(p).unwrap_or(""), s.doc.name_of(p).unwrap_or_default()));
+                    }
                     if s.doc.is_dirty() {
                         ui.separator();
                         ui.colored_label(Color32::from_rgb(255, 170, 40), "● ungespeichert");
@@ -920,7 +1067,26 @@ impl IfcApp {
             egui::Window::new(format!("{} Neues Projekt", ic::NEW)).collapsible(false).resizable(false).show(ctx, |ui| {
                 egui::Grid::new("new").num_columns(2).show(ui, |ui| {
                     ui.label("Projektname");
-                    ui.text_edit_singleline(&mut d.name);
+                    if ui.text_edit_singleline(&mut d.name).changed() && !d.file_name_edited {
+                        d.file_name = format!("{}.ifc", d.name.trim());
+                    }
+                    ui.end_row();
+                    ui.label("Dateiname");
+                    if ui.text_edit_singleline(&mut d.file_name).changed() {
+                        d.file_name_edited = true;
+                    }
+                    ui.end_row();
+                    ui.label("Standort");
+                    ui.text_edit_singleline(&mut d.site);
+                    ui.end_row();
+                    ui.label("Gebäude");
+                    ui.text_edit_singleline(&mut d.building);
+                    ui.end_row();
+                    ui.label("Autor");
+                    ui.text_edit_singleline(&mut d.author);
+                    ui.end_row();
+                    ui.label("Organisation");
+                    ui.text_edit_singleline(&mut d.organization);
                     ui.end_row();
                     ui.label("Schema");
                     egui::ComboBox::from_id_salt("schema").selected_text(d.schema.display()).show_ui(ui, |ui| {
@@ -949,6 +1115,7 @@ impl IfcApp {
                     let next = d.storeys.last().map(|s| s.1 + 3.0).unwrap_or(0.0);
                     d.storeys.push((format!("{}. Obergeschoss", d.storeys.len()), next));
                 }
+                ui.checkbox(&mut d.sample, "Beispielobjekt einfügen (Würfel mit Eigenschaften)");
                 ui.separator();
                 ui.horizontal(|ui| {
                     if ui.button("Erstellen").clicked() {
@@ -960,8 +1127,15 @@ impl IfcApp {
                 });
             });
             if create {
-                let doc = ifc_doc::ops::new_project(d.schema, &d.name, &d.storeys);
+                let spec = ifc_doc::ops::NewProjectSpec { schema: d.schema, project: d.name.clone(), site: d.site.clone(), building: d.building.clone(), storeys: d.storeys.clone(), author: d.author.clone(), organization: d.organization.clone(), sample_object: d.sample };
+                self.ctx_state.settings.author = d.author.clone();
+                self.ctx_state.settings.organization = d.organization.clone();
+                self.ctx_state.settings.save();
+                let mut doc = ifc_doc::ops::new_project_spec(&spec);
+                doc.header.name = d.file_name.clone();
                 let mut s = Session::empty(doc);
+                s.path = None;
+                s.pending_new_name = Some(d.file_name.clone());
                 s.loading = None;
                 s.geom_opts = self.ctx_state.settings.geom_options();
                 s.status = "Neues Projekt erstellt".into();
@@ -1295,15 +1469,25 @@ impl IfcApp {
     }
 
     fn toasts(&mut self, ctx: &egui::Context) {
-        self.ctx_state.toasts.retain(|t| t.1.elapsed().as_secs_f32() < 4.0);
+        // errors stay until dismissed, infos fade after 4 s
+        self.ctx_state.toasts.retain(|t| t.2 || t.1.elapsed().as_secs_f32() < 4.0);
         if self.ctx_state.toasts.is_empty() {
             return;
         }
         egui::Area::new(egui::Id::new("toasts")).anchor(egui::Align2::RIGHT_BOTTOM, [-16.0, -40.0]).order(egui::Order::Tooltip).show(ctx, |ui| {
-            for (msg, _, err) in &self.ctx_state.toasts {
+            let mut dismiss = None;
+            for (i, (msg, _, err)) in self.ctx_state.toasts.iter().enumerate() {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.colored_label(if *err { Color32::from_rgb(240, 90, 80) } else { ui.visuals().text_color() }, msg);
+                    ui.horizontal(|ui| {
+                        ui.colored_label(if *err { Color32::from_rgb(240, 90, 80) } else { ui.visuals().text_color() }, msg);
+                        if *err && ui.small_button(ic::CLOSE).clicked() {
+                            dismiss = Some(i);
+                        }
+                    });
                 });
+            }
+            if let Some(i) = dismiss {
+                self.ctx_state.toasts.remove(i);
             }
         });
         ctx.request_repaint_after(std::time::Duration::from_millis(250));
@@ -1416,7 +1600,11 @@ impl IfcApp {
 }
 
 pub fn apply_style(ctx: &egui::Context, st: &Settings) {
-    ctx.set_visuals(if st.dark { egui::Visuals::dark() } else { egui::Visuals::light() });
+    if st.follow_system_theme {
+        ctx.set_theme(egui::ThemePreference::System);
+    } else {
+        ctx.set_theme(if st.dark { egui::ThemePreference::Dark } else { egui::ThemePreference::Light });
+    }
     ctx.set_zoom_factor(st.ui_scale.clamp(0.5, 3.0));
     ctx.global_style_mut(|s| {
         s.spacing.item_spacing = egui::vec2(6.0, 4.0);
@@ -1429,6 +1617,7 @@ struct Viewer<'a> {
     session: Option<&'a mut Session>,
     app: &'a mut AppCtx,
     welcome: bool,
+    open_paths: Vec<PathBuf>,
 }
 
 impl TabViewer for Viewer<'_> {
@@ -1443,6 +1632,10 @@ impl TabViewer for Viewer<'_> {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Tab) {
+        if *tab == Tab::Recent {
+            panels::misc::recent(ui, &self.open_paths, self.app);
+            return;
+        }
         let Some(s) = self.session.as_deref_mut() else {
             if *tab == Tab::Viewer {
                 self.welcome = true;
@@ -1469,6 +1662,8 @@ impl TabViewer for Viewer<'_> {
             Tab::Table => panels::table::show(ui, s, self.app),
             Tab::Stats => panels::stats::show(ui, s, self.app),
             Tab::Clash => panels::clash::show(ui, s, self.app),
+            Tab::Notes => panels::misc::notes(ui, s, self.app),
+            Tab::Recent => panels::misc::recent(ui, &self.open_paths, self.app),
         }
     }
 
@@ -1502,6 +1697,14 @@ impl eframe::App for IfcApp {
         if any_loading {
             ctx.request_repaint_after(std::time::Duration::from_millis(30));
         }
+        for s in self.sessions.iter_mut() {
+            if s.meta_pending {
+                s.meta_pending = false;
+                if let Some(p) = &s.path {
+                    self.ctx_state.settings.recent_meta.insert(p.display().to_string(), (s.doc.schema_id.display().to_string(), s.doc.len(), chrono::Utc::now().timestamp()));
+                }
+            }
+        }
         self.handle_drops(&ctx);
         self.shortcuts(&ctx);
         if self.ctx_state.request_delete {
@@ -1514,10 +1717,11 @@ impl eframe::App for IfcApp {
         egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
 
         let welcome;
+        let open_paths: Vec<PathBuf> = self.sessions.iter().filter_map(|s| s.path.clone()).collect();
         {
             let active = self.active;
             let session = self.sessions.get_mut(active);
-            let mut viewer = Viewer { session, app: &mut self.ctx_state, welcome: false };
+            let mut viewer = Viewer { session, app: &mut self.ctx_state, welcome: false, open_paths };
             let mut style = DockStyle::from_egui(ui.style());
             style.tab_bar.fill_tab_bar = false;
             DockArea::new(&mut self.dock).style(style).show_leaf_close_all_buttons(false).show_leaf_collapse_buttons(false).show_inside(ui, &mut viewer);

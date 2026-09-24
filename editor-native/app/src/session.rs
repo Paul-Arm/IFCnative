@@ -93,6 +93,9 @@ pub struct Session {
     /// Active floor plan: (storey id, cut height above storey in m).
     pub plan: Option<(u32, f32)>,
     pub plan_saved_camera: Option<Camera>,
+    pub meta_pending: bool,
+    /// Suggested file name for "Save" of a new document.
+    pub pending_new_name: Option<String>,
 }
 
 static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -143,6 +146,8 @@ impl Session {
             pending_remesh_all: false,
             plan: None,
             plan_saved_camera: None,
+            meta_pending: false,
+            pending_new_name: None,
         }
     }
 
@@ -210,6 +215,7 @@ impl Session {
                     }
                     self.doc = doc;
                     self.path = path;
+                    self.meta_pending = true;
                     self.scene = Scene::new(origin);
                     l.total_products = total;
                     l.message = format!("Geometrie wird erzeugt (0/{total}) …");

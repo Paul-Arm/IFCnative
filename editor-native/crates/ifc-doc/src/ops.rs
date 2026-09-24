@@ -985,8 +985,45 @@ pub fn export_subset(doc: &Document, products: &[u32]) -> Vec<u8> {
     out.into_bytes()
 }
 
+#[derive(Clone, Debug)]
+pub struct NewProjectSpec {
+    pub schema: crate::SchemaId,
+    pub project: String,
+    pub site: String,
+    pub building: String,
+    pub storeys: Vec<(String, f64)>,
+    pub author: String,
+    pub organization: String,
+    pub sample_object: bool,
+}
+
+/// New project from a full specification (header, names, optional sample cube with properties).
+pub fn new_project_spec(spec: &NewProjectSpec) -> Document {
+    let mut doc = new_project_named(spec.schema, &spec.project, &spec.site, &spec.building, &spec.storeys);
+    doc.header.author = vec![spec.author.clone()];
+    doc.header.organization = vec![spec.organization.clone()];
+    if spec.sample_object {
+        let storey = doc.ids_of_type("IFCBUILDINGSTOREY").into_iter().next();
+        doc.begin("Beispielobjekt");
+        if let Ok(id) = create_element(&mut doc, &NewElement { class_upper: "IFCBUILDINGELEMENTPROXY".into(), name: "Beispielwürfel".into(), container: storey, location: [0.0; 3], rotation_deg: 0.0, shape: Some(BodyShape::Box { x: 1.0, y: 1.0, z: 1.0, centered: true }), predefined_type: None }) {
+            let _ = set_property(&mut doc, id, "Pset_Beispiel", "Beschreibung", typed_value_from_text("Beispielobjekt mit Eigenschaften", None), false);
+            let _ = set_property(&mut doc, id, "Pset_Beispiel", "Geprüft", typed_value_from_text("false", None), false);
+            let _ = set_property(&mut doc, id, "Pset_Beispiel", "Anzahl", typed_value_from_text("1", None), false);
+            let _ = set_quantity(&mut doc, id, "Qto_BuildingElementProxyBaseQuantities", "NetVolume", "VOLUME", 1.0);
+        }
+        doc.commit();
+    }
+    doc
+}
+
 /// Minimal new project with site, building and one storey.
 pub fn new_project(schema: crate::SchemaId, project_name: &str, storeys: &[(String, f64)]) -> Document {
+    let mut d = new_project_named(schema, project_name, "Grundstück", "Gebäude", storeys);
+    d.mark_saved();
+    d
+}
+
+fn new_project_named(schema: crate::SchemaId, project_name: &str, site_name: &str, building_name: &str, storeys: &[(String, f64)]) -> Document {
     let mut doc = Document::new_empty(schema);
     doc.begin("Neues Projekt");
     let oh = owner_history(&mut doc);
@@ -1013,13 +1050,12 @@ pub fn new_project(schema: crate::SchemaId, project_name: &str, storeys: &[(Stri
         pa[i] = r(ua);
     }
     let project = doc.create("IFCPROJECT", &pa);
-    let site = create_spatial(&mut doc, "IFCSITE", "Grundstück", project, None).expect("site");
-    let building = create_spatial(&mut doc, "IFCBUILDING", "Gebäude", site, None).expect("building");
+    let site = create_spatial(&mut doc, "IFCSITE", site_name, project, None).expect("site");
+    let building = create_spatial(&mut doc, "IFCBUILDING", building_name, site, None).expect("building");
     for (name, elev) in storeys {
         let _ = create_spatial(&mut doc, "IFCBUILDINGSTOREY", name, building, Some(*elev));
     }
     doc.commit();
-    doc.mark_saved();
     doc
 }
 
