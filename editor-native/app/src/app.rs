@@ -1827,7 +1827,23 @@ impl IfcApp {
                 }
             }
             ui.add_space(20.0);
-            ui.weak("Dateien können auch per Drag & Drop geöffnet werden.");
+            ui.weak("Drag & Drop: IFC/IFCZIP öffnen · IDS prüfen · BCF-Themen · CSV/Excel importieren");
+            ui.add_space(10.0);
+            for (k, t) in [
+                ("Strg+K", "Befehlspalette – alle Funktionen per Suche"),
+                ("Rechtsklick im 3D", "Einfärben, Material, Schnittbox, Hier hinzufügen, Kopieren nach …"),
+                ("1 / 3 / 7 / 5", "Ansicht vorne / rechts / oben, Perspektive umschalten"),
+                ("M · G · R", "Messen (Abstand, Kette, Fläche, Winkel) · Verschieben · Drehen"),
+                ("Mehrere Dateien", "Föderierte Ansicht, Modelle zusammenführen"),
+            ] {
+                ui.horizontal(|ui| {
+                    let w = ui.available_width();
+                    let text_w = (k.len() + t.len()) as f32 * 6.3 + 30.0;
+                    ui.add_space(((w - text_w) * 0.5).max(0.0));
+                    ui.label(RichText::new(k).strong());
+                    ui.weak(t);
+                });
+            }
         });
     }
 
