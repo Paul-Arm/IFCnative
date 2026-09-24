@@ -680,6 +680,56 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx, others: &mut [
     }
 }
 
+/// Saved views of the current document (camera, sections, visibility, selection).
+fn views_menu(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
+    let key = s.path.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| format!("unsaved-{}", s.uid));
+    let n = app.settings.views.get(&key).map(|v| v.len()).unwrap_or(0);
+    let label = if n > 0 { format!("{} {n}", ic::ph::BOOKMARK_SIMPLE) } else { ic::ph::BOOKMARK_SIMPLE.to_string() };
+    ui.menu_button(label, |ui| {
+        ui.set_min_width(260.0);
+        let id = ui.id().with("new-view-name");
+        let mut name: String = ui.data_mut(|d| d.get_temp::<String>(id)).unwrap_or_default();
+        ui.horizontal(|ui| {
+            ui.add(egui::TextEdit::singleline(&mut name).hint_text(format!("Ansicht {}", n + 1)).desired_width(170.0));
+            if ui.button(format!("{} Speichern", ic::PLUS)).clicked() {
+                let nm = if name.trim().is_empty() { format!("Ansicht {}", n + 1) } else { name.trim().to_string() };
+                let v = s.capture_view(&nm);
+                app.settings.views.entry(key.clone()).or_default().push(v);
+                app.settings.save();
+                app.toast(format!("Ansicht „{nm}“ gespeichert"));
+                name.clear();
+            }
+        });
+        ui.data_mut(|d| d.insert_temp(id, name));
+        ui.separator();
+        let list = app.settings.views.get(&key).cloned().unwrap_or_default();
+        if list.is_empty() {
+            ui.weak("Noch keine gespeicherten Ansichten.\nKamera, Schnitte, Sichtbarkeit, Auswahl und X-Ray werden gemerkt.");
+        }
+        let mut remove: Option<usize> = None;
+        for (i, v) in list.iter().enumerate() {
+            ui.horizontal(|ui| {
+                let info = format!("{} ausgeblendet/isoliert · {} ausgewählt · {} Schnitte", v.visibility.len(), v.selection.len(), v.sections.len());
+                if ui.button(&v.name).on_hover_text(info).clicked() {
+                    s.restore_view(v);
+                    ui.close();
+                }
+                if ui.small_button(ic::CLOSE).on_hover_text("Ansicht löschen").clicked() {
+                    remove = Some(i);
+                }
+            });
+        }
+        if let Some(i) = remove {
+            if let Some(l) = app.settings.views.get_mut(&key) {
+                l.remove(i);
+            }
+            app.settings.save();
+        }
+    })
+    .response
+    .on_hover_text("Gespeicherte Ansichten");
+}
+
 fn to_screen_fn(cam: &crate::viewer::camera::Camera, rect: Rect, size: GVec2, p: Vec3) -> Option<Pos2> {
     cam.project(p, size).map(|q| Pos2::new(rect.min.x + q.x, rect.min.y + q.y))
 }
@@ -769,6 +819,7 @@ fn toolbar(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
                 ui.weak("Klick auf ein Objekt eines anderen Modells aktiviert dieses Modell.");
             });
         }
+        views_menu(ui, s, app);
         if ui.selectable_label(s.camera.ortho, ic::ORTHO).on_hover_text("Orthografisch / Perspektive (P)").clicked() {
             s.camera.ortho = !s.camera.ortho;
             s.view_dirty = true;

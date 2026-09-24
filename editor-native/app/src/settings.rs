@@ -32,6 +32,28 @@ pub struct Settings {
     pub organization: String,
     pub show_selection_box: bool,
     pub show_grid: bool,
+    /// Saved views per document path.
+    pub views: std::collections::HashMap<String, Vec<SavedView>>,
+}
+
+/// A saved viewpoint: camera (world coordinates), sections, visibility, selection.
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct SavedView {
+    pub name: String,
+    pub created: i64,
+    pub target_world: [f64; 3],
+    pub yaw: f32,
+    pub pitch: f32,
+    pub dist: f32,
+    pub ortho: bool,
+    /// (normal, point in world coordinates, enabled)
+    pub sections: Vec<([f32; 3], [f64; 3], bool)>,
+    /// GlobalIds: hidden objects, or (isolated = true) the only visible ones
+    pub visibility: Vec<String>,
+    pub isolated: bool,
+    pub selection: Vec<String>,
+    pub xray: bool,
 }
 
 impl Default for Settings {
@@ -62,6 +84,7 @@ impl Default for Settings {
             organization: String::new(),
             show_selection_box: false,
             show_grid: true,
+            views: Default::default(),
         }
     }
 }

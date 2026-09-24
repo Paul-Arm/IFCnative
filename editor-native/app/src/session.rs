@@ -582,6 +582,60 @@ impl Session {
         }
     }
 
+    /// Capture the current view (camera, sections, visibility, selection).
+    pub fn capture_view(&self, name: &str) -> crate::settings::SavedView {
+        let o = self.scene.origin;
+        let t = self.camera.target.as_dvec3() + o;
+        let guids = |ids: &mut dyn Iterator<Item = u32>| -> Vec<String> { ids.filter_map(|id| self.doc.guid_of(id)).take(50_000).collect() };
+        let (visibility, isolated) = match &self.isolated {
+            Some(set) => (guids(&mut set.iter().copied().filter(|&id| self.doc.has_flag(id, tflags::PRODUCT))), true),
+            None => (guids(&mut self.hidden.iter().copied().filter(|&id| self.doc.has_flag(id, tflags::PRODUCT))), false),
+        };
+        crate::settings::SavedView {
+            name: name.to_string(),
+            created: chrono::Utc::now().timestamp(),
+            target_world: [t.x, t.y, t.z],
+            yaw: self.camera.yaw,
+            pitch: self.camera.pitch,
+            dist: self.camera.dist,
+            ortho: self.camera.ortho,
+            sections: self.sections.iter().map(|sp| (sp.normal.to_array(), { let p = sp.point.as_dvec3() + o; [p.x, p.y, p.z] }, sp.enabled)).collect(),
+            visibility,
+            isolated,
+            selection: guids(&mut self.selection.iter().copied()),
+            xray: self.xray,
+        }
+    }
+
+    /// Restore a saved view.
+    pub fn restore_view(&mut self, v: &crate::settings::SavedView) {
+        let o = self.scene.origin;
+        self.camera.target = (glam::DVec3::from_array(v.target_world) - o).as_vec3();
+        self.camera.yaw = v.yaw;
+        self.camera.pitch = v.pitch;
+        self.camera.dist = v.dist;
+        self.camera.ortho = v.ortho;
+        self.sections = v.sections.iter().map(|(n, p, e)| SectionPlane { normal: Vec3::from_array(*n), point: (glam::DVec3::from_array(*p) - o).as_vec3(), enabled: *e }).collect();
+        let index = ifc_doc::model::guid_index(&self.doc);
+        let ids: FxHashSet<u32> = v.visibility.iter().filter_map(|g| index.get(g).copied()).collect();
+        if v.isolated {
+            let mut set = FxHashSet::default();
+            for id in ids {
+                set.extend(self.tree.subtree(id));
+            }
+            self.isolated = Some(set);
+            self.hidden.clear();
+        } else {
+            self.isolated = None;
+            self.hidden = ids;
+        }
+        self.xray = v.xray;
+        let sel: Vec<u32> = v.selection.iter().filter_map(|g| index.get(g).copied()).collect();
+        self.select(sel, false);
+        self.apply_visibility();
+        self.view_dirty = true;
+    }
+
     /// Products to colour for the current selection: spatial elements expand to
     /// their contents, elements stand for themselves.
     pub fn paint_targets(&self) -> Vec<u32> {

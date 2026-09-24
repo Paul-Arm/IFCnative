@@ -113,6 +113,29 @@ pub fn run(cmd: &str, app: &mut IfcApp, _ctx: &egui::Context) {
                 s.edit("DIN 276 zuordnen", |doc| ifc_doc::din276::assign(doc, &items));
             }
         }
+        "view-save" => {
+            if let Some(s) = app.sessions.get(app.active) {
+                let v = s.capture_view(&arg);
+                let key = s.path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
+                app.ctx_state.settings.views.entry(key).or_default().push(v);
+            }
+        }
+        "view-restore" => {
+            if let Some(s) = app.sessions.get_mut(app.active) {
+                let key = s.path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
+                if let Some(v) = app.ctx_state.settings.views.get(&key).and_then(|l| l.iter().find(|v| v.name == arg)).cloned() {
+                    s.restore_view(&v);
+                }
+            }
+        }
+        "show-all" => {
+            if let Some(s) = app.session() {
+                s.show_all();
+                s.sections.clear();
+                s.camera = Default::default();
+                s.fit_all();
+            }
+        }
         "federate" => {
             app.ctx_state.federated = arg != "off";
             app.ctx_state.federated_dim = arg == "dim";
