@@ -91,3 +91,7 @@ pub fn for_class(t: &str) -> &'static str {
         _ => ph::CUBE,
     }
 }
+pub const IMPORT: &str = ph::ARROW_SQUARE_IN;
+pub const PASTE: &str = ph::CLIPBOARD_TEXT;
+pub const KEY: &str = ph::KEY;
+pub const DOWNLOAD: &str = ph::DOWNLOAD_SIMPLE;

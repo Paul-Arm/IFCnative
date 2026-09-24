@@ -10,6 +10,7 @@ pub mod graph;
 pub mod groups;
 pub mod history;
 pub mod ids;
+pub mod import;
 pub mod inspector;
 pub mod inspector_ext;
 pub mod materials;
@@ -32,6 +33,7 @@ pub struct PanelState {
     pub builder: builder::BuilderState,
     pub clash: clash::ClashState,
     pub ids: ids::IdsState,
+    pub import: import::ImportState,
     pub ids_path: Option<std::path::PathBuf>,
     pub diff: diff::DiffState,
     pub groups: groups::GroupsState,

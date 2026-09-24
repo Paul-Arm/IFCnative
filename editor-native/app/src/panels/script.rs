@@ -44,6 +44,15 @@ pub fn run(cmd: &str, app: &mut IfcApp, _ctx: &egui::Context) {
                 s.fit_all();
             }
         }
+        "import" => {
+            // import <table file>: open the import dialog with a CSV/XLSX file
+            app.ctx_state.panel_state.import.load_file(arg.clone().into());
+        }
+        "import-apply" => {
+            if let Some(s) = app.sessions.get_mut(app.active) {
+                crate::panels::import::apply_now(s, &mut app.ctx_state);
+            }
+        }
         "tab" => {
             if let Some(tab) = Tab::ALL.iter().find(|x| format!("{x:?}").eq_ignore_ascii_case(&arg)) {
                 app.open_tab(*tab);

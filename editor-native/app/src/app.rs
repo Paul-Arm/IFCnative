@@ -105,6 +105,7 @@ pub enum Action {
     ExportCsv,
     ExportXlsx,
     ExportObj,
+    ImportTable,
     Compare(PathBuf),
     BcfView,
 }
@@ -198,6 +199,16 @@ impl IfcApp {
     pub fn new(cc: &eframe::CreationContext<'_>, args: CliArgs) -> IfcApp {
         let mut fonts = egui::FontDefinitions::default();
         egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+        // system font as last fallback for symbols missing in the bundled fonts (→ ∅ ≤ …)
+        for path in ["C:\\Windows\\Fonts\\seguisym.ttf", "C:\\Windows\\Fonts\\segoeui.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/System/Library/Fonts/Supplemental/Arial Unicode.ttf"] {
+            if let Ok(bytes) = std::fs::read(path) {
+                fonts.font_data.insert("system-fallback".into(), std::sync::Arc::new(egui::FontData::from_owned(bytes)));
+                for fam in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+                    fonts.families.entry(fam).or_default().push("system-fallback".into());
+                }
+                break;
+            }
+        }
         cc.egui_ctx.set_fonts(fonts);
         egui_extras::install_image_loaders(&cc.egui_ctx);
         let settings = Settings::load();
@@ -446,6 +457,15 @@ impl IfcApp {
                         }
                     }
                 }
+                Action::ImportTable => {
+                    if !self.sessions.is_empty() {
+                        let st = &mut self.ctx_state.panel_state.import;
+                        if !st.open {
+                            crate::panels::import::pick_file(st);
+                        }
+                        st.open = true;
+                    }
+                }
                 Action::ExportObj => {
                     if let Some(s) = self.sessions.get(self.active) {
                         if let Some(p) = rfd::FileDialog::new().add_filter("OBJ", &["obj"]).add_filter("glTF binär", &["glb"]).set_file_name("Modell.glb").save_file() {
@@ -667,6 +687,9 @@ impl IfcApp {
                         ui.close();
                     }
                 });
+                if ui.add_enabled(has, egui::Button::new(format!("{} Tabelle importieren (CSV/Excel) …", ic::IMPORT))).clicked() {
+                    self.ctx_state.actions.push(Action::ImportTable);
+                }
                 if ui.add_enabled(has, egui::Button::new(format!("{} Mit Datei vergleichen …", ic::DIFF))).clicked() {
                     if let Some(p) = rfd::FileDialog::new().add_filter("IFC", &["ifc", "ifczip"]).pick_file() {
                         self.ctx_state.actions.push(Action::Compare(p));
@@ -954,6 +977,11 @@ impl IfcApp {
     }
 
     fn dialogs(&mut self, ctx: &egui::Context) {
+        if let Some(s) = self.sessions.get_mut(self.active) {
+            panels::import::window(ctx, s, &mut self.ctx_state);
+        } else {
+            self.ctx_state.panel_state.import.open = false;
+        }
         if self.show_settings {
             let mut open = true;
             egui::Window::new(format!("{} Einstellungen", ic::SETTINGS)).open(&mut open).resizable(false).show(ctx, |ui| {
@@ -1249,6 +1277,7 @@ impl IfcApp {
             (format!("{} Auswahl als IFC exportieren", ic::EXPORT), Cmd::Act(Action::ExportSubset)),
             (format!("{} Eigenschaften als Excel exportieren", ic::EXPORT), Cmd::Act(Action::ExportXlsx)),
             (format!("{} Eigenschaften als CSV exportieren", ic::EXPORT), Cmd::Act(Action::ExportCsv)),
+            (format!("{} Tabelle importieren (CSV/Excel/Zwischenablage)", ic::IMPORT), Cmd::Act(Action::ImportTable)),
             (format!("{} Geometrie als GLB/OBJ exportieren", ic::EXPORT), Cmd::Act(Action::ExportObj)),
             (format!("{} Ansicht als BCF-Thema", ic::EXPORT), Cmd::Act(Action::BcfView)),
             (format!("{} Ansicht: Isometrie", ic::CUBE), Cmd::View(V::Iso)),
@@ -1550,6 +1579,12 @@ impl IfcApp {
                     let _ = s;
                     self.ctx_state.panel_state.ids_path = Some(p.clone());
                     self.open_tab(Tab::Ids);
+                }
+            } else if matches!(ext.as_str(), "csv" | "tsv" | "txt" | "xlsx" | "xlsm" | "xls" | "ods") {
+                if !self.sessions.is_empty() {
+                    self.ctx_state.panel_state.import.load_file(p);
+                } else {
+                    self.ctx_state.error("Zum Tabellenimport zuerst ein Modell öffnen");
                 }
             } else {
                 self.open_path(p, ctx);

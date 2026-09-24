@@ -5,6 +5,7 @@ pub mod diff;
 pub mod document;
 pub mod export;
 pub mod ids;
+pub mod import;
 pub mod model;
 pub mod ops;
 pub mod guid;

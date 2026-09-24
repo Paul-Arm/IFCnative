@@ -34,6 +34,7 @@ fn cell_value(doc: &ifc_doc::Document, tree: &model::SpatialTree, id: u32, col: 
 }
 
 pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
+    let mut export_request: Option<u8> = None;
     let st = &mut app.panel_state.table;
     if st.columns.is_empty() {
         st.columns = vec![("".into(), "Name".into()), ("".into(), "Klasse".into()), ("".into(), "Geschoss".into()), ("".into(), "GlobalId".into())];
@@ -53,6 +54,37 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
         if ui.button(format!("{} Aktualisieren", ic::REDO)).clicked() {
             st.key = None;
         }
+        if ui.button(format!("{} Alle Eigenschaften", ic::PLUS)).on_hover_text("Alle Pset-Eigenschaften der angezeigten Objekte als Spalten hinzufügen").clicked() {
+            let mut seen: std::collections::BTreeSet<(String, String)> = st.columns.iter().cloned().collect();
+            for &id in st.rows.iter().take(2000) {
+                for ps in model::psets_of(&s.doc, id) {
+                    for p in ps.props {
+                        let c = (ps.name.clone(), p.name);
+                        if seen.insert(c.clone()) {
+                            st.columns.push(c);
+                        }
+                    }
+                }
+            }
+        }
+        ui.separator();
+        if ui.button(format!("{} Import …", ic::IMPORT)).on_hover_text("CSV/Excel-Tabelle oder Zwischenablage in das Modell übernehmen").clicked() {
+            app.actions.push(crate::app::Action::ImportTable);
+        }
+        ui.menu_button(format!("{} Export", ic::EXPORT), |ui| {
+            if ui.button("In Zwischenablage (für Excel)").clicked() {
+                export_request = Some(0);
+                ui.close();
+            }
+            if ui.button("Als CSV …").clicked() {
+                export_request = Some(1);
+                ui.close();
+            }
+            if ui.button("Als Excel (XLSX) …").clicked() {
+                export_request = Some(2);
+                ui.close();
+            }
+        });
     });
     let key = (s.uid, s.doc.revision(), st.class.clone(), if st.use_selection { s.selection.len() } else { usize::MAX });
     if st.key.as_ref() != Some(&key) {
@@ -79,6 +111,44 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
         st.rows = rows;
         st.key = Some(key);
     }
+    if let Some(kind) = export_request {
+        let mut headers = vec!["STEP-Id".to_string()];
+        headers.extend(st.columns.iter().map(|c| if c.0.is_empty() { c.1.clone() } else { format!("{}.{}", c.0, c.1) }));
+        if !st.columns.iter().any(|c| c.0.is_empty() && c.1 == "GlobalId") {
+            headers.insert(1, "GlobalId".into());
+        }
+        let with_guid = headers.get(1).map(|h| h == "GlobalId").unwrap_or(false) && !st.columns.iter().any(|c| c.0.is_empty() && c.1 == "GlobalId");
+        let rows: Vec<Vec<String>> = st
+            .rows
+            .iter()
+            .map(|&id| {
+                let mut r = vec![format!("#{id}")];
+                if with_guid {
+                    r.push(s.doc.guid_of(id).unwrap_or_default());
+                }
+                r.extend(st.columns.iter().map(|c| cell_value(&s.doc, &s.tree, id, c)));
+                r
+            })
+            .collect();
+        match kind {
+            0 => match arboard::Clipboard::new().and_then(|mut c| c.set_text(ifc_doc::import::to_delimited(&headers, &rows, '\t'))) {
+                Ok(()) => app.toast(format!("{} Zeilen in die Zwischenablage kopiert", rows.len())),
+                Err(e) => app.error(format!("Zwischenablage: {e}")),
+            },
+            1 | 2 => {
+                let ext = if kind == 2 { "xlsx" } else { "csv" };
+                if let Some(p) = rfd::FileDialog::new().add_filter(ext, &[ext]).set_file_name(format!("Tabelle.{ext}")).save_file() {
+                    let res = if kind == 2 { ifc_doc::import::write_xlsx_rows("Tabelle", &headers, &rows, &p) } else { ifc_doc::import::write_csv_rows(&headers, &rows, &p) };
+                    match res {
+                        Ok(()) => app.toast(format!("{} Zeilen exportiert", rows.len())),
+                        Err(e) => app.error(e.to_string()),
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let st = &mut app.panel_state.table;
     ui.weak(format!("{} Zeilen – Zellen der Eigenschaftsspalten und „Name“ sind editierbar", st.rows.len()));
     let cols = st.columns.clone();
     let rows = st.rows.clone();
