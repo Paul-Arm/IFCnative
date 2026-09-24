@@ -537,6 +537,15 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx, others: &mut [
                     s.show_all();
                     close = true;
                 }
+                if ui.add_enabled(!s.selection.is_empty(), egui::Button::new(format!("{} Schnittbox um Auswahl", ic::SECTION))).clicked() {
+                    s.section_box_selection(0.2);
+                    close = true;
+                }
+                if !s.sections.is_empty() && ui.button(format!("{} Schnitte entfernen", ic::CLEAR)).clicked() {
+                    s.sections.clear();
+                    s.view_dirty = true;
+                    close = true;
+                }
                 ui.separator();
                 if ui.button(format!("{} Gleiche Klasse auswählen", ic::SELECT)).clicked() {
                     if let Some(&id) = s.selection.first() {
@@ -883,6 +892,9 @@ fn toolbar(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
                     }
                 }
             });
+            if ui.add_enabled(!s.selection.is_empty(), egui::Button::new(format!("{} Schnittbox um Auswahl", ic::CUBE))).on_hover_text("Sechs Schnittebenen um die ausgewählten Objekte (+20 cm)").clicked() {
+                s.section_box_selection(0.2);
+            }
             let mut remove = None;
             for (i, sec) in s.sections.iter_mut().enumerate() {
                 ui.horizontal(|ui| {

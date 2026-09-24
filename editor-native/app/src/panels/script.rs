@@ -136,6 +136,11 @@ pub fn run(cmd: &str, app: &mut IfcApp, _ctx: &egui::Context) {
                 s.fit_all();
             }
         }
+        "section-box" => {
+            if let Some(s) = app.session() {
+                s.section_box_selection(0.2);
+            }
+        }
         "federate" => {
             app.ctx_state.federated = arg != "off";
             app.ctx_state.federated_dim = arg == "dim";

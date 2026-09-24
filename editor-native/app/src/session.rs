@@ -582,6 +582,24 @@ impl Session {
         }
     }
 
+    /// Replace the section planes by a box around the selection (margin in m).
+    pub fn section_box_selection(&mut self, margin: f32) -> bool {
+        let ids: Vec<u32> = self.selection.iter().flat_map(|&id| self.tree.subtree(id)).collect();
+        let Some((lo, hi)) = self.scene.bbox_of(ids) else { return false };
+        let (lo, hi) = (lo - Vec3::splat(margin), hi + Vec3::splat(margin));
+        self.sections = vec![
+            SectionPlane { normal: Vec3::X, point: hi, enabled: true },
+            SectionPlane { normal: -Vec3::X, point: lo, enabled: true },
+            SectionPlane { normal: Vec3::Y, point: hi, enabled: true },
+            SectionPlane { normal: -Vec3::Y, point: lo, enabled: true },
+            SectionPlane { normal: Vec3::Z, point: hi, enabled: true },
+            SectionPlane { normal: -Vec3::Z, point: lo, enabled: true },
+        ];
+        self.fit_selection();
+        self.view_dirty = true;
+        true
+    }
+
     /// Capture the current view (camera, sections, visibility, selection).
     pub fn capture_view(&self, name: &str) -> crate::settings::SavedView {
         let o = self.scene.origin;

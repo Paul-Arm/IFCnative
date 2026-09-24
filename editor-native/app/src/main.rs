@@ -56,7 +56,22 @@ fn parse_args() -> CliArgs {
     a
 }
 
+/// Write panics to `crash.log` in the settings directory (shown on the next start).
+fn install_crash_log() {
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if let Some(dir) = settings::Settings::dir() {
+            let _ = std::fs::create_dir_all(&dir);
+            let bt = std::backtrace::Backtrace::force_capture();
+            let text = format!("IFCnative {} – {}\n{info}\n\n{bt}\n", env!("CARGO_PKG_VERSION"), chrono::Utc::now().to_rfc3339());
+            let _ = std::fs::write(dir.join("crash.log"), text);
+        }
+        prev(info);
+    }));
+}
+
 fn main() -> eframe::Result<()> {
+    install_crash_log();
     let args = parse_args();
     let icon = image::load_from_memory(include_bytes!("../assets/icon.png")).ok().map(|img| {
         let img = img.to_rgba8();

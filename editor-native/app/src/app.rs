@@ -145,6 +145,8 @@ pub struct IfcApp {
     last_autosave: std::time::Instant,
     exit_confirmed: bool,
     recovery: Vec<PathBuf>,
+    /// Panic message of the previous session (crash.log), shown once.
+    last_crash: Option<String>,
     palette: Option<(String, usize)>,
 }
 
@@ -270,6 +272,12 @@ impl IfcApp {
             exit_confirmed: false,
             palette: None,
             recovery: Settings::recovery_dir().and_then(|d| std::fs::read_dir(d).ok()).map(|rd| rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().map(|x| x == "ifc").unwrap_or(false)).collect()).unwrap_or_default(),
+            last_crash: Settings::dir().and_then(|d| {
+                let p = d.join("crash.log");
+                let t = std::fs::read_to_string(&p).ok()?;
+                let _ = std::fs::rename(&p, d.join("crash-last.log"));
+                Some(t.lines().take(3).collect::<Vec<_>>().join("\n"))
+            }),
         };
         for f in &args.files {
             app.open_path(f.clone(), &cc.egui_ctx);
@@ -1580,6 +1588,26 @@ impl IfcApp {
     }
 
     fn recovery_dialog(&mut self, ctx: &egui::Context) {
+        if let Some(msg) = self.last_crash.clone() {
+            let mut close = false;
+            egui::Window::new("Unerwartet beendet").collapsible(false).resizable(false).show(ctx, |ui| {
+                ui.label("IFCnative wurde in der letzten Sitzung durch einen Fehler beendet. Das tut uns leid.");
+                ui.weak("Automatisch gesicherte Dokumente können wiederhergestellt werden (falls vorhanden).");
+                ui.add(egui::Label::new(RichText::new(&msg).monospace().small()).wrap());
+                ui.horizontal(|ui| {
+                    if ui.button("Protokoll kopieren").clicked() {
+                        let full = Settings::dir().and_then(|d| std::fs::read_to_string(d.join("crash-last.log")).ok()).unwrap_or(msg.clone());
+                        ui.ctx().copy_text(full);
+                    }
+                    if ui.button("Schließen").clicked() {
+                        close = true;
+                    }
+                });
+            });
+            if close {
+                self.last_crash = None;
+            }
+        }
         if self.recovery.is_empty() || self.args.screenshot.is_some() || self.args.view_screenshot.is_some() {
             return;
         }
