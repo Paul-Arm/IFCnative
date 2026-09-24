@@ -184,6 +184,29 @@ pub fn run(cmd: &str, app: &mut IfcApp, _ctx: &egui::Context) {
                 let _ = std::fs::write(&arg, crate::report::json_export(s, &ids));
             }
         }
+        "ids-color" => {
+            // run the loaded IDS (panel state) and colour the result
+            if let Some(s) = app.sessions.get_mut(app.active) {
+                if let Some(p) = app.ctx_state.panel_state.ids_path.take() {
+                    if let Ok(i) = std::fs::read_to_string(&p).map_err(anyhow::Error::from).and_then(|t| ifc_doc::ids::parse(&t)) {
+                        let res = ifc_doc::ids::check(&s.doc, &i);
+                        let mut map: rustc_hash::FxHashMap<u32, String> = Default::default();
+                        for r in &res {
+                            for &id in &r.applicable {
+                                map.entry(id).or_insert_with(|| "erfüllt".to_string());
+                            }
+                        }
+                        for r in &res {
+                            for f in &r.failures {
+                                map.insert(f.id, "nicht erfüllt".to_string());
+                            }
+                        }
+                        s.color_mode = crate::session::ColorMode::Custom { title: "IDS".into(), map: std::sync::Arc::new(map), colors: vec![("erfüllt".into(), [70, 185, 100, 255]), ("nicht erfüllt".into(), [225, 70, 60, 255])], other: Some(("nicht geprüft".into(), [175, 178, 185, 255])) };
+                        s.recolor();
+                    }
+                }
+            }
+        }
         "federate" => {
             app.ctx_state.federated = arg != "off";
             app.ctx_state.federated_dim = arg == "dim";

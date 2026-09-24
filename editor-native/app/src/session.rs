@@ -36,6 +36,8 @@ pub enum ColorMode {
     ByStorey,
     ByProperty { pset: String, prop: String },
     ByMaterial,
+    /// Precomputed categories (e.g. IDS result): object → category, category colours.
+    Custom { title: String, map: Arc<FxHashMap<u32, String>>, colors: Vec<(String, [u8; 4])>, other: Option<(String, [u8; 4])> },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -484,7 +486,12 @@ impl Session {
                     let v = ifc_doc::model::psets_of(&doc, id).into_iter().filter(|p| p.name == *pset).flat_map(|p| p.props).find(|p| p.name == *prop).map(|p| p.value.display());
                     Some(v.unwrap_or_else(|| "(kein Wert)".into()))
                 }
+                ColorMode::Custom { map, other, .. } => map.get(&id).cloned().or_else(|| other.as_ref().map(|o| o.0.clone())),
             }
+        };
+        let fixed: FxHashMap<String, [u8; 4]> = match &self.color_mode {
+            ColorMode::Custom { colors, other, .. } => colors.iter().cloned().chain(other.iter().cloned()).collect(),
+            _ => FxHashMap::default(),
         };
         for i in 0..n {
             let id = self.scene.objects[i].id;
@@ -493,7 +500,7 @@ impl Session {
                     self.scene.set_override(i as u32, None);
                 }
                 Some(k) => {
-                    let c = counts.entry(k.clone()).or_insert_with(|| (0, palette_color(&k)));
+                    let c = counts.entry(k.clone()).or_insert_with(|| (0, fixed.get(&k).copied().unwrap_or_else(|| palette_color(&k))));
                     c.0 += 1;
                     let col = c.1;
                     self.scene.set_override(i as u32, Some(col));
