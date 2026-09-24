@@ -27,6 +27,11 @@ pub struct BatchState {
     pub filter: String,
     pub new_pset: String,
     pub rename_to: String,
+    pub pattern: String,
+    pub pattern_target: usize,
+    pub pattern_prop: String,
+    pub pattern_start: u32,
+    pub pattern_restart: bool,
 }
 
 pub const TYPES: [&str; 18] = [
@@ -65,6 +70,7 @@ enum Act {
     Retype(String, String, String),
     AddPset(String),
     SelectValue(String, String, Option<String>),
+    PatternRename(Vec<(u32, String)>),
     Replace(String, String, String, String),
     Columns(Vec<(String, String)>),
 }
@@ -74,6 +80,16 @@ fn type_label(v: &Value) -> Option<String> {
         Value::Typed(t, _) => Some(camel(t)),
         Value::List(l) => l.first().and_then(type_label),
         _ => None,
+    }
+}
+
+fn fmt_num(v: f64) -> String {
+    if v.abs() >= 1000.0 {
+        format!("{v:.0}")
+    } else if v.fract().abs() < 1e-9 {
+        format!("{v:.0}")
+    } else {
+        format!("{v:.3}")
     }
 }
 
@@ -127,6 +143,58 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
         }
         ui.separator();
         ui.add(egui::TextEdit::singleline(&mut st.rename_to).hint_text("Neuer Name").desired_width(130.0)).on_hover_text("Für „Umbenennen“ im Kontextmenü einer Eigenschaft oder eines Psets");
+    });
+    // ---------------------------------------------------------------- rename by pattern
+    egui::CollapsingHeader::new(format!("{} Umbenennen nach Muster", ic::EDIT)).id_salt("pattern-rename").show(ui, |ui| {
+        if st.pattern.is_empty() {
+            st.pattern = "{Geschoss}-{Klasse}-{Nr:03}".into();
+            st.pattern_start = 1;
+        }
+        ui.horizontal_wrapped(|ui| {
+            ui.add(egui::TextEdit::singleline(&mut st.pattern).desired_width(260.0).font(egui::TextStyle::Monospace));
+            ui.menu_button("Platzhalter", |ui| {
+                for (t, d) in crate::panels::rename::TOKENS {
+                    if ui.button(format!("{t}  – {d}")).clicked() {
+                        st.pattern.push_str(t);
+                        ui.close();
+                    }
+                }
+            });
+            ui.label("→");
+            egui::ComboBox::from_id_salt("pat-target").selected_text(crate::panels::rename::TARGETS[st.pattern_target]).show_ui(ui, |ui| {
+                for (i, t) in crate::panels::rename::TARGETS.iter().enumerate() {
+                    ui.selectable_value(&mut st.pattern_target, i, *t);
+                }
+            });
+            if st.pattern_target == 5 {
+                ui.add(egui::TextEdit::singleline(&mut st.pattern_prop).hint_text("Pset.Eigenschaft").desired_width(160.0));
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label("Start");
+            ui.add(egui::DragValue::new(&mut st.pattern_start).range(0..=1_000_000));
+            ui.checkbox(&mut st.pattern_restart, "Nummerierung je Geschoss neu");
+            ui.weak("Reihenfolge: Geschoss, dann oben→unten, links→rechts");
+        });
+        if !t.is_empty() {
+            let order = crate::panels::rename::ordered(s, &t, st.pattern_restart, st.pattern_start);
+            // preview only the first rows (expanding is done for all on apply)
+            egui::Grid::new("pat-preview").num_columns(2).striped(true).show(ui, |ui| {
+                for &(id, sti, nr) in order.iter().take(6) {
+                    ui.weak(ifc_doc::model::label(&s.doc, id));
+                    ui.label(format!("→ {}", crate::panels::rename::expand(s, id, &st.pattern, sti, nr)));
+                    ui.end_row();
+                }
+            });
+            if order.len() > 6 {
+                ui.weak(format!("… und {} weitere", order.len() - 6));
+            }
+            let ok = st.pattern_target != 5 || st.pattern_prop.contains('.');
+            if ui.add_enabled(ok, egui::Button::new(egui::RichText::new(format!("{} {} Objekte umbenennen", ic::CHECK, order.len())).strong())).clicked() {
+                let items: Vec<(u32, String)> = order.iter().map(|&(id, sti, nr)| (id, crate::panels::rename::expand(s, id, &st.pattern, sti, nr))).collect();
+                acts.push(Act::PatternRename(items));
+            }
+        }
     });
     // ---------------------------------------------------------------- summary
     let key = (s.uid, s.doc.revision(), t.len());
@@ -229,7 +297,14 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
                     }
                 });
                 let tys: Vec<&str> = sum.types.iter().map(|x| x.trim_start_matches("Ifc")).collect();
-                let ty_text = tys.join(", ");
+                let mut ty_text = tys.join(", ");
+                // numeric values: sum and mean
+                let nums: Vec<(f64, usize)> = sum.values.iter().filter_map(|(v, n)| v.replace(',', ".").parse::<f64>().ok().map(|f| (f, *n))).collect();
+                if !nums.is_empty() && nums.len() == sum.values.len() {
+                    let total: f64 = nums.iter().map(|(f, n)| f * *n as f64).sum();
+                    let count: usize = nums.iter().map(|(_, n)| n).sum();
+                    ty_text = format!("{ty_text}  Σ {} · Ø {}", fmt_num(total), fmt_num(total / count.max(1) as f64));
+                }
                 if tys.len() > 1 {
                     ui.colored_label(egui::Color32::from_rgb(230, 180, 80), ty_text).on_hover_text("Uneinheitliche Datentypen – per Rechtsklick vereinheitlichen");
                 } else {
@@ -412,6 +487,12 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
                     Ok(())
                 });
                 app.toast(format!("{n} Werte ersetzt"));
+            }
+            Act::PatternRename(items) => {
+                let (target, prop) = (st.pattern_target, st.pattern_prop.clone());
+                if let Some(n) = crate::panels::rename::apply(s, &items, target, &prop, split) {
+                    app.toast(format!("{n} Objekte umbenannt"));
+                }
             }
             Act::Columns(cols) => {
                 let ts = &mut app.panel_state.table;

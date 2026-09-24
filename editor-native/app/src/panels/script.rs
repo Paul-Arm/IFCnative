@@ -141,6 +141,15 @@ pub fn run(cmd: &str, app: &mut IfcApp, _ctx: &egui::Context) {
                 s.section_box_selection(0.2);
             }
         }
+        "rename-pattern" => {
+            // rename-pattern <pattern>: rename the selection (Name)
+            if let Some(s) = app.session() {
+                let ids = s.paint_targets();
+                let order = crate::panels::rename::ordered(s, &ids, true, 1);
+                let items: Vec<(u32, String)> = order.iter().map(|&(id, st, nr)| (id, crate::panels::rename::expand(s, id, &arg, st, nr))).collect();
+                crate::panels::rename::apply(s, &items, 0, "", true);
+            }
+        }
         "federate" => {
             app.ctx_state.federated = arg != "off";
             app.ctx_state.federated_dim = arg == "dim";

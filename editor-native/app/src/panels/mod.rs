@@ -17,6 +17,7 @@ pub mod inspector_ext;
 pub mod materials;
 pub mod misc;
 pub mod quantities;
+pub mod rename;
 pub mod script;
 pub mod search;
 pub mod spaces;
