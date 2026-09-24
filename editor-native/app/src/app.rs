@@ -118,6 +118,7 @@ pub enum Action {
     ImportTable,
     /// Export the current plan/section cut (true = DXF, false = SVG).
     ExportCut(bool),
+    ExportReport,
     FocusFederated(usize, u32),
     /// Merge the whole document `i` into the active one.
     MergeFrom(usize),
@@ -501,6 +502,21 @@ impl IfcApp {
                         }
                     }
                 }
+                Action::ExportReport => {
+                    if let Some(s) = self.sessions.get(self.active) {
+                        let base = s.path.as_ref().and_then(|p| p.file_stem()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Modell".into());
+                        let name = format!("Modellbericht {base}.html");
+                        if let Some(p) = rfd::FileDialog::new().add_filter("HTML", &["html"]).set_file_name(name).save_file() {
+                            let t0 = std::time::Instant::now();
+                            let img = self.ctx_state.renderer.as_ref().and_then(|r| r.read_color());
+                            let html = crate::report::build(s, &self.ctx_state, img);
+                            match std::fs::write(&p, html) {
+                                Ok(()) => self.ctx_state.toast(format!("Modellbericht gespeichert ({:.1} s)", t0.elapsed().as_secs_f64())),
+                                Err(e) => self.ctx_state.error(e.to_string()),
+                            }
+                        }
+                    }
+                }
                 Action::MergeFrom(i) => {
                     if i < self.sessions.len() && i != self.active {
                         let src = self.sessions[i].doc.clone();
@@ -778,6 +794,10 @@ impl IfcApp {
                         ui.close();
                     }
                     ui.separator();
+                    if ui.button("Modellbericht (HTML) …").on_hover_text("Ansicht, Kennzahlen, Klassen, Modellprüfung, IDS, Raumbuch, Kostengruppen in einer Datei").clicked() {
+                        self.ctx_state.actions.push(Action::ExportReport);
+                        ui.close();
+                    }
                     if ui.button("Grundriss/Schnitt als SVG …").on_hover_text("Aktiver Grundriss oder erste Schnittebene – Schnittflächen je Klasse, Maßstab 1:100").clicked() {
                         self.ctx_state.actions.push(Action::ExportCut(false));
                         ui.close();
@@ -1390,6 +1410,7 @@ impl IfcApp {
             (format!("{} Eigenschaften als CSV exportieren", ic::EXPORT), Cmd::Act(Action::ExportCsv)),
             (format!("{} Tabelle importieren (CSV/Excel/Zwischenablage)", ic::IMPORT), Cmd::Act(Action::ImportTable)),
             (format!("{} Grundriss/Schnitt als SVG exportieren", ic::EXPORT), Cmd::Act(Action::ExportCut(false))),
+            (format!("{} Modellbericht (HTML) exportieren", ic::EXPORT), Cmd::Act(Action::ExportReport)),
             (format!("{} Grundriss/Schnitt als DXF exportieren", ic::EXPORT), Cmd::Act(Action::ExportCut(true))),
             (format!("{} Geometrie als GLB/OBJ exportieren", ic::EXPORT), Cmd::Act(Action::ExportObj)),
             (format!("{} Ansicht als BCF-Thema", ic::EXPORT), Cmd::Act(Action::BcfView)),

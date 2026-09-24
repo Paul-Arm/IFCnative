@@ -150,6 +150,13 @@ pub fn run(cmd: &str, app: &mut IfcApp, _ctx: &egui::Context) {
                 crate::panels::rename::apply(s, &items, 0, "", true);
             }
         }
+        "report" => {
+            if let Some(s) = app.sessions.get(app.active) {
+                let img = app.ctx_state.renderer.as_ref().and_then(|r| r.read_color());
+                let html = crate::report::build(s, &app.ctx_state, img);
+                let _ = std::fs::write(&arg, html);
+            }
+        }
         "federate" => {
             app.ctx_state.federated = arg != "off";
             app.ctx_state.federated_dim = arg == "dim";

@@ -5,6 +5,7 @@ mod app;
 mod bcf;
 mod icons;
 mod panels;
+mod report;
 mod session;
 mod settings;
 mod viewer;
