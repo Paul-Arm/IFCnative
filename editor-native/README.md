@@ -44,14 +44,19 @@ Schema-Prüfung aller Entities ~0,7 s, Speichern ~0,3 s.
   (Projekt/Kontexte/Owner History werden abgebildet, Geschosse nach Name/Höhe zugeordnet,
   GUID-Konflikte gelöst)
 - Workspaces (Panel-Layouts), Befehlspalette (Strg+K), Fenster-Menü, Tastenkürzel
+- **Gespeicherte Ansichten** je Datei (Kamera, Schnitte, Sichtbarkeit, Auswahl, X-Ray – über GlobalIds)
+- Absturzprotokoll mit Hinweis beim nächsten Start, Autosicherung
 
 **3D-Ansicht**
 - Orbit/Pan/Zoom zum Cursor, Drehen um angeklickten Punkt, WASD/QE, ViewCube,
-  Standardansichten, Perspektive/Orthografisch, Bodenraster, Kanten
+  Standardansichten (auch Tasten 1/3/7/5/0), Perspektive/Orthografisch, Bodenraster, Kanten,
+  weiche Kamerafahrten, Hover-Info (Name/Klasse/Geschoss)
 - Auswahl (Klick, Strg, Rahmen), Ausblenden/Isolieren, X-Ray, Schnittebenen,
-  Grundriss je Geschoss, Messen mit Punktfang, Koordinaten picken,
-  Verschieben-/Drehen-Gizmo
-- Einfärben nach Klasse/Geschoss/Material/Eigenschaft (mit Legende)
+  **Schnittbox um Auswahl**, Grundriss je Geschoss, Koordinaten picken (inkl.
+  Landeskoordinaten), Verschieben-/Drehen-Gizmo
+- **Messen**: Abstand, Kettenmaß, Fläche (mit Umfang), Winkel – mit Punktfang
+- Bildschirmfoto in Fenstergröße oder 2×/4× Auflösung
+- Einfärben nach Klasse/Geschoss/Material/Eigenschaft/IDS-Ergebnis (mit Legende)
 - Kontextmenü: Einfärben, Material zuweisen, „Hier hinzufügen“ (Quader/Zylinder/Markierung),
   Geometrie entfernen, gleicher Typ, GlobalId kopieren, Kopieren nach …
 
@@ -62,7 +67,9 @@ Schema-Prüfung aller Entities ~0,7 s, Speichern ~0,3 s.
   Roh-STEP, Klasse ändern
 - Pset-Stapel: Werte über viele Objekte setzen/entfernen/ersetzen, umbenennen,
   **Datentyp umwandeln**, leere Psets anlegen, Objekte nach Wert auswählen,
-  Matrix-Bearbeitung in der Tabelle
+  Summe/Mittelwert numerischer Werte, Matrix-Bearbeitung in der Tabelle
+- **Umbenennen nach Muster** (`{Geschoss}-{Klasse}-{Nr:03}`, `{P:Pset.Eigenschaft}` …)
+  mit Nummerierung in Lesereihenfolge, je Geschoss neu
 - **Tabellenimport** (CSV/TSV/XLSX/Zwischenablage): Schlüsselspalte (GlobalId,
   #STEP-Id, Tag, Name), automatische Spaltenzuordnung (Attribute, Pset.Eigenschaft,
   `*.Eigenschaft`, Qto_ als Mengen), Vorschau alt → neu, ein Rückgängig-Schritt
@@ -78,21 +85,30 @@ Schema-Prüfung aller Entities ~0,7 s, Speichern ~0,3 s.
 - Gruppen/Systeme/Zonen/Inventar: nach Kategorie, Mitgliedschafts-Manager für die
   Auswahl, Mitglieder isolieren/ausblenden/einfärben
 - Beziehungsgraph: Tiefe 1–3, Filter nach Beziehungsart, Beziehungen anlegen/lösen
+- **Georeferenzierung**: IfcMapConversion/IfcProjectedCRS anzeigen, anlegen, bearbeiten
 
 **Prüfen & Auswerten**
 - Modellprüfung inkl. **Schema-Konformität** aller Entities (Pflichtattribute,
   Verweise, Klassen, Aufzählungen), GlobalIds, Raumstruktur, Platzierung, Geometrie,
   Psets, Öffnungen, ungenutzte Daten – mit Ein-Klick-Korrekturen
 - IDS 1.0: alle Facetten, Restriktionen, Kardinalitäten, ifcVersion, automatische
-  Neuprüfung; Bericht als CSV und BCF; GlobalId-/Tag-Suche
+  Neuprüfung, **Ergebnis im 3D einfärben**, **Autokorrektur** eindeutig vorgegebener
+  Werte; Bericht als CSV und BCF; GlobalId-/Tag-Suche
+- **BCF-Themen**: Import (2.x/3.0) mit Kommentaren und Snapshot, Viewpoints anwenden,
+  Themen aus der aktuellen Ansicht anlegen, als BCF speichern
 - Kollisionsprüfung (Klassen gegen Klassen, Toleranz), BCF-Export
 - Modellvergleich (GlobalId-basiert)
 - Statistik, Mengenermittlung aus Geometrie (Qto_…BaseQuantities)
 - **Raumbuch**: Fläche, Umfang, Höhe, Volumen je Raum aus der Geometrie, Summen je Geschoss,
   Excel-Export, Mengen zurückschreiben
+- **Kostengruppen DIN 276**: automatische Zuordnung nach Klasse/Eigenschaften,
+  manuelle Zuordnung, Mengen je KG, Excel-Export
 
 **Export**
-- Auswahl als IFC, Eigenschaften/Tabellen als CSV/XLSX, Geometrie als GLB/OBJ
+- Auswahl als IFC, **je Geschoss/je Klasse als eigene IFC-Dateien**,
+  Eigenschaften/Tabellen als CSV/XLSX/JSON, Geometrie als GLB/OBJ
+- **Modellbericht (HTML)**: Ansicht, Kennzahlen, Geschosse, Klassen, Prüfung, IDS,
+  Raumbuch, Kostengruppen in einer Datei
 - **Grundriss/Schnitt als SVG (1:100) und DXF** (Schnittflächen je Klasse,
   Ansichtslinien unter der Schnitthöhe)
 
