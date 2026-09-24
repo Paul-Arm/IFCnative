@@ -24,6 +24,7 @@ pub enum Fix {
     ContainDefault,
     DeleteEmptyPsets,
     NameFromClass,
+    ProxyClasses,
 }
 
 #[derive(Default)]
@@ -50,6 +51,14 @@ pub fn run_checks(doc: &Document, s: &Session) -> Vec<Finding> {
             ids,
             fix: None,
         });
+    }
+    // proxies whose name reveals the class
+    let proxies = doc.ids_of_type("IFCBUILDINGELEMENTPROXY");
+    let sugg: Vec<(u32, &'static str)> = proxies.par_iter().filter_map(|&id| ifc_doc::ops::suggest_class_from_name(doc, id).map(|c| (id, c))).collect();
+    if !sugg.is_empty() {
+        let short = |t: String| if t.chars().count() > 24 { format!("{}…", t.chars().take(23).collect::<String>()) } else { t };
+        let examples: Vec<String> = sugg.iter().take(2).map(|(id, c)| format!("„{}“ → {}", short(doc.name_of(*id).unwrap_or_default()), doc.schema().camel(c))).collect();
+        out.push(Finding { severity: Severity::Info, title: "Proxys klassifizierbar".into(), detail: format!("{} per Name, z. B. {}", sugg.len(), examples.join(", ")), ids: sugg.iter().map(|x| x.0).collect(), fix: Some(Fix::ProxyClasses) });
     }
     // GUIDs
     let roots = doc.ids_with_flag(tflags::ROOT);
@@ -198,6 +207,7 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
                         Fix::ContainDefault => "dem ersten Geschoss zuordnen",
                         Fix::DeleteEmptyPsets => "leere Psets löschen",
                         Fix::NameFromClass => "Namen aus Klasse setzen",
+                        Fix::ProxyClasses => "Klassen zuweisen",
                     };
                     if ui.small_button(format!("{} {label}", ic::EDIT)).clicked() {
                         fix = Some((fx, f.ids.clone()));
@@ -236,6 +246,20 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
                     }
                     Ok(())
                 });
+            }
+            Fix::ProxyClasses => {
+                if let Some(n) = s.edit("Proxy-Klassen zuweisen", |doc| {
+                    let mut n = 0;
+                    for id in &ids {
+                        if let Some(c) = ifc_doc::ops::suggest_class_from_name(doc, *id) {
+                            ifc_doc::ops::change_class(doc, *id, c)?;
+                            n += 1;
+                        }
+                    }
+                    Ok(n)
+                }) {
+                    app.toast(format!("{n} Proxy-Elemente neu klassifiziert"));
+                }
             }
             Fix::NameFromClass => {
                 s.edit("Namen setzen", |doc| {

@@ -930,10 +930,13 @@ pub fn change_class(doc: &mut Document, id: u32, new_class_upper: &str) -> anyho
     if n == 0 {
         anyhow::bail!("Unbekannte Klasse {new_class_upper}");
     }
-    // PredefinedType values are class specific: reset
-    if let Some(i) = doc.schema().attr_index(&old, "PredefinedType") {
-        if i < a.len() {
-            a[i] = Value::Null;
+    // keep only attributes with the same name at the same position (PredefinedType is class specific)
+    let old_names: Vec<String> = doc.schema().attr_names(&old).iter().map(|x| x.to_string()).collect();
+    let new_names: Vec<String> = doc.schema().attr_names(new_class_upper).iter().map(|x| x.to_string()).collect();
+    for (i, v) in a.iter_mut().enumerate() {
+        let same = old_names.get(i).is_some() && old_names.get(i) == new_names.get(i) && old_names[i] != "PredefinedType";
+        if !same {
+            *v = Value::Null;
         }
     }
     a.resize(n, Value::Null);
@@ -943,6 +946,45 @@ pub fn change_class(doc: &mut Document, id: u32, new_class_upper: &str) -> anyho
         }
     }
     doc.set_raw(id, Some(new_class_upper), &crate::step::args_to_step(&a))
+}
+
+/// Class suggestion for a building element proxy from its name, ObjectType or type name
+/// (German and English keywords); only classes of the file's schema are suggested.
+pub fn suggest_class_from_name(doc: &Document, id: u32) -> Option<&'static str> {
+    let mut text = doc.name_of(id).unwrap_or_default();
+    text.push(' ');
+    text.push_str(&doc.attr_str(id, "ObjectType").unwrap_or_default());
+    if let Some(t) = model::type_of(doc, id) {
+        text.push(' ');
+        text.push_str(&doc.name_of(t).unwrap_or_default());
+    }
+    let t = text.to_lowercase();
+    const RULES: &[(&[&str], &[&str])] = &[
+        (&["vorhangfassade", "curtain"], &["IFCCURTAINWALL"]),
+        (&["fenster", "window"], &["IFCWINDOW"]),
+        (&["tür", "tuer", "door"], &["IFCDOOR"]),
+        (&["treppe", "stair"], &["IFCSTAIR"]),
+        (&["rampe", "ramp"], &["IFCRAMP"]),
+        (&["geländer", "gelaender", "handlauf", "railing"], &["IFCRAILING"]),
+        (&["bekleidung", "belag", "estrich", "putz", "covering", "cladding"], &["IFCCOVERING"]),
+        (&["stütze", "stuetze", "säule", "saeule", "pfeiler", "column"], &["IFCCOLUMN"]),
+        (&["träger", "traeger", "unterzug", "beam"], &["IFCBEAM"]),
+        (&["fundament", "footing"], &["IFCFOOTING"]),
+        (&["pfahl", "pile"], &["IFCPILE"]),
+        (&["decke", "bodenplatte", "slab"], &["IFCSLAB"]),
+        (&["dach", "roof"], &["IFCROOF"]),
+        (&["wand", "wall"], &["IFCWALL"]),
+        (&["möbel", "moebel", "tisch", "stuhl", "schrank", "furniture", "chair", "desk"], &["IFCFURNITURE", "IFCFURNISHINGELEMENT"]),
+        (&["rohr", "pipe"], &["IFCPIPESEGMENT", "IFCFLOWSEGMENT"]),
+        (&["lüftungskanal", "luftkanal", "duct"], &["IFCDUCTSEGMENT", "IFCFLOWSEGMENT"]),
+        (&["leuchte", "lampe", "luminaire", "light fixture"], &["IFCLIGHTFIXTURE", "IFCFLOWTERMINAL"]),
+    ];
+    for (keys, classes) in RULES {
+        if keys.iter().any(|k| t.contains(k)) {
+            return classes.iter().copied().find(|c| doc.schema().entity(c).is_some());
+        }
+    }
+    None
 }
 
 /// Regenerate GlobalIds that are invalid or duplicated. Returns the number of fixes.
@@ -1109,6 +1151,24 @@ fn new_project_named(schema: crate::SchemaId, project_name: &str, site_name: &st
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn proxy_classes() {
+        let mut doc = new_project(crate::SchemaId::Ifc4, "Test", &[("EG".into(), 0.0)]);
+        let p = doc.create("IFCBUILDINGELEMENTPROXY", &[s(&new_guid()), Value::Null, s("Tür 1.01"), Value::Null, Value::Null, Value::Null, Value::Null, s("T1"), Value::Enum("ELEMENT".into())]);
+        let w = doc.create("IFCBUILDINGELEMENTPROXY", &[s(&new_guid()), Value::Null, s("Außenwand"), Value::Null, Value::Null, Value::Null, Value::Null, Value::Null, Value::Null]);
+        let x = doc.create("IFCBUILDINGELEMENTPROXY", &[s(&new_guid()), Value::Null, s("Objekt 17"), Value::Null, Value::Null, Value::Null, Value::Null, Value::Null, Value::Null]);
+        assert_eq!(suggest_class_from_name(&doc, p), Some("IFCDOOR"));
+        assert_eq!(suggest_class_from_name(&doc, w), Some("IFCWALL"));
+        assert_eq!(suggest_class_from_name(&doc, x), None);
+        change_class(&mut doc, p, "IFCDOOR").unwrap();
+        assert_eq!(doc.type_name(p), Some("IFCDOOR"));
+        assert_eq!(doc.name_of(p).as_deref(), Some("Tür 1.01"));
+        assert_eq!(doc.attr_str(p, "Tag").as_deref(), Some("T1"));
+        // the proxy's enum must not land in OverallHeight
+        assert!(doc.attr(p, "OverallHeight").map(|v| v.is_null()).unwrap_or(true));
+        assert_eq!(doc.args(p).unwrap().len(), doc.schema().attr_names("IFCDOOR").len());
+    }
 
     #[test]
     fn retype_values() {
