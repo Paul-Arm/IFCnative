@@ -18,6 +18,7 @@ pub mod misc;
 pub mod quantities;
 pub mod script;
 pub mod search;
+pub mod spaces;
 pub mod stats;
 pub mod table;
 pub mod tree;
@@ -39,6 +40,7 @@ pub struct PanelState {
     pub groups: groups::GroupsState,
     pub graph: graph::GraphState,
     pub table: table::TableState,
+    pub spaces: spaces::SpacesState,
     pub materials: materials::MaterialsState,
     pub pending_select: Option<Vec<u32>>,
     pub dragging: Option<u32>,

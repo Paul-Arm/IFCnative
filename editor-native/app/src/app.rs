@@ -29,6 +29,7 @@ pub enum Tab {
     Table,
     Stats,
     Clash,
+    Spaces,
     Notes,
     Recent,
 }
@@ -53,12 +54,13 @@ impl Tab {
             Tab::Table => (ic::TABLE, "Tabelle"),
             Tab::Stats => (ic::CHART, "Statistik"),
             Tab::Clash => (ic::CLASH, "Kollisionen"),
+            Tab::Spaces => (ic::ph::DOOR_OPEN, "Raumbuch"),
             Tab::Notes => (ic::EDIT, "Notizen"),
             Tab::Recent => (ic::HISTORY, "Zuletzt geöffnet"),
         };
         format!("{i} {t}")
     }
-    pub const ALL: [Tab; 19] = [Tab::Viewer, Tab::Structure, Tab::Classes, Tab::Search, Tab::Inspector, Tab::History, Tab::Diagnostics, Tab::Graph, Tab::Batch, Tab::Builder, Tab::Ids, Tab::Diff, Tab::Groups, Tab::Materials, Tab::Table, Tab::Stats, Tab::Clash, Tab::Notes, Tab::Recent];
+    pub const ALL: [Tab; 20] = [Tab::Viewer, Tab::Structure, Tab::Classes, Tab::Search, Tab::Inspector, Tab::History, Tab::Diagnostics, Tab::Graph, Tab::Batch, Tab::Builder, Tab::Ids, Tab::Diff, Tab::Groups, Tab::Materials, Tab::Table, Tab::Stats, Tab::Clash, Tab::Spaces, Tab::Notes, Tab::Recent];
 }
 
 /// State shared with panels.
@@ -200,7 +202,7 @@ pub fn default_dock() -> DockState<Tab> {
     let tree = dock.main_surface_mut();
     let [center, _left] = tree.split_left(NodeIndex::root(), 0.21, vec![Tab::Structure, Tab::Classes, Tab::Search, Tab::Groups]);
     let [center, _right] = tree.split_right(center, 0.72, vec![Tab::Inspector, Tab::History, Tab::Materials]);
-    let [_c, _bottom] = tree.split_below(center, 0.72, vec![Tab::Diagnostics, Tab::Table, Tab::Batch, Tab::Builder, Tab::Graph, Tab::Ids, Tab::Clash, Tab::Diff, Tab::Stats]);
+    let [_c, _bottom] = tree.split_below(center, 0.72, vec![Tab::Diagnostics, Tab::Table, Tab::Batch, Tab::Builder, Tab::Graph, Tab::Ids, Tab::Clash, Tab::Diff, Tab::Stats, Tab::Spaces]);
     dock
 }
 
@@ -1764,6 +1766,7 @@ impl TabViewer for Viewer<'_> {
             Tab::Materials => panels::materials::show(ui, s, self.app),
             Tab::Table => panels::table::show(ui, s, self.app),
             Tab::Stats => panels::stats::show(ui, s, self.app),
+            Tab::Spaces => panels::spaces::show(ui, s, self.app),
             Tab::Clash => panels::clash::show(ui, s, self.app),
             Tab::Notes => panels::misc::notes(ui, s, self.app),
             Tab::Recent => panels::misc::recent(ui, &self.open_paths, self.app),
