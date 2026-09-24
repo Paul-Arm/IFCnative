@@ -14,6 +14,7 @@ pub mod guid;
 pub mod io;
 pub mod schema;
 pub mod step;
+pub mod validate;
 
 pub use document::{tflags, Diagnostic, Document, Header, Severity, Transaction, TypeInfo};
 pub use schema::{Schema, SchemaId};

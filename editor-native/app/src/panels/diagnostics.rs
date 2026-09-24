@@ -38,6 +38,19 @@ pub fn run_checks(doc: &Document, s: &Session) -> Vec<Finding> {
     for d in doc.diagnostics.iter().take(200) {
         out.push(Finding { severity: d.severity, title: "Datei".into(), detail: d.message.clone(), ids: d.entity.into_iter().collect(), fix: None });
     }
+    // schema conformance (all entities)
+    for g in ifc_doc::validate::validate(doc, 5000) {
+        let examples: Vec<String> = g.samples.iter().take(3).map(|i| format!("#{} {}", i.id, i.message)).collect();
+        let mut ids: Vec<u32> = g.samples.iter().map(|i| i.id).collect();
+        ids.dedup();
+        out.push(Finding {
+            severity: if g.kind.is_error() { Severity::Error } else { Severity::Warning },
+            title: format!("Schema: {}", g.kind.title()),
+            detail: format!("{} Fälle, z. B. {}", g.total, examples.join("; ")),
+            ids,
+            fix: None,
+        });
+    }
     // GUIDs
     let roots = doc.ids_with_flag(tflags::ROOT);
     let guids: Vec<(u32, String)> = roots.par_iter().map(|&id| (id, doc.guid_of(id).unwrap_or_default())).collect();
@@ -132,7 +145,9 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
     let st = &mut app.panel_state.diag;
     let key = (s.uid, s.doc.revision());
     ui.horizontal(|ui| {
-        if ui.button(format!("{} Modell prüfen", ic::CHECK)).clicked() || (st.ran_rev.is_some() && st.ran_rev != Some(key) && s.loading.is_none()) {
+        // automatic re-check after edits only while it is fast (large models: on demand)
+        let stale = st.ran_rev.is_some() && st.ran_rev != Some(key) && s.loading.is_none();
+        if ui.button(format!("{} Modell prüfen", ic::CHECK)).clicked() || (stale && st.millis < 300.0) {
             let t = std::time::Instant::now();
             st.findings = run_checks(&s.doc, s);
             st.millis = t.elapsed().as_secs_f64() * 1000.0;
@@ -147,10 +162,13 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
             ui.colored_label(Color32::from_rgb(240, 90, 80), format!("{e} Fehler"));
             ui.colored_label(Color32::from_rgb(255, 170, 40), format!("{w} Warnungen"));
             ui.weak(format!("{i} Hinweise · {:.0} ms", st.millis));
+            if st.ran_rev != Some(key) {
+                ui.colored_label(Color32::from_rgb(230, 180, 80), "Modell geändert – erneut prüfen");
+            }
         }
     });
     if st.ran_rev.is_none() {
-        ui.weak("Prüft GlobalIds, Raumstruktur, Platzierung, Geometrie, Psets, Öffnungen, ungenutzte Daten u. a.");
+        ui.weak("Prüft Schema-Konformität (Pflichtattribute, Verweise, Aufzählungen), GlobalIds, Raumstruktur, Platzierung, Geometrie, Psets, Öffnungen, ungenutzte Daten u. a.");
         return;
     }
     if st.findings.is_empty() {

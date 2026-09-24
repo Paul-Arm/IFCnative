@@ -81,6 +81,12 @@ pub fn run(cmd: &str, app: &mut IfcApp, _ctx: &egui::Context) {
                 app.process_actions(_ctx);
             }
         }
+        "diag" => {
+            // run the model check on the next frame of the Prüfung tab
+            app.ctx_state.panel_state.diag.ran_rev = Some((u64::MAX, 0));
+            app.ctx_state.panel_state.diag.millis = 0.0;
+            app.open_tab(Tab::Diagnostics);
+        }
         "federate" => {
             app.ctx_state.federated = arg != "off";
             app.ctx_state.federated_dim = arg == "dim";
