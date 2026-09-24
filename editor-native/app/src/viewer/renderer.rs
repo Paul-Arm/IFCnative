@@ -30,6 +30,26 @@ struct Globals {
     ghost_color: [f32; 4],
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct LayerUniform {
+    offset: [f32; 4],
+    /// x: layer id (encoded into pick ids), y: 1 = dimmed
+    id: [u32; 4],
+}
+
+/// GPU data of one scene (the active document or a federated one).
+struct GpuLayer {
+    key: u64,
+    used: bool,
+    chunks: Vec<Option<GpuChunk>>,
+    state_buf: wgpu::Buffer,
+    state_cap: usize,
+    layer_buf: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+    uniform: [u32; 8],
+}
+
 struct GpuChunk {
     ibuf_edges: Option<wgpu::Buffer>,
     n_edges: u32,
@@ -57,6 +77,8 @@ struct Targets {
 }
 
 pub struct PickResult {
+    /// Layer the object belongs to (0 = active document).
+    pub layer: u32,
     pub obj: Option<u32>,
     pub pos: Option<Vec3>,
     pub normal: Option<Vec3>,
@@ -89,10 +111,9 @@ pub struct Renderer {
     pub grid_key: Option<[i32; 5]>,
     bgl: wgpu::BindGroupLayout,
     globals: wgpu::Buffer,
-    state_buf: wgpu::Buffer,
-    state_cap: usize,
+    /// Bind group for layer-independent drawing (grid).
     bind_group: wgpu::BindGroup,
-    chunks: Vec<Option<GpuChunk>>,
+    layers: Vec<GpuLayer>,
     targets: Option<Targets>,
     pub texture_id: Option<egui::TextureId>,
     msaa: u32,
@@ -108,6 +129,7 @@ impl Renderer {
             entries: &[
                 wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::VERTEX_FRAGMENT, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
                 wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::VERTEX_FRAGMENT, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::VERTEX_FRAGMENT, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
             ],
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("scene-layout"), bind_group_layouts: &[Some(&bgl)], immediate_size: 0 });
@@ -181,9 +203,9 @@ impl Renderer {
             cache: None,
         });
         let globals = device.create_buffer(&wgpu::BufferDescriptor { label: Some("globals"), size: std::mem::size_of::<Globals>() as u64, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
-        let state_cap = 1024;
-        let state_buf = device.create_buffer(&wgpu::BufferDescriptor { label: Some("obj-state"), size: (state_cap * 8) as u64, usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
-        let bind_group = Self::make_bg(&device, &bgl, &globals, &state_buf);
+        let base_state = device.create_buffer(&wgpu::BufferDescriptor { label: Some("obj-state-base"), size: 64, usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+        let base_layer = device.create_buffer(&wgpu::BufferDescriptor { label: Some("layer-base"), size: std::mem::size_of::<LayerUniform>() as u64, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+        let bind_group = Self::make_bg(&device, &bgl, &globals, &base_state, &base_layer);
         Renderer {
             device,
             queue,
@@ -198,27 +220,29 @@ impl Renderer {
             grid_key: None,
             bgl,
             globals,
-            state_buf,
-            state_cap,
             bind_group,
-            chunks: Vec::new(),
+            layers: Vec::new(),
             targets: None,
             texture_id: None,
             msaa,
         }
     }
 
-    fn make_bg(device: &wgpu::Device, bgl: &wgpu::BindGroupLayout, globals: &wgpu::Buffer, state: &wgpu::Buffer) -> wgpu::BindGroup {
+    fn make_bg(device: &wgpu::Device, bgl: &wgpu::BindGroupLayout, globals: &wgpu::Buffer, state: &wgpu::Buffer, layer: &wgpu::Buffer) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("scene-bg"),
             layout: bgl,
-            entries: &[wgpu::BindGroupEntry { binding: 0, resource: globals.as_entire_binding() }, wgpu::BindGroupEntry { binding: 1, resource: state.as_entire_binding() }],
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: globals.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: state.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: layer.as_entire_binding() },
+            ],
         })
     }
 
     /// Drop all GPU geometry (new document).
     pub fn clear(&mut self) {
-        self.chunks.clear();
+        self.layers.clear();
         self.grid = None;
         self.grid_key = None;
     }
@@ -260,27 +284,72 @@ impl Renderer {
         self.grid = Some((buf, v.len() as u32));
     }
 
-    /// Upload dirty chunks and object state.
-    pub fn sync(&mut self, scene: &mut Scene) {
-        if scene.state.len() > self.state_cap || (scene.state_dirty && self.state_cap == 0) {
-            self.state_cap = (scene.state.len() * 2).max(1024);
-            self.state_buf = self.device.create_buffer(&wgpu::BufferDescriptor { label: Some("obj-state"), size: (self.state_cap * 8) as u64, usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
-            self.bind_group = Self::make_bg(&self.device, &self.bgl, &self.globals, &self.state_buf);
+    /// Start a frame: layers not synced until `end_layers` are dropped.
+    pub fn begin_layers(&mut self) {
+        for l in &mut self.layers {
+            l.used = false;
+        }
+    }
+
+    /// Drop layers that were not synced this frame; true if any was removed.
+    pub fn end_layers(&mut self) -> bool {
+        let n = self.layers.len();
+        self.layers.retain(|l| l.used);
+        n != self.layers.len()
+    }
+
+    /// Upload dirty chunks and object state of a scene into the layer `key`
+    /// (drawn with `offset`, pick ids tagged with `id`). Returns true if anything changed.
+    pub fn sync_layer(&mut self, key: u64, id: u8, scene: &mut Scene, offset: Vec3, dimmed: bool) -> bool {
+        let mut changed = false;
+        let li = match self.layers.iter().position(|l| l.key == key) {
+            Some(i) => i,
+            None => {
+                let state_cap = (scene.state.len() * 2).max(1024);
+                let state_buf = self.device.create_buffer(&wgpu::BufferDescriptor { label: Some("obj-state"), size: (state_cap * 8) as u64, usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+                let layer_buf = self.device.create_buffer(&wgpu::BufferDescriptor { label: Some("layer"), size: std::mem::size_of::<LayerUniform>() as u64, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+                let bind_group = Self::make_bg(&self.device, &self.bgl, &self.globals, &state_buf, &layer_buf);
+                self.layers.push(GpuLayer { key, used: true, chunks: Vec::new(), state_buf, state_cap, layer_buf, bind_group, uniform: [u32::MAX; 8] });
+                // fresh layer: upload everything
+                for c in 0..scene.chunks.len() {
+                    scene.dirty_chunks.insert(c as u32);
+                }
+                scene.state_dirty = true;
+                changed = true;
+                self.layers.len() - 1
+            }
+        };
+        let device = self.device.clone();
+        let queue = self.queue.clone();
+        let layer = &mut self.layers[li];
+        layer.used = true;
+        let u = LayerUniform { offset: [offset.x, offset.y, offset.z, 0.0], id: [id as u32, dimmed as u32, 0, 0] };
+        let key8: [u32; 8] = [offset.x.to_bits(), offset.y.to_bits(), offset.z.to_bits(), 0, id as u32, dimmed as u32, 0, 0];
+        if layer.uniform != key8 {
+            queue.write_buffer(&layer.layer_buf, 0, bytemuck::bytes_of(&u));
+            layer.uniform = key8;
+            changed = true;
+        }
+        if scene.state.len() > layer.state_cap {
+            layer.state_cap = (scene.state.len() * 2).max(1024);
+            layer.state_buf = device.create_buffer(&wgpu::BufferDescriptor { label: Some("obj-state"), size: (layer.state_cap * 8) as u64, usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+            layer.bind_group = Self::make_bg(&device, &self.bgl, &self.globals, &layer.state_buf, &layer.layer_buf);
             scene.state_dirty = true;
         }
         if scene.state_dirty && !scene.state.is_empty() {
-            self.queue.write_buffer(&self.state_buf, 0, bytemuck::cast_slice(&scene.state));
+            queue.write_buffer(&layer.state_buf, 0, bytemuck::cast_slice(&scene.state));
             scene.state_dirty = false;
+            changed = true;
         }
         if scene.dirty_chunks.is_empty() {
-            return;
+            return changed;
         }
         let dirty: Vec<u32> = scene.dirty_chunks.drain().collect();
-        if self.chunks.len() < scene.chunks.len() {
-            self.chunks.resize_with(scene.chunks.len(), || None);
+        if layer.chunks.len() < scene.chunks.len() {
+            layer.chunks.resize_with(scene.chunks.len(), || None);
         }
         for ci in dirty {
-            let c = &scene.chunks[ci as usize];
+            let Some(c) = scene.chunks.get(ci as usize) else { continue };
             let mut verts: Vec<Vertex> = Vec::with_capacity(c.verts);
             let mut iop: Vec<u32> = Vec::new();
             let mut itr: Vec<u32> = Vec::new();
@@ -298,15 +367,17 @@ impl Renderer {
                     dst.extend_from_slice(&[base + t[0], base + t[1], base + t[2]]);
                 }
             }
+            changed = true;
             if verts.is_empty() {
-                self.chunks[ci as usize] = None;
+                layer.chunks[ci as usize] = None;
                 continue;
             }
             use wgpu::util::DeviceExt;
-            let vbuf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("chunk-v"), contents: bytemuck::cast_slice(&verts), usage: wgpu::BufferUsages::VERTEX });
-            let mk = |d: &[u32]| if d.is_empty() { None } else { Some(self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("chunk-i"), contents: bytemuck::cast_slice(d), usage: wgpu::BufferUsages::INDEX })) };
-            self.chunks[ci as usize] = Some(GpuChunk { vbuf, ibuf_opaque: mk(&iop), ibuf_trans: mk(&itr), ibuf_edges: mk(&ied), n_opaque: iop.len() as u32, n_trans: itr.len() as u32, n_edges: ied.len() as u32 });
+            let vbuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("chunk-v"), contents: bytemuck::cast_slice(&verts), usage: wgpu::BufferUsages::VERTEX });
+            let mk = |d: &[u32]| if d.is_empty() { None } else { Some(device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("chunk-i"), contents: bytemuck::cast_slice(d), usage: wgpu::BufferUsages::INDEX })) };
+            layer.chunks[ci as usize] = Some(GpuChunk { vbuf, ibuf_opaque: mk(&iop), ibuf_trans: mk(&itr), ibuf_edges: mk(&ied), n_opaque: iop.len() as u32, n_trans: itr.len() as u32, n_edges: ied.len() as u32 });
         }
+        changed
     }
 
     fn ensure_targets(&mut self, w: u32, h: u32) {
@@ -393,49 +464,61 @@ impl Renderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            pass.set_bind_group(0, &self.bind_group, &[]);
             pass.set_pipeline(&self.pipe_opaque);
-            for c in self.chunks.iter().flatten() {
-                if let Some(ib) = &c.ibuf_opaque {
-                    pass.set_vertex_buffer(0, c.vbuf.slice(..));
-                    pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
-                    pass.draw_indexed(0..c.n_opaque, 0, 0..1);
+            for l in &self.layers {
+                pass.set_bind_group(0, &l.bind_group, &[]);
+                for c in l.chunks.iter().flatten() {
+                    if let Some(ib) = &c.ibuf_opaque {
+                        pass.set_vertex_buffer(0, c.vbuf.slice(..));
+                        pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+                        pass.draw_indexed(0..c.n_opaque, 0, 0..1);
+                    }
                 }
             }
             if let (true, Some((buf, n))) = (s.grid, &self.grid) {
+                pass.set_bind_group(0, &self.bind_group, &[]);
                 pass.set_pipeline(&self.pipe_grid);
                 pass.set_vertex_buffer(0, buf.slice(..));
                 pass.draw(0..*n, 0..1);
             }
             if s.edges {
                 pass.set_pipeline(&self.pipe_edge);
-                for c in self.chunks.iter().flatten() {
-                    if let Some(ib) = &c.ibuf_edges {
-                        pass.set_vertex_buffer(0, c.vbuf.slice(..));
-                        pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
-                        pass.draw_indexed(0..c.n_edges, 0, 0..1);
+                for l in &self.layers {
+                    pass.set_bind_group(0, &l.bind_group, &[]);
+                    for c in l.chunks.iter().flatten() {
+                        if let Some(ib) = &c.ibuf_edges {
+                            pass.set_vertex_buffer(0, c.vbuf.slice(..));
+                            pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+                            pass.draw_indexed(0..c.n_edges, 0, 0..1);
+                        }
                     }
                 }
             }
             pass.set_pipeline(&self.pipe_trans);
-            for c in self.chunks.iter().flatten() {
-                if let Some(ib) = &c.ibuf_trans {
-                    pass.set_vertex_buffer(0, c.vbuf.slice(..));
-                    pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
-                    pass.draw_indexed(0..c.n_trans, 0, 0..1);
+            for l in &self.layers {
+                pass.set_bind_group(0, &l.bind_group, &[]);
+                for c in l.chunks.iter().flatten() {
+                    if let Some(ib) = &c.ibuf_trans {
+                        pass.set_vertex_buffer(0, c.vbuf.slice(..));
+                        pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+                        pass.draw_indexed(0..c.n_trans, 0, 0..1);
+                    }
                 }
             }
             if s.xray {
                 pass.set_pipeline(&self.pipe_ghost);
-                for c in self.chunks.iter().flatten() {
-                    pass.set_vertex_buffer(0, c.vbuf.slice(..));
-                    if let Some(ib) = &c.ibuf_opaque {
-                        pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
-                        pass.draw_indexed(0..c.n_opaque, 0, 0..1);
-                    }
-                    if let Some(ib) = &c.ibuf_trans {
-                        pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
-                        pass.draw_indexed(0..c.n_trans, 0, 0..1);
+                for l in &self.layers {
+                    pass.set_bind_group(0, &l.bind_group, &[]);
+                    for c in l.chunks.iter().flatten() {
+                        pass.set_vertex_buffer(0, c.vbuf.slice(..));
+                        if let Some(ib) = &c.ibuf_opaque {
+                            pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+                            pass.draw_indexed(0..c.n_opaque, 0, 0..1);
+                        }
+                        if let Some(ib) = &c.ibuf_trans {
+                            pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+                            pass.draw_indexed(0..c.n_trans, 0, 0..1);
+                        }
                     }
                 }
             }
@@ -457,17 +540,19 @@ impl Renderer {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        pass.set_bind_group(0, &self.bind_group, &[]);
         pass.set_pipeline(&self.pipe_id);
-        for c in self.chunks.iter().flatten() {
-            pass.set_vertex_buffer(0, c.vbuf.slice(..));
-            if let Some(ib) = &c.ibuf_opaque {
-                pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..c.n_opaque, 0, 0..1);
-            }
-            if let Some(ib) = &c.ibuf_trans {
-                pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..c.n_trans, 0, 0..1);
+        for l in &self.layers {
+            pass.set_bind_group(0, &l.bind_group, &[]);
+            for c in l.chunks.iter().flatten() {
+                pass.set_vertex_buffer(0, c.vbuf.slice(..));
+                if let Some(ib) = &c.ibuf_opaque {
+                    pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..c.n_opaque, 0, 0..1);
+                }
+                if let Some(ib) = &c.ibuf_trans {
+                    pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..c.n_trans, 0, 0..1);
+                }
             }
         }
     }
@@ -514,12 +599,13 @@ impl Renderer {
         let idv = u32::from_le_bytes([id[0], id[1], id[2], id[3]]);
         let f = |b: &[u8], i: usize| f32::from_le_bytes([b[i * 4], b[i * 4 + 1], b[i * 4 + 2], b[i * 4 + 3]]);
         if idv == 0 {
-            return PickResult { obj: None, pos: None, normal: None };
+            return PickResult { layer: 0, obj: None, pos: None, normal: None };
         }
-        PickResult { obj: Some(idv - 1), pos: Some(Vec3::new(f(&pos, 0), f(&pos, 1), f(&pos, 2))), normal: Some(Vec3::new(half(&nrm, 0), half(&nrm, 1), half(&nrm, 2))) }
+        let (layer, obj) = decode_id(idv);
+        PickResult { layer, obj: Some(obj), pos: Some(Vec3::new(f(&pos, 0), f(&pos, 1), f(&pos, 2))), normal: Some(Vec3::new(half(&nrm, 0), half(&nrm, 1), half(&nrm, 2))) }
     }
 
-    /// All object indices visible inside a pixel rectangle.
+    /// All object indices of the active layer visible inside a pixel rectangle.
     pub fn pick_rect(&mut self, w: u32, h: u32, cam: &Camera, s: &RenderSettings, x0: u32, y0: u32, x1: u32, y1: u32) -> Vec<u32> {
         self.ensure_targets(w, h);
         self.write_globals(cam, w as f32 / h.max(1) as f32, s);
@@ -537,7 +623,10 @@ impl Renderer {
         for c in data.chunks_exact(4) {
             let v = u32::from_le_bytes([c[0], c[1], c[2], c[3]]);
             if v > 0 {
-                set.insert(v - 1);
+                let (layer, obj) = decode_id(v);
+                if layer == 0 {
+                    set.insert(obj);
+                }
             }
         }
         set.into_iter().collect()
@@ -550,6 +639,11 @@ impl Renderer {
         let data = self.read_region(&t.color, 0, 0, w, h, 4);
         Some((w, h, data))
     }
+}
+
+/// Pick id → (layer, object index): low 24 bits object index + 1, high 8 bits layer.
+fn decode_id(v: u32) -> (u32, u32) {
+    (v >> 24, (v & 0x00ff_ffff).saturating_sub(1))
 }
 
 fn half(b: &[u8], i: usize) -> f32 {

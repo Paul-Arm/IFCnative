@@ -78,6 +78,12 @@ pub struct AppCtx {
     pub toasts: Vec<(String, std::time::Instant, bool)>,
     pub actions: Vec<Action>,
     pub panel_state: panels::PanelState,
+    /// Show all open documents together in the 3D view.
+    pub federated: bool,
+    pub federated_dim: bool,
+    pub federated_excluded: rustc_hash::FxHashSet<u64>,
+    /// (uid, title) of all open documents (for the viewer toolbar).
+    pub open_docs: Vec<(u64, String)>,
 }
 
 impl AppCtx {
@@ -106,6 +112,7 @@ pub enum Action {
     ExportXlsx,
     ExportObj,
     ImportTable,
+    FocusFederated(usize, u32),
     Compare(PathBuf),
     BcfView,
 }
@@ -231,6 +238,10 @@ impl IfcApp {
                 toasts: Vec::new(),
                 actions: Vec::new(),
                 panel_state: panels::PanelState::default(),
+                federated: false,
+                federated_dim: false,
+                federated_excluded: Default::default(),
+                open_docs: Vec::new(),
             },
             sessions: Vec::new(),
             active: 0,
@@ -359,14 +370,8 @@ impl IfcApp {
             return;
         }
         self.active = i;
-        if let Some(r) = self.ctx_state.renderer.as_mut() {
-            r.clear();
-        }
+        // GPU layers are keyed by document; a newly shown document is uploaded by the viewer
         let s = &mut self.sessions[i];
-        for c in 0..s.scene.chunks.len() {
-            s.scene.dirty_chunks.insert(c as u32);
-        }
-        s.scene.state_dirty = true;
         s.view_dirty = true;
     }
 
@@ -455,6 +460,20 @@ impl IfcApp {
                                 Err(e) => self.ctx_state.error(e.to_string()),
                             }
                         }
+                    }
+                }
+                Action::FocusFederated(si, id) => {
+                    if si < self.sessions.len() && si != self.active {
+                        // keep the view: move the camera into the other model's coordinates
+                        let (cam, origin) = { let a = &self.sessions[self.active]; (a.camera.clone(), a.scene.origin) };
+                        self.switch_to(si);
+                        let s = &mut self.sessions[si];
+                        let mut cam = cam;
+                        cam.target += (origin - s.scene.origin).as_vec3();
+                        s.camera = cam;
+                        s.select(vec![id], false);
+                        s.view_dirty = true;
+                        self.ctx_state.toast(format!("Aktives Modell: {}", s.title()));
                     }
                 }
                 Action::ImportTable => {
@@ -1664,6 +1683,7 @@ pub fn apply_style(ctx: &egui::Context, st: &Settings) {
 
 struct Viewer<'a> {
     session: Option<&'a mut Session>,
+    others: Vec<(usize, &'a mut Session)>,
     app: &'a mut AppCtx,
     welcome: bool,
     open_paths: Vec<PathBuf>,
@@ -1694,7 +1714,7 @@ impl TabViewer for Viewer<'_> {
             return;
         };
         match tab {
-            Tab::Viewer => panels::viewer::show(ui, s, self.app),
+            Tab::Viewer => panels::viewer::show(ui, s, self.app, &mut self.others),
             Tab::Structure => panels::tree::show(ui, s, self.app),
             Tab::Classes => panels::classes::show(ui, s, self.app),
             Tab::Search => panels::search::show(ui, s, self.app),
@@ -1769,8 +1789,17 @@ impl eframe::App for IfcApp {
         let open_paths: Vec<PathBuf> = self.sessions.iter().filter_map(|s| s.path.clone()).collect();
         {
             let active = self.active;
-            let session = self.sessions.get_mut(active);
-            let mut viewer = Viewer { session, app: &mut self.ctx_state, welcome: false, open_paths };
+            self.ctx_state.open_docs = self.sessions.iter().map(|s| (s.uid, s.title())).collect();
+            let mut session = None;
+            let mut others = Vec::new();
+            for (i, s) in self.sessions.iter_mut().enumerate() {
+                if i == active {
+                    session = Some(s);
+                } else {
+                    others.push((i, s));
+                }
+            }
+            let mut viewer = Viewer { session, others, app: &mut self.ctx_state, welcome: false, open_paths };
             let mut style = DockStyle::from_egui(ui.style());
             style.tab_bar.fill_tab_bar = false;
             DockArea::new(&mut self.dock).style(style).show_leaf_close_all_buttons(false).show_leaf_collapse_buttons(false).show_inside(ui, &mut viewer);

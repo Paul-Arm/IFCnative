@@ -14,6 +14,17 @@ struct Globals {
 @group(0) @binding(0) var<uniform> g: Globals;
 @group(0) @binding(1) var<storage, read> obj_state: array<u32>;
 
+struct Layer {
+    offset: vec4<f32>,
+    // x: layer id (high byte of pick ids), y: 1 = dimmed (federated context model)
+    id: vec4<u32>,
+};
+@group(0) @binding(2) var<uniform> layer: Layer;
+
+fn pick_id(obj: u32) -> u32 {
+    return ((obj + 1u) & 0x00ffffffu) | (layer.id.x << 24u);
+}
+
 override PASS: u32 = 0u;
 
 struct VIn {
@@ -51,13 +62,14 @@ fn vs(v: VIn) -> VOut {
 fn transform(v: VIn) -> VOut {
     var o: VOut;
     let st = obj_state[v.obj * 2u];
-    o.world = v.pos;
+    let p = v.pos + layer.offset.xyz;
+    o.world = p;
     o.color = v.color;
     o.obj = v.obj;
     if ((st & HIDDEN) != 0u) {
         o.clip = vec4<f32>(0.0, 0.0, 2.0, 1.0);
     } else {
-        o.clip = g.view_proj * vec4<f32>(v.pos, 1.0);
+        o.clip = g.view_proj * vec4<f32>(p, 1.0);
     }
     return o;
 }
@@ -127,8 +139,13 @@ fn fs(i: VOut) -> @location(0) vec4<f32> {
         rgb = mix(rgb, sel, 0.55);
         a = max(a, 0.85);
     }
-    if ((st & HOVER) != 0u || g.params.w == i.obj + 1u) {
+    if ((st & HOVER) != 0u || g.params.w == pick_id(i.obj)) {
         rgb = rgb * 1.25 + vec3<f32>(0.04);
+    }
+    if (layer.id.y == 1u) {
+        // federated context model: muted
+        let l = dot(rgb, vec3<f32>(0.3, 0.5, 0.2));
+        rgb = mix(rgb, vec3<f32>(l), 0.65) * 0.9;
     }
     return vec4<f32>(rgb, a);
 }
@@ -147,7 +164,7 @@ fn fs_id(i: VOut) -> IdOut {
         discard;
     }
     var o: IdOut;
-    o.id = i.obj + 1u;
+    o.id = pick_id(i.obj);
     o.pos = vec4<f32>(i.world, 1.0);
     o.normal = vec4<f32>(n, 0.0);
     return o;

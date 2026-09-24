@@ -8,7 +8,7 @@ use crate::viewer::renderer::RenderSettings;
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Vec2};
 use glam::{Vec2 as GVec2, Vec3};
 
-pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
+pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx, others: &mut [(usize, &mut Session)]) {
     let avail = ui.available_rect_before_wrap();
     toolbar(ui, s, app);
     let rect = ui.available_rect_before_wrap();
@@ -183,7 +183,7 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
             match s.tool {
                 Tool::Measure if resp.clicked() => {
                     if let Some(pos) = r.pos {
-                        let pos = snap_vertex(s, r.obj, pos, &s.camera, size, app.settings.snap_px);
+                        let pos = snap_vertex(s, r.obj.filter(|_| r.layer == 0), pos, &s.camera, size, app.settings.snap_px);
                         s.measure.points.push(pos);
                         if s.measure.points.len() == 2 {
                             let a = s.measure.points[0];
@@ -212,8 +212,16 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
                         s.status = "Schnittebene gesetzt".into();
                     }
                 }
+                _ if r.layer > 0 && resp.clicked() => {
+                    // object of another (federated) model: activate that model
+                    if let Some((si, o)) = others.get(r.layer as usize - 1) {
+                        if let Some(id) = r.obj.and_then(|x| o.scene.objects.get(x as usize)).map(|x| x.id) {
+                            app.actions.push(crate::app::Action::FocusFederated(*si, id));
+                        }
+                    }
+                }
                 _ => {
-                    let id = r.obj.and_then(|o| s.scene.objects.get(o as usize)).map(|o| o.id);
+                    let id = if r.layer == 0 { r.obj.and_then(|o| s.scene.objects.get(o as usize)).map(|o| o.id) } else { None };
                     if resp.secondary_clicked() {
                         if let Some(id) = id {
                             if !s.selection.contains(&id) {
@@ -259,7 +267,21 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
     }
 
     // ---------------------------------------------------------------- render
-    renderer.sync(&mut s.scene);
+    renderer.begin_layers();
+    let mut layers_changed = renderer.sync_layer(s.uid, 0, &mut s.scene, Vec3::ZERO, false);
+    if app.federated {
+        for (k, (_, o)) in others.iter_mut().enumerate().take(250) {
+            if o.scene.objects.is_empty() || app.federated_excluded.contains(&o.uid) {
+                continue;
+            }
+            let off = (o.scene.origin - s.scene.origin).as_vec3();
+            layers_changed |= renderer.sync_layer(o.uid, (k + 1) as u8, &mut o.scene, off, app.federated_dim);
+        }
+    }
+    layers_changed |= renderer.end_layers();
+    if layers_changed {
+        s.view_dirty = true;
+    }
     if settings.grid {
         if let Some((lo, hi)) = s.scene.robust_visible_bbox() {
             let z = s.doc.ids_of_type("IFCBUILDINGSTOREY").into_iter().filter_map(|st| s.storey_elevation(st)).fold(f32::MAX, f32::min);
@@ -507,6 +529,41 @@ fn toolbar(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
         })
         .response
         .on_hover_text("Standardansichten");
+        if app.open_docs.len() > 1 {
+            let n_on = app.open_docs.iter().filter(|(u, _)| *u != s.uid && !app.federated_excluded.contains(u)).count();
+            let label = if app.federated { format!("{} {}", ic::LAYERS, n_on + 1) } else { ic::LAYERS.to_string() };
+            let r = ui.add(egui::Button::selectable(app.federated, label)).on_hover_text("Föderierte Ansicht: alle geöffneten Modelle gemeinsam anzeigen (Rechtsklick: Modelle wählen)");
+            if r.clicked() {
+                app.federated = !app.federated;
+                s.view_dirty = true;
+            }
+            r.context_menu(|ui| {
+                ui.label(egui::RichText::new("Föderierte Ansicht").strong());
+                if ui.checkbox(&mut app.federated, "Alle geöffneten Modelle zeigen").changed() {
+                    s.view_dirty = true;
+                }
+                if ui.checkbox(&mut app.federated_dim, "Andere Modelle abgeblendet").changed() {
+                    s.view_dirty = true;
+                }
+                ui.separator();
+                for (uid, title) in app.open_docs.clone() {
+                    if uid == s.uid {
+                        ui.label(format!("● {title} (aktiv)"));
+                        continue;
+                    }
+                    let mut on = !app.federated_excluded.contains(&uid);
+                    if ui.checkbox(&mut on, &title).changed() {
+                        if on {
+                            app.federated_excluded.remove(&uid);
+                        } else {
+                            app.federated_excluded.insert(uid);
+                        }
+                        s.view_dirty = true;
+                    }
+                }
+                ui.weak("Klick auf ein Objekt eines anderen Modells aktiviert dieses Modell.");
+            });
+        }
         if ui.selectable_label(s.camera.ortho, ic::ORTHO).on_hover_text("Orthografisch / Perspektive (P)").clicked() {
             s.camera.ortho = !s.camera.ortho;
             s.view_dirty = true;

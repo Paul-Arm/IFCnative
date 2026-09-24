@@ -53,6 +53,13 @@ pub fn run(cmd: &str, app: &mut IfcApp, _ctx: &egui::Context) {
                 crate::panels::import::apply_now(s, &mut app.ctx_state);
             }
         }
+        "federate" => {
+            app.ctx_state.federated = arg != "off";
+            app.ctx_state.federated_dim = arg == "dim";
+            if let Some(s) = app.session() {
+                s.view_dirty = true;
+            }
+        }
         "mat-select" => {
             app.ctx_state.panel_state.materials.selected = arg.trim_start_matches('#').parse().ok();
         }
