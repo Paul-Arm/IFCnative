@@ -131,6 +131,22 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
         if ui.add_enabled(!st.rows.is_empty(), egui::Button::new(format!("{} Alle auswählen", ic::SELECT))).clicked() {
             select = Some(st.rows.iter().map(|r| r.id).collect());
         }
+        if ui.add_enabled(!st.rows.is_empty(), egui::Button::new(format!("{} Nach Fläche einfärben", ic::PALETTE))).on_hover_text("Räume im 3D nach Flächenklassen färben (Räume werden eingeblendet)").clicked() {
+            const BINS: [(f64, &str, [u8; 4]); 5] = [(10.0, "< 10 m²", [120, 190, 240, 170]), (20.0, "10–20 m²", [110, 200, 140, 170]), (50.0, "20–50 m²", [240, 200, 90, 170]), (100.0, "50–100 m²", [240, 140, 70, 170]), (f64::MAX, "≥ 100 m²", [220, 80, 70, 170])];
+            let mut map: rustc_hash::FxHashMap<u32, String> = rustc_hash::FxHashMap::default();
+            for r in &st.rows {
+                let b = BINS.iter().find(|b| r.area < b.0).unwrap_or(&BINS[4]);
+                map.insert(r.id, b.1.to_string());
+            }
+            let ids: Vec<u32> = st.rows.iter().map(|r| r.id).collect();
+            s.color_mode = crate::session::ColorMode::Custom { title: "Raumfläche".into(), map: std::sync::Arc::new(map), colors: BINS.iter().map(|b| (b.1.to_string(), b.2)).collect(), other: None };
+            s.class_hidden.remove("IFCSPACE");
+            for id in &ids {
+                s.hidden.remove(id);
+            }
+            s.recolor();
+            s.apply_visibility();
+        }
     });
     if st.rows.is_empty() {
         ui.weak("Das Modell enthält keine Räume (IfcSpace).");

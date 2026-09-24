@@ -150,6 +150,20 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
     }
     let st = &mut app.panel_state.table;
     ui.weak(format!("{} Zeilen – Zellen der Eigenschaftsspalten und „Name“ sind editierbar", st.rows.len()));
+    // sums of numeric columns (up to 50 000 rows)
+    if st.rows.len() <= 50_000 && !st.rows.is_empty() {
+        let mut parts: Vec<String> = Vec::new();
+        for c in st.columns.iter().filter(|c| !c.0.is_empty()) {
+            let vals: Vec<f64> = st.rows.iter().map(|&id| cell_value(&s.doc, &s.tree, id, c)).filter(|v| !v.is_empty()).filter_map(|v| v.replace(',', ".").parse::<f64>().ok()).collect();
+            if vals.len() >= 2 {
+                let sum: f64 = vals.iter().sum();
+                parts.push(format!("{}.{}: Σ {:.3} · Ø {:.3} ({} Werte)", c.0, c.1, sum, sum / vals.len() as f64, vals.len()));
+            }
+        }
+        if !parts.is_empty() {
+            ui.weak(parts.join("   "));
+        }
+    }
     let cols = st.columns.clone();
     let rows = st.rows.clone();
     let mut edit: Option<(u32, (String, String), String)> = None;
