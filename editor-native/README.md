@@ -130,4 +130,10 @@ cargo build --release --target x86_64-pc-windows-gnu -p ifcnative-app
 
 Installer: `installer/ifcnative.iss` (Inno Setup, registriert `.ifc`/`.ifczip`).
 
+Fertige Builds: Der GitHub-Workflow „IFCnative (nativ) Windows-Build“ baut bei jedem Push
+die EXE mit MSVC und den Installer – Artefakt `IFCnative-windows` im jeweiligen Lauf.
+
+Automatisierung/Tests der Oberfläche: `IFCnative.exe datei.ifc --do "<befehl>" --screenshot bild.png`
+(Befehle siehe `app/src/panels/script.rs`, z. B. `select-class IFCWALL`, `diag`, `report x.html`).
+
 Tests: `cargo test --workspace`.
