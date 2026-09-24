@@ -90,6 +90,9 @@ pub struct Session {
     pub nav_fwd: Vec<u32>,
     pub hover_obj: Option<u32>,
     pub pending_remesh_all: bool,
+    /// Active floor plan: (storey id, cut height above storey in m).
+    pub plan: Option<(u32, f32)>,
+    pub plan_saved_camera: Option<Camera>,
 }
 
 static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -138,6 +141,8 @@ impl Session {
             nav_fwd: Vec::new(),
             hover_obj: None,
             pending_remesh_all: false,
+            plan: None,
+            plan_saved_camera: None,
         }
     }
 
@@ -416,11 +421,53 @@ impl Session {
     }
 
     pub fn clip_planes(&self) -> Vec<Vec4> {
-        self.sections.iter().filter(|s| s.enabled).map(|s| {
+        let mut v: Vec<Vec4> = self.sections.iter().filter(|s| s.enabled).map(|s| {
             let n = s.normal.normalize_or(Vec3::Z);
             Vec4::new(n.x, n.y, n.z, -n.dot(s.point))
         })
-        .collect()
+        .collect();
+        if let Some((st, cut)) = self.plan {
+            if let Some(z) = self.storey_elevation(st) {
+                v.push(Vec4::new(0.0, 0.0, 1.0, -(z + cut)));
+            }
+        }
+        v
+    }
+
+    /// Storey elevation in scene coordinates (placement based, falls back to element bbox).
+    pub fn storey_elevation(&self, storey: u32) -> Option<f32> {
+        let doc = &self.doc;
+        let unit = ifc_doc::model::length_unit(doc).0;
+        let e = Engine::with_parts(doc, self.geom_opts.clone(), self.scene.origin, Default::default());
+        if let Some(pl) = doc.arg(storey, 5).and_then(|v| v.as_ref_id()) {
+            let m = e.placement(&mut ifc_geom::Cache::default(), pl, 0);
+            return Some((m.w_axis.z * unit - self.scene.origin.z) as f32);
+        }
+        self.scene.bbox_of(self.tree.subtree(storey)).map(|(lo, _)| lo.z)
+    }
+
+    /// Show a storey as floor plan: isolate, cut above the storey, top orthographic view.
+    pub fn enter_plan(&mut self, storey: u32, cut: f32) {
+        if self.plan.is_none() {
+            self.plan_saved_camera = Some(self.camera.clone());
+        }
+        self.plan = Some((storey, cut));
+        self.isolate(&[storey]);
+        self.camera.set_preset(crate::viewer::camera::ViewPreset::Top);
+        self.camera.ortho = true;
+        if let Some((lo, hi)) = self.scene.bbox_of(self.tree.subtree(storey)) {
+            self.camera.fit(lo, hi);
+        }
+        self.view_dirty = true;
+    }
+
+    pub fn exit_plan(&mut self) {
+        self.plan = None;
+        if let Some(c) = self.plan_saved_camera.take() {
+            self.camera = c;
+        }
+        self.isolated = None;
+        self.apply_visibility();
     }
 
     // ---------------------------------------------------------------- edits

@@ -36,7 +36,19 @@ const HOVER: u32 = 8u;
 const OVERRIDE: u32 = 16u;
 
 @vertex
+fn vs_edge(v: VIn) -> VOut {
+    var o = transform(v);
+    // pull edges slightly towards the camera (reversed Z: larger = closer)
+    o.clip.z = o.clip.z * 1.0006;
+    return o;
+}
+
+@vertex
 fn vs(v: VIn) -> VOut {
+    return transform(v);
+}
+
+fn transform(v: VIn) -> VOut {
     var o: VOut;
     let st = obj_state[v.obj * 2u];
     o.world = v.pos;
@@ -139,4 +151,20 @@ fn fs_id(i: VOut) -> IdOut {
     o.pos = vec4<f32>(i.world, 1.0);
     o.normal = vec4<f32>(n, 0.0);
     return o;
+}
+
+@fragment
+fn fs_edge(i: VOut) -> @location(0) vec4<f32> {
+    if (clipped(i.world)) {
+        discard;
+    }
+    let st = obj_state[i.obj * 2u];
+    if ((st & GHOST) != 0u) {
+        return vec4<f32>(0.5, 0.55, 0.62, 0.10);
+    }
+    if ((st & SELECTED) != 0u) {
+        let sel = srgb_to_linear(unpack4x8unorm(g.params.y).rgb);
+        return vec4<f32>(sel * 0.6, 1.0);
+    }
+    return vec4<f32>(0.02, 0.022, 0.026, 0.55);
 }

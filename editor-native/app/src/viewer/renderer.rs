@@ -31,6 +31,8 @@ struct Globals {
 }
 
 struct GpuChunk {
+    ibuf_edges: Option<wgpu::Buffer>,
+    n_edges: u32,
     vbuf: wgpu::Buffer,
     ibuf_opaque: Option<wgpu::Buffer>,
     ibuf_trans: Option<wgpu::Buffer>,
@@ -67,6 +69,7 @@ pub struct RenderSettings {
     pub xray: bool,
     pub clip_planes: Vec<Vec4>,
     pub hover_obj: Option<u32>,
+    pub edges: bool,
 }
 
 pub struct Renderer {
@@ -77,6 +80,7 @@ pub struct Renderer {
     pipe_trans: wgpu::RenderPipeline,
     pipe_ghost: wgpu::RenderPipeline,
     pipe_id: wgpu::RenderPipeline,
+    pipe_edge: wgpu::RenderPipeline,
     bgl: wgpu::BindGroupLayout,
     globals: wgpu::Buffer,
     state_buf: wgpu::Buffer,
@@ -128,6 +132,17 @@ impl Renderer {
         let pipe_opaque = make(0.0, None, true, "opaque");
         let pipe_trans = make(1.0, Some(wgpu::BlendState::ALPHA_BLENDING), false, "transparent");
         let pipe_ghost = make(2.0, Some(wgpu::BlendState::ALPHA_BLENDING), false, "ghost");
+        let pipe_edge = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("edges"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs_edge"), compilation_options: Default::default(), buffers: &[Some(vlayout.clone())] },
+            primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::LineList, cull_mode: None, ..Default::default() },
+            depth_stencil: Some(wgpu::DepthStencilState { format: DEPTH_FORMAT, depth_write_enabled: Some(false), depth_compare: Some(wgpu::CompareFunction::GreaterEqual), stencil: Default::default(), bias: Default::default() }),
+            multisample: wgpu::MultisampleState { count: msaa, mask: !0, alpha_to_coverage_enabled: false },
+            fragment: Some(wgpu::FragmentState { module: &shader, entry_point: Some("fs_edge"), compilation_options: Default::default(), targets: &[Some(wgpu::ColorTargetState { format: COLOR_FORMAT, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL })] }),
+            multiview_mask: None,
+            cache: None,
+        });
         let pipe_id = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("id"),
             layout: Some(&layout),
@@ -160,6 +175,7 @@ impl Renderer {
             pipe_trans,
             pipe_ghost,
             pipe_id,
+            pipe_edge,
             bgl,
             globals,
             state_buf,
@@ -209,12 +225,14 @@ impl Renderer {
             let mut verts: Vec<Vertex> = Vec::with_capacity(c.verts);
             let mut iop: Vec<u32> = Vec::new();
             let mut itr: Vec<u32> = Vec::new();
+            let mut ied: Vec<u32> = Vec::new();
             for &oi in &c.objs {
                 let Some(g) = &scene.objects[oi as usize].geom else { continue };
                 let base = verts.len() as u32;
                 for (p, col) in g.positions.iter().zip(g.colors.iter()) {
                     verts.push(Vertex { pos: *p, color: *col, obj: oi });
                 }
+                ied.extend(g.edges.iter().map(|e| base + e));
                 for t in g.indices.chunks_exact(3) {
                     let transparent = g.colors[t[0] as usize][3] < 250;
                     let dst = if transparent { &mut itr } else { &mut iop };
@@ -228,7 +246,7 @@ impl Renderer {
             use wgpu::util::DeviceExt;
             let vbuf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("chunk-v"), contents: bytemuck::cast_slice(&verts), usage: wgpu::BufferUsages::VERTEX });
             let mk = |d: &[u32]| if d.is_empty() { None } else { Some(self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("chunk-i"), contents: bytemuck::cast_slice(d), usage: wgpu::BufferUsages::INDEX })) };
-            self.chunks[ci as usize] = Some(GpuChunk { vbuf, ibuf_opaque: mk(&iop), ibuf_trans: mk(&itr), n_opaque: iop.len() as u32, n_trans: itr.len() as u32 });
+            self.chunks[ci as usize] = Some(GpuChunk { vbuf, ibuf_opaque: mk(&iop), ibuf_trans: mk(&itr), ibuf_edges: mk(&ied), n_opaque: iop.len() as u32, n_trans: itr.len() as u32, n_edges: ied.len() as u32 });
         }
     }
 
@@ -323,6 +341,16 @@ impl Renderer {
                     pass.set_vertex_buffer(0, c.vbuf.slice(..));
                     pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
                     pass.draw_indexed(0..c.n_opaque, 0, 0..1);
+                }
+            }
+            if s.edges {
+                pass.set_pipeline(&self.pipe_edge);
+                for c in self.chunks.iter().flatten() {
+                    if let Some(ib) = &c.ibuf_edges {
+                        pass.set_vertex_buffer(0, c.vbuf.slice(..));
+                        pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+                        pass.draw_indexed(0..c.n_edges, 0, 0..1);
+                    }
                 }
             }
             pass.set_pipeline(&self.pipe_trans);

@@ -45,9 +45,42 @@ pub struct ProductGeom {
     pub min: [f32; 3],
     pub max: [f32; 3],
     pub transparent: bool,
+    /// Feature edges as index pairs into `positions` (creases > ~25° and open boundaries).
+    pub edges: Vec<u32>,
 }
 
 impl ProductGeom {
+    /// Compute feature edges from the triangle list.
+    pub fn compute_edges(&mut self) {
+        let mut map: FxHashMap<(u32, u32), (glam::Vec3, u32, bool)> = FxHashMap::default();
+        let pos = &self.positions;
+        for t in self.indices.chunks_exact(3) {
+            let (a, b, c) = (glam::Vec3::from(pos[t[0] as usize]), glam::Vec3::from(pos[t[1] as usize]), glam::Vec3::from(pos[t[2] as usize]));
+            let n = (b - a).cross(c - a).normalize_or_zero();
+            for (x, y) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+                let key = if x < y { (x, y) } else { (y, x) };
+                match map.get_mut(&key) {
+                    None => {
+                        map.insert(key, (n, 1, false));
+                    }
+                    Some(e) => {
+                        e.1 += 1;
+                        if e.0.dot(n).abs() < 0.906 {
+                            e.2 = true;
+                        }
+                    }
+                }
+            }
+        }
+        let mut edges: Vec<u32> = Vec::new();
+        for ((a, b), (_, count, crease)) in map {
+            if count == 1 || crease || count > 2 {
+                edges.push(a);
+                edges.push(b);
+            }
+        }
+        self.edges = edges;
+    }
     pub fn tri_count(&self) -> usize {
         self.indices.len() / 3
     }
@@ -392,6 +425,7 @@ impl<'a> Engine<'a> {
                 }
             }
         }
+        g.compute_edges();
         g
     }
 

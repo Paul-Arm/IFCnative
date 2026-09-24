@@ -21,6 +21,7 @@ pub struct Settings {
     pub split_shared_psets: bool,
     pub autosave_minutes: u32,
     pub show_welcome: bool,
+    pub show_edges: bool,
 }
 
 impl Default for Settings {
@@ -41,6 +42,7 @@ impl Default for Settings {
             split_shared_psets: true,
             autosave_minutes: 5,
             show_welcome: true,
+            show_edges: true,
         }
     }
 }

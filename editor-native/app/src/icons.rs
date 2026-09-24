@@ -53,6 +53,10 @@ pub const EDIT: &str = ph::PENCIL_SIMPLE;
 pub const LAYERS: &str = ph::STACK;
 pub const GROUP: &str = ph::SQUARES_FOUR;
 pub const DIFF: &str = ph::CHECKS;
+pub const EDGES: &str = ph::POLYGON;
+pub const PLAN: &str = ph::MAP_TRIFOLD;
+pub const CLASH: &str = ph::LIGHTNING;
+pub const COMMAND: &str = ph::COMMAND;
 
 /// Icon for an IFC class keyword (upper case).
 pub fn for_class(t: &str) -> &'static str {

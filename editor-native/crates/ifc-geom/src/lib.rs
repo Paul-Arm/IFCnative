@@ -5,6 +5,7 @@
 //! tessellated face sets, mapped items, CSG primitives, boolean results and
 //! opening voids (BSP based CSG), plus presentation colors.
 
+pub mod clash;
 pub mod csg;
 pub mod engine;
 pub mod mesh;

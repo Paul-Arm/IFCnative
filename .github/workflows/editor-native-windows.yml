@@ -1,0 +1,50 @@
+name: IFCnative (nativ) Windows-Build
+
+on:
+  workflow_dispatch:
+  push:
+    paths: ["editor-native/**", ".github/workflows/editor-native-windows.yml"]
+  pull_request:
+    paths: ["editor-native/**"]
+
+jobs:
+  test:
+    name: Tests (Linux)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: editor-native
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: editor-native
+      - name: Tests (Kern + Geometrie)
+        run: cargo test -p ifc-doc -p ifc-geom --release
+
+  build:
+    name: Release + Installer (Windows)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: editor-native
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: editor-native
+      - name: Build
+        run: cargo build --release -p ifcnative-app
+      - name: Installer (Inno Setup)
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DBuildDir="..\target\release" installer\ifcnative.iss
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IFCnative-windows
+          path: |
+            editor-native/target/release/IFCnative.exe
+            editor-native/installer/Output/*.exe

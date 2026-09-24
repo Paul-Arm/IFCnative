@@ -35,14 +35,14 @@ pub fn parse_xml(text: &str) -> anyhow::Result<Elem> {
             Event::Start(e) => {
                 let mut el = Elem { name: local(e.name().as_ref().as_bytes()), ..Default::default() };
                 for a in e.attributes().flatten() {
-                    el.attrs.push((local(a.key.as_ref().as_bytes()), a.unescape_value().map(|v| v.into_owned()).unwrap_or_default()));
+                    el.attrs.push((local(a.key.as_ref().as_bytes()), a.normalized_value(quick_xml::XmlVersion::Implicit1_0).map(|v| v.into_owned()).unwrap_or_default()));
                 }
                 stack.push(el);
             }
             Event::Empty(e) => {
                 let mut el = Elem { name: local(e.name().as_ref().as_bytes()), ..Default::default() };
                 for a in e.attributes().flatten() {
-                    el.attrs.push((local(a.key.as_ref().as_bytes()), a.unescape_value().map(|v| v.into_owned()).unwrap_or_default()));
+                    el.attrs.push((local(a.key.as_ref().as_bytes()), a.normalized_value(quick_xml::XmlVersion::Implicit1_0).map(|v| v.into_owned()).unwrap_or_default()));
                 }
                 stack.last_mut().unwrap().children.push(el);
             }

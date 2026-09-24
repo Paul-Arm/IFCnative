@@ -31,6 +31,7 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
         xray: s.xray,
         clip_planes: s.clip_planes(),
         hover_obj: s.hover_obj,
+        edges: app.settings.show_edges,
     };
     let pointer = resp.hover_pos();
     let local = |p: Pos2| GVec2::new(p.x - rect.min.x, p.y - rect.min.y);
@@ -364,6 +365,11 @@ fn toolbar(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
             s.camera.ortho = !s.camera.ortho;
             s.view_dirty = true;
         }
+        if ui.selectable_label(app.settings.show_edges, ic::EDGES).on_hover_text("Kanten anzeigen (K)").clicked() {
+            app.settings.show_edges = !app.settings.show_edges;
+            app.settings.save();
+            s.view_dirty = true;
+        }
         if ui.selectable_label(s.xray, ic::XRAY).on_hover_text("Röntgenmodus (X)").clicked() {
             s.xray = !s.xray;
             s.apply_visibility();
@@ -447,6 +453,34 @@ fn toolbar(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
         })
         .response
         .on_hover_text("Schnittebenen");
+        let storeys = s.doc.ids_of_type("IFCBUILDINGSTOREY");
+        if !storeys.is_empty() {
+            let cur = s.plan.map(|p| ifc_doc::model::label(&s.doc, p.0)).unwrap_or_else(|| "Grundriss".into());
+            ui.menu_button(format!("{} {}", ic::PLAN, cur), |ui| {
+                let mut sorted: Vec<(f32, u32)> = storeys.iter().map(|&st| (s.storey_elevation(st).unwrap_or(0.0), st)).collect();
+                sorted.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+                for (z, st) in sorted {
+                    if ui.selectable_label(s.plan.map(|p| p.0) == Some(st), format!("{}  ({:+.2} m)", ifc_doc::model::label(&s.doc, st), z + s.scene.origin.z as f32)).clicked() {
+                        let cut = s.plan.map(|p| p.1).unwrap_or(1.2);
+                        s.enter_plan(st, cut);
+                        ui.close();
+                    }
+                }
+                if let Some((st, mut cut)) = s.plan {
+                    ui.separator();
+                    if ui.add(egui::Slider::new(&mut cut, 0.1..=5.0).text("Schnitthöhe (m)")).changed() {
+                        s.plan = Some((st, cut));
+                        s.view_dirty = true;
+                    }
+                    if ui.button("Grundriss beenden").clicked() {
+                        s.exit_plan();
+                        ui.close();
+                    }
+                }
+            })
+            .response
+            .on_hover_text("Geschoss als Grundriss (Schnitt + Draufsicht)");
+        }
         if !s.measure.results.is_empty() && ui.button(ic::CLEAR).on_hover_text("Messungen löschen").clicked() {
             s.measure.results.clear();
         }

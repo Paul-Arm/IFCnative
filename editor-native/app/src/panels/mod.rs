@@ -2,6 +2,7 @@
 
 pub mod batch;
 pub mod builder;
+pub mod clash;
 pub mod classes;
 pub mod diagnostics;
 pub mod diff;
@@ -26,6 +27,7 @@ pub struct PanelState {
     pub diag: diagnostics::DiagState,
     pub batch: batch::BatchState,
     pub builder: builder::BuilderState,
+    pub clash: clash::ClashState,
     pub ids: ids::IdsState,
     pub ids_path: Option<std::path::PathBuf>,
     pub diff: diff::DiffState,

@@ -28,6 +28,7 @@ pub enum Tab {
     Materials,
     Table,
     Stats,
+    Clash,
 }
 
 impl Tab {
@@ -49,10 +50,11 @@ impl Tab {
             Tab::Materials => (ic::LAYERS, "Materialien"),
             Tab::Table => (ic::TABLE, "Tabelle"),
             Tab::Stats => (ic::CHART, "Statistik"),
+            Tab::Clash => (ic::CLASH, "Kollisionen"),
         };
         format!("{i} {t}")
     }
-    pub const ALL: [Tab; 16] = [Tab::Viewer, Tab::Structure, Tab::Classes, Tab::Search, Tab::Inspector, Tab::History, Tab::Diagnostics, Tab::Graph, Tab::Batch, Tab::Builder, Tab::Ids, Tab::Diff, Tab::Groups, Tab::Materials, Tab::Table, Tab::Stats];
+    pub const ALL: [Tab; 17] = [Tab::Viewer, Tab::Structure, Tab::Classes, Tab::Search, Tab::Inspector, Tab::History, Tab::Diagnostics, Tab::Graph, Tab::Batch, Tab::Builder, Tab::Ids, Tab::Diff, Tab::Groups, Tab::Materials, Tab::Table, Tab::Stats, Tab::Clash];
 }
 
 /// State shared with panels.
@@ -133,7 +135,7 @@ pub fn default_dock() -> DockState<Tab> {
     let tree = dock.main_surface_mut();
     let [center, _left] = tree.split_left(NodeIndex::root(), 0.21, vec![Tab::Structure, Tab::Classes, Tab::Search, Tab::Groups]);
     let [center, _right] = tree.split_right(center, 0.72, vec![Tab::Inspector, Tab::History, Tab::Materials]);
-    let [_c, _bottom] = tree.split_below(center, 0.72, vec![Tab::Diagnostics, Tab::Table, Tab::Batch, Tab::Builder, Tab::Graph, Tab::Ids, Tab::Diff, Tab::Stats]);
+    let [_c, _bottom] = tree.split_below(center, 0.72, vec![Tab::Diagnostics, Tab::Table, Tab::Batch, Tab::Builder, Tab::Graph, Tab::Ids, Tab::Clash, Tab::Diff, Tab::Stats]);
     dock
 }
 
@@ -483,6 +485,10 @@ impl IfcApp {
             s.camera.ortho = !s.camera.ortho;
             s.view_dirty = true;
         }
+        if sc(ctx, Modifiers::NONE, Key::K) {
+            self.ctx_state.settings.show_edges = !self.ctx_state.settings.show_edges;
+            s.view_dirty = true;
+        }
         if sc(ctx, Modifiers::NONE, Key::M) {
             s.tool = if s.tool == Tool::Measure { Tool::Select } else { Tool::Measure };
         }
@@ -677,6 +683,9 @@ impl IfcApp {
                 }
                 if ui.button(format!("{} IDS-Prüfung …", ic::CHECK)).clicked() {
                     self.open_tab(Tab::Ids);
+                }
+                if ui.button(format!("{} Kollisionsprüfung …", ic::CLASH)).clicked() {
+                    self.open_tab(Tab::Clash);
                 }
                 if ui.button(format!("{} Statistik", ic::CHART)).clicked() {
                     self.open_tab(Tab::Stats);
@@ -1201,6 +1210,7 @@ impl TabViewer for Viewer<'_> {
             Tab::Materials => panels::materials::show(ui, s, self.app),
             Tab::Table => panels::table::show(ui, s, self.app),
             Tab::Stats => panels::stats::show(ui, s, self.app),
+            Tab::Clash => panels::clash::show(ui, s, self.app),
         }
     }
 

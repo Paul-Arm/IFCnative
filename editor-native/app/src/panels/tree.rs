@@ -229,6 +229,10 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
                     ctx_action = Some(("children", row.id));
                     ui.close();
                 }
+                if doc.type_name(row.id) == Some("IFCBUILDINGSTOREY") && ui.button(format!("{} Grundriss anzeigen", ic::PLAN)).clicked() {
+                    ctx_action = Some(("plan", row.id));
+                    ui.close();
+                }
                 if ui.button(format!("{} GlobalId kopieren", ic::COPY)).clicked() {
                     ctx_action = Some(("copyguid", row.id));
                     ui.close();
@@ -314,6 +318,7 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
                 let ids = s.tree.subtree(id);
                 s.select(ids, false);
             }
+            "plan" => s.enter_plan(id, 1.2),
             "copyguid" => {
                 if let Some(g) = s.doc.guid_of(id) {
                     ui.ctx().copy_text(g);
