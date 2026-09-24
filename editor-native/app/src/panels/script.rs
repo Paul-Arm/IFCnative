@@ -53,6 +53,27 @@ pub fn run(cmd: &str, app: &mut IfcApp, _ctx: &egui::Context) {
                 crate::panels::import::apply_now(s, &mut app.ctx_state);
             }
         }
+        "mat-select" => {
+            app.ctx_state.panel_state.materials.selected = arg.trim_start_matches('#').parse().ok();
+        }
+        "paint" => {
+            // paint <r> <g> <b> [transparency]: colour the selection (0..1)
+            let v: Vec<f64> = arg.split_whitespace().filter_map(|x| x.parse().ok()).collect();
+            if let Some(s) = app.session() {
+                let sel = s.paint_targets();
+                let c = if v.len() >= 3 { Some(([v[0], v[1], v[2]], v.get(3).copied().unwrap_or(0.0))) } else { None };
+                s.edit("Objekte einfärben", |doc| ifc_doc::material::set_object_color(doc, &sel, c));
+            }
+        }
+        "mat-color" => {
+            // mat-color <id> <r> <g> <b>
+            let v: Vec<f64> = arg.split_whitespace().filter_map(|x| x.trim_start_matches('#').parse().ok()).collect();
+            if v.len() >= 4 {
+                if let Some(s) = app.session() {
+                    s.edit("Materialfarbe", |doc| ifc_doc::material::set_material_color(doc, v[0] as u32, Some(([v[1], v[2], v[3]], 0.0))));
+                }
+            }
+        }
         "tab" => {
             if let Some(tab) = Tab::ALL.iter().find(|x| format!("{x:?}").eq_ignore_ascii_case(&arg)) {
                 app.open_tab(*tab);

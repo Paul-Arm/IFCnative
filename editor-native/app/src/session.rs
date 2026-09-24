@@ -511,6 +511,22 @@ impl Session {
         }
     }
 
+    /// Products to colour for the current selection: spatial elements expand to
+    /// their contents, elements stand for themselves.
+    pub fn paint_targets(&self) -> Vec<u32> {
+        let mut out = Vec::new();
+        for &id in &self.selection {
+            if self.doc.has_flag(id, tflags::SPATIAL) || self.doc.has_flag(id, tflags::PROJECT) {
+                out.extend(self.tree.subtree(id).into_iter().filter(|&x| self.doc.has_flag(x, tflags::PRODUCT)));
+            } else if self.doc.has_flag(id, tflags::PRODUCT) {
+                out.push(id);
+            }
+        }
+        out.sort_unstable();
+        out.dedup();
+        out
+    }
+
     /// Call after any document modification: rebuild tree and re-mesh affected products.
     pub fn after_edit(&mut self) {
         let Some(doc) = Arc::get_mut(&mut self.doc) else { return };
@@ -611,6 +627,13 @@ fn affected_products(doc: &Document, changed: &[u32]) -> (FxHashSet<u32>, bool) 
                 if let Some(i) = doc.arg(id, 0).and_then(|v| v.as_ref_id()) {
                     stack.push(i);
                 }
+            }
+            "IFCMATERIALDEFINITIONREPRESENTATION" => {
+                // material colour changed → everything using the material
+                if let Some(m) = doc.arg(id, 3).and_then(|v| v.as_ref_id()) {
+                    stack.push(m);
+                }
+                continue;
             }
             "IFCRELASSOCIATESMATERIAL" | "IFCRELDEFINESBYTYPE" => {
                 for o in doc.arg(id, 4).map(|v| v.ref_list()).unwrap_or_default() {

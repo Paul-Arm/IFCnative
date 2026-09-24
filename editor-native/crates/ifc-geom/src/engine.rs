@@ -457,7 +457,8 @@ impl<'a> Engine<'a> {
         if depth > 24 {
             return;
         }
-        let color = self.styles.item_color(item).or(inherited);
+        let own = self.styles.item_color(item);
+        let color = own.or(inherited);
         let Some(ty) = self.doc.type_name(item) else { return };
         match ty {
             "IFCMAPPEDITEM" => {
@@ -467,7 +468,9 @@ impl<'a> Engine<'a> {
                 let mapped = self.mapped_parts(c, src, depth);
                 let mm = *m * target;
                 for p in mapped.iter() {
-                    out.push(Part { color: p.color.or(color), mesh: p.mesh.transformed(&mm) });
+                    // a style on the mapped item itself overrides the source styles (per-occurrence colour)
+                    let col = if own.is_some() { own } else { p.color.or(inherited) };
+                    out.push(Part { color: col, mesh: p.mesh.transformed(&mm) });
                 }
             }
             _ => {
