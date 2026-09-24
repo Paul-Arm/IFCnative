@@ -123,6 +123,26 @@ pub fn run(cmd: &str, app: &mut IfcApp, _ctx: &egui::Context) {
         "palette" => {
             app.open_palette(&arg);
         }
+        "combine" => {
+            if let Some(s) = app.session() {
+                let sel = s.selection.clone();
+                if let Some(n) = s.edit("Kombinieren", |doc| crate::panels::builder::combine(doc, &sel, false)) {
+                    s.select(vec![n], false);
+                }
+            }
+        }
+        "split-z" => {
+            if let Some(s) = app.session() {
+                let sel = s.selection.clone();
+                let unit = ifc_doc::model::length_unit(&s.doc).0;
+                if let Some((lo, hi)) = s.scene.bbox_of(sel.clone()) {
+                    let c = ((lo + hi) * 0.5).as_dvec3() + s.scene.origin;
+                    if let Some(parts) = s.edit("Zerteilen", |doc| crate::panels::builder::split(doc, &sel, c / unit, glam::DVec3::Z)) {
+                        s.select(parts, false);
+                    }
+                }
+            }
+        }
         "print-status" => {
             if let Some(s) = app.session() {
                 println!("STATUS: {} | objects={} tris={} sel={:?} dirty={}", s.status, s.scene.objects.len(), s.scene.total_tris, s.selection, s.doc.is_dirty());

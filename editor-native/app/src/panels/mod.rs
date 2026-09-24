@@ -42,6 +42,8 @@ pub struct PanelState {
     pub drop_target: Option<(u32, u32)>,
     pub delete_purge: bool,
     pub builder_pick: Option<glam::DVec3>,
+    pub tree_new: Option<(u32, String, String)>,
+    pub structure_dialog: bool,
     pub class_cache: ((u64, u64, u64), Vec<(String, usize, String)>),
     pub stats_cache: Option<((u64, u64), Vec<(String, (usize, usize, f64, f64))>)>,
 }

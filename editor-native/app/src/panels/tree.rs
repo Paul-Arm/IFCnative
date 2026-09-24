@@ -7,6 +7,15 @@ use egui::{Color32, RichText, Sense};
 use ifc_doc::model::{self, Link};
 use ifc_doc::tflags;
 
+/// Synthetic row id for the "free objects" folder.
+pub const FREE_ID: u32 = u32::MAX - 7;
+
+/// Products without spatial container or aggregation parent.
+pub fn free_objects(s: &Session) -> Vec<u32> {
+    let doc = &s.doc;
+    doc.ids_with_flag(tflags::ELEMENT).into_iter().filter(|&e| !doc.has_flag(e, tflags::OPENING) && !doc.has_flag(e, tflags::FEATURE) && !s.tree.parent.contains_key(&e)).collect()
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum TreeMode {
     #[default]
@@ -59,7 +68,9 @@ fn rebuild(st: &mut TreeState, s: &Session) {
             let class = doc.type_camel(id).unwrap_or("").to_lowercase();
             let guid = doc.guid_of(id).unwrap_or_default().to_lowercase();
             let tag = doc.attr_str(id, "Tag").unwrap_or_default().to_lowercase();
-            if name.contains(&q) || class.contains(&q) || guid == q || tag.contains(&q) || format!("#{id}") == q {
+            let desc = doc.attr_str(id, "Description").unwrap_or_default().to_lowercase();
+            let id_match = format!("#{id}") == q || id.to_string() == q;
+            if name.contains(&q) || class.contains(&q) || (q.len() >= 4 && guid.contains(&q)) || tag.contains(&q) || desc.contains(&q) || id_match {
                 st.rows.push(Row { id, depth: 0, has_children: false, expanded: false, link: None, header: None });
             }
         }
@@ -79,6 +90,16 @@ fn rebuild(st: &mut TreeState, s: &Session) {
                 }
                 if st.rows.len() > 2_000_000 {
                     break;
+                }
+            }
+            let free = free_objects(s);
+            if !free.is_empty() {
+                let expanded = s.expanded.contains(&FREE_ID);
+                st.rows.push(Row { id: FREE_ID, depth: 0, has_children: true, expanded, link: None, header: Some(format!("Freie Objekte ({})", free.len())) });
+                if expanded {
+                    for f in free {
+                        st.rows.push(Row { id: f, depth: 1, has_children: false, expanded: false, link: None, header: None });
+                    }
                 }
             }
         }
@@ -133,6 +154,13 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
             }
         }
     });
+    if s.doc.ids_with_flag(tflags::SPATIAL).is_empty() && s.loading.is_none() {
+        ui.colored_label(egui::Color32::from_rgb(255, 170, 40), "Das Modell hat keine Raumstruktur.");
+        if ui.button(format!("{} Raumstruktur anlegen …", ic::LAYERS)).clicked() {
+            app.panel_state.structure_dialog = true;
+        }
+    }
+    let st = &mut app.panel_state.tree;
     ui.separator();
     let key = (s.uid, s.doc.revision(), expanded_key(s), s.tree.children.len(), st.mode, st.search.clone());
     if key != st.key {
@@ -157,6 +185,30 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
     scroll.show_rows(ui, row_h, total, |ui, range| {
         for i in range {
             let row = st.rows[i].clone();
+            if let Some(h) = &row.header {
+                let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), row_h), Sense::click());
+                let col = ui.visuals().text_color();
+                ui.painter().text(egui::pos2(rect.min.x + 4.0, rect.center().y), egui::Align2::LEFT_CENTER, if row.expanded { ic::CARET_DOWN } else { ic::CARET_RIGHT }, egui::FontId::proportional(12.0), col);
+                ui.painter().text(egui::pos2(rect.min.x + 22.0, rect.center().y), egui::Align2::LEFT_CENTER, format!("{} {h}", ic::ph::FOLDER_DASHED), egui::FontId::proportional(13.0), col.gamma_multiply(0.8));
+                if resp.clicked() {
+                    toggle = Some(row.id);
+                }
+                resp.context_menu(|ui| {
+                    if ui.button(format!("{} Alle auswählen", ic::SELECT)).clicked() {
+                        ctx_action = Some(("select-free", row.id));
+                        ui.close();
+                    }
+                    if ui.button(format!("{} Neues freies Objekt anlegen …", ic::PLUS)).clicked() {
+                        ctx_action = Some(("new-free", row.id));
+                        ui.close();
+                    }
+                    if ui.button(format!("{} Raumstruktur anlegen und zuordnen …", ic::LAYERS)).clicked() {
+                        ctx_action = Some(("ensure-structure", row.id));
+                        ui.close();
+                    }
+                });
+                continue;
+            }
             let doc = &s.doc;
             let ty = doc.type_name(row.id).unwrap_or("");
             let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), row_h), Sense::click());
@@ -229,6 +281,41 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
                     ctx_action = Some(("children", row.id));
                     ui.close();
                 }
+                let ptype = doc.type_name(row.id).unwrap_or("").to_string();
+                ui.menu_button(format!("{} Neues Element anlegen", ic::PLUS), |ui| {
+                    let spatial_children: &[(&str, &str)] = match ptype.as_str() {
+                        "IFCPROJECT" => &[("IFCSITE", "Grundstück"), ("IFCBUILDING", "Gebäude")],
+                        "IFCSITE" => &[("IFCBUILDING", "Gebäude"), ("IFCSITE", "Teilgelände")],
+                        "IFCBUILDING" => &[("IFCBUILDINGSTOREY", "Geschoss")],
+                        "IFCBUILDINGSTOREY" => &[("IFCSPACE", "Raum")],
+                        _ => &[],
+                    };
+                    for (c, n) in spatial_children {
+                        if ui.button(format!("{} {n}", ic::for_class(c))).clicked() {
+                            app.panel_state.tree_new = Some((row.id, c.to_string(), n.to_string()));
+                            ui.close();
+                        }
+                    }
+                    if ptype != "IFCPROJECT" {
+                        let label = if doc.has_flag(row.id, tflags::ELEMENT) { "Teil-Element (aggregiert) …" } else { "Bauteil im Builder …" };
+                        if ui.button(format!("{} {label}", ic::BUILD)).clicked() {
+                            ctx_action = Some(("new-element", row.id));
+                            ui.close();
+                        }
+                    }
+                    if ptype == "IFCBUILDINGSTOREY" {
+                        for (c, n) in [("IFCSENSOR", "Sensor"), ("IFCACTUATOR", "Aktor")] {
+                            if doc.schema().entity(c).is_some() && ui.button(n).clicked() {
+                                app.panel_state.tree_new = Some((row.id, c.to_string(), n.to_string()));
+                                ui.close();
+                            }
+                        }
+                    }
+                });
+                if doc.has_flag(row.id, tflags::ELEMENT) && ui.button(format!("{} Gruppen verwalten …", ic::GROUP)).clicked() {
+                    ctx_action = Some(("groups", row.id));
+                    ui.close();
+                }
                 if doc.type_name(row.id) == Some("IFCBUILDINGSTOREY") && ui.button(format!("{} Grundriss anzeigen", ic::PLAN)).clicked() {
                     ctx_action = Some(("plan", row.id));
                     ui.close();
@@ -270,6 +357,19 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
             }
         }
     }
+    if let Some((parent, class, name)) = app.panel_state.tree_new.take() {
+        let spatial = matches!(class.as_str(), "IFCSITE" | "IFCBUILDING" | "IFCBUILDINGSTOREY" | "IFCSPACE");
+        let res = if spatial {
+            s.edit(&format!("{name} anlegen"), |doc| ifc_doc::ops::create_spatial(doc, &class, &name, parent, None))
+        } else {
+            let spec = ifc_doc::ops::NewElement { class_upper: class.clone(), name: name.clone(), container: Some(parent), location: [0.0; 3], rotation_deg: 0.0, shape: None, predefined_type: None };
+            s.edit(&format!("{name} anlegen"), |doc| ifc_doc::ops::create_element(doc, &spec))
+        };
+        if let Some(nid) = res {
+            s.select(vec![nid], false);
+        }
+    }
+    structure_dialog(ui.ctx(), s, app);
     if let Some(id) = toggle {
         if !s.expanded.remove(&id) {
             s.expanded.insert(id);
@@ -326,10 +426,41 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
                 }
             }
             "delete" => {
-                if !s.selection.contains(&id) {
-                    s.select(vec![id], false);
+                if s.doc.has_flag(id, tflags::PROJECT) {
+                    app.error("Das IfcProject kann nicht gelöscht werden");
+                } else {
+                    if !s.selection.contains(&id) {
+                        s.select(vec![id], false);
+                    }
+                    app.actions.push(Action::DeleteSelection);
                 }
-                app.actions.push(Action::DeleteSelection);
+            }
+            "select-free" => {
+                let f = free_objects(s);
+                s.select(f, false);
+            }
+            "new-free" => {
+                app.panel_state.builder.container = None;
+                app.panel_state.builder.aggregate_parent = None;
+                app.panel_state.builder.free = true;
+                app.actions.push(Action::OpenTab(crate::app::Tab::Builder));
+            }
+            "new-element" => {
+                if s.doc.has_flag(id, tflags::ELEMENT) {
+                    app.panel_state.builder.aggregate_parent = Some(id);
+                } else {
+                    app.panel_state.builder.container = Some(id);
+                    app.panel_state.builder.aggregate_parent = None;
+                }
+                app.panel_state.builder.free = false;
+                app.actions.push(Action::OpenTab(crate::app::Tab::Builder));
+            }
+            "groups" => {
+                s.select(vec![id], false);
+                app.actions.push(Action::OpenTab(crate::app::Tab::Groups));
+            }
+            "ensure-structure" => {
+                app.panel_state.structure_dialog = true;
             }
             _ => {}
         }
@@ -342,4 +473,39 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
 
 fn st_last(app: &AppCtx) -> Option<usize> {
     app.panel_state.tree.last_clicked
+}
+
+/// Dialog: create missing Project → Site → Building → Storey levels.
+fn structure_dialog(ctx: &egui::Context, s: &mut Session, app: &mut AppCtx) {
+    if !app.panel_state.structure_dialog {
+        return;
+    }
+    let k = egui::Id::new("structure-dialog");
+    let (mut names, mut attach): ([String; 4], bool) = ctx.data_mut(|d| d.get_temp(k)).unwrap_or_else(|| (["Projekt".into(), "Grundstück".into(), "Gebäude".into(), "Erdgeschoss".into()], true));
+    let mut open = true;
+    let mut apply = false;
+    egui::Window::new("Raumstruktur anlegen").open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
+        ui.label("Fehlende Ebenen werden ergänzt, vorhandene wiederverwendet.");
+        egui::Grid::new("sd").num_columns(2).show(ui, |ui| {
+            for (i, l) in ["Projekt", "Standort", "Gebäude", "Geschoss"].iter().enumerate() {
+                ui.label(*l);
+                ui.text_edit_singleline(&mut names[i]);
+                ui.end_row();
+            }
+        });
+        ui.checkbox(&mut attach, "Alle nicht zugeordneten Bauteile dem Geschoss zuordnen");
+        if ui.button("Anlegen").clicked() {
+            apply = true;
+        }
+    });
+    if apply {
+        let n = names.clone();
+        let res = s.edit("Raumstruktur anlegen", |doc| ifc_doc::ops::ensure_spatial_structure(doc, [&n[0], &n[1], &n[2], &n[3]], attach));
+        if let Some(st) = res {
+            s.select(vec![st], false);
+        }
+        open = false;
+    }
+    ctx.data_mut(|d| d.insert_temp(k, (names, attach)));
+    app.panel_state.structure_dialog = open;
 }

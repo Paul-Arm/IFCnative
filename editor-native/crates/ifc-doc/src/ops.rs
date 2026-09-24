@@ -560,6 +560,8 @@ pub enum BodyShape {
     Cylinder { r: f64, h: f64 },
     /// Arbitrary polygon extrusion (points in element XY, height).
     Polygon { pts: Vec<[f64; 2]>, h: f64 },
+    /// Elliptic cylinder: semi axes, height.
+    Ellipse { a: f64, b: f64, h: f64 },
 }
 
 #[derive(Clone, Debug)]
@@ -573,42 +575,19 @@ pub struct NewElement {
     pub predefined_type: Option<String>,
 }
 
+impl NewElement {
+    pub fn simple(class_upper: &str, name: &str, container: Option<u32>, shape: Option<BodyShape>) -> NewElement {
+        NewElement { class_upper: class_upper.into(), name: name.into(), container, location: [0.0; 3], rotation_deg: 0.0, shape, predefined_type: None }
+    }
+}
+
 /// Create a product with optional extruded body geometry and spatial containment.
 pub fn create_element(doc: &mut Document, spec: &NewElement) -> anyhow::Result<u32> {
     let oh = owner_history(doc);
     let container_pl = spec.container.and_then(|c| doc.arg(c, 5)).and_then(|v| v.as_ref_id());
     let pl = create_local_placement(doc, container_pl, spec.location, spec.rotation_deg);
     let rep = match &spec.shape {
-        Some(shape) => {
-            let ctx = body_context(doc);
-            let (profile, depth) = match shape {
-                BodyShape::Box { x, y, z, centered } => {
-                    let c = if *centered { [0.0, 0.0] } else { [x / 2.0, y / 2.0] };
-                    let pp = doc.create("IFCCARTESIANPOINT", &[Value::List(vec![Value::Real(c[0]), Value::Real(c[1])])]);
-                    let pos = doc.create("IFCAXIS2PLACEMENT2D", &[r(pp), Value::Null]);
-                    (doc.create("IFCRECTANGLEPROFILEDEF", &[Value::Enum("AREA".into()), Value::Null, r(pos), Value::Real(*x), Value::Real(*y)]), *z)
-                }
-                BodyShape::Cylinder { r: rad, h } => {
-                    let pp = doc.create("IFCCARTESIANPOINT", &[Value::List(vec![Value::Real(0.0), Value::Real(0.0)])]);
-                    let pos = doc.create("IFCAXIS2PLACEMENT2D", &[r(pp), Value::Null]);
-                    (doc.create("IFCCIRCLEPROFILEDEF", &[Value::Enum("AREA".into()), Value::Null, r(pos), Value::Real(*rad)]), *h)
-                }
-                BodyShape::Polygon { pts, h } => {
-                    let mut ids: Vec<Value> = pts.iter().map(|p| Value::Ref(doc.create("IFCCARTESIANPOINT", &[Value::List(vec![Value::Real(p[0]), Value::Real(p[1])])]))).collect();
-                    if let Some(first) = ids.first().cloned() {
-                        ids.push(first);
-                    }
-                    let pl = doc.create("IFCPOLYLINE", &[Value::List(ids)]);
-                    (doc.create("IFCARBITRARYCLOSEDPROFILEDEF", &[Value::Enum("AREA".into()), Value::Null, r(pl)]), *h)
-                }
-            };
-            let o = doc.create("IFCCARTESIANPOINT", &[Value::List(vec![Value::Real(0.0), Value::Real(0.0), Value::Real(0.0)])]);
-            let ax = doc.create("IFCAXIS2PLACEMENT3D", &[r(o), Value::Null, Value::Null]);
-            let dir = doc.create("IFCDIRECTION", &[Value::List(vec![Value::Real(0.0), Value::Real(0.0), Value::Real(1.0)])]);
-            let solid = doc.create("IFCEXTRUDEDAREASOLID", &[r(profile), r(ax), r(dir), Value::Real(depth)]);
-            let sr = doc.create("IFCSHAPEREPRESENTATION", &[r(ctx), s("Body"), s("SweptSolid"), refs(&[solid])]);
-            Value::Ref(doc.create("IFCPRODUCTDEFINITIONSHAPE", &[Value::Null, Value::Null, refs(&[sr])]))
-        }
+        Some(shape) => Value::Ref(make_body(doc, shape)),
         None => Value::Null,
     };
     let names = doc.schema().attr_names(&spec.class_upper);
@@ -1460,6 +1439,11 @@ pub fn make_body(doc: &mut Document, shape: &BodyShape) -> u32 {
             }
             let pl = doc.create("IFCPOLYLINE", &[Value::List(ids)]);
             (doc.create("IFCARBITRARYCLOSEDPROFILEDEF", &[Value::Enum("AREA".into()), Value::Null, r(pl)]), *h)
+        }
+        BodyShape::Ellipse { a, b, h } => {
+            let pp = doc.create("IFCCARTESIANPOINT", &[Value::List(vec![Value::Real(0.0), Value::Real(0.0)])]);
+            let pos = doc.create("IFCAXIS2PLACEMENT2D", &[r(pp), Value::Null]);
+            (doc.create("IFCELLIPSEPROFILEDEF", &[Value::Enum("AREA".into()), Value::Null, r(pos), Value::Real(*a), Value::Real(*b)]), *h)
         }
     };
     let o = doc.create("IFCCARTESIANPOINT", &[Value::List(vec![Value::Real(0.0), Value::Real(0.0), Value::Real(0.0)])]);

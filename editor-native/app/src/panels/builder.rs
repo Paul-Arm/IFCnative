@@ -12,6 +12,9 @@ pub enum ShapeKind {
     #[default]
     Box,
     Cylinder,
+    Ellipse,
+    Triangle,
+    Marker,
     None,
 }
 
@@ -31,6 +34,12 @@ pub struct BuilderState {
     pub rz: f64,
     pub storey_name: String,
     pub storey_elev: f64,
+    /// Create as aggregated part of this element instead of spatial containment.
+    pub aggregate_parent: Option<u32>,
+    /// Create without spatial container ("free object").
+    pub free: bool,
+    pub tag: String,
+    pub world_coords: bool,
 }
 
 impl Default for BuilderState {
@@ -51,6 +60,10 @@ impl Default for BuilderState {
             rz: 0.0,
             storey_name: "Neues Geschoss".into(),
             storey_elev: 0.0,
+            aggregate_parent: None,
+            free: false,
+            tag: String::new(),
+            world_coords: false,
         }
     }
 }
@@ -100,32 +113,70 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
         ui.text_edit_singleline(&mut st.name);
         ui.end_row();
         ui.label("Enthalten in");
-        egui::ComboBox::from_id_salt("container").selected_text(st.container.map(|c| model::label(&s.doc, c)).unwrap_or_else(|| "—".into())).width(220.0).show_ui(ui, |ui| {
-            for c in &spatial {
-                ui.selectable_value(&mut st.container, Some(*c), format!("{} {}", s.doc.type_camel(*c).unwrap_or(""), model::label(&s.doc, *c)));
+        ui.vertical(|ui| {
+            if let Some(p) = st.aggregate_parent.filter(|p| s.doc.exists(*p)) {
+                ui.horizontal(|ui| {
+                    ui.label(format!("Teil von: {}", model::label(&s.doc, p)));
+                    if ui.small_button(ic::CLOSE).clicked() {
+                        st.aggregate_parent = None;
+                    }
+                });
+            } else {
+                ui.add_enabled_ui(!st.free, |ui| {
+                    egui::ComboBox::from_id_salt("container").selected_text(st.container.map(|c| model::label(&s.doc, c)).unwrap_or_else(|| "—".into())).width(220.0).show_ui(ui, |ui| {
+                        for c in &spatial {
+                            ui.selectable_value(&mut st.container, Some(*c), format!("{} {}", s.doc.type_camel(*c).unwrap_or(""), model::label(&s.doc, *c)));
+                        }
+                    });
+                });
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut st.free, "freies Objekt (ohne Raumstruktur)");
+                    if let Some(&sel) = s.selection.first() {
+                        if s.doc.has_flag(sel, tflags::ELEMENT) && ui.small_button("als Teil der Auswahl").clicked() {
+                            st.aggregate_parent = Some(sel);
+                        }
+                    }
+                });
             }
         });
         ui.end_row();
         ui.label("Position (m)");
-        ui.horizontal(|ui| {
-            for (i, a) in ["X", "Y", "Z"].iter().enumerate() {
-                ui.add(egui::DragValue::new(&mut st.loc[i]).speed(0.05).prefix(format!("{a} ")).max_decimals(3));
-            }
+        ui.vertical(|ui| {
+            ui.horizontal(|ui| {
+                for (i, a) in ["X", "Y", "Z"].iter().enumerate() {
+                    ui.add(egui::DragValue::new(&mut st.loc[i]).speed(0.05).prefix(format!("{a} ")).max_decimals(3));
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut st.world_coords, "Weltkoordinaten").on_hover_text("aus: relativ zum Container/Eltern-Objekt");
+                if ui.small_button(format!("{} aus Zwischenablage", ic::COPY)).on_hover_text("JSON {x,y,z}, \"x=… y=… z=…\" oder drei Zahlen").clicked() {
+                    if let Some(p) = clipboard_coords() {
+                        st.loc = p;
+                        st.world_coords = true;
+                    }
+                }
+            });
         });
         ui.end_row();
         ui.label("Drehung");
         ui.add(egui::DragValue::new(&mut st.rot).speed(1.0).suffix("°").range(-360.0..=360.0));
         ui.end_row();
+        ui.label("Tag");
+        ui.add(egui::TextEdit::singleline(&mut st.tag).hint_text("optional").desired_width(120.0));
+        ui.end_row();
         ui.label("Körper");
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.selectable_value(&mut st.shape, ShapeKind::Box, "Quader");
             ui.selectable_value(&mut st.shape, ShapeKind::Cylinder, "Zylinder");
+            ui.selectable_value(&mut st.shape, ShapeKind::Ellipse, "Ellipse");
+            ui.selectable_value(&mut st.shape, ShapeKind::Triangle, "Dreieck");
+            ui.selectable_value(&mut st.shape, ShapeKind::Marker, "Marker");
             ui.selectable_value(&mut st.shape, ShapeKind::None, "ohne");
         });
         ui.end_row();
         match st.shape {
-            ShapeKind::Box => {
-                ui.label("Abmessungen (m)");
+            ShapeKind::Box | ShapeKind::Ellipse | ShapeKind::Triangle => {
+                ui.label(if st.shape == ShapeKind::Ellipse { "Halbachsen / Höhe (m)" } else { "Abmessungen (m)" });
                 ui.horizontal(|ui| {
                     for (i, a) in ["L", "B", "H"].iter().enumerate() {
                         ui.add(egui::DragValue::new(&mut st.dims[i]).speed(0.01).range(0.001..=1e5).prefix(format!("{a} ")).max_decimals(3));
@@ -142,7 +193,7 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
                 });
                 ui.end_row();
             }
-            ShapeKind::None => {}
+            ShapeKind::None | ShapeKind::Marker => {}
         }
         ui.label("Anzahl / Abstand");
         ui.horizontal(|ui| {
@@ -191,6 +242,12 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
         if s.doc.schema().entity(&class_upper).is_none() {
             app.error(format!("Unbekannte Klasse {} im Schema {}", class_upper, s.doc.schema_id.display()));
         } else {
+            let world = st.world_coords;
+            let tag = st.tag.trim().to_string();
+            let agg = st.aggregate_parent.filter(|p| s.doc.exists(*p));
+            // container placement for world -> local conversion
+            let parent_pl = agg.or(spec_base.container).and_then(|c| s.doc.arg(c, 5)).and_then(|v| v.as_ref_id());
+            let parent_m = placement_matrix(&s.doc, parent_pl);
             let created = s.edit(&format!("{name} erstellen"), |doc| {
                 let mut ids = Vec::new();
                 for k in 0..count {
@@ -198,10 +255,25 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
                     for a in 0..3 {
                         spec.location[a] += spacing[a] * k as f64 / unit;
                     }
+                    if world {
+                        let l = parent_m.inverse().transform_point3(DVec3::from(spec.location));
+                        spec.location = [l.x, l.y, l.z];
+                    }
                     if count > 1 {
                         spec.name = format!("{} {}", spec.name, k + 1);
                     }
-                    ids.push(ops::create_element(doc, &spec)?);
+                    let id = ops::create_element(doc, &spec)?;
+                    if let (Some(p), Some(pl)) = (agg, parent_pl) {
+                        // place relative to the parent element and aggregate
+                        if let Some(own) = doc.arg(id, 5).and_then(|v| v.as_ref_id()) {
+                            doc.set_arg(own, 0, Value::Ref(pl))?;
+                        }
+                        ops::aggregate(doc, p, &[id])?;
+                    }
+                    if !tag.is_empty() {
+                        let _ = doc.set_attr(id, "Tag", Value::Str(tag.clone()));
+                    }
+                    ids.push(id);
                 }
                 Ok(ids)
             });
@@ -231,9 +303,30 @@ fn st_to_spec(st: &BuilderState, unit: f64) -> NewElement {
     let shape = match st.shape {
         ShapeKind::Box => Some(BodyShape::Box { x: st.dims[0] / unit, y: st.dims[1] / unit, z: st.dims[2] / unit, centered: st.centered }),
         ShapeKind::Cylinder => Some(BodyShape::Cylinder { r: st.radius / unit, h: st.dims[2] / unit }),
+        ShapeKind::Ellipse => Some(BodyShape::Ellipse { a: st.dims[0] / unit, b: st.dims[1] / unit, h: st.dims[2] / unit }),
+        ShapeKind::Triangle => Some(BodyShape::Polygon { pts: vec![[0.0, 0.0], [st.dims[0] / unit, 0.0], [0.0, st.dims[1] / unit]], h: st.dims[2] / unit }),
+        ShapeKind::Marker => Some(BodyShape::Cylinder { r: 0.05 / unit, h: 0.6 / unit }),
         ShapeKind::None => None,
     };
-    NewElement { class_upper: st.class.trim().to_ascii_uppercase(), name: st.name.clone(), container: st.container, location: [st.loc[0] / unit, st.loc[1] / unit, st.loc[2] / unit], rotation_deg: st.rot, shape, predefined_type: None }
+    let container = if st.free || st.aggregate_parent.is_some() { None } else { st.container };
+    NewElement { class_upper: st.class.trim().to_ascii_uppercase(), name: st.name.clone(), container, location: [st.loc[0] / unit, st.loc[1] / unit, st.loc[2] / unit], rotation_deg: st.rot, shape, predefined_type: None }
+}
+
+/// Parse coordinates from the clipboard: JSON {x,y,z}, "x=.. y=.. z=.." or three numbers.
+pub fn clipboard_coords() -> Option<[f64; 3]> {
+    let text = arboard::Clipboard::new().ok()?.get_text().ok()?;
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+        let g = |k: &str| v.get(k).and_then(|x| x.as_f64());
+        if let (Some(x), Some(y), Some(z)) = (g("x"), g("y"), g("z")) {
+            return Some([x, y, z]);
+        }
+    }
+    let nums: Vec<f64> = text.split(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-' || c == 'e' || c == 'E')).filter_map(|t| t.parse::<f64>().ok()).collect();
+    if nums.len() >= 3 {
+        Some([nums[0], nums[1], nums[2]])
+    } else {
+        None
+    }
 }
 
 /// Resolve a placement matrix (file units) using the geometry engine.
@@ -287,6 +380,95 @@ pub fn transform_products(doc: &mut Document, ids: &[u32], delta_world: DVec3, r
     Ok(())
 }
 
+fn axes_cto(doc: &mut Document, m: &DMat4) -> u32 {
+    let r = |v: f64| (v * 1e10).round() / 1e10;
+    let d = |doc: &mut Document, v: DVec3| doc.create("IFCDIRECTION", &[Value::List(vec![Value::Real(r(v.x)), Value::Real(r(v.y)), Value::Real(r(v.z))])]);
+    let x = d(doc, m.x_axis.truncate().normalize());
+    let y = d(doc, m.y_axis.truncate().normalize());
+    let z = d(doc, m.z_axis.truncate().normalize());
+    let t = m.w_axis.truncate();
+    let o = doc.create("IFCCARTESIANPOINT", &[Value::List(vec![Value::Real(r(t.x)), Value::Real(r(t.y)), Value::Real(r(t.z))])]);
+    doc.create("IFCCARTESIANTRANSFORMATIONOPERATOR3D", &[Value::Ref(x), Value::Ref(y), Value::Ref(o), Value::Real(1.0), Value::Ref(z)])
+}
+
+/// Combine products into one new product using mapped items (exact geometry kept).
+pub fn combine(doc: &mut Document, ids: &[u32], keep_sources: bool) -> anyhow::Result<u32> {
+    let first = *ids.first().ok_or_else(|| anyhow::anyhow!("keine Auswahl"))?;
+    let class = doc.type_name(first).unwrap_or("IFCBUILDINGELEMENTPROXY").to_string();
+    let e = ifc_geom::Engine::with_parts(doc, Default::default(), DVec3::ZERO, Default::default());
+    let mut c = ifc_geom::Cache::default();
+    let w_new = e.product_matrix(&mut c, first);
+    let mats: Vec<(u32, DMat4)> = ids.iter().map(|&i| (i, e.product_matrix(&mut c, i))).collect();
+    let bodies: Vec<(u32, Vec<u32>)> = ids.iter().map(|&i| (i, doc.arg(i, 6).and_then(|v| v.as_ref_id()).map(|p| e.body_representations(p)).unwrap_or_default())).collect();
+    drop(e);
+    let ctx = ops::body_context(doc);
+    let origin_pt = doc.create("IFCCARTESIANPOINT", &[Value::List(vec![Value::Real(0.0), Value::Real(0.0), Value::Real(0.0)])]);
+    let origin_ax = doc.create("IFCAXIS2PLACEMENT3D", &[Value::Ref(origin_pt), Value::Null, Value::Null]);
+    let mut items = Vec::new();
+    for ((_, m), (_, reps)) in mats.iter().zip(bodies.iter()) {
+        let rel = w_new.inverse() * *m;
+        for rep in reps {
+            let map = doc.create("IFCREPRESENTATIONMAP", &[Value::Ref(origin_ax), Value::Ref(*rep)]);
+            let cto = axes_cto(doc, &rel);
+            items.push(Value::Ref(doc.create("IFCMAPPEDITEM", &[Value::Ref(map), Value::Ref(cto)])));
+        }
+    }
+    let sr = doc.create("IFCSHAPEREPRESENTATION", &[Value::Ref(ctx), Value::Str("Body".into()), Value::Str("MappedRepresentation".into()), Value::List(items)]);
+    let pds = doc.create("IFCPRODUCTDEFINITIONSHAPE", &[Value::Null, Value::Null, Value::List(vec![Value::Ref(sr)])]);
+    let mut dup = ops::duplicate(doc, &[first], [0.0; 3])?;
+    let nid = dup.pop().ok_or_else(|| anyhow::anyhow!("Kopieren fehlgeschlagen"))?;
+    doc.set_arg(nid, 6, Value::Ref(pds))?;
+    doc.set_arg(nid, 2, Value::Str("Kombiniert".into()))?;
+    let _ = class;
+    if !keep_sources {
+        ops::delete_entities(doc, ids, true)?;
+    }
+    Ok(nid)
+}
+
+/// Split products by a world plane (file units) into two clipped products each.
+pub fn split(doc: &mut Document, ids: &[u32], point: DVec3, normal: DVec3) -> anyhow::Result<Vec<u32>> {
+    let mut out = Vec::new();
+    for &id in ids {
+        let e = ifc_geom::Engine::with_parts(doc, Default::default(), DVec3::ZERO, Default::default());
+        let w = e.product_matrix(&mut ifc_geom::Cache::default(), id);
+        drop(e);
+        let inv = w.inverse();
+        let lp = inv.transform_point3(point);
+        let ln = inv.transform_vector3(normal).normalize();
+        let mut parts = Vec::new();
+        for agreement in [false, true] {
+            let mut dup = ops::duplicate(doc, &[id], [0.0; 3])?;
+            let nid = dup.pop().ok_or_else(|| anyhow::anyhow!("Kopieren fehlgeschlagen"))?;
+            let pds = doc.arg(nid, 6).and_then(|v| v.as_ref_id()).ok_or_else(|| anyhow::anyhow!("ohne Geometrie"))?;
+            for rep in doc.arg(pds, 2).map(|v| v.ref_list()).unwrap_or_default() {
+                let ident = doc.arg(rep, 1).and_then(|v| v.as_str().map(|x| x.to_string())).unwrap_or_default();
+                if !ident.eq_ignore_ascii_case("Body") {
+                    continue;
+                }
+                let items = doc.arg(rep, 3).map(|v| v.ref_list()).unwrap_or_default();
+                let mut new_items = Vec::new();
+                for it in items {
+                    let p = doc.create("IFCCARTESIANPOINT", &[Value::List(vec![Value::Real(lp.x), Value::Real(lp.y), Value::Real(lp.z)])]);
+                    let n = doc.create("IFCDIRECTION", &[Value::List(vec![Value::Real(ln.x), Value::Real(ln.y), Value::Real(ln.z)])]);
+                    let ax = doc.create("IFCAXIS2PLACEMENT3D", &[Value::Ref(p), Value::Ref(n), Value::Null]);
+                    let plane = doc.create("IFCPLANE", &[Value::Ref(ax)]);
+                    let hs = doc.create("IFCHALFSPACESOLID", &[Value::Ref(plane), Value::Enum(if agreement { "T".into() } else { "F".into() })]);
+                    new_items.push(Value::Ref(doc.create("IFCBOOLEANCLIPPINGRESULT", &[Value::Enum("DIFFERENCE".into()), Value::Ref(it), Value::Ref(hs)])));
+                }
+                doc.set_arg(rep, 2, Value::Str("Clipping".into()))?;
+                doc.set_arg(rep, 3, Value::List(new_items))?;
+            }
+            let name = doc.name_of(id).unwrap_or_default();
+            doc.set_arg(nid, 2, Value::Str(format!("{name} ({})", if agreement { "B" } else { "A" })))?;
+            parts.push(nid);
+        }
+        ops::delete_entities(doc, &[id], false)?;
+        out.extend(parts);
+    }
+    Ok(out)
+}
+
 fn transform_ui(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx, unit: f64) {
     let sel: Vec<u32> = s.selection.iter().copied().filter(|&id| s.doc.has_flag(id, tflags::PRODUCT)).collect();
     let st = &mut app.panel_state.builder;
@@ -311,6 +493,48 @@ fn transform_ui(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx, unit: f64)
                 }
             }
         });
+    });
+    ui.collapsing(format!("{} Kombinieren / Zerteilen / Geometrie", ic::SECTION), |ui| {
+        let k = ui.id().with("split-ui");
+        let (mut axis, mut off, mut keep): (u8, f64, bool) = ui.data_mut(|d| d.get_temp(k)).unwrap_or((2, 0.0, false));
+        ui.horizontal(|ui| {
+            if ui.add_enabled(sel.len() >= 2, egui::Button::new("Kombinieren")).on_hover_text("Auswahl zu einem Objekt vereinen (Mapped Items)").clicked() {
+                let ids = sel.clone();
+                if let Some(n) = s.edit("Kombinieren", |doc| combine(doc, &ids, keep)) {
+                    s.select(vec![n], false);
+                }
+            }
+            ui.checkbox(&mut keep, "Quellen behalten");
+        });
+        ui.horizontal(|ui| {
+            ui.label("Zerteilen an Ebene");
+            for (i, a) in ["X", "Y", "Z"].iter().enumerate() {
+                ui.selectable_value(&mut axis, i as u8, *a);
+            }
+            ui.add(egui::DragValue::new(&mut off).speed(0.01).prefix("Versatz ").suffix(" m"));
+            if ui.add_enabled(!sel.is_empty(), egui::Button::new("Zerteilen")).on_hover_text("Ebene durch die Mitte der Auswahl (+ Versatz); erzeugt je zwei Objekte").clicked() {
+                if let Some((lo, hi)) = s.scene.bbox_of(sel.clone()) {
+                    let c = ((lo + hi) * 0.5).as_dvec3() + s.scene.origin;
+                    let mut n = DVec3::ZERO;
+                    n[axis as usize] = 1.0;
+                    let p = (c + n * off) / unit;
+                    let ids = sel.clone();
+                    if let Some(parts) = s.edit("Zerteilen", |doc| split(doc, &ids, p, n)) {
+                        s.select(parts, false);
+                    }
+                }
+            }
+        });
+        if ui.add_enabled(!sel.is_empty(), egui::Button::new(format!("{} Nur Geometrie löschen", ic::DELETE))).clicked() {
+            let ids = sel.clone();
+            s.edit("Geometrie löschen", |doc| {
+                for i in &ids {
+                    ops::delete_geometry(doc, *i)?;
+                }
+                Ok(())
+            });
+        }
+        ui.data_mut(|d| d.insert_temp(k, (axis, off, keep)));
     });
 }
 
