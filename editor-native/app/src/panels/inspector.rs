@@ -55,7 +55,7 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
     let mut navigate: Option<u32> = None;
     // header
     ui.horizontal(|ui| {
-        if ui.add_enabled(!s.nav_back.is_empty(), egui::Button::new("⟵").small()).on_hover_text("Zurück (Alt+←)").clicked() {
+        if ui.add_enabled(!s.nav_back.is_empty(), egui::Button::new(ic::ph::ARROW_LEFT).small()).on_hover_text("Zurück (Alt+←)").clicked() {
             if let Some(prev) = s.nav_back.pop() {
                 s.nav_fwd.push(id);
                 s.selection = vec![prev];
@@ -63,7 +63,7 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
                 return;
             }
         }
-        if ui.add_enabled(!s.nav_fwd.is_empty(), egui::Button::new("⟶").small()).on_hover_text("Vor (Alt+→)").clicked() {
+        if ui.add_enabled(!s.nav_fwd.is_empty(), egui::Button::new(ic::ph::ARROW_RIGHT).small()).on_hover_text("Vor (Alt+→)").clicked() {
             if let Some(next) = s.nav_fwd.pop() {
                 s.nav_back.push(id);
                 s.selection = vec![next];
@@ -98,13 +98,17 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
     ui.separator();
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         attributes(ui, s, id, &mut navigate);
-        if s.doc.has_flag(id, tflags::ROOT) {
+        crate::panels::inspector_ext::units_section(ui, s, id);
+        crate::panels::inspector_ext::placement_section(ui, s, id);
+        if s.doc.has_flag(id, tflags::ROOT) && !s.doc.has_flag(id, tflags::REL) {
             psets(ui, s, app, id, &mut navigate);
         }
         if s.doc.has_flag(id, tflags::PRODUCT) || s.doc.has_flag(id, tflags::TYPE_OBJECT) {
             type_and_material(ui, s, app, id, &mut navigate);
         }
         relations(ui, s, app, id, &mut navigate);
+        crate::panels::inspector_ext::relationships_section(ui, s, app, id, &mut navigate);
+        crate::panels::inspector_ext::resources_section(ui, s, id, &mut navigate);
         raw_step(ui, s, app, id);
     });
     if let Some(n) = navigate {
@@ -272,7 +276,7 @@ fn value_editor(ui: &mut egui::Ui, key: egui::Id, v: &Value) -> Option<Value> {
 }
 
 fn psets(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx, id: u32, navigate: &mut Option<u32>) {
-    let sets = model::psets_of(&s.doc, id);
+    let all_sets = model::psets_of(&s.doc, id);
     let split = app.settings.split_shared_psets;
     enum Op {
         SetValue(u32, u32, String, Value, bool),
@@ -285,8 +289,29 @@ fn psets(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx, id: u32, navigate
         SetQuantity(u32, usize, f64),
     }
     let mut op: Option<Op> = None;
-    let header = format!("Eigenschaften ({})", sets.iter().filter(|p| !p.is_quantity).count());
+    let header = format!("Eigenschaften ({})", all_sets.iter().filter(|p| !p.is_quantity).count());
+    let mut sets = all_sets.clone();
+    let mut dup: Option<(u32, String)> = None;
+    let mut composite: Option<(u32, String, ops::PropertyKindInput, String, String)> = None;
     egui::CollapsingHeader::new(RichText::new(header).strong()).default_open(true).show(ui, |ui| {
+        let q = crate::panels::inspector_ext::pset_tools(ui, s, id).to_lowercase();
+        if !q.is_empty() {
+            sets = all_sets
+                .iter()
+                .cloned()
+                .filter_map(|mut ps| {
+                    if ps.name.to_lowercase().contains(&q) {
+                        return Some(ps);
+                    }
+                    ps.props.retain(|p| p.name.to_lowercase().contains(&q) || p.value.display().to_lowercase().contains(&q));
+                    if ps.props.is_empty() {
+                        None
+                    } else {
+                        Some(ps)
+                    }
+                })
+                .collect();
+        }
         for ps in sets.iter().filter(|p| !p.is_quantity) {
             let mut title = RichText::new(format!("{}  ({})", ps.name, ps.props.len()));
             if ps.from_type.is_some() {
@@ -306,6 +331,9 @@ fn psets(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx, id: u32, navigate
                         if ps.from_type.is_none() {
                             if ui.small_button(ic::DELETE).on_hover_text("Pset löschen").clicked() {
                                 op = Some(Op::DeletePset(ps.id));
+                            }
+                            if ui.small_button(ic::COPY).on_hover_text("Pset duplizieren").clicked() {
+                                dup = Some((ps.id, format!("{} (Kopie)", ps.name)));
                             }
                             let rk = ui.id().with(("rename-pset", ps.id));
                             let mut renaming = ui.data_mut(|d| d.get_temp::<bool>(rk)).unwrap_or(false);
@@ -340,6 +368,13 @@ fn psets(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx, id: u32, navigate
                                     op = Some(Op::SetValue(id, ps.id, p.name.clone(), v, ps.shared_count > 1 && split));
                                 }
                             }
+                            PropKind::List | PropKind::Enumerated | PropKind::Bounded | PropKind::Table if ps.from_type.is_none() => {
+                                let (kind, text) = composite_text(p);
+                                let base = first_type(&p.value);
+                                if let Some(t) = edit_field(ui, key, &text, f32::INFINITY) {
+                                    composite = Some((ps.id, p.name.clone(), kind, t, base));
+                                }
+                            }
                             _ => {
                                 ui.label(p.value.display());
                             }
@@ -355,18 +390,7 @@ fn psets(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx, id: u32, navigate
                     }
                 });
                 if ps.from_type.is_none() {
-                    let nk = ui.id().with(("newprop", ps.id));
-                    let (mut n, mut v): (String, String) = ui.data_mut(|d| d.get_temp(nk)).unwrap_or_default();
-                    ui.horizontal(|ui| {
-                        ui.add(egui::TextEdit::singleline(&mut n).hint_text("Neue Eigenschaft").desired_width(120.0));
-                        ui.add(egui::TextEdit::singleline(&mut v).hint_text("Wert").desired_width(100.0));
-                        if ui.add_enabled(!n.trim().is_empty(), egui::Button::new(ic::PLUS)).on_hover_text("Hinzufügen (Typ wird aus dem Wert erkannt)").clicked() {
-                            op = Some(Op::AddProp(ps.id, n.trim().to_string(), v.clone()));
-                            n.clear();
-                            v.clear();
-                        }
-                    });
-                    ui.data_mut(|d| d.insert_temp(nk, (n, v)));
+                    crate::panels::inspector_ext::add_property_row(ui, s, ps.id);
                 }
             });
         }
@@ -405,6 +429,13 @@ fn psets(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx, id: u32, navigate
             }
         });
     }
+    if let Some((ps, n)) = dup {
+        let objs: Vec<u32> = vec![id];
+        s.edit("Pset duplizieren", |doc| ops::duplicate_pset(doc, ps, &objs, &n).map(|_| ()));
+    }
+    if let Some((ps, name, kind, text, base)) = composite {
+        s.edit(&format!("{name} setzen"), |doc| ops::set_property_value_kind(doc, ps, &name, kind, &text, &base).map(|_| ()));
+    }
     if let Some(op) = op {
         match op {
             Op::SetValue(el, ps, name, v, split_now) => {
@@ -442,6 +473,35 @@ fn psets(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx, id: u32, navigate
                 s.edit("Menge ändern", |doc| doc.set_arg(q, vi, Value::Real(v)));
             }
         }
+    }
+}
+
+/// Editable text form of a composite property value.
+fn composite_text(p: &model::PropView) -> (ops::PropertyKindInput, String) {
+    let items = |v: &Value| -> Vec<String> { v.as_list().map(|l| l.iter().map(|x| x.display()).collect()).unwrap_or_default() };
+    match p.kind {
+        PropKind::List => (ops::PropertyKindInput::List, items(&p.value).join("; ")),
+        PropKind::Enumerated => (ops::PropertyKindInput::Enumerated, items(&p.value).join("; ")),
+        PropKind::Bounded => {
+            let l = p.value.as_list().map(|l| l.to_vec()).unwrap_or_default();
+            let lo = l.first().map(|v| v.display()).unwrap_or_default();
+            let hi = l.get(1).map(|v| v.display()).unwrap_or_default();
+            (ops::PropertyKindInput::Bounded, format!("{lo}..{hi}"))
+        }
+        _ => {
+            let l = p.value.as_list().map(|l| l.to_vec()).unwrap_or_default();
+            let a = l.first().map(items).unwrap_or_default();
+            let b = l.get(1).map(items).unwrap_or_default();
+            (ops::PropertyKindInput::Table, a.iter().zip(b.iter()).map(|(x, y)| format!("{x}=>{y}")).collect::<Vec<_>>().join("; "))
+        }
+    }
+}
+
+fn first_type(v: &Value) -> String {
+    match v {
+        Value::Typed(t, _) => t.clone(),
+        Value::List(l) => l.iter().map(first_type).find(|t| !t.is_empty()).unwrap_or_default(),
+        _ => String::new(),
     }
 }
 
@@ -519,6 +579,7 @@ fn type_and_material(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx, id: u
                 ui.end_row();
             }
         });
+        let _ = ();
         ui.horizontal(|ui| {
             let materials = doc.ids_of_type("IFCMATERIAL");
             egui::ComboBox::from_id_salt(("assign-mat", id)).selected_text("Material zuweisen …").width(170.0).show_ui(ui, |ui| {
@@ -551,6 +612,7 @@ fn type_and_material(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx, id: u
         });
         ui.data_mut(|d| d.insert_temp(k, (sys, code, name)));
     });
+    crate::panels::inspector_ext::type_section(ui, s, id);
     let targets: Vec<u32> = if s.selection.len() > 1 { s.selection.clone() } else { vec![id] };
     if let Some(m) = assign_mat {
         s.edit("Material zuweisen", |doc| ops::assign_material(doc, &targets, m));

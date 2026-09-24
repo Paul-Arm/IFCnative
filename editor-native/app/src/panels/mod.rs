@@ -11,6 +11,7 @@ pub mod groups;
 pub mod history;
 pub mod ids;
 pub mod inspector;
+pub mod inspector_ext;
 pub mod materials;
 pub mod quantities;
 pub mod script;

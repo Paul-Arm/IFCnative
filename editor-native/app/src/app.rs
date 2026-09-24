@@ -123,6 +123,17 @@ pub struct IfcApp {
     last_autosave: std::time::Instant,
     exit_confirmed: bool,
     recovery: Vec<PathBuf>,
+    palette: Option<(String, usize)>,
+}
+
+#[derive(Clone, Debug)]
+enum Cmd {
+    Act(Action),
+    Tab(Tab),
+    View(crate::viewer::camera::ViewPreset),
+    Toggle(&'static str),
+    Tool(Tool),
+    Select(u32),
 }
 
 struct NewProjectDialog {
@@ -182,6 +193,7 @@ impl IfcApp {
             applied_args: false,
             last_autosave: std::time::Instant::now(),
             exit_confirmed: false,
+            palette: None,
             recovery: Settings::recovery_dir().and_then(|d| std::fs::read_dir(d).ok()).map(|rd| rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().map(|x| x == "ifc").unwrap_or(false)).collect()).unwrap_or_default(),
         };
         for f in &args.files {
@@ -723,6 +735,10 @@ impl IfcApp {
                     self.show_settings = true;
                     ui.close();
                 }
+                if ui.button(format!("{} Befehlspalette …\tStrg+K", ic::COMMAND)).clicked() {
+                    self.palette = Some((String::new(), 0));
+                    ui.close();
+                }
                 if ui.button("Tastenkürzel …").clicked() {
                     self.show_shortcuts = true;
                     ui.close();
@@ -887,6 +903,8 @@ impl IfcApp {
                         ("Doppelklick", "Auf Objekt zoomen"),
                         ("Alt+← / Alt+→", "Auswahlverlauf zurück / vor"),
                         ("Strg+F", "Filter öffnen"),
+                        ("Strg+K / F1", "Befehlspalette"),
+                        ("K", "Kanten ein/aus"),
                     ] {
                         ui.label(RichText::new(k).monospace());
                         ui.label(d);
@@ -1023,6 +1041,219 @@ impl IfcApp {
             if done {
                 self.confirm_close = None;
             }
+        }
+    }
+
+    pub fn open_palette(&mut self, q: &str) {
+        self.palette = Some((q.to_string(), 0));
+    }
+
+    fn palette_items(&self, q: &str) -> Vec<(String, Cmd)> {
+        use crate::viewer::camera::ViewPreset as V;
+        let mut items: Vec<(String, Cmd)> = vec![
+            (format!("{} Öffnen …", ic::OPEN), Cmd::Act(Action::OpenDialog)),
+            (format!("{} Neues Projekt …", ic::NEW), Cmd::Act(Action::New)),
+            (format!("{} Speichern", ic::SAVE), Cmd::Act(Action::Save)),
+            (format!("{} Speichern unter …", ic::SAVE), Cmd::Act(Action::SaveAs)),
+            (format!("{} Rückgängig", ic::UNDO), Cmd::Act(Action::Undo)),
+            (format!("{} Wiederholen", ic::REDO), Cmd::Act(Action::Redo)),
+            (format!("{} Auswahl löschen", ic::DELETE), Cmd::Act(Action::DeleteSelection)),
+            (format!("{} Auswahl als IFC exportieren", ic::EXPORT), Cmd::Act(Action::ExportSubset)),
+            (format!("{} Eigenschaften als Excel exportieren", ic::EXPORT), Cmd::Act(Action::ExportXlsx)),
+            (format!("{} Eigenschaften als CSV exportieren", ic::EXPORT), Cmd::Act(Action::ExportCsv)),
+            (format!("{} Geometrie als GLB/OBJ exportieren", ic::EXPORT), Cmd::Act(Action::ExportObj)),
+            (format!("{} Ansicht als BCF-Thema", ic::EXPORT), Cmd::Act(Action::BcfView)),
+            (format!("{} Ansicht: Isometrie", ic::CUBE), Cmd::View(V::Iso)),
+            (format!("{} Ansicht: Oben", ic::CUBE), Cmd::View(V::Top)),
+            (format!("{} Ansicht: Vorne", ic::CUBE), Cmd::View(V::Front)),
+            (format!("{} Ansicht: Rechts", ic::CUBE), Cmd::View(V::Right)),
+            (format!("{} Röntgenmodus umschalten", ic::XRAY), Cmd::Toggle("xray")),
+            (format!("{} Kanten umschalten", ic::EDGES), Cmd::Toggle("edges")),
+            (format!("{} Perspektive/Orthografisch", ic::ORTHO), Cmd::Toggle("ortho")),
+            (format!("{} Alles einblenden", ic::SHOW), Cmd::Toggle("showall")),
+            (format!("{} Auswahl isolieren", ic::ISOLATE), Cmd::Toggle("isolate")),
+            (format!("{} Auswahl ausblenden", ic::HIDE), Cmd::Toggle("hide")),
+            (format!("{} Alles zeigen (Zoom)", ic::FIT), Cmd::Toggle("fit")),
+            (format!("{} Messen", ic::RULER), Cmd::Tool(Tool::Measure)),
+            (format!("{} Rahmenauswahl", ic::BOX_SELECT), Cmd::Tool(Tool::BoxSelect)),
+            (format!("{} Schnittebene an Fläche", ic::SECTION), Cmd::Tool(Tool::Section)),
+            (format!("{} Mengen aus Geometrie berechnen", ic::CHART), Cmd::Toggle("qto")),
+            (format!("{} Ungenutzte Entities bereinigen", ic::CLEAR), Cmd::Toggle("purge")),
+            (format!("{} Einstellungen", ic::SETTINGS), Cmd::Toggle("settings")),
+        ];
+        for t in Tab::ALL {
+            items.push((format!("Fenster: {}", t.title()), Cmd::Tab(t)));
+        }
+        let ql = q.trim().to_lowercase();
+        let score = |label: &str| -> Option<i32> {
+            if ql.is_empty() {
+                return Some(0);
+            }
+            let l = label.to_lowercase();
+            if let Some(p) = l.find(&ql) {
+                return Some(100 - p as i32);
+            }
+            // subsequence match
+            let mut it = l.chars();
+            let mut n = 0;
+            for c in ql.chars() {
+                if c == ' ' {
+                    continue;
+                }
+                loop {
+                    match it.next() {
+                        Some(x) if x == c => {
+                            n += 1;
+                            break;
+                        }
+                        Some(_) => continue,
+                        None => return None,
+                    }
+                }
+            }
+            Some(n)
+        };
+        let mut scored: Vec<(i32, String, Cmd)> = items.into_iter().filter_map(|(l, c)| score(&l).map(|s| (s, l, c))).collect();
+        // model elements
+        if ql.len() >= 2 {
+            if let Some(s) = self.sessions.get(self.active) {
+                let mut hits = 0;
+                for o in &s.scene.objects {
+                    if hits >= 40 {
+                        break;
+                    }
+                    let name = s.doc.name_of(o.id).unwrap_or_default();
+                    let class = s.doc.type_camel(o.id).unwrap_or("");
+                    let hay = format!("{name} {class} {}", s.doc.guid_of(o.id).unwrap_or_default()).to_lowercase();
+                    if hay.contains(&ql) {
+                        scored.push((50, format!("{} {name}  ({class} #{})", ic::for_class(s.doc.type_name(o.id).unwrap_or("")), o.id), Cmd::Select(o.id)));
+                        hits += 1;
+                    }
+                }
+            }
+        }
+        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        scored.into_iter().map(|(_, l, c)| (l, c)).take(60).collect()
+    }
+
+    fn palette(&mut self, ctx: &egui::Context) {
+        if ctx.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::K))) || ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F1)) {
+            self.palette = if self.palette.is_some() { None } else { Some((String::new(), 0)) };
+        }
+        let Some((mut q, mut sel)) = self.palette.take() else { return };
+        let items = self.palette_items(&q);
+        let mut run: Option<Cmd> = None;
+        let mut close = false;
+        let screen = ctx.content_rect();
+        egui::Area::new(egui::Id::new("palette")).fixed_pos(egui::pos2(screen.center().x - 280.0, screen.min.y + 70.0)).order(egui::Order::Foreground).show(ctx, |ui| {
+            egui::Frame::popup(ui.style()).inner_margin(10.0).show(ui, |ui| {
+                ui.set_width(560.0);
+                let r = ui.add(egui::TextEdit::singleline(&mut q).hint_text("Befehl, Fenster oder Element suchen …").desired_width(f32::INFINITY));
+                r.request_focus();
+                if r.changed() {
+                    sel = 0;
+                }
+                if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
+                    sel = (sel + 1).min(items.len().saturating_sub(1));
+                }
+                if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+                    sel = sel.saturating_sub(1);
+                }
+                if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    close = true;
+                }
+                if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    if let Some((_, c)) = items.get(sel) {
+                        run = Some(c.clone());
+                    }
+                }
+                ui.separator();
+                egui::ScrollArea::vertical().max_height(380.0).show(ui, |ui| {
+                    for (i, (label, c)) in items.iter().enumerate() {
+                        let resp = ui.selectable_label(i == sel, label);
+                        if i == sel {
+                            resp.scroll_to_me(None);
+                        }
+                        if resp.clicked() {
+                            run = Some(c.clone());
+                        }
+                    }
+                    if items.is_empty() {
+                        ui.weak("Keine Treffer");
+                    }
+                });
+            });
+        });
+        if let Some(c) = run {
+            close = true;
+            match c {
+                Cmd::Act(a) => self.ctx_state.actions.push(a),
+                Cmd::Tab(t) => self.open_tab(t),
+                Cmd::View(v) => {
+                    if let Some(s) = self.session() {
+                        s.camera.set_preset(v);
+                        s.fit_all();
+                    }
+                }
+                Cmd::Tool(t) => {
+                    if let Some(s) = self.session() {
+                        s.tool = t;
+                    }
+                }
+                Cmd::Select(id) => {
+                    if let Some(s) = self.session() {
+                        s.select(vec![id], false);
+                        s.fit_selection();
+                    }
+                }
+                Cmd::Toggle(what) => {
+                    let edges = &mut self.ctx_state.settings.show_edges;
+                    if what == "edges" {
+                        *edges = !*edges;
+                    }
+                    if what == "settings" {
+                        self.show_settings = true;
+                    }
+                    let mut toast = None;
+                    if let Some(s) = self.sessions.get_mut(self.active) {
+                        match what {
+                            "xray" => {
+                                s.xray = !s.xray;
+                                s.apply_visibility();
+                            }
+                            "ortho" => s.camera.ortho = !s.camera.ortho,
+                            "showall" => s.show_all(),
+                            "isolate" => {
+                                let sel = s.selection.clone();
+                                s.isolate(&sel);
+                            }
+                            "hide" => {
+                                let sel = s.selection.clone();
+                                s.hide(&sel);
+                            }
+                            "fit" => s.fit_all(),
+                            "qto" => {
+                                let ids: Vec<u32> = if s.selection.is_empty() { s.scene.objects.iter().map(|o| o.id).collect() } else { s.selection.clone() };
+                                let n = panels::quantities::write_quantities(s, &ids);
+                                toast = Some(format!("Mengen für {n} Elemente geschrieben"));
+                            }
+                            "purge" => {
+                                if let Some(n) = s.edit("Bereinigen", |doc| Ok(ifc_doc::ops::purge_unused(doc))) {
+                                    toast = Some(format!("{n} ungenutzte Entities entfernt"));
+                                }
+                            }
+                            _ => {}
+                        }
+                        s.view_dirty = true;
+                    }
+                    if let Some(t) = toast {
+                        self.ctx_state.toast(t);
+                    }
+                }
+            }
+        }
+        if !close {
+            self.palette = Some((q, sel));
         }
     }
 
@@ -1303,6 +1534,7 @@ impl eframe::App for IfcApp {
             });
         }
         self.dialogs(&ctx);
+        self.palette(&ctx);
         self.recovery_dialog(&ctx);
         self.process_actions(&ctx);
         self.toasts(&ctx);

@@ -120,6 +120,9 @@ pub fn run(cmd: &str, app: &mut IfcApp, _ctx: &egui::Context) {
                 }
             }
         }
+        "palette" => {
+            app.open_palette(&arg);
+        }
         "print-status" => {
             if let Some(s) = app.session() {
                 println!("STATUS: {} | objects={} tris={} sel={:?} dirty={}", s.status, s.scene.objects.len(), s.scene.total_tris, s.selection, s.doc.is_dirty());

@@ -1086,3 +1086,475 @@ mod tests {
         assert_eq!(d2.ids_of_type("IFCWALL").len(), 1);
     }
 }
+
+// ------------------------------------------------------------------ extended operations
+
+/// Relationship classes offered in the UI: (class, description).
+pub const REL_CLASSES: &[(&str, &str)] = &[
+    ("IfcRelAggregates", "Aggregation (Ganzes → Teile)"),
+    ("IfcRelNests", "Verschachtelung"),
+    ("IfcRelContainedInSpatialStructure", "Enthalten in Raumstruktur"),
+    ("IfcRelReferencedInSpatialStructure", "Referenziert in Raumstruktur"),
+    ("IfcRelVoidsElement", "Öffnung in Bauteil"),
+    ("IfcRelFillsElement", "Öffnung gefüllt durch"),
+    ("IfcRelProjectsElement", "Vorsprung"),
+    ("IfcRelConnectsElements", "Bauteile verbunden"),
+    ("IfcRelCoversBldgElements", "Bekleidung von Bauteil"),
+    ("IfcRelSpaceBoundary", "Raumbegrenzung"),
+    ("IfcRelAssignsToGroup", "Gruppenzuordnung"),
+    ("IfcRelAssignsToProduct", "Zuordnung zu Produkt"),
+    ("IfcRelAssignsToProcess", "Zuordnung zu Prozess"),
+    ("IfcRelAssignsToControl", "Zuordnung zu Steuerung"),
+    ("IfcRelAssignsToResource", "Zuordnung zu Ressource"),
+    ("IfcRelAssignsToActor", "Zuordnung zu Akteur"),
+    ("IfcRelSequence", "Prozessfolge"),
+    ("IfcRelServicesBuildings", "System versorgt Gebäude"),
+    ("IfcRelDefinesByType", "Typzuordnung"),
+    ("IfcRelAssociatesMaterial", "Materialzuordnung"),
+    ("IfcRelAssociatesClassification", "Klassifikation"),
+    ("IfcRelAssociatesDocument", "Dokument"),
+    ("IfcRelConnectsPortToElement", "Anschluss an Element"),
+    ("IfcRelDeclares", "Deklaration im Kontext"),
+];
+
+/// Indices of the relating/related attributes of a relationship class.
+pub fn rel_roles(doc: &Document, class_upper: &str) -> Option<(usize, usize, bool)> {
+    let e = doc.schema().entity(class_upper)?;
+    let relating = e.attrs.iter().position(|a| a.name.starts_with("Relating"))?;
+    let related = e.attrs.iter().position(|a| a.name.starts_with("Related") && a.name != "RelatedObjectsType")?;
+    Some((relating, related, e.attrs[related].is_list))
+}
+
+/// Create any relationship between `relating` and `related` objects.
+pub fn create_relationship(doc: &mut Document, class_upper: &str, relating: u32, related: &[u32]) -> anyhow::Result<u32> {
+    let schema = doc.schema();
+    let e = schema.entity(class_upper).ok_or_else(|| anyhow::anyhow!("{class_upper} ist im Schema {} unbekannt", doc.schema_id.display()))?.clone();
+    let (ri, di, list) = rel_roles(doc, class_upper).ok_or_else(|| anyhow::anyhow!("{class_upper} ist keine Beziehung"))?;
+    if related.is_empty() {
+        anyhow::bail!("Keine Zielobjekte");
+    }
+    let oh = owner_history(doc);
+    let mut a = vec![Value::Null; e.attrs.len()];
+    a[0] = s(&new_guid());
+    a[1] = oh;
+    a[ri] = r(relating);
+    a[di] = if list { refs(related) } else { r(related[0]) };
+    for (i, d) in e.attrs.iter().enumerate() {
+        if i <= 3 || i == ri || i == di || d.optional {
+            continue;
+        }
+        if let Some(vals) = schema.enum_values(&d.ty) {
+            let v = if vals.iter().any(|x| x == "NOTDEFINED") { "NOTDEFINED".to_string() } else { vals[0].clone() };
+            a[i] = Value::Enum(v);
+        }
+    }
+    let mut ids = vec![doc.create(class_upper, &a)];
+    // 1:1 relationships: one instance per related object
+    if !list {
+        for &x in &related[1..] {
+            a[0] = s(&new_guid());
+            a[di] = r(x);
+            ids.push(doc.create(class_upper, &a));
+        }
+    }
+    Ok(ids[0])
+}
+
+/// Remove `id` from a relationship (either end). Deletes the relationship if it becomes empty.
+pub fn detach_from_relationship(doc: &mut Document, rel: u32, id: u32) -> anyhow::Result<()> {
+    let t = doc.type_name(rel).unwrap_or("").to_string();
+    let Some((ri, di, list)) = rel_roles(doc, &t) else { anyhow::bail!("keine Beziehung") };
+    let mut a = doc.args(rel).unwrap_or_default();
+    if a.get(ri).and_then(|v| v.as_ref_id()) == Some(id) || !list {
+        doc.delete(rel);
+        return Ok(());
+    }
+    let l: Vec<u32> = a[di].ref_list().into_iter().filter(|&x| x != id).collect();
+    if l.is_empty() {
+        doc.delete(rel);
+        Ok(())
+    } else {
+        a[di] = refs(&l);
+        doc.set_args(rel, &a)
+    }
+}
+
+/// All relationships an object takes part in: (rel id, rel class, role: true = relating).
+pub fn relationships_of(doc: &Document, id: u32) -> Vec<(u32, String, bool)> {
+    let mut out = Vec::new();
+    for rel in doc.referencing(id) {
+        if !doc.has_flag(rel, tflags::REL) {
+            continue;
+        }
+        let t = doc.type_name(rel).unwrap_or("").to_string();
+        let Some((ri, _, _)) = rel_roles(doc, &t) else { continue };
+        let relating = doc.arg(rel, ri).and_then(|v| v.as_ref_id()) == Some(id);
+        out.push((rel, doc.type_camel(rel).unwrap_or("").to_string(), relating));
+    }
+    out
+}
+
+/// Type class for an occurrence class (IFCWALL -> IFCWALLTYPE), if present in the schema.
+pub fn type_class_for(doc: &Document, occurrence_upper: &str) -> String {
+    let base = occurrence_upper.trim_end_matches("STANDARDCASE").trim_end_matches("ELEMENTEDCASE");
+    for cand in [format!("{base}TYPE"), format!("{}TYPE", base.trim_end_matches("ELEMENT")), "IFCBUILDINGELEMENTPROXYTYPE".to_string()] {
+        if doc.schema().entity(&cand).is_some() {
+            return cand;
+        }
+    }
+    "IFCTYPEOBJECT".into()
+}
+
+/// Create a type object and assign it to the objects.
+pub fn create_type_object(doc: &mut Document, class_upper: &str, name: &str, tag: &str, objects: &[u32]) -> anyhow::Result<u32> {
+    let schema = doc.schema();
+    let e = schema.entity(class_upper).ok_or_else(|| anyhow::anyhow!("Unbekannte Klasse {class_upper}"))?.clone();
+    let oh = owner_history(doc);
+    let mut a = vec![Value::Null; e.attrs.len()];
+    a[0] = s(&new_guid());
+    a[1] = oh;
+    a[2] = s(name);
+    for (i, d) in e.attrs.iter().enumerate() {
+        match d.name.as_str() {
+            "Tag" if !tag.is_empty() => a[i] = s(tag),
+            "PredefinedType" if !d.optional => a[i] = Value::Enum("NOTDEFINED".into()),
+            _ => {}
+        }
+    }
+    let t = doc.create(class_upper, &a);
+    if !objects.is_empty() {
+        assign_type(doc, objects, t)?;
+    }
+    Ok(t)
+}
+
+/// Add (or replace) an SI unit in the project's unit assignment.
+pub fn add_si_unit(doc: &mut Document, unit_type: &str, prefix: Option<&str>, name: &str) -> anyhow::Result<u32> {
+    let proj = model::project(doc).ok_or_else(|| anyhow::anyhow!("Kein IfcProject"))?;
+    let pt = doc.type_name(proj).unwrap_or("IFCPROJECT").to_string();
+    let ui = doc.schema().attr_index(&pt, "UnitsInContext").unwrap_or(8);
+    let unit = doc.create("IFCSIUNIT", &[Value::Derived, Value::Enum(unit_type.into()), prefix.map(|p| Value::Enum(p.into())).unwrap_or(Value::Null), Value::Enum(name.into())]);
+    match doc.arg(proj, ui).and_then(|v| v.as_ref_id()) {
+        Some(ua) => {
+            let mut l: Vec<u32> = doc.arg(ua, 0).map(|v| v.ref_list()).unwrap_or_default();
+            l.retain(|&u| doc.arg(u, 1).and_then(|v| v.as_enum().map(|x| x.to_string())).as_deref() != Some(unit_type));
+            l.push(unit);
+            doc.set_arg(ua, 0, refs(&l))?;
+        }
+        None => {
+            let ua = doc.create("IFCUNITASSIGNMENT", &[refs(&[unit])]);
+            doc.set_arg(proj, ui, r(ua))?;
+        }
+    }
+    Ok(unit)
+}
+
+fn set_by_name(doc: &Document, class_upper: &str, a: &mut [Value], name: &str, v: Value) {
+    if let Some(i) = doc.schema().attr_index(class_upper, name) {
+        if i < a.len() {
+            a[i] = v;
+        }
+    }
+}
+
+fn new_args(doc: &Document, class_upper: &str) -> Vec<Value> {
+    vec![Value::Null; doc.schema().attr_names(class_upper).len()]
+}
+
+/// Attach a document reference (IfcDocumentReference + IfcRelAssociatesDocument).
+pub fn add_document_reference(doc: &mut Document, objects: &[u32], location: &str, identification: &str, name: &str) -> anyhow::Result<u32> {
+    let c = "IFCDOCUMENTREFERENCE";
+    let mut a = new_args(doc, c);
+    set_by_name(doc, c, &mut a, "Location", s(location));
+    set_by_name(doc, c, &mut a, "Identification", s(identification));
+    set_by_name(doc, c, &mut a, "ItemReference", s(identification));
+    set_by_name(doc, c, &mut a, "Name", s(name));
+    let d = doc.create(c, &a);
+    let oh = owner_history(doc);
+    doc.create("IFCRELASSOCIATESDOCUMENT", &[s(&new_guid()), oh, Value::Null, Value::Null, refs(objects), r(d)]);
+    Ok(d)
+}
+
+/// Attach a library reference (IfcLibraryReference + IfcRelAssociatesLibrary).
+pub fn add_library_reference(doc: &mut Document, objects: &[u32], location: &str, identification: &str, name: &str) -> anyhow::Result<u32> {
+    let c = "IFCLIBRARYREFERENCE";
+    let mut a = new_args(doc, c);
+    set_by_name(doc, c, &mut a, "Location", s(location));
+    set_by_name(doc, c, &mut a, "Identification", s(identification));
+    set_by_name(doc, c, &mut a, "ItemReference", s(identification));
+    set_by_name(doc, c, &mut a, "Name", s(name));
+    let d = doc.create(c, &a);
+    let oh = owner_history(doc);
+    doc.create("IFCRELASSOCIATESLIBRARY", &[s(&new_guid()), oh, Value::Null, Value::Null, refs(objects), r(d)]);
+    Ok(d)
+}
+
+/// Attach an approval (IfcApproval + IfcRelAssociatesApproval).
+pub fn add_approval(doc: &mut Document, objects: &[u32], identifier: &str, name: &str, status: &str) -> anyhow::Result<u32> {
+    let c = "IFCAPPROVAL";
+    let mut a = new_args(doc, c);
+    set_by_name(doc, c, &mut a, "Identifier", s(identifier));
+    set_by_name(doc, c, &mut a, "Name", s(name));
+    set_by_name(doc, c, &mut a, "Status", s(status));
+    set_by_name(doc, c, &mut a, "ApprovalStatus", s(status));
+    if doc.schema_id == crate::SchemaId::Ifc2x3 {
+        // IFC2X3 requires an IfcDateAndTime
+        let now = chrono::Local::now();
+        use chrono::{Datelike, Timelike};
+        let date = doc.create("IFCCALENDARDATE", &[Value::Int(now.day() as i64), Value::Int(now.month() as i64), Value::Int(now.year() as i64)]);
+        let time = doc.create("IFCLOCALTIME", &[Value::Int(now.hour() as i64), Value::Int(now.minute() as i64), Value::Null, Value::Null, Value::Null]);
+        let dt = doc.create("IFCDATEANDTIME", &[r(date), r(time)]);
+        set_by_name(doc, c, &mut a, "ApprovalDateTime", r(dt));
+    } else {
+        set_by_name(doc, c, &mut a, "TimeOfApproval", s(&chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string()));
+    }
+    let ap = doc.create(c, &a);
+    let oh = owner_history(doc);
+    doc.create("IFCRELASSOCIATESAPPROVAL", &[s(&new_guid()), oh, Value::Null, Value::Null, refs(objects), r(ap)]);
+    Ok(ap)
+}
+
+/// Attach a constraint (IfcObjective + IfcRelAssociatesConstraint).
+pub fn add_objective(doc: &mut Document, objects: &[u32], name: &str, grade: &str, qualifier: &str, source: &str, intent: &str) -> anyhow::Result<u32> {
+    let c = "IFCOBJECTIVE";
+    let mut a = new_args(doc, c);
+    set_by_name(doc, c, &mut a, "Name", s(name));
+    set_by_name(doc, c, &mut a, "ConstraintGrade", Value::Enum(if grade.is_empty() { "NOTDEFINED".into() } else { grade.to_ascii_uppercase() }));
+    set_by_name(doc, c, &mut a, "ConstraintSource", if source.is_empty() { Value::Null } else { s(source) });
+    set_by_name(doc, c, &mut a, "ObjectiveQualifier", Value::Enum(if qualifier.is_empty() { "NOTDEFINED".into() } else { qualifier.to_ascii_uppercase() }));
+    if doc.schema_id == crate::SchemaId::Ifc2x3 {
+        set_by_name(doc, c, &mut a, "CreationTime", Value::Null);
+    }
+    let o = doc.create(c, &a);
+    let oh = owner_history(doc);
+    let n = doc.schema().attr_names("IFCRELASSOCIATESCONSTRAINT").len();
+    let mut ra = vec![Value::Null; n.max(7)];
+    ra[0] = s(&new_guid());
+    ra[1] = oh;
+    ra[4] = refs(objects);
+    let ii = doc.schema().attr_index("IFCRELASSOCIATESCONSTRAINT", "Intent").unwrap_or(5);
+    ra[ii] = if intent.is_empty() { Value::Null } else { s(intent) };
+    let ci = doc.schema().attr_index("IFCRELASSOCIATESCONSTRAINT", "RelatingConstraint").unwrap_or(6);
+    ra[ci] = r(o);
+    ra.truncate(n.max(1));
+    doc.create("IFCRELASSOCIATESCONSTRAINT", &ra);
+    Ok(o)
+}
+
+/// Resources associated to an object via IfcRelAssociates* (rel, resource, rel class).
+pub fn associations_of(doc: &Document, id: u32, rel_class_upper: &str) -> Vec<(u32, u32)> {
+    let mut out = Vec::new();
+    for rel in doc.referencing_with_type(id, rel_class_upper) {
+        let t = doc.type_name(rel).unwrap_or("").to_string();
+        let ri = doc.schema().attr_names(&t).iter().position(|n| n.starts_with("Relating")).unwrap_or(5);
+        if let Some(res) = doc.arg(rel, ri).and_then(|v| v.as_ref_id()) {
+            out.push((rel, res));
+        }
+    }
+    out
+}
+
+/// Composite property kinds supported by `set_property_value_kind`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PropertyKindInput {
+    Single,
+    List,
+    Enumerated,
+    Bounded,
+    Table,
+}
+
+fn parse_items(text: &str, base: &str, doc: &Document) -> Vec<Value> {
+    text.split(';').map(|x| x.trim()).filter(|x| !x.is_empty()).map(|x| if base.is_empty() { typed_value_from_text(x, None) } else { typed_value(base, x, doc) }).collect()
+}
+
+/// Create or replace a property with a (composite) value parsed from text:
+/// list `a; b; c`, enumerated `a; b`, bounded `lo..hi; setpoint`, table `x=>y; x2=>y2`.
+pub fn set_property_value_kind(doc: &mut Document, pset: u32, name: &str, kind: PropertyKindInput, text: &str, base_type_upper: &str) -> anyhow::Result<u32> {
+    let (class, args): (&str, Vec<Value>) = match kind {
+        PropertyKindInput::Single => {
+            let v = if base_type_upper.is_empty() { typed_value_from_text(text, None) } else { typed_value(base_type_upper, text, doc) };
+            ("IFCPROPERTYSINGLEVALUE", vec![s(name), Value::Null, v, Value::Null])
+        }
+        PropertyKindInput::List => {
+            let n = doc.schema().attr_names("IFCPROPERTYLISTVALUE").len();
+            let mut a = vec![s(name), Value::Null, Value::List(parse_items(text, base_type_upper, doc)), Value::Null];
+            a.truncate(n.max(3));
+            ("IFCPROPERTYLISTVALUE", a)
+        }
+        PropertyKindInput::Enumerated => ("IFCPROPERTYENUMERATEDVALUE", vec![s(name), Value::Null, Value::List(parse_items(text, base_type_upper, doc)), Value::Null]),
+        PropertyKindInput::Bounded => {
+            let (range, setp) = text.split_once(';').map(|(a, b)| (a.trim(), b.trim())).unwrap_or((text.trim(), ""));
+            let (lo, hi) = range.split_once("..").map(|(a, b)| (a.trim(), b.trim())).unwrap_or((range, ""));
+            let mk = |x: &str| if x.is_empty() { Value::Null } else if base_type_upper.is_empty() { typed_value_from_text(x, None) } else { typed_value(base_type_upper, x, doc) };
+            let n = doc.schema().attr_names("IFCPROPERTYBOUNDEDVALUE").len();
+            let mut a = vec![s(name), Value::Null, mk(hi), mk(lo), Value::Null];
+            if n > 5 {
+                a.push(mk(setp));
+            }
+            ("IFCPROPERTYBOUNDEDVALUE", a)
+        }
+        PropertyKindInput::Table => {
+            let mut defining = Vec::new();
+            let mut defined = Vec::new();
+            for pair in text.split(';') {
+                if let Some((x, y)) = pair.split_once("=>") {
+                    defining.push(typed_value_from_text(x.trim(), None));
+                    defined.push(if base_type_upper.is_empty() { typed_value_from_text(y.trim(), None) } else { typed_value(base_type_upper, y.trim(), doc) });
+                }
+            }
+            let n = doc.schema().attr_names("IFCPROPERTYTABLEVALUE").len();
+            let mut a = vec![s(name), Value::Null, Value::List(defining), Value::List(defined), Value::Null, Value::Null, Value::Null];
+            if n > 7 {
+                a.push(Value::Null);
+            }
+            a.truncate(n.max(4));
+            ("IFCPROPERTYTABLEVALUE", a)
+        }
+    };
+    let text_args = crate::step::args_to_step(&args);
+    let mut pa = doc.args(pset).ok_or_else(|| anyhow::anyhow!("Pset fehlt"))?;
+    let props = pa.get(4).map(|v| v.ref_list()).unwrap_or_default();
+    for p in &props {
+        if doc.arg(*p, 0).and_then(|v| v.as_str().map(|x| x.to_string())).as_deref() == Some(name) {
+            doc.set_raw(*p, Some(class), &text_args)?;
+            return Ok(*p);
+        }
+    }
+    let np = doc.create_raw(class, &text_args)?;
+    let mut l: Vec<Value> = props.into_iter().map(Value::Ref).collect();
+    l.push(Value::Ref(np));
+    pa[4] = Value::List(l);
+    doc.set_args(pset, &pa)?;
+    Ok(np)
+}
+
+/// Duplicate a property set onto the same objects under a new name.
+pub fn duplicate_pset(doc: &mut Document, pset: u32, objects: &[u32], new_name: &str) -> anyhow::Result<u32> {
+    let copy = deep_copy_pset(doc, pset)?;
+    doc.set_arg(copy, 2, s(new_name))?;
+    let oh = owner_history(doc);
+    doc.create("IFCRELDEFINESBYPROPERTIES", &[s(&new_guid()), oh, Value::Null, Value::Null, refs(objects), r(copy)]);
+    Ok(copy)
+}
+
+/// Build a body representation (IfcProductDefinitionShape) for a shape.
+pub fn make_body(doc: &mut Document, shape: &BodyShape) -> u32 {
+    let ctx = body_context(doc);
+    let (profile, depth) = match shape {
+        BodyShape::Box { x, y, z, centered } => {
+            let c = if *centered { [0.0, 0.0] } else { [x / 2.0, y / 2.0] };
+            let pp = doc.create("IFCCARTESIANPOINT", &[Value::List(vec![Value::Real(c[0]), Value::Real(c[1])])]);
+            let pos = doc.create("IFCAXIS2PLACEMENT2D", &[r(pp), Value::Null]);
+            (doc.create("IFCRECTANGLEPROFILEDEF", &[Value::Enum("AREA".into()), Value::Null, r(pos), Value::Real(*x), Value::Real(*y)]), *z)
+        }
+        BodyShape::Cylinder { r: rad, h } => {
+            let pp = doc.create("IFCCARTESIANPOINT", &[Value::List(vec![Value::Real(0.0), Value::Real(0.0)])]);
+            let pos = doc.create("IFCAXIS2PLACEMENT2D", &[r(pp), Value::Null]);
+            (doc.create("IFCCIRCLEPROFILEDEF", &[Value::Enum("AREA".into()), Value::Null, r(pos), Value::Real(*rad)]), *h)
+        }
+        BodyShape::Polygon { pts, h } => {
+            let mut ids: Vec<Value> = pts.iter().map(|p| Value::Ref(doc.create("IFCCARTESIANPOINT", &[Value::List(vec![Value::Real(p[0]), Value::Real(p[1])])]))).collect();
+            if let Some(first) = ids.first().cloned() {
+                ids.push(first);
+            }
+            let pl = doc.create("IFCPOLYLINE", &[Value::List(ids)]);
+            (doc.create("IFCARBITRARYCLOSEDPROFILEDEF", &[Value::Enum("AREA".into()), Value::Null, r(pl)]), *h)
+        }
+    };
+    let o = doc.create("IFCCARTESIANPOINT", &[Value::List(vec![Value::Real(0.0), Value::Real(0.0), Value::Real(0.0)])]);
+    let ax = doc.create("IFCAXIS2PLACEMENT3D", &[r(o), Value::Null, Value::Null]);
+    let dir = doc.create("IFCDIRECTION", &[Value::List(vec![Value::Real(0.0), Value::Real(0.0), Value::Real(1.0)])]);
+    let solid = doc.create("IFCEXTRUDEDAREASOLID", &[r(profile), r(ax), r(dir), Value::Real(depth)]);
+    let sr = doc.create("IFCSHAPEREPRESENTATION", &[r(ctx), s("Body"), s("SweptSolid"), refs(&[solid])]);
+    doc.create("IFCPRODUCTDEFINITIONSHAPE", &[Value::Null, Value::Null, refs(&[sr])])
+}
+
+/// Give an element (without geometry) a body; creates a placement if missing.
+pub fn assign_body(doc: &mut Document, element: u32, shape: &BodyShape) -> anyhow::Result<()> {
+    let pds = make_body(doc, shape);
+    if doc.arg(element, 5).map(|v| v.is_null()).unwrap_or(true) {
+        let tree = model::SpatialTree::build(doc);
+        let parent_pl = tree.container_of(doc, element).and_then(|c| doc.arg(c, 5)).and_then(|v| v.as_ref_id());
+        let pl = create_local_placement(doc, parent_pl, [0.0; 3], 0.0);
+        doc.set_arg(element, 5, r(pl))?;
+    }
+    doc.set_arg(element, 6, r(pds))
+}
+
+/// Remove only the geometry of an element (keeps object, placement, psets).
+pub fn delete_geometry(doc: &mut Document, element: u32) -> anyhow::Result<()> {
+    let Some(pds) = doc.arg(element, 6).and_then(|v| v.as_ref_id()) else { return Ok(()) };
+    doc.set_arg(element, 6, Value::Null)?;
+    if doc.referencing(pds).is_empty() {
+        delete_entities(doc, &[pds], true)?;
+    }
+    Ok(())
+}
+
+/// Ensure Project → Site → Building → Storey exists (reusing existing levels); optionally
+/// attach all products without spatial container to the storey. Returns the storey.
+pub fn ensure_spatial_structure(doc: &mut Document, names: [&str; 4], attach_free: bool) -> anyhow::Result<u32> {
+    let project = match model::project(doc) {
+        Some(p) => p,
+        None => {
+            let oh = owner_history(doc);
+            let n = doc.schema().attr_names("IFCPROJECT").len();
+            let mut pa = vec![Value::Null; n];
+            pa[0] = s(&new_guid());
+            pa[1] = oh;
+            pa[2] = s(names[0]);
+            let ctx = body_context(doc);
+            let _ = ctx;
+            doc.create("IFCPROJECT", &pa)
+        }
+    };
+    let tree = model::SpatialTree::build(doc);
+    let find_child = |parent: u32, class: &str| tree.children_of(parent).iter().map(|(c, _)| *c).find(|c| doc.type_name(*c) == Some(class));
+    let site = match find_child(project, "IFCSITE") {
+        Some(x) => x,
+        None => create_spatial(doc, "IFCSITE", names[1], project, None)?,
+    };
+    let tree = model::SpatialTree::build(doc);
+    let building = match tree.children_of(site).iter().map(|(c, _)| *c).find(|c| doc.type_name(*c) == Some("IFCBUILDING")).or_else(|| tree.children_of(project).iter().map(|(c, _)| *c).find(|c| doc.type_name(*c) == Some("IFCBUILDING"))) {
+        Some(x) => x,
+        None => create_spatial(doc, "IFCBUILDING", names[2], site, None)?,
+    };
+    let tree = model::SpatialTree::build(doc);
+    let storey = match tree.children_of(building).iter().map(|(c, _)| *c).find(|c| doc.type_name(*c) == Some("IFCBUILDINGSTOREY")) {
+        Some(x) => x,
+        None => create_spatial(doc, "IFCBUILDINGSTOREY", names[3], building, Some(0.0))?,
+    };
+    if attach_free {
+        let tree = model::SpatialTree::build(doc);
+        let free: Vec<u32> = doc.ids_with_flag(tflags::ELEMENT).into_iter().filter(|&e| !doc.has_flag(e, tflags::OPENING) && !doc.has_flag(e, tflags::FEATURE) && !tree.parent.contains_key(&e)).collect();
+        if !free.is_empty() {
+            move_to_container(doc, &free, storey)?;
+        }
+    }
+    Ok(storey)
+}
+
+/// Preview of what `delete_entities(ids, purge=true)` would remove (without changing the model).
+pub fn plan_deletion(doc: &Document, ids: &[u32]) -> Vec<u32> {
+    let mut out: FxHashSet<u32> = ids.iter().copied().collect();
+    // dependents only referenced by the deleted set
+    let mut stack: Vec<u32> = ids.iter().flat_map(|&i| doc.references(i)).collect();
+    let mut guard = 0;
+    while let Some(d) = stack.pop() {
+        guard += 1;
+        if guard > 200_000 || out.contains(&d) || !doc.exists(d) || is_anchor(doc, d) {
+            continue;
+        }
+        if doc.has_flag(d, tflags::ROOT) && !doc.has_flag(d, tflags::PSET) && !doc.has_flag(d, tflags::QSET) {
+            continue;
+        }
+        if doc.referencing(d).iter().all(|r| out.contains(r)) {
+            out.insert(d);
+            stack.extend(doc.references(d));
+        }
+    }
+    let mut v: Vec<u32> = out.into_iter().collect();
+    v.sort_unstable();
+    v
+}
