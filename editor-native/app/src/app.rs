@@ -31,6 +31,7 @@ pub enum Tab {
     Clash,
     Spaces,
     Costs,
+    Bcf,
     Notes,
     Recent,
 }
@@ -57,12 +58,13 @@ impl Tab {
             Tab::Clash => (ic::CLASH, "Kollisionen"),
             Tab::Spaces => (ic::ph::DOOR_OPEN, "Raumbuch"),
             Tab::Costs => (ic::ph::COINS, "Kostengruppen"),
+            Tab::Bcf => (ic::ph::CHAT_CIRCLE_TEXT, "BCF-Themen"),
             Tab::Notes => (ic::EDIT, "Notizen"),
             Tab::Recent => (ic::HISTORY, "Zuletzt geöffnet"),
         };
         format!("{i} {t}")
     }
-    pub const ALL: [Tab; 21] = [Tab::Viewer, Tab::Structure, Tab::Classes, Tab::Search, Tab::Inspector, Tab::History, Tab::Diagnostics, Tab::Graph, Tab::Batch, Tab::Builder, Tab::Ids, Tab::Diff, Tab::Groups, Tab::Materials, Tab::Table, Tab::Stats, Tab::Clash, Tab::Spaces, Tab::Costs, Tab::Notes, Tab::Recent];
+    pub const ALL: [Tab; 22] = [Tab::Viewer, Tab::Structure, Tab::Classes, Tab::Search, Tab::Inspector, Tab::History, Tab::Diagnostics, Tab::Graph, Tab::Batch, Tab::Builder, Tab::Ids, Tab::Diff, Tab::Groups, Tab::Materials, Tab::Table, Tab::Stats, Tab::Clash, Tab::Spaces, Tab::Costs, Tab::Bcf, Tab::Notes, Tab::Recent];
 }
 
 /// State shared with panels.
@@ -211,7 +213,7 @@ pub fn default_dock() -> DockState<Tab> {
     let tree = dock.main_surface_mut();
     let [center, _left] = tree.split_left(NodeIndex::root(), 0.21, vec![Tab::Structure, Tab::Classes, Tab::Search, Tab::Groups]);
     let [center, _right] = tree.split_right(center, 0.72, vec![Tab::Inspector, Tab::History, Tab::Materials]);
-    let [_c, _bottom] = tree.split_below(center, 0.72, vec![Tab::Diagnostics, Tab::Table, Tab::Batch, Tab::Builder, Tab::Graph, Tab::Ids, Tab::Clash, Tab::Diff, Tab::Stats, Tab::Spaces, Tab::Costs]);
+    let [_c, _bottom] = tree.split_below(center, 0.72, vec![Tab::Diagnostics, Tab::Table, Tab::Batch, Tab::Builder, Tab::Graph, Tab::Ids, Tab::Clash, Tab::Diff, Tab::Stats, Tab::Spaces, Tab::Costs, Tab::Bcf]);
     dock
 }
 
@@ -1734,6 +1736,9 @@ impl IfcApp {
                     self.ctx_state.panel_state.ids_path = Some(p.clone());
                     self.open_tab(Tab::Ids);
                 }
+            } else if ext == "bcf" || ext == "bcfzip" {
+                self.ctx_state.panel_state.bcf.load(&p);
+                self.open_tab(Tab::Bcf);
             } else if matches!(ext.as_str(), "csv" | "tsv" | "txt" | "xlsx" | "xlsm" | "xls" | "ods") {
                 if !self.sessions.is_empty() {
                     self.ctx_state.panel_state.import.load_file(p);
@@ -1867,6 +1872,7 @@ impl TabViewer for Viewer<'_> {
             Tab::Stats => panels::stats::show(ui, s, self.app),
             Tab::Spaces => panels::spaces::show(ui, s, self.app),
             Tab::Costs => panels::costs::show(ui, s, self.app),
+            Tab::Bcf => panels::bcf_panel::show(ui, s, self.app),
             Tab::Clash => panels::clash::show(ui, s, self.app),
             Tab::Notes => panels::misc::notes(ui, s, self.app),
             Tab::Recent => panels::misc::recent(ui, &self.open_paths, self.app),

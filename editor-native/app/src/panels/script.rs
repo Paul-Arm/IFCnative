@@ -157,6 +157,27 @@ pub fn run(cmd: &str, app: &mut IfcApp, _ctx: &egui::Context) {
                 let _ = std::fs::write(&arg, html);
             }
         }
+        "bcf-load" => {
+            app.ctx_state.panel_state.bcf.load(std::path::Path::new(&arg));
+            app.open_tab(Tab::Bcf);
+        }
+        "bcf-apply" => {
+            let i: usize = arg.parse().unwrap_or(0);
+            if let Some(vp) = app.ctx_state.panel_state.bcf.topics.get(i).and_then(|t| t.viewpoint.clone()) {
+                app.ctx_state.panel_state.bcf.selected = Some(i);
+                if let Some(s) = app.sessions.get_mut(app.active) {
+                    crate::bcf::apply_viewpoint(s, &vp);
+                }
+            }
+        }
+        "bcf-export" => {
+            // bcf-export <path>: current view (selection) as one topic
+            if let Some(s) = app.sessions.get(app.active) {
+                let comps: Vec<String> = s.selection.iter().filter_map(|&i| s.doc.guid_of(i)).collect();
+                let topic = crate::bcf::Topic { title: "Testthema".into(), description: "aus Skript".into(), components: comps, camera: Some(s.camera.clone()), origin: s.scene.origin, snapshot_png: None, status: "Open".into(), topic_type: "Issue".into() };
+                let _ = crate::bcf::write_bcf(std::path::Path::new(&arg), "Test", &[topic]);
+            }
+        }
         "federate" => {
             app.ctx_state.federated = arg != "off";
             app.ctx_state.federated_dim = arg == "dim";

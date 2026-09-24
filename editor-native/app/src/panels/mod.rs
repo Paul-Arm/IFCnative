@@ -1,6 +1,7 @@
 //! UI panels.
 
 pub mod batch;
+pub mod bcf_panel;
 pub mod builder;
 pub mod clash;
 pub mod classes;
@@ -44,6 +45,7 @@ pub struct PanelState {
     pub table: table::TableState,
     pub spaces: spaces::SpacesState,
     pub costs: costs::CostsState,
+    pub bcf: bcf_panel::BcfState,
     pub materials: materials::MaterialsState,
     pub pending_select: Option<Vec<u32>>,
     pub dragging: Option<u32>,
