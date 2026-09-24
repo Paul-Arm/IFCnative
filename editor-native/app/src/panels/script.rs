@@ -53,6 +53,27 @@ pub fn run(cmd: &str, app: &mut IfcApp, _ctx: &egui::Context) {
                 crate::panels::import::apply_now(s, &mut app.ctx_state);
             }
         }
+        "plan" => {
+            // plan [cut height]: floor plan of the first storey
+            if let Some(s) = app.session() {
+                let cut: f32 = arg.parse().unwrap_or(1.2);
+                if let Some(st) = s.doc.ids_of_type("IFCBUILDINGSTOREY").first().copied() {
+                    s.enter_plan(st, cut);
+                }
+            }
+        }
+        "cut-export" => {
+            if let Some(s) = app.session() {
+                if let Some(cut) = crate::viewer::cut_export::current_cut(s) {
+                    let res = crate::viewer::cut_export::compute(s, &cut, if s.plan.is_some() { 3.0 } else { 0.0 });
+                    let p = std::path::Path::new(&arg);
+                    let r = if arg.ends_with(".dxf") { crate::viewer::cut_export::write_dxf(&res, p) } else { crate::viewer::cut_export::write_svg(&res, p) };
+                    eprintln!("cut-export: {} objects, {} projection lines, {:?}", res.objects.len(), res.projection.len(), r.err());
+                } else {
+                    eprintln!("cut-export: no cut");
+                }
+            }
+        }
         "federate" => {
             app.ctx_state.federated = arg != "off";
             app.ctx_state.federated_dim = arg == "dim";

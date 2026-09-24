@@ -112,6 +112,8 @@ pub enum Action {
     ExportXlsx,
     ExportObj,
     ImportTable,
+    /// Export the current plan/section cut (true = DXF, false = SVG).
+    ExportCut(bool),
     FocusFederated(usize, u32),
     Compare(PathBuf),
     BcfView,
@@ -462,6 +464,27 @@ impl IfcApp {
                         }
                     }
                 }
+                Action::ExportCut(dxf) => {
+                    if let Some(s) = self.sessions.get(self.active) {
+                        match crate::viewer::cut_export::current_cut(s) {
+                            None => self.ctx_state.error("Zuerst einen Grundriss (Werkzeugleiste „Grundriss“) oder eine Schnittebene aktivieren"),
+                            Some(cut) => {
+                                let ext = if dxf { "dxf" } else { "svg" };
+                                let name = format!("{}.{ext}", if s.plan.is_some() { "Grundriss" } else { "Schnitt" });
+                                if let Some(p) = rfd::FileDialog::new().add_filter(ext.to_ascii_uppercase(), &[ext]).set_file_name(name).save_file() {
+                                    let t0 = std::time::Instant::now();
+                                    let res = crate::viewer::cut_export::compute(s, &cut, if s.plan.is_some() { 3.0 } else { 0.0 });
+                                    let n = res.objects.len();
+                                    let w = if dxf { crate::viewer::cut_export::write_dxf(&res, &p) } else { crate::viewer::cut_export::write_svg(&res, &p) };
+                                    match w {
+                                        Ok(()) => self.ctx_state.toast(format!("{} exportiert: {n} geschnittene Objekte, {} Ansichtslinien ({:.0} ms)", ext.to_ascii_uppercase(), res.projection.len(), t0.elapsed().as_secs_f64() * 1000.0)),
+                                        Err(e) => self.ctx_state.error(e.to_string()),
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 Action::FocusFederated(si, id) => {
                     if si < self.sessions.len() && si != self.active {
                         // keep the view: move the camera into the other model's coordinates
@@ -703,6 +726,15 @@ impl IfcApp {
                     }
                     if ui.button("Geometrie als GLB/OBJ …").clicked() {
                         self.ctx_state.actions.push(Action::ExportObj);
+                        ui.close();
+                    }
+                    ui.separator();
+                    if ui.button("Grundriss/Schnitt als SVG …").on_hover_text("Aktiver Grundriss oder erste Schnittebene – Schnittflächen je Klasse, Maßstab 1:100").clicked() {
+                        self.ctx_state.actions.push(Action::ExportCut(false));
+                        ui.close();
+                    }
+                    if ui.button("Grundriss/Schnitt als DXF …").on_hover_text("CAD-Austausch: Layer je IFC-Klasse, Einheit Meter").clicked() {
+                        self.ctx_state.actions.push(Action::ExportCut(true));
                         ui.close();
                     }
                 });
@@ -1297,6 +1329,8 @@ impl IfcApp {
             (format!("{} Eigenschaften als Excel exportieren", ic::EXPORT), Cmd::Act(Action::ExportXlsx)),
             (format!("{} Eigenschaften als CSV exportieren", ic::EXPORT), Cmd::Act(Action::ExportCsv)),
             (format!("{} Tabelle importieren (CSV/Excel/Zwischenablage)", ic::IMPORT), Cmd::Act(Action::ImportTable)),
+            (format!("{} Grundriss/Schnitt als SVG exportieren", ic::EXPORT), Cmd::Act(Action::ExportCut(false))),
+            (format!("{} Grundriss/Schnitt als DXF exportieren", ic::EXPORT), Cmd::Act(Action::ExportCut(true))),
             (format!("{} Geometrie als GLB/OBJ exportieren", ic::EXPORT), Cmd::Act(Action::ExportObj)),
             (format!("{} Ansicht als BCF-Thema", ic::EXPORT), Cmd::Act(Action::BcfView)),
             (format!("{} Ansicht: Isometrie", ic::CUBE), Cmd::View(V::Iso)),
