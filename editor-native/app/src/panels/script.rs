@@ -87,6 +87,25 @@ pub fn run(cmd: &str, app: &mut IfcApp, _ctx: &egui::Context) {
             app.ctx_state.panel_state.diag.millis = 0.0;
             app.open_tab(Tab::Diagnostics);
         }
+        "measure-demo" => {
+            // draws an area, a chain and an angle on the scene bounding box (for screenshots)
+            if let Some(s) = app.session() {
+                if let Some((lo, hi)) = s.scene.robust_visible_bbox() {
+                    use crate::session::{MeasureMode as M, MeasureShape};
+                    let z = lo.z;
+                    let a = glam::Vec3::new(lo.x, lo.y, z);
+                    let b = glam::Vec3::new(hi.x, lo.y, z);
+                    let c = glam::Vec3::new(hi.x, hi.y, z);
+                    let d = glam::Vec3::new(lo.x, hi.y, z);
+                    s.measure.shapes.push(MeasureShape { mode: M::Area, pts: vec![a, b, c, d] });
+                    s.measure.shapes.push(MeasureShape { mode: M::Chain, pts: vec![a, glam::Vec3::new(lo.x, lo.y, hi.z), glam::Vec3::new(hi.x, lo.y, hi.z)] });
+                    s.measure.shapes.push(MeasureShape { mode: M::Angle, pts: vec![b, c, glam::Vec3::new(hi.x, hi.y, hi.z)] });
+                    s.tool = crate::session::Tool::Measure;
+                    s.measure.mode = M::Area;
+                    s.view_dirty = true;
+                }
+            }
+        }
         "federate" => {
             app.ctx_state.federated = arg != "off";
             app.ctx_state.federated_dim = arg == "dim";

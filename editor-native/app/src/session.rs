@@ -38,11 +38,82 @@ pub enum ColorMode {
     ByMaterial,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum MeasureMode {
+    #[default]
+    Distance,
+    Chain,
+    Area,
+    Angle,
+}
+
+#[derive(Clone, Debug)]
+pub struct MeasureShape {
+    pub mode: MeasureMode,
+    pub pts: Vec<Vec3>,
+}
+
+impl MeasureShape {
+    /// Total length (chain) or perimeter (area).
+    pub fn length(&self) -> f32 {
+        let mut l: f32 = self.pts.windows(2).map(|w| w[0].distance(w[1])).sum();
+        if self.mode == MeasureMode::Area && self.pts.len() > 2 {
+            l += self.pts[self.pts.len() - 1].distance(self.pts[0]);
+        }
+        l
+    }
+    /// Polygon area (Newell), m².
+    pub fn area(&self) -> f32 {
+        let n = self.pts.len();
+        let mut v = Vec3::ZERO;
+        for i in 0..n {
+            let (a, b) = (self.pts[i], self.pts[(i + 1) % n]);
+            v += a.cross(b);
+        }
+        v.length() * 0.5
+    }
+    /// Angle at the middle point, degrees.
+    pub fn angle(&self) -> f32 {
+        if self.pts.len() < 3 {
+            return 0.0;
+        }
+        let (a, b) = (self.pts[0] - self.pts[1], self.pts[2] - self.pts[1]);
+        a.angle_between(b).to_degrees()
+    }
+    pub fn summary(&self) -> String {
+        match self.mode {
+            MeasureMode::Distance | MeasureMode::Chain => format!("Länge {:.3} m ({} Segmente)", self.length(), self.pts.len().saturating_sub(1)),
+            MeasureMode::Area => format!("Fläche {:.3} m² · Umfang {:.3} m", self.area(), self.length()),
+            MeasureMode::Angle => format!("Winkel {:.2}°", self.angle()),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Measure {
     pub active: bool,
+    pub mode: MeasureMode,
     pub points: Vec<Vec3>,
     pub results: Vec<(Vec3, Vec3)>,
+    pub shapes: Vec<MeasureShape>,
+}
+
+impl Measure {
+    /// Finish the current chain/area; returns a status text.
+    pub fn finish(&mut self) -> Option<String> {
+        let need = match self.mode {
+            MeasureMode::Area => 3,
+            _ => 2,
+        };
+        if matches!(self.mode, MeasureMode::Chain | MeasureMode::Area) && self.points.len() >= need {
+            let sh = MeasureShape { mode: self.mode, pts: std::mem::take(&mut self.points) };
+            let t = sh.summary();
+            self.shapes.push(sh);
+            return Some(t);
+        }
+        self.points.clear();
+        None
+    }
 }
 
 #[derive(Clone, Debug)]

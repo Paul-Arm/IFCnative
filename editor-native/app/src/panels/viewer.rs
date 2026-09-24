@@ -181,16 +181,42 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx, others: &mut [
                 app.panel_state.builder_pick = Some(p.as_dvec3() + s.scene.origin);
             }
             match s.tool {
+                Tool::Measure if resp.secondary_clicked() => {
+                    if let Some(t) = s.measure.finish() {
+                        s.status = t;
+                    }
+                }
                 Tool::Measure if resp.clicked() => {
                     if let Some(pos) = r.pos {
                         let pos = snap_vertex(s, r.obj.filter(|_| r.layer == 0), pos, &s.camera, size, app.settings.snap_px);
-                        s.measure.points.push(pos);
-                        if s.measure.points.len() == 2 {
-                            let a = s.measure.points[0];
-                            let b = s.measure.points[1];
-                            s.measure.results.push((a, b));
-                            s.measure.points.clear();
-                            s.status = format!("Abstand: {:.3} m  (ΔX {:.3}, ΔY {:.3}, ΔZ {:.3})", a.distance(b), (b - a).x.abs(), (b - a).y.abs(), (b - a).z.abs());
+                        use crate::session::MeasureMode as M;
+                        // closing an area by clicking its first point
+                        let closes = s.measure.mode == M::Area && s.measure.points.len() >= 3 && to_screen_fn(&s.camera, rect, size, s.measure.points[0]).zip(pointer).map(|(a, b)| a.distance(b) < 10.0).unwrap_or(false);
+                        if closes {
+                            if let Some(t) = s.measure.finish() {
+                                s.status = t;
+                            }
+                        } else {
+                            s.measure.points.push(pos);
+                        }
+                        match s.measure.mode {
+                            M::Distance if s.measure.points.len() == 2 => {
+                                let a = s.measure.points[0];
+                                let b = s.measure.points[1];
+                                s.measure.results.push((a, b));
+                                s.measure.points.clear();
+                                s.status = format!("Abstand: {:.3} m  (ΔX {:.3}, ΔY {:.3}, ΔZ {:.3})", a.distance(b), (b - a).x.abs(), (b - a).y.abs(), (b - a).z.abs());
+                            }
+                            M::Angle if s.measure.points.len() == 3 => {
+                                let sh = crate::session::MeasureShape { mode: M::Angle, pts: std::mem::take(&mut s.measure.points) };
+                                s.status = sh.summary();
+                                s.measure.shapes.push(sh);
+                            }
+                            M::Chain | M::Area if !closes && s.measure.points.len() >= 2 => {
+                                let sh = crate::session::MeasureShape { mode: s.measure.mode, pts: s.measure.points.clone() };
+                                s.status = format!("{} – Rechtsklick/Enter beendet", sh.summary());
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -244,8 +270,13 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx, others: &mut [
             s.view_dirty = true;
         }
     }
-    if resp.double_clicked() {
+    if resp.double_clicked() && s.tool != Tool::Measure {
         s.fit_selection();
+    }
+    if s.tool == Tool::Measure && resp.hovered() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+        if let Some(t) = s.measure.finish() {
+            s.status = t;
+        }
     }
 
     // keyboard navigation when hovered
@@ -317,13 +348,54 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx, others: &mut [
             painter.galley(r.min + Vec2::new(5.0, 2.0), galley, Color32::BLACK);
         }
     }
+    let label = |painter: &egui::Painter, at: Pos2, txt: String, big: bool| {
+        let galley = painter.layout_no_wrap(txt, FontId::proportional(if big { 13.0 } else { 11.0 }), Color32::BLACK);
+        let r = Rect::from_center_size(at, galley.size() + Vec2::new(10.0, 4.0));
+        painter.rect_filled(r, 4.0, if big { accent } else { accent.gamma_multiply(0.85) });
+        painter.galley(r.min + Vec2::new(5.0, 2.0), galley, Color32::BLACK);
+    };
+    {
+        use crate::session::MeasureMode as M;
+        let mut shapes: Vec<crate::session::MeasureShape> = s.measure.shapes.clone();
+        if s.measure.points.len() >= 2 && matches!(s.measure.mode, M::Chain | M::Area | M::Angle) {
+            shapes.push(crate::session::MeasureShape { mode: s.measure.mode, pts: s.measure.points.clone() });
+        }
+        for sh in &shapes {
+            let pts: Vec<Option<Pos2>> = sh.pts.iter().map(|p| to_screen(*p)).collect();
+            let n = pts.len();
+            let seg_count = if sh.mode == M::Area && n > 2 { n } else { n.saturating_sub(1) };
+            for i in 0..seg_count {
+                if let (Some(a), Some(b)) = (pts[i], pts[(i + 1) % n]) {
+                    painter.line_segment([a, b], Stroke::new(2.5, accent));
+                    if sh.mode != M::Angle && n <= 30 {
+                        label(&painter, a + (b - a) * 0.5, format!("{:.2}", sh.pts[i].distance(sh.pts[(i + 1) % n])), false);
+                    }
+                }
+            }
+            for p in pts.iter().flatten() {
+                painter.circle_filled(*p, 3.5, accent);
+            }
+            let anchor = match sh.mode {
+                M::Angle => pts.get(1).copied().flatten(),
+                M::Area => {
+                    let v: Vec<Pos2> = pts.iter().flatten().copied().collect();
+                    (!v.is_empty()).then(|| Pos2::new(v.iter().map(|p| p.x).sum::<f32>() / v.len() as f32, v.iter().map(|p| p.y).sum::<f32>() / v.len() as f32))
+                }
+                _ => pts.last().copied().flatten(),
+            };
+            if let Some(at) = anchor {
+                let off = if sh.mode == M::Area { Vec2::ZERO } else { Vec2::new(0.0, -18.0) };
+                label(&painter, at + off, sh.summary(), true);
+            }
+        }
+    }
     for p in &s.measure.points {
         if let Some(pp) = to_screen(*p) {
             painter.circle_stroke(pp, 6.0, Stroke::new(2.0, accent));
-            if let Some(ptr) = pointer {
-                painter.line_segment([pp, ptr], Stroke::new(1.0, accent));
-            }
         }
+    }
+    if let (Some(last), Some(ptr)) = (s.measure.points.last().and_then(|p| to_screen(*p)), pointer) {
+        painter.line_segment([last, ptr], Stroke::new(1.0, accent));
     }
     if let (Some(a), Some(b)) = (app.box_start, pointer) {
         let r = Rect::from_two_pos(a, b);
@@ -420,7 +492,12 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx, others: &mut [
     }
     if s.tool != Tool::Select {
         let hint = match s.tool {
-            Tool::Measure => "Messen: zwei Punkte anklicken (Esc beendet)",
+            Tool::Measure => match s.measure.mode {
+                crate::session::MeasureMode::Distance => "Abstand: zwei Punkte anklicken (Esc beendet)",
+                crate::session::MeasureMode::Chain => "Kettenmaß: Punkte anklicken – Rechtsklick oder Enter beendet",
+                crate::session::MeasureMode::Area => "Fläche: Eckpunkte anklicken – ersten Punkt, Rechtsklick oder Enter schließt",
+                crate::session::MeasureMode::Angle => "Winkel: Schenkelpunkt, Scheitel, Schenkelpunkt anklicken",
+            },
             Tool::Section => "Schnitt: Fläche anklicken, um eine Schnittebene zu setzen",
             Tool::BoxSelect => "Rahmenauswahl: Rechteck aufziehen (Strg = hinzufügen)",
             Tool::PickCoords => "Koordinaten: Punkt anklicken (wird als JSON kopiert)",
@@ -601,6 +678,10 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx, others: &mut [
             app.context_menu_frames += 1;
         }
     }
+}
+
+fn to_screen_fn(cam: &crate::viewer::camera::Camera, rect: Rect, size: GVec2, p: Vec3) -> Option<Pos2> {
+    cam.project(p, size).map(|q| Pos2::new(rect.min.x + q.x, rect.min.y + q.y))
 }
 
 fn snap_vertex(s: &Session, obj: Option<u32>, pos: Vec3, cam: &crate::viewer::camera::Camera, size: GVec2, snap_px: f32) -> Vec3 {
@@ -808,8 +889,19 @@ fn toolbar(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
             .response
             .on_hover_text("Geschoss als Grundriss (Schnitt + Draufsicht)");
         }
-        if !s.measure.results.is_empty() && ui.button(ic::CLEAR).on_hover_text("Messungen löschen").clicked() {
+        if s.tool == Tool::Measure {
+            use crate::session::MeasureMode as M;
+            for (m, t, tip) in [(M::Distance, "Abstand", "Zwei Punkte"), (M::Chain, "Kette", "Polylinie mit Gesamtlänge"), (M::Area, "Fläche", "Polygonfläche und Umfang"), (M::Angle, "Winkel", "Winkel zwischen zwei Schenkeln")] {
+                if ui.selectable_label(s.measure.mode == m, t).on_hover_text(tip).clicked() {
+                    s.measure.mode = m;
+                    s.measure.points.clear();
+                }
+            }
+        }
+        if (!s.measure.results.is_empty() || !s.measure.shapes.is_empty()) && ui.button(ic::CLEAR).on_hover_text("Messungen löschen").clicked() {
             s.measure.results.clear();
+            s.measure.shapes.clear();
+            s.measure.points.clear();
         }
         ui.separator();
         if ui.button(ic::CAMERA).on_hover_text("Bildschirmfoto der 3D-Ansicht speichern").clicked() {
