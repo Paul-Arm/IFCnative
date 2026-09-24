@@ -2,6 +2,7 @@
 //! IFCnative – native IFC editor.
 
 mod app;
+mod bcf;
 mod icons;
 mod panels;
 mod session;

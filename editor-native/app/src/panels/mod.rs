@@ -12,6 +12,7 @@ pub mod history;
 pub mod ids;
 pub mod inspector;
 pub mod materials;
+pub mod quantities;
 pub mod script;
 pub mod search;
 pub mod stats;

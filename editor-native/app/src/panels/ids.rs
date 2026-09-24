@@ -45,6 +45,22 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
             st.millis = t.elapsed().as_secs_f64() * 1000.0;
             st.checked_rev = Some((s.uid, s.doc.revision()));
         }
+        if !st.results.is_empty() && ui.button(format!("{} BCF …", ic::EXPORT)).on_hover_text("Nicht erfüllte Spezifikationen als BCF-Themen").clicked() {
+            let topics: Vec<crate::bcf::Topic> = st.results.iter().filter(|r| !r.spec_ok).map(|r| crate::bcf::Topic {
+                title: format!("IDS: {}", r.name),
+                description: format!("{} von {} Objekten erfüllen die Anforderungen nicht. {}", r.failures.len(), r.applicable.len(), r.note),
+                components: r.failures.iter().take(2000).filter_map(|f| s.doc.guid_of(f.id)).collect(),
+                camera: Some(s.camera.clone()),
+                origin: s.scene.origin,
+                snapshot_png: None,
+                status: "Open".into(),
+                topic_type: "Error".into(),
+            })
+            .collect();
+            if let Some(p) = rfd::FileDialog::new().add_filter("BCF", &["bcf", "bcfzip"]).set_file_name("IDS-Befunde.bcf").save_file() {
+                let _ = crate::bcf::write_bcf(&p, &s.title(), &topics);
+            }
+        }
         if !st.results.is_empty() && ui.button(format!("{} Bericht (CSV) …", ic::EXPORT)).clicked() {
             if let Some(p) = rfd::FileDialog::new().add_filter("CSV", &["csv"]).set_file_name("IDS-Bericht.csv").save_file() {
                 let _ = std::fs::write(p, ids::report_csv(&s.doc, &st.results));

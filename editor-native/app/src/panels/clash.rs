@@ -143,6 +143,29 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
             s.legend = vec![("Gruppe A".into(), [230, 60, 60, 255], a_ids.len()), ("Gruppe B".into(), [250, 200, 50, 255], b_ids.len())];
             s.view_dirty = true;
         }
+        if !st.results.is_empty() && ui.button(format!("{} BCF …", ic::EXPORT)).on_hover_text("Jede Kollision als BCF-Thema mit Kamera").clicked() {
+            let topics: Vec<crate::bcf::Topic> = st.results.iter().map(|c| {
+                let mut cam = s.camera.clone();
+                cam.target = c.point;
+                cam.dist = 4.0;
+                crate::bcf::Topic {
+                    title: format!("Kollision: {} ↔ {}", model::label(&s.doc, c.a), model::label(&s.doc, c.b)),
+                    description: format!("{} #{} / {} #{}", s.doc.type_camel(c.a).unwrap_or(""), c.a, s.doc.type_camel(c.b).unwrap_or(""), c.b),
+                    components: [c.a, c.b].iter().filter_map(|&i| s.doc.guid_of(i)).collect(),
+                    camera: Some(cam),
+                    origin: s.scene.origin,
+                    snapshot_png: None,
+                    status: "Open".into(),
+                    topic_type: "Clash".into(),
+                }
+            })
+            .collect();
+            if let Some(p) = rfd::FileDialog::new().add_filter("BCF", &["bcf", "bcfzip"]).set_file_name("Kollisionen.bcf").save_file() {
+                if let Err(e) = crate::bcf::write_bcf(&p, &s.title(), &topics) {
+                    s.status = format!("BCF-Fehler: {e}");
+                }
+            }
+        }
         if ui.button("Farben zurücksetzen").clicked() {
             s.color_mode = crate::session::ColorMode::Ifc;
             s.recolor();

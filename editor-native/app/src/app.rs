@@ -102,6 +102,7 @@ pub enum Action {
     ExportXlsx,
     ExportObj,
     Compare(PathBuf),
+    BcfView,
 }
 
 pub struct IfcApp {
@@ -386,6 +387,20 @@ impl IfcApp {
                             let res = if is_glb { crate::viewer::export::write_glb(s, &p) } else { crate::viewer::export::write_obj(s, &p) };
                             match res {
                                 Ok(()) => self.ctx_state.toast(format!("Exportiert: {}", p.display())),
+                                Err(e) => self.ctx_state.error(e.to_string()),
+                            }
+                        }
+                    }
+                }
+                Action::BcfView => {
+                    if let Some(s) = self.sessions.get(self.active) {
+                        let snap = self.ctx_state.renderer.as_ref().and_then(|r| r.read_color()).and_then(|(w, h, d)| crate::bcf::png_bytes(w, h, &d));
+                        let comps: Vec<String> = s.selection.iter().filter_map(|&i| s.doc.guid_of(i)).collect();
+                        let title = s.selection.first().map(|&i| ifc_doc::model::label(&s.doc, i)).unwrap_or_else(|| "Ansicht".into());
+                        let topic = crate::bcf::Topic { title, description: String::new(), components: comps, camera: Some(s.camera.clone()), origin: s.scene.origin, snapshot_png: snap, status: "Open".into(), topic_type: "Issue".into() };
+                        if let Some(p) = rfd::FileDialog::new().add_filter("BCF", &["bcf", "bcfzip"]).set_file_name("Thema.bcf").save_file() {
+                            match crate::bcf::write_bcf(&p, &s.title(), &[topic]) {
+                                Ok(()) => self.ctx_state.toast("BCF gespeichert"),
                                 Err(e) => self.ctx_state.error(e.to_string()),
                             }
                         }
@@ -683,6 +698,18 @@ impl IfcApp {
                 }
                 if ui.button(format!("{} IDS-Prüfung …", ic::CHECK)).clicked() {
                     self.open_tab(Tab::Ids);
+                }
+                if let Some(s) = self.sessions.get_mut(self.active) {
+                    if ui.button(format!("{} Mengen aus Geometrie berechnen (Auswahl)", ic::CHART)).on_hover_text("Volumen, Flächen, Länge/Breite/Höhe als Qto_…BaseQuantities schreiben").clicked() {
+                        let ids: Vec<u32> = if s.selection.is_empty() { s.scene.objects.iter().map(|o| o.id).collect() } else { s.selection.iter().flat_map(|&i| s.tree.subtree(i)).filter(|i| s.scene.has(*i)).collect() };
+                        let n = panels::quantities::write_quantities(s, &ids);
+                        self.ctx_state.toast(format!("Mengen für {n} Elemente geschrieben"));
+                        ui.close();
+                    }
+                }
+                if ui.button(format!("{} Aktuelle Ansicht als BCF-Thema …", ic::EXPORT)).clicked() {
+                    self.ctx_state.actions.push(Action::BcfView);
+                    ui.close();
                 }
                 if ui.button(format!("{} Kollisionsprüfung …", ic::CLASH)).clicked() {
                     self.open_tab(Tab::Clash);
