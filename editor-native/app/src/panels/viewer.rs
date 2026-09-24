@@ -436,7 +436,12 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx, others: &mut [
         let mut close = false;
         egui::Area::new(egui::Id::new("viewer-ctx")).fixed_pos(p).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
             egui::Frame::menu(ui.style()).show(ui, |ui| {
-                ui.set_min_width(200.0);
+                ui.set_min_width(220.0);
+                if let Some(&id) = s.selection.first() {
+                    let title = if s.selection.len() > 1 { format!("{} Objekte", s.selection.len()) } else { ifc_doc::model::label(&s.doc, id) };
+                    ui.label(egui::RichText::new(format!("{} {title}", ic::for_class(s.doc.type_name(id).unwrap_or("")))).strong());
+                    ui.separator();
+                }
                 if ui.button(format!("{} Auf Auswahl zoomen", ic::FOCUS)).clicked() {
                     s.fit_selection();
                     close = true;
@@ -462,6 +467,115 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx, others: &mut [
                         let ids: Vec<u32> = s.scene.objects.iter().map(|o| o.id).filter(|&i| s.doc.type_name(i) == Some(ty.as_str())).collect();
                         s.select(ids, false);
                     }
+                    close = true;
+                }
+                if ui.add_enabled(!s.selection.is_empty(), egui::Button::new(format!("{} Gleichen Typ auswählen", ic::SELECT))).clicked() {
+                    let types: Vec<u32> = s.selection.iter().filter_map(|&i| ifc_doc::model::type_of(&s.doc, i)).collect();
+                    if !types.is_empty() {
+                        let mut ids: Vec<u32> = types.iter().flat_map(|&t| ifc_doc::model::occurrences_of_type(&s.doc, t)).collect();
+                        ids.sort_unstable();
+                        ids.dedup();
+                        s.status = format!("{} Objekte desselben Typs", ids.len());
+                        s.select(ids, false);
+                    } else {
+                        s.status = "Kein Typobjekt zugeordnet".into();
+                    }
+                    close = true;
+                }
+                if let Some(&id) = s.selection.first() {
+                    if let Some(g) = s.doc.guid_of(id) {
+                        if ui.button(format!("{} GlobalId kopieren", ic::COPY)).on_hover_text(&g).clicked() {
+                            ui.ctx().copy_text(g.clone());
+                            s.status = format!("GlobalId kopiert: {g}");
+                            close = true;
+                        }
+                    }
+                    if ui.button(format!("{} Im Strukturbaum zeigen", ic::TREE)).clicked() {
+                        s.scroll_tree_to = Some(id);
+                        app.actions.push(crate::app::Action::OpenTab(crate::app::Tab::Structure));
+                        close = true;
+                    }
+                }
+                ui.separator();
+                let has_sel = !s.selection.is_empty();
+                ui.add_enabled_ui(has_sel, |ui| {
+                    ui.menu_button(format!("{} Einfärben", ic::PALETTE), |ui| {
+                        const COLORS: [(&str, [f64; 3]); 8] = [("Rot", [0.86, 0.24, 0.2]), ("Orange", [0.95, 0.55, 0.15]), ("Gelb", [0.95, 0.85, 0.2]), ("Grün", [0.3, 0.72, 0.35]), ("Türkis", [0.2, 0.7, 0.72]), ("Blau", [0.22, 0.47, 0.88]), ("Violett", [0.6, 0.35, 0.8]), ("Grau", [0.6, 0.6, 0.62])];
+                        for (name, c) in COLORS {
+                            let col = egui::Color32::from_rgb((c[0] * 255.0) as u8, (c[1] * 255.0) as u8, (c[2] * 255.0) as u8);
+                            if ui.button(egui::RichText::new(format!("■ {name}")).color(col)).clicked() {
+                                let t = s.paint_targets();
+                                s.edit("Objekte einfärben", |doc| ifc_doc::material::set_object_color(doc, &t, Some((c, 0.0))));
+                                close = true;
+                            }
+                        }
+                        if ui.button("Halbtransparent (Glas)").clicked() {
+                            let t = s.paint_targets();
+                            s.edit("Objekte einfärben", |doc| ifc_doc::material::set_object_color(doc, &t, Some(([0.6, 0.78, 0.92], 0.6))));
+                            close = true;
+                        }
+                        ui.separator();
+                        if ui.button("Objektfarbe entfernen").clicked() {
+                            let t = s.paint_targets();
+                            s.edit("Objektfarbe entfernen", |doc| ifc_doc::material::set_object_color(doc, &t, None));
+                            close = true;
+                        }
+                    });
+                    ui.menu_button(format!("{} Material zuweisen", ic::LAYERS), |ui| {
+                        let mut mats: Vec<(String, u32)> = s.doc.ids_of_type("IFCMATERIAL").into_iter().map(|m| (ifc_doc::model::material_name(&s.doc, m), m)).collect();
+                        mats.sort();
+                        if mats.is_empty() {
+                            ui.weak("Keine Materialien – im Material-Panel anlegen");
+                        }
+                        egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+                            for (name, m) in mats {
+                                if ui.button(name).clicked() {
+                                    let sel = s.paint_targets();
+                                    s.edit("Material zuweisen", |doc| ifc_doc::ops::assign_material(doc, &sel, m));
+                                    close = true;
+                                }
+                            }
+                        });
+                    });
+                });
+                ui.menu_button(format!("{} Hier hinzufügen", ic::PLUS), |ui| {
+                    let Some(at) = app.panel_state.builder_pick else {
+                        ui.weak("Auf eine Fläche rechtsklicken");
+                        return;
+                    };
+                    let unit = ifc_doc::model::length_unit(&s.doc).0;
+                    let shapes: [(&str, ifc_doc::ops::BodyShape); 3] = [
+                        ("Quader 1 × 1 × 1 m", ifc_doc::ops::BodyShape::Box { x: 1.0 / unit, y: 1.0 / unit, z: 1.0 / unit, centered: true }),
+                        ("Zylinder Ø 1 m, 1 m hoch", ifc_doc::ops::BodyShape::Cylinder { r: 0.5 / unit, h: 1.0 / unit }),
+                        ("Markierung (Stab)", ifc_doc::ops::BodyShape::Cylinder { r: 0.05 / unit, h: 0.6 / unit }),
+                    ];
+                    for (label, shape) in shapes {
+                        if ui.button(label).on_hover_text(format!("IfcBuildingElementProxy bei X {:.2}  Y {:.2}  Z {:.2} m", at.x, at.y, at.z)).clicked() {
+                            // absolute placement at the picked point, contained in the picked object's storey
+                            let storey = s.selection.first().and_then(|&id| s.tree.storey_of(&s.doc, id)).or_else(|| s.doc.ids_of_type("IFCBUILDINGSTOREY").first().copied());
+                            let spec = ifc_doc::ops::NewElement { class_upper: "IFCBUILDINGELEMENTPROXY".into(), name: label.split(' ').next().unwrap_or("Objekt").to_string(), container: None, location: [at.x / unit, at.y / unit, at.z / unit], rotation_deg: 0.0, shape: Some(shape), predefined_type: None };
+                            if let Some(id) = s.edit("Objekt hinzufügen", |doc| {
+                                let id = ifc_doc::ops::create_element(doc, &spec)?;
+                                if let Some(st) = storey {
+                                    ifc_doc::ops::move_to_container(doc, &[id], st)?;
+                                }
+                                Ok(id)
+                            }) {
+                                s.select(vec![id], false);
+                            }
+                            close = true;
+                        }
+                    }
+                });
+                ui.separator();
+                if ui.add_enabled(has_sel, egui::Button::new(format!("{} Geometrie entfernen", ic::CLEAR))).on_hover_text("Nur die Darstellung löschen – Objekt, Eigenschaften und Beziehungen bleiben").clicked() {
+                    let t = s.paint_targets();
+                    s.edit("Geometrie entfernen", |doc| {
+                        for id in &t {
+                            ifc_doc::ops::delete_geometry(doc, *id)?;
+                        }
+                        Ok(())
+                    });
                     close = true;
                 }
                 if ui.button(format!("{} Löschen", ic::DELETE)).clicked() {
