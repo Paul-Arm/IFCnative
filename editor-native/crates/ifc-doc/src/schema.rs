@@ -112,6 +112,12 @@ impl Schema {
                 Some("E") => {
                     let name = it.next().unwrap_or_default().to_string();
                     let parent = it.next().unwrap_or("-").to_string();
+                    let n_own = it.next().unwrap_or("0");
+                    // numeric defined types appear as attribute-less root "entities" in the source listing
+                    if parent == "-" && n_own == "0" && is_numeric_type_name(&name) {
+                        s.defined.insert(name.to_ascii_uppercase(), "number".to_string());
+                        s.defined_camel.insert(name.to_ascii_uppercase(), name.clone());
+                    }
                     let idx = s.entities.len();
                     let upper = name.to_ascii_uppercase();
                     s.by_upper.insert(upper.clone(), idx);
@@ -264,6 +270,12 @@ impl Schema {
         v.sort();
         v
     }
+}
+
+fn is_numeric_type_name(n: &str) -> bool {
+    (n.ends_with("Measure") && n != "IfcDescriptiveMeasure")
+        || n.ends_with("Number")
+        || matches!(n, "IfcInteger" | "IfcReal" | "IfcPositiveInteger" | "IfcTimeStamp" | "IfcDimensionCount" | "IfcParameterValue" | "IfcSpecularExponent" | "IfcSpecularRoughness" | "IfcCardinalPointReference" | "IfcNumericMeasure")
 }
 
 #[cfg(test)]

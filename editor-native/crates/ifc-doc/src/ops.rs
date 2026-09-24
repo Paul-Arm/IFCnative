@@ -89,6 +89,53 @@ fn bool_enum(t: &str) -> Option<String> {
     }
 }
 
+/// Convert a single/enumerated property value to another defined type.
+/// Returns false (and leaves the value) when the text does not fit the type.
+pub fn retype_property(doc: &mut Document, prop: u32, type_upper: &str) -> anyhow::Result<bool> {
+    let prim = doc.schema().primitive_of(type_upper).unwrap_or("string").to_string();
+    let convert = |doc: &Document, v: &Value| -> Option<Value> {
+        let t = v.display();
+        let t = t.trim();
+        if t.is_empty() {
+            return Some(Value::Null);
+        }
+        let ok = match prim.as_str() {
+            "number" => t.replace(',', ".").parse::<f64>().is_ok(),
+            "boolean" | "logical" => bool_enum(t).is_some(),
+            _ => true,
+        };
+        ok.then(|| typed_value(type_upper, t, doc))
+    };
+    match doc.type_name(prop).unwrap_or("") {
+        "IFCPROPERTYSINGLEVALUE" => {
+            let v = doc.arg(prop, 2).unwrap_or(Value::Null);
+            match convert(doc, &v) {
+                Some(nv) => {
+                    doc.set_arg(prop, 2, nv)?;
+                    Ok(true)
+                }
+                None => Ok(false),
+            }
+        }
+        "IFCPROPERTYENUMERATEDVALUE" => {
+            let vals = match doc.arg(prop, 2) {
+                Some(Value::List(l)) => l,
+                _ => return Ok(false),
+            };
+            let mut out = Vec::new();
+            for v in &vals {
+                match convert(doc, v) {
+                    Some(nv) => out.push(nv),
+                    None => return Ok(false),
+                }
+            }
+            doc.set_arg(prop, 2, Value::List(out))?;
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
 /// Find an occurrence pset by name: (pset id, rel id, number of related objects).
 pub fn find_pset(doc: &Document, element: u32, name: &str) -> Option<(u32, u32, usize)> {
     for rel in doc.referencing_with_type(element, "IFCRELDEFINESBYPROPERTIES") {
@@ -1062,6 +1109,20 @@ fn new_project_named(schema: crate::SchemaId, project_name: &str, site_name: &st
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retype_values() {
+        let mut doc = new_project(crate::SchemaId::Ifc4, "Test", &[("EG".into(), 0.0)]);
+        let w = doc.create("IFCWALL", &[s(&new_guid()), Value::Null, s("W"), Value::Null, Value::Null, Value::Null, Value::Null, Value::Null, Value::Null]);
+        set_property(&mut doc, w, "P", "Len", Value::Typed("IFCLABEL".into(), Box::new(Value::Str("2,5".into()))), false).unwrap();
+        set_property(&mut doc, w, "P", "Txt", Value::Typed("IFCLABEL".into(), Box::new(Value::Str("abc".into()))), false).unwrap();
+        let ps = model::psets_of(&doc, w).into_iter().find(|p| p.name == "P").unwrap();
+        let len = ps.props.iter().find(|p| p.name == "Len").unwrap().id;
+        let txt = ps.props.iter().find(|p| p.name == "Txt").unwrap().id;
+        assert!(retype_property(&mut doc, len, "IFCLENGTHMEASURE").unwrap());
+        assert!(!retype_property(&mut doc, txt, "IFCLENGTHMEASURE").unwrap());
+        assert_eq!(doc.arg(len, 2).unwrap().to_step(), "IFCLENGTHMEASURE(2.5)");
+    }
 
     #[test]
     fn project_and_edits() {
