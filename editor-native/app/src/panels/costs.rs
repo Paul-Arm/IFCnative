@@ -109,6 +109,17 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
         if ui.add_enabled(!st.groups.is_empty(), egui::Button::new(format!("{} Excel …", ic::EXPORT))).clicked() {
             export = true;
         }
+        if ui.add_enabled(!st.groups.is_empty(), egui::Button::new(format!("{} Einfärben", ic::PALETTE))).on_hover_text("Elemente im 3D nach Kostengruppe färben").clicked() {
+            let mut map: rustc_hash::FxHashMap<u32, String> = rustc_hash::FxHashMap::default();
+            for (code, g) in &st.groups {
+                let label = format!("{code} {}", din276::name_of(code).unwrap_or(""));
+                for &id in &g.ids {
+                    map.insert(id, label.clone());
+                }
+            }
+            s.color_mode = crate::session::ColorMode::Custom { title: "DIN 276".into(), map: std::sync::Arc::new(map), colors: vec![], other: Some(("ohne Kostengruppe".into(), [175, 178, 185, 255])) };
+            s.recolor();
+        }
     });
     let total: usize = st.groups.values().map(|g| g.ids.len()).sum::<usize>() + st.unassigned.len();
     ui.horizontal(|ui| {
