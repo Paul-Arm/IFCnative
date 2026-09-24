@@ -205,6 +205,8 @@ pub struct Requirement {
 
 #[derive(Debug, Clone)]
 pub struct Specification {
+    pub identifier: String,
+    pub instructions: String,
     pub name: String,
     pub description: String,
     pub ifc_version: String,
@@ -218,7 +220,9 @@ pub struct Specification {
 pub struct Ids {
     pub title: String,
     pub author: String,
+    pub info: Vec<(String, String)>,
     pub specs: Vec<Specification>,
+    pub warnings: Vec<String>,
 }
 
 fn parse_facet(el: &Elem) -> Option<Facet> {
@@ -242,6 +246,13 @@ pub fn parse(text: &str) -> anyhow::Result<Ids> {
     if let Some(info) = root.child("info") {
         ids.title = info.child("title").map(|t| t.text.clone()).unwrap_or_default();
         ids.author = info.child("author").map(|t| t.text.clone()).unwrap_or_default();
+        for (tag, label) in [("title", "Titel"), ("description", "Beschreibung"), ("purpose", "Zweck"), ("milestone", "Meilenstein"), ("author", "Autor"), ("date", "Datum"), ("version", "Version"), ("copyright", "Copyright")] {
+            if let Some(t) = info.child(tag) {
+                if !t.text.trim().is_empty() {
+                    ids.info.push((label.to_string(), t.text.trim().to_string()));
+                }
+            }
+        }
     }
     for spec in root.child("specifications").map(|s| s.all("specification").collect::<Vec<_>>()).unwrap_or_default() {
         let app = spec.child("applicability");
@@ -276,7 +287,12 @@ pub fn parse(text: &str) -> anyhow::Result<Ids> {
                     .collect()
             })
             .unwrap_or_default();
+        if applicability.is_empty() {
+            ids.warnings.push(format!("Spezifikation „{}“ hat keine Anwendbarkeit", spec.attr("name").unwrap_or("?")));
+        }
         ids.specs.push(Specification {
+            identifier: spec.attr("identifier").unwrap_or("").to_string(),
+            instructions: spec.attr("instructions").unwrap_or("").to_string(),
             name: spec.attr("name").unwrap_or("Spezifikation").to_string(),
             description: spec.attr("description").unwrap_or("").to_string(),
             ifc_version: spec.attr("ifcVersion").unwrap_or("").to_string(),
@@ -447,8 +463,16 @@ pub struct Failure {
     pub reason: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpecStatus {
+    Pass,
+    Fail,
+    NotApplicable,
+}
+
 #[derive(Debug, Clone)]
 pub struct SpecResult {
+    pub status: SpecStatus,
     pub name: String,
     pub description: String,
     pub applicable: Vec<u32>,
@@ -456,6 +480,26 @@ pub struct SpecResult {
     pub failures: Vec<Failure>,
     pub spec_ok: bool,
     pub note: String,
+}
+
+/// Plain language description of a facet (public for UI).
+pub fn describe(f: &Facet) -> String {
+    describe_facet(f)
+}
+
+pub fn cardinality_label(c: Cardinality) -> &'static str {
+    match c {
+        Cardinality::Required => "erforderlich",
+        Cardinality::Optional => "optional",
+        Cardinality::Prohibited => "verboten",
+    }
+}
+
+fn version_matches(spec_versions: &str, schema: crate::SchemaId) -> bool {
+    if spec_versions.trim().is_empty() {
+        return true;
+    }
+    spec_versions.split_whitespace().any(|v| crate::SchemaId::from_header(v) == schema)
 }
 
 fn describe_facet(f: &Facet) -> String {
@@ -475,6 +519,9 @@ pub fn check(doc: &Document, ids: &Ids) -> Vec<SpecResult> {
     ids.specs
         .iter()
         .map(|spec| {
+            if !version_matches(&spec.ifc_version, doc.schema_id) {
+                return SpecResult { status: SpecStatus::NotApplicable, name: spec.name.clone(), description: spec.description.clone(), applicable: vec![], passed: 0, failures: vec![], spec_ok: true, note: format!("gilt für {}, Modell ist {}", spec.ifc_version, doc.schema_id.display()) };
+            }
             // candidates: entity facet narrows by class
             let candidates: Vec<u32> = match spec.applicability.iter().find(|f| matches!(f, Facet::Entity { .. })) {
                 Some(Facet::Entity { name: Constraint::Simple(n), .. }) => doc.ids_of_type(&n.to_ascii_uppercase()),
@@ -530,7 +577,8 @@ pub fn check(doc: &Document, ids: &Ids) -> Vec<SpecResult> {
                 spec_ok = false;
                 note = format!("{n} Objekte vorhanden, obwohl verboten");
             }
-            SpecResult { name: spec.name.clone(), description: spec.description.clone(), passed: n - failures.len(), applicable, failures, spec_ok, note }
+            let status = if n == 0 && spec_ok { SpecStatus::NotApplicable } else if spec_ok { SpecStatus::Pass } else { SpecStatus::Fail };
+            SpecResult { status, name: spec.name.clone(), description: spec.description.clone(), passed: n - failures.len(), applicable, failures, spec_ok, note }
         })
         .collect()
 }
