@@ -4,6 +4,7 @@ pub mod batch;
 pub mod builder;
 pub mod clash;
 pub mod classes;
+pub mod costs;
 pub mod diagnostics;
 pub mod diff;
 pub mod graph;
@@ -41,6 +42,7 @@ pub struct PanelState {
     pub graph: graph::GraphState,
     pub table: table::TableState,
     pub spaces: spaces::SpacesState,
+    pub costs: costs::CostsState,
     pub materials: materials::MaterialsState,
     pub pending_select: Option<Vec<u32>>,
     pub dragging: Option<u32>,

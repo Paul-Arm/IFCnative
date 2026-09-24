@@ -2,6 +2,7 @@
 //! model queries and editing operations.
 
 pub mod diff;
+pub mod din276;
 pub mod document;
 pub mod export;
 pub mod ids;

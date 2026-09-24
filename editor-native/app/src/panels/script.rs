@@ -106,6 +106,13 @@ pub fn run(cmd: &str, app: &mut IfcApp, _ctx: &egui::Context) {
                 }
             }
         }
+        "din276-auto" => {
+            // assign all DIN 276 suggestions
+            if let Some(s) = app.session() {
+                let items: Vec<(u32, String)> = s.doc.ids_with_flag(ifc_doc::tflags::ELEMENT).into_iter().filter_map(|id| ifc_doc::din276::suggest(&s.doc, id).map(|c| (id, c.to_string()))).collect();
+                s.edit("DIN 276 zuordnen", |doc| ifc_doc::din276::assign(doc, &items));
+            }
+        }
         "federate" => {
             app.ctx_state.federated = arg != "off";
             app.ctx_state.federated_dim = arg == "dim";
