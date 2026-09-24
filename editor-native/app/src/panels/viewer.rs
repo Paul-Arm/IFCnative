@@ -337,6 +337,23 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx, others: &mut [
         app.force_redraw = false;
         app.last_view_size = (w, h);
     }
+    if let Some(k) = app.hires_screenshot.take() {
+        let (hw, hh) = ((w * k).min(8192), (h * k).min(8192));
+        renderer.render(hw, hh, &s.camera, &settings);
+        let shot = renderer.read_color();
+        // back to the window size
+        renderer.render(w, h, &s.camera, &settings);
+        if let Some((iw, ih, data)) = shot {
+            if let Some(p) = rfd::FileDialog::new().add_filter("PNG", &["png"]).set_file_name("Ansicht.png").save_file() {
+                match image::save_buffer(&p, &data, iw, ih, image::ExtendedColorType::Rgba8) {
+                    Ok(()) => app.toast(format!("Bild {iw}×{ih} gespeichert")),
+                    Err(e) => app.error(e.to_string()),
+                }
+            }
+        }
+        app.force_redraw = true;
+        return;
+    }
     if let Some(tex) = renderer.texture_id {
         ui.painter().image(tex, rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
     }
@@ -977,9 +994,20 @@ fn toolbar(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
             s.measure.points.clear();
         }
         ui.separator();
-        if ui.button(ic::CAMERA).on_hover_text("Bildschirmfoto der 3D-Ansicht speichern").clicked() {
-            app.request_view_screenshot = true;
-        }
+        ui.menu_button(ic::CAMERA, |ui| {
+            if ui.button("Bildschirmfoto (Fenstergröße)").clicked() {
+                app.request_view_screenshot = true;
+                ui.close();
+            }
+            for k in [2u32, 4] {
+                if ui.button(format!("Hohe Auflösung ({k}×)")).on_hover_text("Rendert die Ansicht neu in höherer Auflösung (max. 8192 px)").clicked() {
+                    app.hires_screenshot = Some(k);
+                    ui.close();
+                }
+            }
+        })
+        .response
+        .on_hover_text("Bildschirmfoto der 3D-Ansicht speichern");
     });
 }
 

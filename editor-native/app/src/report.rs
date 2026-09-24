@@ -174,6 +174,64 @@ th{{background:#f4f6f8}} td.n,th.n{{text-align:right;font-variant-numeric:tabula
     h
 }
 
+/// Objects with attributes, structure, type, material, classification, psets and quantities as JSON.
+pub fn json_export(s: &Session, ids: &[u32]) -> String {
+    use serde_json::{json, Map, Value as J};
+    let doc = &s.doc;
+    let val = |v: &ifc_doc::Value| -> J {
+        let t = v.display();
+        match t.parse::<f64>() {
+            Ok(f) if f.is_finite() && !t.is_empty() => json!(f),
+            _ => match t.as_str() {
+                "TRUE" => J::Bool(true),
+                "FALSE" => J::Bool(false),
+                "" => J::Null,
+                _ => J::String(t),
+            },
+        }
+    };
+    let items: Vec<J> = ids
+        .iter()
+        .map(|&id| {
+            let mut psets = Map::new();
+            let mut qtos = Map::new();
+            for ps in model::psets_of(doc, id) {
+                let mut m = Map::new();
+                for p in &ps.props {
+                    m.insert(p.name.clone(), val(&p.value));
+                }
+                let target = if ps.is_quantity { &mut qtos } else { &mut psets };
+                target.entry(ps.name.clone()).or_insert_with(|| J::Object(Map::new()));
+                if let Some(J::Object(o)) = target.get_mut(&ps.name) {
+                    o.extend(m);
+                }
+            }
+            json!({
+                "id": id,
+                "GlobalId": doc.guid_of(id),
+                "Klasse": doc.type_camel(id),
+                "Name": doc.name_of(id),
+                "Beschreibung": doc.attr_str(id, "Description"),
+                "ObjectType": doc.attr_str(id, "ObjectType"),
+                "Tag": doc.attr_str(id, "Tag"),
+                "Geschoss": s.tree.storey_of(doc, id).and_then(|st| doc.name_of(st)),
+                "Typ": model::type_of(doc, id).and_then(|t| doc.name_of(t)),
+                "Material": model::materials_of(doc, id).iter().flat_map(|m| m.layers.iter().map(|l| l.material_name.clone())).collect::<Vec<_>>(),
+                "Klassifikation": model::classifications_of(doc, id).iter().map(|c| json!({"System": c.source, "Code": c.identification, "Name": c.name})).collect::<Vec<_>>(),
+                "Psets": psets,
+                "Mengen": qtos,
+            })
+        })
+        .collect();
+    serde_json::to_string_pretty(&json!({
+        "Datei": s.path.as_ref().map(|p| p.display().to_string()),
+        "Schema": doc.schema_id.display(),
+        "Längeneinheit": model::length_unit(doc).1,
+        "Objekte": items,
+    }))
+    .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

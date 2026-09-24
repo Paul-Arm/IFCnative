@@ -77,6 +77,8 @@ pub struct AppCtx {
     pub context_menu_frames: u32,
     pub request_delete: bool,
     pub request_view_screenshot: bool,
+    /// Render the view at this scale factor and save it as PNG.
+    pub hires_screenshot: Option<u32>,
     pub force_redraw: bool,
     pub last_view_size: (u32, u32),
     pub color_pset: String,
@@ -116,6 +118,7 @@ pub enum Action {
     ExportSubset,
     ExportCsv,
     ExportXlsx,
+    ExportJson,
     ExportObj,
     ImportTable,
     /// Export the current plan/section cut (true = DXF, false = SVG).
@@ -246,6 +249,7 @@ impl IfcApp {
                 context_menu_frames: 0,
                 request_delete: false,
                 request_view_screenshot: false,
+                hires_screenshot: None,
                 force_redraw: true,
                 last_view_size: (0, 0),
                 color_pset: String::new(),
@@ -575,6 +579,17 @@ impl IfcApp {
                         st.open = true;
                     }
                 }
+                Action::ExportJson => {
+                    if let Some(s) = self.sessions.get(self.active) {
+                        let ids: Vec<u32> = if s.selection.is_empty() { s.doc.ids_with_flag(ifc_doc::tflags::PRODUCT) } else { s.selection.iter().flat_map(|&id| s.tree.subtree(id)).filter(|&id| s.doc.has_flag(id, ifc_doc::tflags::PRODUCT)).collect() };
+                        if let Some(p) = rfd::FileDialog::new().add_filter("JSON", &["json"]).set_file_name("Eigenschaften.json").save_file() {
+                            match std::fs::write(&p, crate::report::json_export(s, &ids)) {
+                                Ok(()) => self.ctx_state.toast(format!("{} Objekte als JSON exportiert", ids.len())),
+                                Err(e) => self.ctx_state.error(e.to_string()),
+                            }
+                        }
+                    }
+                }
                 Action::ExportObj => {
                     if let Some(s) = self.sessions.get(self.active) {
                         if let Some(p) = rfd::FileDialog::new().add_filter("OBJ", &["obj"]).add_filter("glTF binär", &["glb"]).set_file_name("Modell.glb").save_file() {
@@ -664,6 +679,28 @@ impl IfcApp {
             let sel = s.selection.clone();
             if let Some(ids) = s.edit("Duplizieren", |doc| ifc_doc::ops::duplicate(doc, &sel, [0.0, 0.0, 0.0])) {
                 s.select(ids, false);
+            }
+        }
+        // view presets on the number keys (Blender style): 1 front, 3 right, 7 top (+Ctrl opposite), 5 ortho, 0 iso
+        {
+            use crate::viewer::camera::ViewPreset as V;
+            let presets = [(Key::Num1, V::Front, V::Back), (Key::Num3, V::Right, V::Left), (Key::Num7, V::Top, V::Bottom)];
+            for (k, a, b) in presets {
+                if sc(ctx, cmd, k) {
+                    s.camera.set_preset(b);
+                    s.fit_all();
+                } else if sc(ctx, Modifiers::NONE, k) {
+                    s.camera.set_preset(a);
+                    s.fit_all();
+                }
+            }
+            if sc(ctx, Modifiers::NONE, Key::Num0) {
+                s.camera.set_preset(V::Iso);
+                s.fit_all();
+            }
+            if sc(ctx, Modifiers::NONE, Key::Num5) {
+                s.camera.ortho = !s.camera.ortho;
+                s.view_dirty = true;
             }
         }
         if sc(ctx, Modifiers::NONE, Key::Escape) {
@@ -789,6 +826,10 @@ impl IfcApp {
                     }
                     if ui.button("Eigenschaften als Excel (XLSX) …").clicked() {
                         self.ctx_state.actions.push(Action::ExportXlsx);
+                        ui.close();
+                    }
+                    if ui.button("Eigenschaften als JSON …").on_hover_text("Attribute, Raumstruktur, Typ, Material, Klassifikation, Psets und Mengen je Objekt").clicked() {
+                        self.ctx_state.actions.push(Action::ExportJson);
                         ui.close();
                     }
                     if ui.button("Geometrie als GLB/OBJ …").clicked() {
@@ -1224,6 +1265,8 @@ impl IfcApp {
                         ("Umschalt+Ziehen", "Rahmenauswahl"),
                         ("Doppelklick", "Auf Objekt zoomen"),
                         ("Alt+← / Alt+→", "Auswahlverlauf zurück / vor"),
+                        ("1 / 3 / 7 (Strg: Gegenseite)", "Ansicht vorne / rechts / oben"),
+                        ("5 / 0", "Perspektive ↔ orthografisch / Isometrie"),
                         ("Strg+F", "Filter öffnen"),
                         ("Strg+K / F1", "Befehlspalette"),
                         ("K", "Kanten ein/aus"),

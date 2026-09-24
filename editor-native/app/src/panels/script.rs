@@ -178,6 +178,12 @@ pub fn run(cmd: &str, app: &mut IfcApp, _ctx: &egui::Context) {
                 let _ = crate::bcf::write_bcf(std::path::Path::new(&arg), "Test", &[topic]);
             }
         }
+        "json-export" => {
+            if let Some(s) = app.sessions.get(app.active) {
+                let ids = s.doc.ids_with_flag(ifc_doc::tflags::PRODUCT);
+                let _ = std::fs::write(&arg, crate::report::json_export(s, &ids));
+            }
+        }
         "federate" => {
             app.ctx_state.federated = arg != "off";
             app.ctx_state.federated_dim = arg == "dim";
