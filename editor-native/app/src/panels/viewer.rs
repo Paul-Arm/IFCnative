@@ -307,6 +307,41 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx, others: &mut [
         }
     }
 
+    // ---------------------------------------------------------------- hover info (one pick after the pointer rests)
+    {
+        let busy = ui.input(|i| i.pointer.any_down()) || resp.dragged() || app.context_menu_pos.is_some() || s.tool != Tool::Select;
+        match (pointer.filter(|_| resp.hovered() && !busy), app.hover_rest) {
+            (Some(p), Some((q, t, done))) if p.distance(q) < 2.0 => {
+                if !done && t.elapsed().as_millis() >= 280 {
+                    let lp = local(p);
+                    let r = renderer.pick(w, h, &s.camera, &settings, (lp.x * ppp) as u32, (lp.y * ppp) as u32);
+                    let obj = r.obj.filter(|_| r.layer == 0);
+                    if s.hover_obj != obj {
+                        s.hover_obj = obj;
+                        s.view_dirty = true;
+                    }
+                    app.hover_rest = Some((q, t, true));
+                } else if !done {
+                    ui.ctx().request_repaint_after(std::time::Duration::from_millis(300));
+                }
+            }
+            (Some(p), _) => {
+                app.hover_rest = Some((p, std::time::Instant::now(), false));
+                if s.hover_obj.take().is_some() {
+                    s.view_dirty = true;
+                }
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(300));
+            }
+            (None, _) => {
+                app.hover_rest = None;
+                if s.hover_obj.take().is_some() {
+                    s.view_dirty = true;
+                }
+            }
+        }
+    }
+    let settings = RenderSettings { hover_obj: s.hover_obj, ..settings };
+
     // ---------------------------------------------------------------- render
     renderer.begin_layers();
     let mut layers_changed = renderer.sync_layer(s.uid, 0, &mut s.scene, Vec3::ZERO, false);
@@ -423,6 +458,20 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx, others: &mut [
     }
     if let (Some(last), Some(ptr)) = (s.measure.points.last().and_then(|p| to_screen(*p)), pointer) {
         painter.line_segment([last, ptr], Stroke::new(1.0, accent));
+    }
+    if let (Some(o), Some(p)) = (s.hover_obj, pointer) {
+        if let Some(id) = s.scene.objects.get(o as usize).map(|x| x.id) {
+            let class = s.doc.type_camel(id).unwrap_or("?");
+            let name = s.doc.name_of(id).unwrap_or_default();
+            let storey = s.tree.storey_of(&s.doc, id).map(|st| ifc_doc::model::label(&s.doc, st)).unwrap_or_default();
+            let txt = if name.is_empty() { class.to_string() } else { format!("{name}\n{class}{}", if storey.is_empty() { String::new() } else { format!(" · {storey}") }) };
+            let galley = painter.layout_no_wrap(txt, FontId::proportional(12.0), ui.visuals().text_color());
+            let at = p + Vec2::new(16.0, 18.0);
+            let r = Rect::from_min_size(at, galley.size() + Vec2::new(12.0, 8.0));
+            painter.rect_filled(r, 5.0, ui.visuals().extreme_bg_color.gamma_multiply(0.92));
+            painter.rect_stroke(r, 5.0, Stroke::new(1.0, ui.visuals().weak_text_color().gamma_multiply(0.5)), egui::StrokeKind::Inside);
+            painter.galley(at + Vec2::new(6.0, 4.0), galley, ui.visuals().text_color());
+        }
     }
     if let (Some(a), Some(b)) = (app.box_start, pointer) {
         let r = Rect::from_two_pos(a, b);

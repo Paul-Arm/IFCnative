@@ -79,6 +79,8 @@ pub struct AppCtx {
     pub request_view_screenshot: bool,
     /// Render the view at this scale factor and save it as PNG.
     pub hires_screenshot: Option<u32>,
+    /// Hover info: last pointer position, time it came to rest, pick done.
+    pub hover_rest: Option<(egui::Pos2, std::time::Instant, bool)>,
     pub force_redraw: bool,
     pub last_view_size: (u32, u32),
     pub color_pset: String,
@@ -250,6 +252,7 @@ impl IfcApp {
                 request_delete: false,
                 request_view_screenshot: false,
                 hires_screenshot: None,
+                hover_rest: None,
                 force_redraw: true,
                 last_view_size: (0, 0),
                 color_pset: String::new(),
