@@ -40,6 +40,7 @@ pub struct Cond {
 
 #[derive(Default)]
 pub struct SearchState {
+    pub fulltext: String,
     pub class: String,
     pub subtypes: bool,
     pub conds: Vec<Cond>,
@@ -93,8 +94,51 @@ pub fn run(doc: &Document, tree: &model::SpatialTree, st: &SearchState) -> Vec<u
     candidates.into_par_iter().filter(|&id| st.conds.iter().all(|c| check(doc, tree, id, c))).collect()
 }
 
+/// Objects whose attributes, property/quantity values, type, material or classification contain `text`.
+pub fn fulltext(doc: &Document, text: &str) -> Vec<u32> {
+    let needle = text.trim().to_lowercase();
+    if needle.is_empty() {
+        return Vec::new();
+    }
+    let ids: Vec<u32> = doc.ids_with_flag(tflags::PRODUCT).into_iter().chain(doc.ids_with_flag(tflags::TYPE_OBJECT)).collect();
+    let hit = |t: &str| t.to_lowercase().contains(&needle);
+    let mut out: Vec<u32> = ids
+        .par_iter()
+        .copied()
+        .filter(|&id| {
+            doc.args(id).map(|a| a.iter().any(|v| matches!(v, ifc_doc::Value::Str(_) | ifc_doc::Value::Enum(_)) && hit(&v.display()))).unwrap_or(false)
+                || doc.guid_of(id).map(|g| g == text.trim()).unwrap_or(false)
+                || model::psets_of(doc, id).iter().any(|p| hit(&p.name) || p.props.iter().any(|x| hit(&x.name) || hit(&x.value.display())))
+                || model::materials_of(doc, id).iter().any(|m| m.layers.iter().any(|l| hit(&l.material_name)))
+                || model::classifications_of(doc, id).iter().any(|c| hit(&c.identification) || hit(&c.name))
+                || model::type_of(doc, id).and_then(|t| doc.name_of(t)).map(|n| hit(&n)).unwrap_or(false)
+        })
+        .collect();
+    out.sort_unstable();
+    out
+}
+
 pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
     let st = &mut app.panel_state.search;
+    let mut ft: Option<Vec<u32>> = None;
+    ui.horizontal(|ui| {
+        ui.label(ic::SEARCH);
+        let r = ui.add(egui::TextEdit::singleline(&mut st.fulltext).hint_text("Volltext: Werte, Eigenschaften, Material, Klassifikation …").desired_width(300.0));
+        let go = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        if (ui.add_enabled(!st.fulltext.trim().is_empty(), egui::Button::new("Suchen")).clicked() || go) && !st.fulltext.trim().is_empty() {
+            let t = std::time::Instant::now();
+            ft = Some(fulltext(&s.doc, &st.fulltext));
+            st.millis = t.elapsed().as_secs_f64() * 1000.0;
+        }
+    });
+    if let Some(ids) = ft {
+        st.results = ids.clone();
+        st.ran = true;
+        s.status = format!("Volltextsuche: {} Treffer ({:.0} ms)", ids.len(), st.millis);
+        s.select(ids, false);
+    }
+    let st = &mut app.panel_state.search;
+    ui.separator();
     ui.horizontal(|ui| {
         ui.label("Klasse");
         ui.add(egui::TextEdit::singleline(&mut st.class).hint_text("z. B. IfcWall (leer = alle Produkte)").desired_width(170.0));

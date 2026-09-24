@@ -227,6 +227,13 @@ pub fn run(cmd: &str, app: &mut IfcApp, _ctx: &egui::Context) {
                 }
             }
         }
+        "fulltext" => {
+            if let Some(s) = app.session() {
+                let ids = crate::panels::search::fulltext(&s.doc, &arg);
+                eprintln!("fulltext '{arg}': {} hits", ids.len());
+                s.select(ids, false);
+            }
+        }
         "federate" => {
             app.ctx_state.federated = arg != "off";
             app.ctx_state.federated_dim = arg == "dim";

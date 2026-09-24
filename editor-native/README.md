@@ -90,7 +90,9 @@ Schema-Prüfung aller Entities ~0,7 s, Speichern ~0,3 s.
 **Prüfen & Auswerten**
 - Modellprüfung inkl. **Schema-Konformität** aller Entities (Pflichtattribute,
   Verweise, Klassen, Aufzählungen), GlobalIds, Raumstruktur, Platzierung, Geometrie,
-  Psets, Öffnungen, ungenutzte Daten – mit Ein-Klick-Korrekturen
+  Psets, Öffnungen, ungenutzte Daten, **doppelte (deckungsgleiche) Elemente** und
+  **Proxy-Assistent** (IfcBuildingElementProxy per Name klassifizieren) – mit Ein-Klick-Korrekturen
+- Volltextsuche über Attribute, Eigenschaftswerte, Material, Klassifikation und Typ
 - IDS 1.0: alle Facetten, Restriktionen, Kardinalitäten, ifcVersion, automatische
   Neuprüfung, **Ergebnis im 3D einfärben**, **Autokorrektur** eindeutig vorgegebener
   Werte; Bericht als CSV und BCF; GlobalId-/Tag-Suche
