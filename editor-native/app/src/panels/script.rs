@@ -74,6 +74,13 @@ pub fn run(cmd: &str, app: &mut IfcApp, _ctx: &egui::Context) {
                 }
             }
         }
+        "merge-from" => {
+            // merge-from <session index>
+            if let Ok(i) = arg.parse::<usize>() {
+                app.ctx_state.actions.push(crate::app::Action::MergeFrom(i));
+                app.process_actions(_ctx);
+            }
+        }
         "federate" => {
             app.ctx_state.federated = arg != "off";
             app.ctx_state.federated_dim = arg == "dim";

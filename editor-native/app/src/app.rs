@@ -117,6 +117,10 @@ pub enum Action {
     /// Export the current plan/section cut (true = DXF, false = SVG).
     ExportCut(bool),
     FocusFederated(usize, u32),
+    /// Merge the whole document `i` into the active one.
+    MergeFrom(usize),
+    /// Copy the active selection into document `i`.
+    CopySelectionTo(usize),
     Compare(PathBuf),
     BcfView,
 }
@@ -379,7 +383,7 @@ impl IfcApp {
         s.view_dirty = true;
     }
 
-    fn process_actions(&mut self, ctx: &egui::Context) {
+    pub(crate) fn process_actions(&mut self, ctx: &egui::Context) {
         let actions = std::mem::take(&mut self.ctx_state.actions);
         for a in actions {
             match a {
@@ -483,6 +487,39 @@ impl IfcApp {
                                         Err(e) => self.ctx_state.error(e.to_string()),
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+                Action::MergeFrom(i) => {
+                    if i < self.sessions.len() && i != self.active {
+                        let src = self.sessions[i].doc.clone();
+                        let title = self.sessions[i].title();
+                        let t0 = std::time::Instant::now();
+                        let s = &mut self.sessions[self.active];
+                        match s.edit(&format!("{title} übernehmen"), |doc| ifc_doc::merge::merge_from(doc, &src, None)) {
+                            Some(r) => {
+                                self.ctx_state.toast(format!("{title}: {} ({:.1} s)", r.summary(), t0.elapsed().as_secs_f64()));
+                                s.needs_fit = true;
+                            }
+                            None => self.ctx_state.error(format!("Zusammenführen fehlgeschlagen: {}", s.last_error.clone().unwrap_or_default())),
+                        }
+                    }
+                }
+                Action::CopySelectionTo(i) => {
+                    if i < self.sessions.len() && i != self.active {
+                        let (src, ids) = {
+                            let a = &self.sessions[self.active];
+                            (a.doc.clone(), a.paint_targets())
+                        };
+                        if ids.is_empty() {
+                            self.ctx_state.error("Keine Objekte ausgewählt");
+                        } else {
+                            let s = &mut self.sessions[i];
+                            let title = s.title();
+                            match s.edit("Objekte einfügen", |doc| ifc_doc::merge::merge_from(doc, &src, Some(&ids))) {
+                                Some(r) => self.ctx_state.toast(format!("Nach {title} kopiert: {}", r.summary())),
+                                None => self.ctx_state.error(format!("Kopieren fehlgeschlagen: {}", s.last_error.clone().unwrap_or_default())),
                             }
                         }
                     }
@@ -742,6 +779,17 @@ impl IfcApp {
                 });
                 if ui.add_enabled(has, egui::Button::new(format!("{} Tabelle importieren (CSV/Excel) …", ic::IMPORT))).clicked() {
                     self.ctx_state.actions.push(Action::ImportTable);
+                }
+                if self.sessions.len() > 1 {
+                    ui.menu_button(format!("{} Modell hier einfügen", ic::LAYERS), |ui| {
+                        ui.weak("Alle Objekte des gewählten Modells in das aktive übernehmen (Geschosse werden nach Namen zugeordnet)");
+                        for (i, other) in self.sessions.iter().enumerate() {
+                            if i != self.active && ui.button(other.title()).clicked() {
+                                self.ctx_state.actions.push(Action::MergeFrom(i));
+                                ui.close();
+                            }
+                        }
+                    });
                 }
                 if ui.add_enabled(has, egui::Button::new(format!("{} Mit Datei vergleichen …", ic::DIFF))).clicked() {
                     if let Some(p) = rfd::FileDialog::new().add_filter("IFC", &["ifc", "ifczip"]).pick_file() {

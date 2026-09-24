@@ -538,6 +538,16 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx, others: &mut [
                         });
                     });
                 });
+                if app.open_docs.len() > 1 && has_sel {
+                    ui.menu_button(format!("{} Kopieren nach", ic::COPY), |ui| {
+                        for (i, (uid, title)) in app.open_docs.clone().into_iter().enumerate() {
+                            if uid != s.uid && ui.button(title).clicked() {
+                                app.actions.push(crate::app::Action::CopySelectionTo(i));
+                                close = true;
+                            }
+                        }
+                    });
+                }
                 ui.menu_button(format!("{} Hier hinzufügen", ic::PLUS), |ui| {
                     let Some(at) = app.panel_state.builder_pick else {
                         ui.weak("Auf eine Fläche rechtsklicken");
