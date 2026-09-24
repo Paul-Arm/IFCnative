@@ -576,6 +576,12 @@ impl IfcApp {
         if sc(ctx, Modifiers::NONE, Key::M) {
             s.tool = if s.tool == Tool::Measure { Tool::Select } else { Tool::Measure };
         }
+        if sc(ctx, Modifiers::NONE, Key::G) {
+            s.tool = if s.tool == Tool::Move { Tool::Select } else { Tool::Move };
+        }
+        if sc(ctx, Modifiers::NONE, Key::R) {
+            s.tool = if s.tool == Tool::Rotate { Tool::Select } else { Tool::Rotate };
+        }
         if sc(ctx, Modifiers::NONE, Key::B) {
             s.tool = if s.tool == Tool::BoxSelect { Tool::Select } else { Tool::BoxSelect };
         }
@@ -979,6 +985,13 @@ impl IfcApp {
                         changed |= ui.checkbox(&mut st.invert_zoom, "Zoomrichtung umkehren").changed();
                     });
                     ui.end_row();
+                    ui.label("Anzeige");
+                    ui.vertical(|ui| {
+                        changed |= ui.checkbox(&mut st.show_selection_box, "Auswahlbox anzeigen").changed();
+                        changed |= ui.checkbox(&mut st.show_grid, "Bodenraster anzeigen").changed();
+                        changed |= ui.checkbox(&mut st.show_edges, "Kanten anzeigen").changed();
+                    });
+                    ui.end_row();
                     ui.label("Fangradius Messen (px)");
                     changed |= ui.add(egui::Slider::new(&mut st.snap_px, 0.0..=40.0)).changed();
                     ui.end_row();
@@ -1043,6 +1056,7 @@ impl IfcApp {
                         ("F / Z", "Alles zeigen / Auf Auswahl zoomen"),
                         ("X / P", "Röntgenmodus / Orthografisch"),
                         ("M / B", "Messen / Rahmenauswahl"),
+                        ("G / R", "Verschieben- / Drehen-Gizmo"),
                         ("1 3 7 0 4 6 9", "Vorne, Rechts, Oben, Iso, Links, Hinten, Unten"),
                         ("W A S D Q E", "Kamera bewegen (Maus über 3D-Ansicht)"),
                         ("Linke Maus / Rechte Maus / Rad", "Drehen / Verschieben / Zoomen"),

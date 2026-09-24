@@ -143,6 +143,17 @@ pub fn run(cmd: &str, app: &mut IfcApp, _ctx: &egui::Context) {
                 }
             }
         }
+        "tool" => {
+            if let Some(s) = app.session() {
+                s.tool = match arg.as_str() {
+                    "move" => crate::session::Tool::Move,
+                    "rotate" => crate::session::Tool::Rotate,
+                    "measure" => crate::session::Tool::Measure,
+                    "coords" => crate::session::Tool::PickCoords,
+                    _ => crate::session::Tool::Select,
+                };
+            }
+        }
         "print-status" => {
             if let Some(s) = app.session() {
                 println!("STATUS: {} | objects={} tris={} sel={:?} dirty={}", s.status, s.scene.objects.len(), s.scene.total_tris, s.selection, s.doc.is_dirty());

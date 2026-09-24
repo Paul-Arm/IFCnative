@@ -30,6 +30,8 @@ pub struct Settings {
     pub active_workspace: String,
     pub author: String,
     pub organization: String,
+    pub show_selection_box: bool,
+    pub show_grid: bool,
 }
 
 impl Default for Settings {
@@ -58,6 +60,8 @@ impl Default for Settings {
             active_workspace: "Editor".into(),
             author: String::new(),
             organization: String::new(),
+            show_selection_box: false,
+            show_grid: true,
         }
     }
 }

@@ -58,6 +58,9 @@ pub enum Tool {
     Measure,
     Section,
     BoxSelect,
+    PickCoords,
+    Move,
+    Rotate,
 }
 
 pub struct Session {
@@ -96,6 +99,10 @@ pub struct Session {
     pub meta_pending: bool,
     /// Suggested file name for "Save" of a new document.
     pub pending_new_name: Option<String>,
+    /// Last picked coordinate (scene coords) for the coordinate tool.
+    pub picked_coord: Option<Vec3>,
+    /// Gizmo drag state: accumulated world delta (m) and rotation (deg).
+    pub gizmo_drag: Option<(u8, Vec3, f32)>,
 }
 
 static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -148,6 +155,8 @@ impl Session {
             plan_saved_camera: None,
             meta_pending: false,
             pending_new_name: None,
+            picked_coord: None,
+            gizmo_drag: None,
         }
     }
 

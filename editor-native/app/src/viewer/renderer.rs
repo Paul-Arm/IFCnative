@@ -70,6 +70,9 @@ pub struct RenderSettings {
     pub clip_planes: Vec<Vec4>,
     pub hover_obj: Option<u32>,
     pub edges: bool,
+    pub grid: bool,
+    /// Grid fade distance (m).
+    pub grid_fade: f32,
 }
 
 pub struct Renderer {
@@ -81,6 +84,9 @@ pub struct Renderer {
     pipe_ghost: wgpu::RenderPipeline,
     pipe_id: wgpu::RenderPipeline,
     pipe_edge: wgpu::RenderPipeline,
+    pipe_grid: wgpu::RenderPipeline,
+    grid: Option<(wgpu::Buffer, u32)>,
+    pub grid_key: Option<[i32; 5]>,
     bgl: wgpu::BindGroupLayout,
     globals: wgpu::Buffer,
     state_buf: wgpu::Buffer,
@@ -143,6 +149,17 @@ impl Renderer {
             multiview_mask: None,
             cache: None,
         });
+        let pipe_grid = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("grid"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs_grid"), compilation_options: Default::default(), buffers: &[Some(vlayout.clone())] },
+            primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::LineList, cull_mode: None, ..Default::default() },
+            depth_stencil: Some(wgpu::DepthStencilState { format: DEPTH_FORMAT, depth_write_enabled: Some(false), depth_compare: Some(wgpu::CompareFunction::GreaterEqual), stencil: Default::default(), bias: Default::default() }),
+            multisample: wgpu::MultisampleState { count: msaa, mask: !0, alpha_to_coverage_enabled: false },
+            fragment: Some(wgpu::FragmentState { module: &shader, entry_point: Some("fs_grid"), compilation_options: Default::default(), targets: &[Some(wgpu::ColorTargetState { format: COLOR_FORMAT, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL })] }),
+            multiview_mask: None,
+            cache: None,
+        });
         let pipe_id = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("id"),
             layout: Some(&layout),
@@ -176,6 +193,9 @@ impl Renderer {
             pipe_ghost,
             pipe_id,
             pipe_edge,
+            pipe_grid,
+            grid: None,
+            grid_key: None,
             bgl,
             globals,
             state_buf,
@@ -199,6 +219,45 @@ impl Renderer {
     /// Drop all GPU geometry (new document).
     pub fn clear(&mut self) {
         self.chunks.clear();
+        self.grid = None;
+        self.grid_key = None;
+    }
+
+    /// Ground grid at height `z` covering [lo, hi] (scene coords), 1 m minor / 10 m major lines.
+    pub fn set_grid(&mut self, lo: glam::Vec2, hi: glam::Vec2, z: f32, dark: bool) {
+        let key = [lo.x.floor() as i32, lo.y.floor() as i32, hi.x.ceil() as i32, hi.y.ceil() as i32, (z * 100.0) as i32];
+        if self.grid_key == Some(key) {
+            return;
+        }
+        self.grid_key = Some(key);
+        let ext = (hi - lo).max_element().max(10.0);
+        let step = if ext > 2000.0 { 100.0 } else if ext > 200.0 { 10.0 } else { 1.0 };
+        let pad = ext * 0.25;
+        let (x0, x1) = (((lo.x - pad) / step).floor() * step, ((hi.x + pad) / step).ceil() * step);
+        let (y0, y1) = (((lo.y - pad) / step).floor() * step, ((hi.y + pad) / step).ceil() * step);
+        let mut v: Vec<Vertex> = Vec::new();
+        let base = if dark { [150u8, 160, 175] } else { [90u8, 95, 105] };
+        let mut add = |a: [f32; 3], b: [f32; 3], major: bool| {
+            let col = [base[0], base[1], base[2], if major { 110 } else { 45 }];
+            v.push(Vertex { pos: a, color: col, obj: 0 });
+            v.push(Vertex { pos: b, color: col, obj: 0 });
+        };
+        let mut x = x0;
+        let mut guard = 0;
+        while x <= x1 + 1e-3 && guard < 4000 {
+            add([x, y0, z], [x, y1, z], ((x / step).round() as i64) % 10 == 0);
+            x += step;
+            guard += 1;
+        }
+        let mut y = y0;
+        while y <= y1 + 1e-3 && guard < 8000 {
+            add([x0, y, z], [x1, y, z], ((y / step).round() as i64) % 10 == 0);
+            y += step;
+            guard += 1;
+        }
+        use wgpu::util::DeviceExt;
+        let buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("grid"), contents: bytemuck::cast_slice(&v), usage: wgpu::BufferUsages::VERTEX });
+        self.grid = Some((buf, v.len() as u32));
     }
 
     /// Upload dirty chunks and object state.
@@ -300,7 +359,7 @@ impl Renderer {
         }
         let g = Globals {
             view_proj: vp.to_cols_array_2d(),
-            cam_pos: [eye.x, eye.y, eye.z, 1.0],
+            cam_pos: [eye.x, eye.y, eye.z, s.grid_fade],
             light_dir: Vec3::new(0.35, 0.55, 0.85).normalize().extend(0.0).to_array(),
             clip_planes: planes,
             params: [s.clip_planes.len().min(6) as u32, u32::from_le_bytes(s.selection_color), s.xray as u32, s.hover_obj.map(|o| o + 1).unwrap_or(0)],
@@ -342,6 +401,11 @@ impl Renderer {
                     pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
                     pass.draw_indexed(0..c.n_opaque, 0, 0..1);
                 }
+            }
+            if let (true, Some((buf, n))) = (s.grid, &self.grid) {
+                pass.set_pipeline(&self.pipe_grid);
+                pass.set_vertex_buffer(0, buf.slice(..));
+                pass.draw(0..*n, 0..1);
             }
             if s.edges {
                 pass.set_pipeline(&self.pipe_edge);

@@ -32,6 +32,8 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
         clip_planes: s.clip_planes(),
         hover_obj: s.hover_obj,
         edges: app.settings.show_edges,
+        grid: app.settings.show_grid && !s.scene.objects.is_empty(),
+        grid_fade: s.camera.dist * 4.0 + 50.0,
     };
     let pointer = resp.hover_pos();
     let local = |p: Pos2| GVec2::new(p.x - rect.min.x, p.y - rect.min.y);
@@ -58,6 +60,74 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
     }
     let modifiers = ui.input(|i| i.modifiers);
     let box_mode = s.tool == Tool::BoxSelect || (modifiers.shift && resp.dragged_by(egui::PointerButton::Primary) && s.tool == Tool::Select && app.box_start.is_some()) ;
+    let gizmo_active = matches!(s.tool, Tool::Move | Tool::Rotate) && !s.selection.is_empty();
+    let gizmo_center = if gizmo_active { s.scene.bbox_of(s.selection.clone()).map(|(lo, hi)| (lo + hi) * 0.5) } else { None };
+    let gizmo_hit = |p: Pos2, s: &Session| -> Option<u8> {
+        let c = gizmo_center?;
+        let cs = s.camera.project(c, size)?;
+        let cs = Pos2::new(rect.min.x + cs.x, rect.min.y + cs.y);
+        if s.tool == Tool::Rotate {
+            let d = (p - cs).length();
+            return if (d - 70.0).abs() < 12.0 { Some(3) } else { None };
+        }
+        let scale = s.camera.dist * 0.12;
+        for (k, axis) in [Vec3::X, Vec3::Y, Vec3::Z].iter().enumerate() {
+            if let Some(e) = s.camera.project(c + *axis * scale, size) {
+                let e = Pos2::new(rect.min.x + e.x, rect.min.y + e.y);
+                // distance point-segment
+                let ab = e - cs;
+                let t = ((p - cs).dot(ab) / ab.length_sq().max(1.0)).clamp(0.0, 1.0);
+                if (cs + ab * t - p).length() < 9.0 {
+                    return Some(k as u8);
+                }
+            }
+        }
+        None
+    };
+    if gizmo_active && resp.drag_started_by(egui::PointerButton::Primary) {
+        if let Some(p) = pointer {
+            if let Some(axis) = gizmo_hit(p, s) {
+                s.gizmo_drag = Some((axis, Vec3::ZERO, 0.0));
+            }
+        }
+    }
+    if let (Some((axis, mut delta, mut rot)), true) = (s.gizmo_drag, resp.dragged()) {
+        let d = resp.drag_delta();
+        if let Some(c) = gizmo_center {
+            if axis == 3 {
+                if let (Some(p), Some(cs)) = (pointer, s.camera.project(c, size)) {
+                    let cs = Pos2::new(rect.min.x + cs.x, rect.min.y + cs.y);
+                    let a0 = (p - d - cs).angle();
+                    let a1 = (p - cs).angle();
+                    rot -= (a1 - a0).to_degrees();
+                }
+            } else {
+                let mut dir = Vec3::ZERO;
+                dir[axis as usize] = 1.0;
+                let scale = s.camera.dist * 0.12;
+                if let (Some(a), Some(b)) = (s.camera.project(c, size), s.camera.project(c + dir * scale, size)) {
+                    let sd = b - a;
+                    let len2 = sd.length_squared().max(1.0);
+                    let t = (d.x * sd.x + d.y * sd.y) / len2;
+                    delta += dir * t * scale;
+                }
+            }
+        }
+        s.gizmo_drag = Some((axis, delta, rot));
+        s.view_dirty = true;
+    }
+    if resp.drag_stopped() {
+        if let Some((_, delta, rot)) = s.gizmo_drag.take() {
+            let unit = ifc_doc::model::length_unit(&s.doc).0;
+            let sel = s.selection.clone();
+            let snap = |v: f32| if app.settings.snap_px > 0.0 { (v * 100.0).round() / 100.0 } else { v };
+            let d = glam::DVec3::new(snap(delta.x) as f64, snap(delta.y) as f64, snap(delta.z) as f64) / unit;
+            let r = (rot as f64 * 2.0).round() / 2.0;
+            if d.length() > 0.0 || r.abs() > 0.0 {
+                s.edit(if r.abs() > 0.0 { "Drehen" } else { "Verschieben" }, |doc| crate::panels::builder::transform_products(doc, &sel, d, r));
+            }
+        }
+    }
     if resp.drag_started_by(egui::PointerButton::Primary) && (s.tool == Tool::BoxSelect || modifiers.shift) {
         app.box_start = pointer;
     }
@@ -65,6 +135,8 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
         let d = resp.drag_delta();
         if app.box_start.is_some() && (s.tool == Tool::BoxSelect || modifiers.shift) {
             // box selection drag; drawn below
+        } else if s.gizmo_drag.is_some() {
+            // gizmo handles the drag
         } else if resp.dragged_by(egui::PointerButton::Primary) && !modifiers.ctrl {
             if let (true, Some(p)) = (app.settings.orbit_around_pick, app.orbit_pivot) {
                 s.camera.orbit_around(p, d.x, d.y);
@@ -120,6 +192,16 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
                             s.measure.points.clear();
                             s.status = format!("Abstand: {:.3} m  (ΔX {:.3}, ΔY {:.3}, ΔZ {:.3})", a.distance(b), (b - a).x.abs(), (b - a).y.abs(), (b - a).z.abs());
                         }
+                    }
+                }
+                Tool::PickCoords if resp.clicked() => {
+                    if let Some(pos) = r.pos {
+                        s.picked_coord = Some(pos);
+                        let w = pos.as_dvec3() + s.scene.origin;
+                        let json = format!("{{\"x\": {:.4}, \"y\": {:.4}, \"z\": {:.4}}}", w.x, w.y, w.z);
+                        ui.ctx().copy_text(json);
+                        s.status = format!("Koordinate kopiert: X {:.4}  Y {:.4}  Z {:.4} m", w.x, w.y, w.z);
+                        app.panel_state.builder_pick = Some(w);
                     }
                 }
                 Tool::Section if resp.clicked() => {
@@ -178,6 +260,13 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
 
     // ---------------------------------------------------------------- render
     renderer.sync(&mut s.scene);
+    if settings.grid {
+        if let Some((lo, hi)) = s.scene.robust_visible_bbox() {
+            let z = s.doc.ids_of_type("IFCBUILDINGSTOREY").into_iter().filter_map(|st| s.storey_elevation(st)).fold(f32::MAX, f32::min);
+            let z = if z == f32::MAX || z < lo.z - 1.0 || z > hi.z { lo.z } else { z };
+            renderer.set_grid(lo.truncate(), hi.truncate(), z - 0.002, ui.visuals().dark_mode);
+        }
+    }
     let aspect_changed = app.last_view_size != (w, h);
     if s.view_dirty || aspect_changed || app.force_redraw {
         renderer.render(w, h, &s.camera, &settings);
@@ -219,6 +308,57 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
         painter.rect_filled(r, 0.0, Color32::from_rgba_unmultiplied(80, 150, 255, 40));
         painter.rect_stroke(r, 0.0, Stroke::new(1.0, Color32::from_rgb(80, 150, 255)), egui::StrokeKind::Inside);
     }
+    // move/rotate gizmo
+    if let Some(c) = gizmo_center {
+        let (drag_axis, delta, rot) = s.gizmo_drag.map(|g| (Some(g.0), g.1, g.2)).unwrap_or((None, Vec3::ZERO, 0.0));
+        let c2 = c + delta;
+        if let Some(cs) = to_screen(c2) {
+            if s.tool == Tool::Rotate {
+                let col = if drag_axis == Some(3) { accent } else { Color32::from_rgb(80, 130, 240) };
+                painter.circle_stroke(cs, 70.0, Stroke::new(3.0, col));
+                if rot != 0.0 {
+                    painter.text(cs + Vec2::new(0.0, -86.0), Align2::CENTER_CENTER, format!("{rot:+.1}°"), FontId::proportional(14.0), accent);
+                }
+            } else {
+                let scale = s.camera.dist * 0.12;
+                for (k, (axis, col)) in [(Vec3::X, Color32::from_rgb(230, 70, 70)), (Vec3::Y, Color32::from_rgb(80, 200, 90)), (Vec3::Z, Color32::from_rgb(80, 130, 240))].iter().enumerate() {
+                    if let Some(e) = to_screen(c2 + *axis * scale) {
+                        let col = if drag_axis == Some(k as u8) { accent } else { *col };
+                        painter.arrow(cs, e - cs, Stroke::new(3.0, col));
+                    }
+                }
+                if delta != Vec3::ZERO {
+                    painter.text(cs + Vec2::new(12.0, -18.0), Align2::LEFT_BOTTOM, format!("Δ {:.2} / {:.2} / {:.2} m", delta.x, delta.y, delta.z), FontId::proportional(13.0), accent);
+                }
+            }
+            // ghost bbox of the moved selection
+            if let Some((lo, hi)) = s.scene.bbox_of(s.selection.clone()) {
+                draw_box(&painter, lo + delta, hi + delta, &to_screen, Stroke::new(1.0, accent));
+            }
+        }
+    }
+    if app.settings.show_selection_box && s.gizmo_drag.is_none() && !s.selection.is_empty() {
+        if let Some((lo, hi)) = s.scene.bbox_of(s.selection.clone()) {
+            draw_box(&painter, lo, hi, &to_screen, Stroke::new(1.5, accent));
+        }
+    }
+    if let (Some(p), Tool::PickCoords) = (s.picked_coord, s.tool) {
+        if let Some(ps) = to_screen(p) {
+            let w = p.as_dvec3() + s.scene.origin;
+            for (axis, col) in [(Vec3::X, Color32::from_rgb(230, 70, 70)), (Vec3::Y, Color32::from_rgb(80, 200, 90)), (Vec3::Z, Color32::from_rgb(80, 130, 240))] {
+                if let Some(e) = to_screen(p + axis * s.camera.dist * 0.05) {
+                    painter.line_segment([ps, e], Stroke::new(2.0, col));
+                }
+            }
+            let txt = format!("X {:.3}\nY {:.3}\nZ {:.3}", w.x, w.y, w.z);
+            let galley = painter.layout_no_wrap(txt, FontId::monospace(12.0), ui.visuals().text_color());
+            let r = Rect::from_min_size(ps + Vec2::new(10.0, 10.0), galley.size() + Vec2::new(10.0, 6.0));
+            painter.rect_filled(r, 4.0, ui.visuals().window_fill().gamma_multiply(0.95));
+            painter.galley(r.min + Vec2::new(5.0, 3.0), galley, ui.visuals().text_color());
+        }
+    }
+    // view cube (clickable)
+    view_cube(ui, &painter, rect, s);
     // axis gizmo
     let gc = Pos2::new(rect.min.x + 44.0, rect.max.y - 44.0);
     for (axis, col, label) in [(Vec3::X, Color32::from_rgb(230, 70, 70), "X"), (Vec3::Y, Color32::from_rgb(80, 200, 90), "Y"), (Vec3::Z, Color32::from_rgb(80, 130, 240), "Z")] {
@@ -261,6 +401,9 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
             Tool::Measure => "Messen: zwei Punkte anklicken (Esc beendet)",
             Tool::Section => "Schnitt: Fläche anklicken, um eine Schnittebene zu setzen",
             Tool::BoxSelect => "Rahmenauswahl: Rechteck aufziehen (Strg = hinzufügen)",
+            Tool::PickCoords => "Koordinaten: Punkt anklicken (wird als JSON kopiert)",
+            Tool::Move => "Verschieben: Achspfeil ziehen (G)",
+            Tool::Rotate => "Drehen: Ring ziehen (R)",
             Tool::Select => "",
         };
         painter.text(Pos2::new(rect.center().x, rect.min.y + 14.0), Align2::CENTER_TOP, hint, FontId::proportional(13.0), accent);
@@ -343,6 +486,9 @@ fn toolbar(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
         tool_btn(ui, &mut s.tool, Tool::BoxSelect, ic::BOX_SELECT, "Rahmenauswahl (oder Umschalt+Ziehen)");
         tool_btn(ui, &mut s.tool, Tool::Measure, ic::RULER, "Messen (M)");
         tool_btn(ui, &mut s.tool, Tool::Section, ic::SECTION, "Schnittebene an Fläche setzen");
+        tool_btn(ui, &mut s.tool, Tool::PickCoords, ic::ph::MAP_PIN, "Koordinaten picken (kopiert JSON)");
+        tool_btn(ui, &mut s.tool, Tool::Move, ic::MOVE, "Verschieben-Gizmo (G)");
+        tool_btn(ui, &mut s.tool, Tool::Rotate, ic::ph::ARROWS_CLOCKWISE, "Drehen-Gizmo um Z (R)");
         ui.separator();
         if ui.button(ic::FIT).on_hover_text("Alles zeigen (F)").clicked() {
             s.fit_all();
@@ -489,4 +635,85 @@ fn toolbar(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
             app.request_view_screenshot = true;
         }
     });
+}
+
+fn draw_box(painter: &egui::Painter, lo: Vec3, hi: Vec3, to_screen: &dyn Fn(Vec3) -> Option<Pos2>, stroke: Stroke) {
+    let c = [
+        Vec3::new(lo.x, lo.y, lo.z),
+        Vec3::new(hi.x, lo.y, lo.z),
+        Vec3::new(hi.x, hi.y, lo.z),
+        Vec3::new(lo.x, hi.y, lo.z),
+        Vec3::new(lo.x, lo.y, hi.z),
+        Vec3::new(hi.x, lo.y, hi.z),
+        Vec3::new(hi.x, hi.y, hi.z),
+        Vec3::new(lo.x, hi.y, hi.z),
+    ];
+    for (a, b) in [(0, 1), (1, 2), (2, 3), (3, 0), (4, 5), (5, 6), (6, 7), (7, 4), (0, 4), (1, 5), (2, 6), (3, 7)] {
+        if let (Some(p), Some(q)) = (to_screen(c[a]), to_screen(c[b])) {
+            painter.line_segment([p, q], stroke);
+        }
+    }
+}
+
+/// Small clickable view cube in the top right corner.
+fn view_cube(ui: &mut egui::Ui, painter: &egui::Painter, rect: Rect, s: &mut Session) {
+    let center = Pos2::new(rect.max.x - 60.0, rect.min.y + 60.0);
+    let size = 26.0;
+    let view = s.camera.view();
+    let proj = |v: Vec3| -> (Pos2, f32) {
+        let r = view.transform_vector3(v);
+        (center + Vec2::new(r.x, -r.y) * size, r.z)
+    };
+    use crate::viewer::camera::ViewPreset as V;
+    let faces: [(Vec3, Vec3, Vec3, &str, V); 6] = [
+        (Vec3::Z, Vec3::X, Vec3::Y, "Oben", V::Top),
+        (-Vec3::Z, Vec3::X, -Vec3::Y, "Unten", V::Bottom),
+        (-Vec3::Y, Vec3::X, Vec3::Z, "Vorne", V::Front),
+        (Vec3::Y, -Vec3::X, Vec3::Z, "Hinten", V::Back),
+        (Vec3::X, Vec3::Y, Vec3::Z, "Rechts", V::Right),
+        (-Vec3::X, -Vec3::Y, Vec3::Z, "Links", V::Left),
+    ];
+    let mut drawn: Vec<(f32, Vec<Pos2>, &str, V)> = Vec::new();
+    for (n, u, v, label, preset) in faces {
+        let (_, depth) = proj(n);
+        let pts: Vec<Pos2> = [n - u - v, n + u - v, n + u + v, n - u + v].iter().map(|p| proj(*p * 0.5).0).collect();
+        drawn.push((depth, pts, label, preset));
+    }
+    drawn.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    let pointer = ui.input(|i| i.pointer.hover_pos());
+    let clicked = ui.input(|i| i.pointer.primary_clicked());
+    let mut hit: Option<V> = None;
+    for (depth, pts, label, preset) in &drawn {
+        if *depth < 0.0 {
+            continue; // back faces
+        }
+        let inside = pointer.map(|p| point_in_poly(p, pts)).unwrap_or(false);
+        let fill = if inside { Color32::from_rgba_unmultiplied(255, 170, 40, 200) } else { ui.visuals().widgets.inactive.bg_fill.gamma_multiply(0.9) };
+        painter.add(egui::Shape::convex_polygon(pts.clone(), fill, Stroke::new(1.0, ui.visuals().widgets.inactive.fg_stroke.color.gamma_multiply(0.6))));
+        let c = pts.iter().fold(Vec2::ZERO, |a, p| a + p.to_vec2()) / pts.len() as f32;
+        if *depth > 0.35 {
+            painter.text(c.to_pos2(), Align2::CENTER_CENTER, *label, FontId::proportional(9.5), ui.visuals().text_color());
+        }
+        if inside && clicked {
+            hit = Some(*preset);
+        }
+    }
+    if let Some(p) = hit {
+        s.camera.set_preset(p);
+        s.fit_all();
+    }
+}
+
+fn point_in_poly(p: Pos2, poly: &[Pos2]) -> bool {
+    let mut inside = false;
+    let n = poly.len();
+    let mut j = n - 1;
+    for i in 0..n {
+        let (a, b) = (poly[i], poly[j]);
+        if ((a.y > p.y) != (b.y > p.y)) && (p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y + 1e-9) + a.x) {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
 }

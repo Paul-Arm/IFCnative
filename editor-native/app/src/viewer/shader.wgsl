@@ -168,3 +168,21 @@ fn fs_edge(i: VOut) -> @location(0) vec4<f32> {
     }
     return vec4<f32>(0.02, 0.022, 0.026, 0.55);
 }
+
+@vertex
+fn vs_grid(v: VIn) -> VOut {
+    var o: VOut;
+    o.world = v.pos;
+    o.color = v.color;
+    o.obj = 0u;
+    o.clip = g.view_proj * vec4<f32>(v.pos, 1.0);
+    return o;
+}
+
+@fragment
+fn fs_grid(i: VOut) -> @location(0) vec4<f32> {
+    // fade with distance to the camera
+    let d = distance(g.cam_pos.xyz, i.world);
+    let fade = clamp(1.0 - d / (g.cam_pos.w * 1.0 + 1.0), 0.0, 1.0);
+    return vec4<f32>(srgb_to_linear(i.color.rgb), i.color.a * fade);
+}
