@@ -88,6 +88,7 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
         load(&mut app.panel_state.ids, &p);
         run(&mut app.panel_state.ids, s);
     }
+    let mut fixed_msg: Option<String> = None;
     let st = &mut app.panel_state.ids;
     // automatic re-check after model changes
     if st.auto && st.ids.is_some() && st.checked_rev.map(|r| r.1 != s.doc.revision() || r.0 != s.uid).unwrap_or(false) && s.loading.is_none() {
@@ -104,6 +105,16 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
             run(st, s);
         }
         ui.checkbox(&mut st.auto, "bei Änderungen neu prüfen");
+        let fixable = st.ids.as_ref().map(|(_, i)| ids::autofix_candidates(i, &st.results)).unwrap_or(0);
+        if fixable > 0 && ui.button(format!("{} Korrigieren ({fixable})", ic::EDIT)).on_hover_text("Setzt eindeutig vorgegebene Werte (Eigenschaft, Attribut, Klassifikation, Material) bei nicht erfüllten Objekten – ein Rückgängig-Schritt").clicked() {
+            if let Some((_, i)) = st.ids.clone() {
+                let results = st.results.clone();
+                if let Some((n, objs)) = s.edit("IDS-Korrektur", |doc| ids::autofix(doc, &i, &results)) {
+                    fixed_msg = Some(format!("IDS-Korrektur: {n} Werte an {objs} Objekten gesetzt"));
+                }
+                run(st, s);
+            }
+        }
         if !st.results.is_empty() && ui.button(format!("{} Einfärben", ic::PALETTE)).on_hover_text("Ergebnis im 3D: grün = erfüllt, rot = Verstoß, grau = nicht geprüft").clicked() {
             // an object failing any specification is red, applicable and never failing is green
             let mut map: rustc_hash::FxHashMap<u32, String> = rustc_hash::FxHashMap::default();
@@ -151,6 +162,10 @@ pub fn show(ui: &mut egui::Ui, s: &mut Session, app: &mut AppCtx) {
             }
         }
     });
+    if let Some(m) = fixed_msg.take() {
+        app.toast(m);
+    }
+    let st = &mut app.panel_state.ids;
     if let Some(e) = &st.error {
         ui.colored_label(Color32::from_rgb(240, 90, 80), e);
     }

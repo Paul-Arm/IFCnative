@@ -630,3 +630,118 @@ mod tests {
         assert!(r[0].failures[0].reason.contains("FireRating"));
     }
 }
+
+// ------------------------------------------------------------------ auto fix
+
+/// The single value a constraint prescribes, if any.
+fn fixed_value(c: &Constraint) -> Option<String> {
+    match c {
+        Constraint::Simple(v) => Some(v.clone()),
+        Constraint::Enum(l) if l.len() == 1 => Some(l[0].clone()),
+        _ => None,
+    }
+}
+
+/// Number of requirements of failing objects that prescribe one definite value
+/// (property, attribute, classification, material) – what `autofix` can set.
+pub fn autofix_candidates(ids: &Ids, results: &[SpecResult]) -> usize {
+    ids.specs
+        .iter()
+        .zip(results)
+        .filter(|(_, r)| r.status == SpecStatus::Fail)
+        .map(|(spec, r)| {
+            let fixable = spec.requirements.iter().filter(|q| q.card == Cardinality::Required && fixable_facet(&q.facet)).count();
+            if fixable == 0 {
+                0
+            } else {
+                let mut ids: Vec<u32> = r.failures.iter().map(|f| f.id).collect();
+                ids.sort_unstable();
+                ids.dedup();
+                ids.len()
+            }
+        })
+        .sum()
+}
+
+fn fixable_facet(f: &Facet) -> bool {
+    match f {
+        Facet::Property { pset, name, value, .. } => fixed_value(pset).is_some() && fixed_value(name).is_some() && fixed_value(value).is_some(),
+        Facet::Attribute { name, value } => fixed_value(name).is_some() && fixed_value(value).is_some(),
+        Facet::Classification { system, value } => fixed_value(system).is_some() && fixed_value(value).is_some(),
+        Facet::Material { value } => fixed_value(value).is_some(),
+        _ => false,
+    }
+}
+
+/// Set prescribed values on all objects failing a specification.
+/// Returns (values written, objects touched).
+pub fn autofix(doc: &mut Document, ids: &Ids, results: &[SpecResult]) -> anyhow::Result<(usize, usize)> {
+    let mut written = 0;
+    let mut touched = rustc_hash::FxHashSet::default();
+    for (spec, r) in ids.specs.iter().zip(results) {
+        if r.status != SpecStatus::Fail {
+            continue;
+        }
+        let mut objs: Vec<u32> = r.failures.iter().map(|f| f.id).collect();
+        objs.sort_unstable();
+        objs.dedup();
+        for q in spec.requirements.iter().filter(|q| q.card == Cardinality::Required) {
+            for &id in &objs {
+                if !doc.exists(id) {
+                    continue;
+                }
+                let done = match &q.facet {
+                    Facet::Property { pset, name, value, data_type } => match (fixed_value(pset), fixed_value(name), fixed_value(value)) {
+                        (Some(ps), Some(n), Some(v)) => {
+                            let val = match data_type {
+                                Some(dt) => crate::ops::typed_value(&dt.to_ascii_uppercase(), &v, doc),
+                                None => crate::ops::typed_value_from_text(&v, None),
+                            };
+                            crate::ops::set_property(doc, id, &ps, &n, val, true)?;
+                            true
+                        }
+                        _ => false,
+                    },
+                    Facet::Attribute { name, value } => match (fixed_value(name), fixed_value(value)) {
+                        (Some(a), Some(v)) => {
+                            let ty = doc.type_name(id).unwrap_or("").to_string();
+                            if doc.schema().attr_index(&ty, &a).is_some() {
+                                let cur = doc.attr(id, &a).unwrap_or(Value::Null);
+                                let nv = if matches!(cur, Value::Enum(_)) || a == "PredefinedType" { Value::Enum(v.to_ascii_uppercase()) } else { Value::Str(v) };
+                                doc.set_attr(id, &a, nv)?;
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        _ => false,
+                    },
+                    Facet::Classification { system, value } => match (fixed_value(system), fixed_value(value)) {
+                        (Some(sys), Some(code)) => {
+                            let has = model::classifications_of(doc, id).iter().any(|c| c.source.eq_ignore_ascii_case(&sys) && c.identification == code);
+                            if !has {
+                                crate::ops::assign_classification(doc, &[id], &sys, &code, "")?;
+                            }
+                            !has
+                        }
+                        _ => false,
+                    },
+                    Facet::Material { value } => match fixed_value(value) {
+                        Some(m) => {
+                            let mat = crate::ops::find_or_create_material(doc, &m);
+                            crate::ops::assign_material(doc, &[id], mat)?;
+                            true
+                        }
+                        None => false,
+                    },
+                    _ => false,
+                };
+                if done {
+                    written += 1;
+                    touched.insert(id);
+                }
+            }
+        }
+    }
+    Ok((written, touched.len()))
+}

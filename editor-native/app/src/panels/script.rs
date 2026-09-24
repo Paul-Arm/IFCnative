@@ -207,6 +207,18 @@ pub fn run(cmd: &str, app: &mut IfcApp, _ctx: &egui::Context) {
                 }
             }
         }
+        "ids-fix" => {
+            // ids-fix <file.ids>: check, auto-fix, re-check; prints counts
+            if let Some(s) = app.sessions.get_mut(app.active) {
+                if let Ok(i) = std::fs::read_to_string(&arg).map_err(anyhow::Error::from).and_then(|t| ifc_doc::ids::parse(&t)) {
+                    let before = ifc_doc::ids::check(&s.doc, &i);
+                    let fails = |r: &[ifc_doc::ids::SpecResult]| r.iter().map(|x| x.failures.len()).sum::<usize>();
+                    let res = s.edit("IDS-Korrektur", |doc| ifc_doc::ids::autofix(doc, &i, &before));
+                    let after = ifc_doc::ids::check(&s.doc, &i);
+                    eprintln!("ids-fix: failures {} -> {}, written {:?}", fails(&before), fails(&after), res);
+                }
+            }
+        }
         "federate" => {
             app.ctx_state.federated = arg != "off";
             app.ctx_state.federated_dim = arg == "dim";
