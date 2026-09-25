@@ -1,0 +1,48 @@
+# Lokale Testumgebung: OpenProject 17.7.2 (all-in-one, BIM-Edition) mit
+# Plugin "IFC Hub". Der Hub selbst läuft nativ (npm run dev:openproject)
+# auf http://localhost:8787 — beide Adressen sind "same-site" (localhost).
+#
+#   docker compose -f deploy/openproject-local/docker-compose.yml up -d --build
+#
+# Secrets stehen in .env neben dieser Datei (Vorlage: .env.example).
+name: ifc-hub-openproject
+
+services:
+  openproject:
+    build:
+      context: ../..
+      dockerfile: deploy/openproject-local/Dockerfile
+      # "plugin" = schnell ohne Frontend-Neubau (Upload in den Speicher
+      # "IFC Hub" fehlt dann), "full" = mit Angular-Build (Standard).
+      target: ${OPENPROJECT_BUILD_TARGET:-full}
+      args:
+        NODE_HEAP_MB: ${NODE_HEAP_MB:-6144}
+    image: ifcnative/openproject-ifc-hub:17.7.2-local
+    ports:
+      - "8080:80"
+    environment:
+      # OpenProject 17 liest SECRET_KEY_BASE (ohne OPENPROJECT_-Präfix) und
+      # verweigert den Start mit dem Platzhalter aus dem Image.
+      SECRET_KEY_BASE: ${OPENPROJECT_SECRET_KEY_BASE:?in .env setzen}
+      OPENPROJECT_HOST__NAME: localhost:8080
+      OPENPROJECT_HTTPS: "false"
+      OPENPROJECT_DEFAULT__LANGUAGE: de
+      OPENPROJECT_EDITION: bim
+      # Plugin "IFC Hub": Hub-Adresse aus Sicht des Browsers + gemeinsames Secret
+      IFC_HUB_URL: ${IFC_HUB_URL:-http://localhost:8787}
+      IFC_HUB_SHARED_SECRET: ${OPENPROJECT_SHARED_SECRET:?in .env setzen}
+      # Speichertyp "IFC Hub": OpenProject blockiert Server-Anfragen an private
+      # IPs (SSRF-Schutz) — die IP des Hubs muss freigegeben sein. Lokal ist
+      # das host.docker.internal (Docker Desktop: 192.168.65.254), auf dem
+      # Server die interne IP des Hubs.
+      OPENPROJECT_SSRF_PROTECTION_IP_ALLOWLIST: ${IFC_HUB_SSRF_ALLOWLIST:-192.168.65.254}
+    volumes:
+      - pgdata:/var/openproject/pgdata
+      - assets:/var/openproject/assets
+      # Entwicklung: Plugin-Quellen live einbinden — nach Änderungen genügt
+      # `docker compose restart openproject` statt eines neuen Builds.
+      - ../../openproject-plugin:/app/vendored-plugins/openproject-ifc_hub:ro
+
+volumes:
+  pgdata:
+  assets:
