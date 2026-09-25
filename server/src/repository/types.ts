@@ -62,6 +62,20 @@ export interface Member {
 export type Visibility = "private" | "public";
 
 /**
+ * Verknüpfung eines Hub-Objekts mit seinem Gegenstück in einem Fremdsystem
+ * (z. B. OpenProject-Benutzer 16 <-> Hub-User). Pro (system, kind,
+ * externalId) genau ein lokales Objekt.
+ */
+export type ExternalLinkKind = "user" | "project";
+
+export interface ExternalLink {
+  system: string;
+  kind: ExternalLinkKind;
+  externalId: string;
+  localId: string;
+}
+
+/**
  * Dateiart eines Modells: "ifc" = IFC-Modell mit semantischem GlobalId-Diff,
  * "md" = Markdown-Dokument (z. B. README), versioniert ohne Objekt-Diff,
  * "file" = beliebige Datei (PDF, Word, DWG, …), versioniert als Binärblob.
@@ -296,9 +310,23 @@ export interface Repository {
   userHasContent(userId: string): Promise<boolean>;
   listAllProjects(): Promise<Project[]>;
 
+  // Verknüpfungen mit Fremdsystemen (OpenProject)
+  /** Lokale Id zu (system, kind, externalId) oder null. */
+  getExternalLink(
+    system: string,
+    kind: ExternalLinkKind,
+    externalId: string,
+  ): Promise<string | null>;
+  /** Legt die Verknüpfung an bzw. biegt sie auf ein anderes lokales Objekt um. */
+  setExternalLink(link: ExternalLink): Promise<void>;
+  deleteExternalLink(system: string, kind: ExternalLinkKind, externalId: string): Promise<void>;
+  /** Alle Verknüpfungen eines lokalen Objekts (für Rück-Links in der UI). */
+  listExternalLinks(kind: ExternalLinkKind, localId: string): Promise<ExternalLink[]>;
+
   // Projects + membership
   createProject(input: Omit<Project, "id" | "createdAt">): Promise<Project>;
   getProjectBySlug(slug: string): Promise<Project | null>;
+  getProjectById(id: string): Promise<Project | null>;
   listProjectsForUser(userId: string): Promise<Project[]>;
   listPublicProjects(): Promise<Project[]>;
   updateProject(
@@ -313,6 +341,7 @@ export interface Repository {
   // Models
   createModel(input: Omit<Model, "id" | "createdAt">): Promise<Model>;
   getModel(projectId: string, slug: string): Promise<Model | null>;
+  getModelById(id: string): Promise<Model | null>;
   listModels(projectId: string): Promise<Model[]>;
   updateModel(
     modelId: string,

@@ -4,6 +4,7 @@ import { hashPassword } from "./auth/passwords";
 import { loadConfig } from "./config";
 import { buildApp } from "./http/app";
 import { installProcessErrorLog } from "./http/requestLog";
+import { MIN_SECRET_LENGTH } from "./integrations/openproject";
 import { createPgClient } from "./repository/sql/pgClient";
 import { SqliteClient } from "./repository/sql/sqliteClient";
 import { SqlRepository } from "./repository/sqlRepository";
@@ -67,12 +68,31 @@ async function main(): Promise<void> {
     console.log(`Admin-Status gesetzt fuer ${config.adminEmail}`);
   }
 
+  let openproject: { sharedSecret: string; origin?: string; internalUrl?: string } | undefined;
+  if (config.openprojectSharedSecret) {
+    if (config.openprojectSharedSecret.length < MIN_SECRET_LENGTH) {
+      throw new Error(
+        `OPENPROJECT_SHARED_SECRET muss mindestens ${MIN_SECRET_LENGTH} Zeichen lang sein`,
+      );
+    }
+    openproject = {
+      sharedSecret: config.openprojectSharedSecret,
+      origin: config.openprojectOrigin,
+      internalUrl: config.openprojectInternalUrl,
+    };
+    console.log(
+      `OpenProject-Einbettung aktiv (frame-ancestors: ${config.openprojectOrigin ?? "nur self"}, ` +
+        `Abgleich-Webhook: ${config.openprojectInternalUrl ?? "aus"})`,
+    );
+  }
+
   const app = buildApp({
     repo,
     store,
     jwtSecret: config.jwtSecret,
     storageMode: config.storage,
     logRequests: config.logRequests,
+    openproject,
   });
 
   await app.listen({ port: config.port, host: config.host });

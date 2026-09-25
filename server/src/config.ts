@@ -12,6 +12,29 @@ export interface ServerConfig {
   adminPassword: string;
   /** Jede Anfrage auf stdout protokollieren (LOG_REQUESTS=0 schaltet ab). */
   logRequests: boolean;
+  /**
+   * OpenProject-Einbettung: OPENPROJECT_SHARED_SECRET (= IFC_HUB_SHARED_SECRET
+   * im Plugin) und OPENPROJECT_URL (Adresse, unter der der Browser
+   * OpenProject öffnet; wird zur frame-ancestors-Freigabe).
+   */
+  openprojectSharedSecret: string | undefined;
+  openprojectOrigin: string | undefined;
+  /**
+   * OPENPROJECT_INTERNAL_URL: Adresse, unter der der Hub-SERVER OpenProject
+   * erreicht (Webhook für den Abgleich). Standard: OPENPROJECT_URL.
+   */
+  openprojectInternalUrl: string | undefined;
+}
+
+/** Origin (Schema://Host[:Port]) einer URL oder undefined. */
+function originOf(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    const { origin } = new URL(url);
+    return origin === "null" ? undefined : origin;
+  } catch {
+    throw new Error(`OPENPROJECT_URL ist keine gültige URL: ${url}`);
+  }
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
@@ -32,5 +55,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     adminEmail: env.ADMIN_EMAIL ?? "admin@ifc-hub.local",
     adminPassword: env.ADMIN_PASSWORD ?? "ifc-hub-admin",
     logRequests: env.LOG_REQUESTS !== "0" && env.LOG_REQUESTS !== "false",
+    openprojectSharedSecret: env.OPENPROJECT_SHARED_SECRET || undefined,
+    openprojectOrigin: originOf(env.OPENPROJECT_URL),
+    openprojectInternalUrl: env.OPENPROJECT_INTERNAL_URL || originOf(env.OPENPROJECT_URL),
   };
 }

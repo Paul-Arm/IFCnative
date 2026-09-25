@@ -22,6 +22,8 @@ import type {
   Branch,
   LibraryFile,
   Commit,
+  ExternalLink,
+  ExternalLinkKind,
   Issue,
   IssueComment,
   IssueKind,
@@ -404,6 +406,10 @@ export class SqlRepository implements Repository {
       await this.sql.query(`delete from project_members where user_id = $1`, [
         userId,
       ]);
+      await this.sql.query(
+        `delete from external_links where kind = 'user' and local_id = $1`,
+        [userId],
+      );
       await this.sql.query(`delete from users where id = $1`, [userId]);
     });
   }
@@ -413,6 +419,62 @@ export class SqlRepository implements Repository {
       `select * from projects order by created_at desc`,
     );
     return rows.map(toProject);
+  }
+
+  // ---- Verknüpfungen mit Fremdsystemen --------------------------------
+
+  async getExternalLink(
+    system: string,
+    kind: ExternalLinkKind,
+    externalId: string,
+  ): Promise<string | null> {
+    const { rows } = await this.sql.query<{ local_id: string }>(
+      `select local_id from external_links
+       where system = $1 and kind = $2 and external_id = $3`,
+      [system, kind, externalId],
+    );
+    return rows[0]?.local_id ?? null;
+  }
+
+  async setExternalLink(link: ExternalLink): Promise<void> {
+    await this.sql.query(
+      `insert into external_links (system, kind, external_id, local_id)
+       values ($1, $2, $3, $4)
+       on conflict (system, kind, external_id) do update set local_id = excluded.local_id`,
+      [link.system, link.kind, link.externalId, link.localId],
+    );
+  }
+
+  async deleteExternalLink(
+    system: string,
+    kind: ExternalLinkKind,
+    externalId: string,
+  ): Promise<void> {
+    await this.sql.query(
+      `delete from external_links where system = $1 and kind = $2 and external_id = $3`,
+      [system, kind, externalId],
+    );
+  }
+
+  async listExternalLinks(
+    kind: ExternalLinkKind,
+    localId: string,
+  ): Promise<ExternalLink[]> {
+    const { rows } = await this.sql.query<{
+      system: string;
+      kind: ExternalLinkKind;
+      external_id: string;
+      local_id: string;
+    }>(
+      `select * from external_links where kind = $1 and local_id = $2`,
+      [kind, localId],
+    );
+    return rows.map((row) => ({
+      system: row.system,
+      kind: row.kind,
+      externalId: row.external_id,
+      localId: row.local_id,
+    }));
   }
 
   // ---- projects + membership ------------------------------------------
@@ -444,6 +506,14 @@ export class SqlRepository implements Repository {
     const { rows } = await this.sql.query<ProjectRow>(
       `select * from projects where slug = $1`,
       [slug],
+    );
+    return rows[0] ? toProject(rows[0]) : null;
+  }
+
+  async getProjectById(id: string): Promise<Project | null> {
+    const { rows } = await this.sql.query<ProjectRow>(
+      `select * from projects where id = $1`,
+      [id],
     );
     return rows[0] ? toProject(rows[0]) : null;
   }
@@ -547,6 +617,11 @@ export class SqlRepository implements Repository {
       `select * from models where project_id = $1 and slug = $2`,
       [projectId, slug],
     );
+    return rows[0] ? toModel(rows[0]) : null;
+  }
+
+  async getModelById(id: string): Promise<Model | null> {
+    const { rows } = await this.sql.query<ModelRow>(`select * from models where id = $1`, [id]);
     return rows[0] ? toModel(rows[0]) : null;
   }
 
@@ -685,6 +760,10 @@ export class SqlRepository implements Repository {
       await this.sql.query(`delete from project_members where project_id = $1`, [
         projectId,
       ]);
+      await this.sql.query(
+        `delete from external_links where kind = 'project' and local_id = $1`,
+        [projectId],
+      );
       await this.sql.query(`delete from project_folders where project_id = $1`, [
         projectId,
       ]);

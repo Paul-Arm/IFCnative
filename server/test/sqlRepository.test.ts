@@ -85,6 +85,26 @@ test("metadata round-trips through the SQL repository", async () => {
   assert.equal((await repo.listProjectsForUser(user.id)).length, 1);
 });
 
+test("external links: upsert, reverse lookup, cleanup on delete", async () => {
+  const { db, repo, user, project } = await setup();
+  assert.deepEqual(await repo.getProjectById(project.id), project);
+  assert.equal(await repo.getExternalLink("openproject", "project", "7"), null);
+
+  await repo.setExternalLink({ system: "openproject", kind: "project", externalId: "7", localId: project.id });
+  await repo.setExternalLink({ system: "openproject", kind: "user", externalId: "16", localId: user.id });
+  // Upsert: gleiche externe Id zeigt danach auf dasselbe Objekt, kein Duplikat.
+  await repo.setExternalLink({ system: "openproject", kind: "project", externalId: "7", localId: project.id });
+  assert.equal(await repo.getExternalLink("openproject", "project", "7"), project.id);
+  assert.equal(await repo.getExternalLink("openproject", "user", "16"), user.id);
+  assert.deepEqual(await repo.listExternalLinks("project", project.id), [
+    { system: "openproject", kind: "project", externalId: "7", localId: project.id },
+  ]);
+
+  await repo.deleteProject(project.id);
+  assert.equal(await repo.getExternalLink("openproject", "project", "7"), null);
+  assert.equal(await count(db, "external_links"), 1);
+});
+
 test("commits persist, dedup entity payloads, and cache diffs", async () => {
   const { db, repo, service, user, model } = await setup();
 

@@ -2,8 +2,25 @@
 import { PhBooks, PhSignOut, PhUsersThree } from "@phosphor-icons/vue";
 
 const { user, token, logout, setSession } = useAuth();
+const { embed } = useEmbed();
 const { api } = useApi();
 const route = useRoute();
+
+// Eingebettet: OpenProject die aktuelle Seite melden (relativ zum Projekt),
+// damit dessen Adresszeile folgt — Neuladen/teilen landet dann hier.
+watch(
+  () => route.path,
+  (path) => {
+    if (!embed.value || window.parent === window) return;
+    const prefix = `/p/${embed.value.projectSlug}`;
+    if (path !== prefix && !path.startsWith(`${prefix}/`)) return;
+    window.parent.postMessage(
+      { type: "ifc-hub:navigate", path: path.slice(prefix.length).replace(/\/$/, "") },
+      new URL(embed.value.openprojectUrl).origin,
+    );
+  },
+  { immediate: true },
+);
 
 // user-Objekt beim Laden auffrischen (z. B. neu gesetzter Admin-Status).
 onMounted(async () => {
@@ -21,7 +38,8 @@ onMounted(async () => {
 
 <template>
   <div>
-    <header v-if="token" class="topbar">
+    <!-- Eingebettet liefert OpenProject Kopfzeile, Benutzer und Abmelden. -->
+    <header v-if="token && !embed" class="topbar">
       <div class="topbar-inner">
         <NuxtLink to="/" class="brand">
           <HubLogo :size="22" node-fill="var(--surface)" />

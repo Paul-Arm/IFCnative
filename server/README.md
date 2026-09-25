@@ -328,6 +328,34 @@ Auth: `Authorization: Bearer <JWT>` aus `/api/auth/login`. Fehler kommen als
 CORS ist offen (Bearer-Auth, keine Cookies) — Editor (Vite/Tauri) und
 Nuxt-Dev-Server können direkt zugreifen.
 
+## OpenProject-Integration
+
+Zusammen mit dem Plugin `openproject-plugin/` (Details dort) wird der Hub
+in OpenProject eingebettet und dient als externer Dateispeicher.
+Aktiviert wird das über `OPENPROJECT_SHARED_SECRET` (mindestens 32
+Zeichen, dasselbe Secret wie `IFC_HUB_SHARED_SECRET` im Plugin).
+`OPENPROJECT_URL` erlaubt der OpenProject-Instanz das Einbetten
+(`frame-ancestors`).
+
+| Methode    | Pfad                                                   | Bemerkung                                                                                                                                                     |
+| ---------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST       | `/api/integrations/openproject/session`                | Ticket (HS256, 120 s, einmalig) → Hub-Sitzung. Verknüpfte Projekte: Rolle abgleichen. Sonst `unlinked` + Einrichtungs-Berechtigung (nur Projektadmins) |
+| POST       | `/api/integrations/openproject/setup`                  | `{grant, slug?}`: vorhandenes Hub-Projekt verknüpfen bzw. ohne `slug` neues anlegen                                                                       |
+| GET/DELETE | `/api/projects/:slug/integrations/openproject`         | Verknüpfungsstatus / Verknüpfung lösen (Projektadmin)                                                                                                       |
+| GET        | `/api/integrations/openproject/storage/…`              | Datei-API für den Speichertyp „IFC Hub“ (`user`, `files`, `files/info`, `paths`, `open`, `download-link`, `upload-link`); Speicher-Token von OpenProject |
+| GET/POST   | `/api/integrations/openproject/storage/download\|upload?t=` | signierte Links für den Browser; Upload committet eine neue Version bzw. legt ein Modell an (gleicher Commit-Weg wie `POST …/commits`)                  |
+| GET/POST/PATCH | `/api/integrations/openproject/sync/:opProjectId/…` | Abgleich mit OpenProjects BCF-Modul (`state`, `models`, `models/:id/file`, `models/:id/commits`, `issues`, `issues/:id`, `issues/:id/comments`); Speicher-Token von OpenProject |
+
+Ändert sich etwas in einem verknüpften Projekt (Commit, Issue, Kommentar
+über API/Web-UI oder Upload aus OpenProject), meldet der Hub das per
+signiertem Webhook an `OPENPROJECT_INTERNAL_URL/ifc_hub/webhook`
+(Standard: `OPENPROJECT_URL`). Das Plugin gleicht dann IFC-Modelle und
+BCF-Issues in beide Richtungen ab.
+
+Die Zuordnung OpenProject-Benutzer/-Projekt ↔ Hub liegt in der Tabelle
+`external_links`. Lokale Testumgebung: `deploy/openproject-local/`
+(OpenProject in Docker, Hub per `npm run dev:openproject`).
+
 ## Editor-Integration
 
 Im Editor (`editor/`) gibt es das Mosaic-Panel **„IFC Hub“** (über das

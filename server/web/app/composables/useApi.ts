@@ -12,6 +12,7 @@ export function apiErrorMessage(error: unknown): string {
 
 export function useApi() {
   const { token, setSession } = useAuth();
+  const { embed } = useEmbed();
 
   async function api<T>(path: string, options: FetchOptions = {}): Promise<T> {
     const headers: Record<string, string> = {};
@@ -28,9 +29,10 @@ export function useApi() {
     } catch (error) {
       const status = (error as { status?: number })?.status;
       if (status === 401 && token.value) {
-        // Token expired or revoked — drop the session and re-authenticate.
+        // Token expired or revoked — drop the session and re-authenticate
+        // (eingebettet über OpenProject statt über das Hub-Login).
         setSession(null, null);
-        await navigateTo("/login");
+        await navigateTo(embed.value ? "/embed" : "/login");
       }
       throw error;
     }

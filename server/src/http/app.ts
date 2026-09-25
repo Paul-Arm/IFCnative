@@ -30,7 +30,7 @@ import {
   withDetails,
   type ChangesQuery,
 } from "../domain/changesView";
-import { CommitService } from "../domain/commitService";
+import { CommitService, type CreateCommitResult } from "../domain/commitService";
 import {
   DIFF_PAGE_LIMIT_DEFAULT,
   diffOverview,
@@ -39,6 +39,23 @@ import {
 import { contentTypeForFileName, fileExtension } from "../domain/fileTypes";
 import { FragmentsService } from "../domain/fragmentsService";
 import { IfcWorkerPool, defaultIfcWorkerPool } from "../domain/ifcWorkerPool";
+import {
+  JtiRegistry,
+  SetupError,
+  TicketError,
+  linkCandidates,
+  openProjectIdFor,
+  provisionFromTicket,
+  setupOpenProjectLink,
+  unlinkOpenProject,
+  verifyTicket,
+  type OpenProjectProjectRef,
+} from "../integrations/openproject";
+import { registerOpenProjectStorageRoutes } from "../integrations/openprojectStorage";
+import {
+  OpenProjectNotifier,
+  registerOpenProjectSyncRoutes,
+} from "../integrations/openprojectSync";
 import type { ObjectStore } from "../storage/objectStore";
 import { registerRequestLog } from "./requestLog";
 import {
@@ -73,11 +90,38 @@ export interface AppDeps {
   workers?: IfcWorkerPool;
   /** Jede Anfrage als Zeile auf stdout protokollieren (Default: an). */
   logRequests?: boolean;
+  /**
+   * Einbettung in OpenProject (Plugin openproject-ifc_hub): gemeinsames
+   * Secret für die Anmelde-Tickets und — optional — die Origin der
+   * OpenProject-Instanz, die den Hub per iframe einbetten darf.
+   */
+  openproject?: {
+    sharedSecret: string;
+    origin?: string;
+    /**
+     * Adresse, unter der der Hub-SERVER OpenProject erreicht (Webhook
+     * "bitte abgleichen"). Ohne Angabe kein Webhook — OpenProject gleicht
+     * dann nur periodisch ab.
+     */
+    internalUrl?: string;
+  };
 }
 
 interface JwtPayload {
   sub: string;
   email: string;
+  /** Nur Sonder-Token (z. B. Einrichtungs-Berechtigung) tragen einen Typ. */
+  typ?: string;
+}
+
+/** Einrichtungs-Berechtigung für die OpenProject-Verknüpfung (15 min). */
+const SETUP_GRANT_TYPE = "openproject-setup";
+
+interface SetupGrant {
+  typ: string;
+  sub: string;
+  role: Role;
+  op: OpenProjectProjectRef;
 }
 
 /** Minimal access level a route demands of a project member. */
@@ -180,6 +224,21 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.register(jwt, { secret: jwtSecret, sign: { expiresIn: "30d" } });
   app.register(multipart, { limits: { fileSize: 512 * 1024 * 1024 } });
 
+  // Einbettung nur durch den Hub selbst und die konfigurierte
+  // OpenProject-Instanz. Ohne Konfiguration bleibt es beim bisherigen
+  // Verhalten (kein Header). Nur HTML — API-Antworten werden nicht gerahmt.
+  const embedOrigin = deps.openproject?.origin;
+  if (embedOrigin) {
+    const policy = `frame-ancestors 'self' ${embedOrigin}`;
+    app.addHook("onSend", async (_request, reply, payload) => {
+      const type = String(reply.getHeader("content-type") ?? "");
+      if (type.startsWith("text/html")) {
+        reply.header("content-security-policy", policy);
+      }
+      return payload;
+    });
+  }
+
   // Serve the built web UI (server/public) at the root.
   app.register(fastifyStatic, {
     root: join(dirname(fileURLToPath(import.meta.url)), "../../public"),
@@ -226,6 +285,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   ): Promise<User | null> {
     try {
       const payload = await request.jwtVerify<JwtPayload>();
+      // Sonder-Token (Einrichtungs-Berechtigung) sind keine Sitzungen.
+      if (payload.typ) {
+        reply.code(401).send({ error: "Authentication required" });
+        return null;
+      }
       const user = await repo.getUserById(payload.sub);
       if (!user) {
         reply.code(401).send({ error: "Unknown user" });
@@ -241,6 +305,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   async function optionalUser(request: FastifyRequest): Promise<User | null> {
     try {
       const payload = await request.jwtVerify<JwtPayload>();
+      if (payload.typ) return null;
       return await repo.getUserById(payload.sub);
     } catch {
       return null;
@@ -389,6 +454,161 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const user = await requireUser(request, reply);
     if (!user) return reply;
     return reply.send({ user: publicUser(user) });
+  });
+
+  // ---- Anmeldung aus OpenProject (Plugin "IFC Hub") ---------------------
+
+  const openProjectTickets = new JtiRegistry();
+
+  app.post(`${api}/integrations/openproject/session`, async (request, reply) => {
+    const secret = deps.openproject?.sharedSecret;
+    if (!secret) {
+      return reply.code(404).send({ error: "OpenProject-Integration ist nicht konfiguriert" });
+    }
+    const { ticket } = (request.body ?? {}) as { ticket?: unknown };
+    if (typeof ticket !== "string" || !ticket) {
+      return reply.code(400).send({ error: "ticket required" });
+    }
+    let claims;
+    try {
+      claims = verifyTicket(ticket, secret);
+    } catch (error) {
+      if (error instanceof TicketError) {
+        return reply.code(401).send({ error: error.message });
+      }
+      throw error;
+    }
+    if (!openProjectTickets.claim(claims.jti, claims.exp)) {
+      return reply.code(401).send({ error: "Ticket wurde bereits verwendet" });
+    }
+    const result = await provisionFromTicket(repo, claims);
+    const openproject = {
+      url: claims.openproject_url,
+      projectIdentifier: claims.project.identifier,
+      projectName: claims.project.name,
+    };
+    if (result.status === "linked") {
+      return reply.send({
+        status: "linked",
+        token: app.jwt.sign({ sub: result.user.id, email: result.user.email }),
+        user: publicUser(result.user),
+        project: { slug: result.project.slug, name: result.project.name },
+        role: result.role,
+        openproject,
+      });
+    }
+    if (!result.canSetup) {
+      // Nichts zu tun, solange kein Projektadministrator eingerichtet hat.
+      return reply.send({ status: "unlinked", canSetup: false, openproject });
+    }
+    // Einrichtungs-Berechtigung: belegt, dass OpenProject diesem Benutzer
+    // für dieses Projekt "IFC Hub verwalten" bescheinigt hat.
+    const grant = app.jwt.sign(
+      {
+        typ: SETUP_GRANT_TYPE,
+        sub: result.user.id,
+        email: result.user.email,
+        role: result.role,
+        op: claims.project,
+      },
+      { expiresIn: "15m" },
+    );
+    const candidates = await linkCandidates(repo, result.user);
+    return reply.send({
+      status: "unlinked",
+      canSetup: true,
+      token: app.jwt.sign({ sub: result.user.id, email: result.user.email }),
+      user: publicUser(result.user),
+      role: result.role,
+      openproject,
+      setup: {
+        grant,
+        candidates: candidates.map((p) => ({ slug: p.slug, name: p.name, visibility: p.visibility })),
+      },
+    });
+  });
+
+  app.post(`${api}/integrations/openproject/setup`, async (request, reply) => {
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    const body = (request.body ?? {}) as { grant?: unknown; slug?: unknown };
+    let grant: SetupGrant;
+    try {
+      grant = app.jwt.verify<SetupGrant>(String(body.grant ?? ""));
+    } catch {
+      return reply.code(401).send({ error: "Einrichtung abgelaufen — bitte in OpenProject neu öffnen" });
+    }
+    if (grant.typ !== SETUP_GRANT_TYPE || grant.sub !== user.id) {
+      return reply.code(403).send({ error: "Einrichtung gehört zu einem anderen Benutzer" });
+    }
+    const slug = typeof body.slug === "string" && body.slug ? body.slug : undefined;
+    try {
+      const project = await setupOpenProjectLink(repo, user, grant.op, grant.role, slug);
+      return reply.send({ project: { slug: project.slug, name: project.name } });
+    } catch (error) {
+      if (error instanceof SetupError) {
+        return reply.code(error.status).send({ error: error.message });
+      }
+      throw error;
+    }
+  });
+
+  // Datei-API für den OpenProject-Speichertyp "IFC Hub" und Abgleich
+  // (IFC-Modelle, BCF-Issues) mit dem BCF-Modul von OpenProject.
+  if (deps.openproject?.sharedSecret) {
+    const { sharedSecret, internalUrl } = deps.openproject;
+    const notifier = internalUrl
+      ? new OpenProjectNotifier(repo, internalUrl.replace(/\/$/, ""), sharedSecret)
+      : null;
+    registerOpenProjectStorageRoutes(app, {
+      repo,
+      sharedSecret,
+      collectFolders,
+      commitUpload,
+      downloadBlob: (commit) => commits.downloadIfc(commit),
+      slugify,
+      onProjectChanged: (projectId) => notifier?.notifyHubProject(projectId),
+    });
+    registerOpenProjectSyncRoutes(app, {
+      repo,
+      sharedSecret,
+      commitUpload,
+      downloadBlob: (commit) => commits.downloadIfc(commit),
+      slugify,
+    });
+    // Änderungen über die normale API (Web-UI, Editor) eines verknüpften
+    // Projekts -> OpenProject gleicht ab. Die Sync-API selbst meldet nicht
+    // zurück, sonst käme jede Änderung als Echo wieder an.
+    if (notifier) {
+      app.addHook("onResponse", async (request, reply) => {
+        if (request.method === "GET" || request.method === "HEAD" || reply.statusCode >= 400) return;
+        if (!request.url.startsWith(`${api}/projects/`)) return;
+        const { slug } = (request.params ?? {}) as { slug?: string };
+        if (!slug) return;
+        const project = await repo.getProjectBySlug(slug);
+        if (project) notifier.notifyHubProject(project.id);
+      });
+    }
+  }
+
+  app.get(`${api}/projects/:slug/integrations/openproject`, async (request, reply) => {
+    const { slug } = request.params as { slug: string };
+    const project = await resolveProject(slug, reply);
+    if (!project) return reply;
+    const member = await requireMember(project, await optionalUser(request), reply, "read");
+    if (!member) return reply;
+    const projectId = await openProjectIdFor(repo, project.id);
+    return reply.send({ linked: projectId !== null, openprojectProjectId: projectId });
+  });
+
+  app.delete(`${api}/projects/:slug/integrations/openproject`, async (request, reply) => {
+    const { slug } = request.params as { slug: string };
+    const project = await resolveProject(slug, reply);
+    if (!project) return reply;
+    const member = await requireMember(project, await optionalUser(request), reply, "admin");
+    if (!member) return reply;
+    const removed = await unlinkOpenProject(repo, project.id);
+    return reply.code(removed ? 200 : 404).send({ unlinked: removed });
   });
 
   // ---- Benutzerverwaltung (nur globale Admins) -------------------------
@@ -1857,6 +2077,69 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     };
   }
 
+  type CommitUploadOutcome =
+    | { ok: true; result: CreateCommitResult }
+    | { ok: false; status: 400; error: string };
+
+  /**
+   * Gemeinsamer Weg für neue Stände (Web-UI/API und Upload aus
+   * OpenProject): Inhalt nach Dateiart prüfen, committen und die Actions
+   * mit "bei Commit ausführen" starten.
+   */
+  async function commitUpload(input: {
+    project: Project;
+    model: Model;
+    user: User;
+    bytes: Buffer;
+    fileName: string | null;
+    branchName: string;
+    message: string;
+  }): Promise<CommitUploadOutcome> {
+    const { project, model, user, bytes } = input;
+    if (bytes.length === 0) {
+      return { ok: false, status: 400, error: "File content required" };
+    }
+    if (model.kind === "md") {
+      if (bytes.length > 2 * 1024 * 1024) {
+        return { ok: false, status: 400, error: "Markdown too large (max 2 MB)" };
+      }
+    } else if (model.kind === "ifc" && !bytes.includes("ISO-10303-21")) {
+      return { ok: false, status: 400, error: "Valid IFC/STEP body required" };
+    } else if (model.kind === "file") {
+      // Content-Type und Vorschau hängen an der Endung des Modellnamens —
+      // eine neue Version muss dieselbe Dateiart sein (z. B. kein PDF in
+      // "plan.dwg").
+      const expected = fileExtension(model.name);
+      if (input.fileName && expected && fileExtension(input.fileName) !== expected) {
+        return {
+          ok: false,
+          status: 400,
+          error: `Falsche Dateiart: „${model.name}“ erwartet eine .${expected}-Datei`,
+        };
+      }
+    }
+    if (!BRANCH_NAME.test(input.branchName)) {
+      return { ok: false, status: 400, error: "Invalid branch name" };
+    }
+
+    const result = await commits.createCommit({
+      model,
+      branchName: input.branchName,
+      text: bytes,
+      authorId: user.id,
+      message: input.message,
+    });
+    // Actions mit "bei Commit ausführen" automatisch starten — nur die,
+    // deren Geltungsbereich das Modell abdeckt.
+    if (model.kind === "ifc") {
+      const autoActions = (await repo.listActions(project.id)).filter(
+        (action) => action.runOnCommit && actionAppliesTo(action, model),
+      );
+      await queueRuns(project, model, result.commit.id, autoActions, user.id);
+    }
+    return { ok: true, result };
+  }
+
   app.post(
     `${api}/projects/:slug/models/:model/commits`,
     async (request, reply) => {
@@ -1878,52 +2161,23 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         name?: string;
       };
       const upload = await readIfcUpload(request);
-      if (upload.bytes === null || upload.bytes.length === 0) {
+      if (upload.bytes === null) {
         return reply.code(400).send({ error: "File content required" });
       }
-      if (model.kind === "md") {
-        if (upload.bytes.length > 2 * 1024 * 1024) {
-          return reply.code(400).send({ error: "Markdown too large (max 2 MB)" });
-        }
-      } else if (
-        model.kind === "ifc" &&
-        !upload.bytes.includes("ISO-10303-21")
-      ) {
-        return reply.code(400).send({ error: "Valid IFC/STEP body required" });
-      } else if (model.kind === "file") {
-        // Content-Type und Vorschau hängen an der Endung des Modellnamens —
-        // eine neue Version muss dieselbe Dateiart sein (z. B. kein PDF in
-        // "plan.dwg"). Roh-Bodies können den Namen per ?name= mitgeben.
-        const uploadName = upload.fileName ?? query.name ?? null;
-        const expected = fileExtension(model.name);
-        if (uploadName && expected && fileExtension(uploadName) !== expected) {
-          return reply.code(400).send({
-            error: `Falsche Dateiart: „${model.name}“ erwartet eine .${expected}-Datei`,
-          });
-        }
-      }
-
-      const branchName =
-        query.branch ?? upload.fields.branch ?? model.defaultBranch;
-      if (!BRANCH_NAME.test(branchName)) {
-        return reply.code(400).send({ error: "Invalid branch name" });
-      }
-
-      const result = await commits.createCommit({
+      const outcome = await commitUpload({
+        project,
         model,
-        branchName,
-        text: upload.bytes,
-        authorId: user.id,
+        user,
+        bytes: upload.bytes,
+        // Roh-Bodies können den Dateinamen per ?name= mitgeben.
+        fileName: upload.fileName ?? query.name ?? null,
+        branchName: query.branch ?? upload.fields.branch ?? model.defaultBranch,
         message: query.message ?? upload.fields.message ?? "",
       });
-      // Actions mit "bei Commit ausführen" automatisch starten — nur die,
-      // deren Geltungsbereich das Modell abdeckt.
-      if (model.kind === "ifc") {
-        const autoActions = (await repo.listActions(project.id)).filter(
-          (action) => action.runOnCommit && actionAppliesTo(action, model),
-        );
-        await queueRuns(project, model, result.commit.id, autoActions, user.id);
+      if (!outcome.ok) {
+        return reply.code(outcome.status).send({ error: outcome.error });
       }
+      const { result } = outcome;
       const [commit] = await withAuthors([result.commit]);
       if (query.compact) {
         // Web-UI: nur Zähler — der volle Entity-Diff eines großen Modells

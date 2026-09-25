@@ -223,6 +223,15 @@ create table if not exists action_runs (
 );
 create index if not exists action_runs_project_idx on action_runs(project_id);
 create index if not exists action_runs_commit_idx on action_runs(commit_id);
+
+create table if not exists external_links (
+  system text not null,
+  kind text not null,
+  external_id text not null,
+  local_id uuid not null,
+  primary key (system, kind, external_id)
+);
+create index if not exists external_links_local_idx on external_links(kind, local_id);
 `;
 
 /**

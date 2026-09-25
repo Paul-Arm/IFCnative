@@ -13,6 +13,8 @@ import type {
   Branch,
   LibraryFile,
   Commit,
+  ExternalLink,
+  ExternalLinkKind,
   Issue,
   IssueComment,
   IssueLinks,
@@ -23,6 +25,10 @@ import type {
   Repository,
   User,
 } from "./types";
+
+function externalLinkKey(system: string, kind: ExternalLinkKind, externalId: string): string {
+  return `${system}\u0000${kind}\u0000${externalId}`;
+}
 
 interface EntityObject {
   type: string;
@@ -57,6 +63,7 @@ export class MemoryRepository implements Repository {
   protected actions = new Map<string, Action>();
   protected actionRuns = new Map<string, ActionRun>();
   protected libraryFiles = new Map<string, LibraryFile>();
+  protected externalLinks = new Map<string, ExternalLink>();
 
   private now(): string {
     // Tests need determinism-free timestamps; ISO string is fine here.
@@ -123,6 +130,7 @@ export class MemoryRepository implements Repository {
       links.assigneeIds = links.assigneeIds.filter((id) => id !== userId);
     }
     this.members = this.members.filter((m) => m.userId !== userId);
+    this.dropExternalLinks("user", userId);
     this.users.delete(userId);
   }
 
@@ -149,6 +157,50 @@ export class MemoryRepository implements Repository {
       }
     }
     return null;
+  }
+
+  async getProjectById(id: string): Promise<Project | null> {
+    return this.projects.get(id) ?? null;
+  }
+
+  async getExternalLink(
+    system: string,
+    kind: ExternalLinkKind,
+    externalId: string,
+  ): Promise<string | null> {
+    return this.externalLinks.get(externalLinkKey(system, kind, externalId))?.localId ?? null;
+  }
+
+  async setExternalLink(link: ExternalLink): Promise<void> {
+    this.externalLinks.set(
+      externalLinkKey(link.system, link.kind, link.externalId),
+      { ...link },
+    );
+  }
+
+  async deleteExternalLink(
+    system: string,
+    kind: ExternalLinkKind,
+    externalId: string,
+  ): Promise<void> {
+    this.externalLinks.delete(externalLinkKey(system, kind, externalId));
+  }
+
+  async listExternalLinks(
+    kind: ExternalLinkKind,
+    localId: string,
+  ): Promise<ExternalLink[]> {
+    return [...this.externalLinks.values()].filter(
+      (link) => link.kind === kind && link.localId === localId,
+    );
+  }
+
+  private dropExternalLinks(kind: ExternalLinkKind, localId: string): void {
+    for (const [key, link] of this.externalLinks) {
+      if (link.kind === kind && link.localId === localId) {
+        this.externalLinks.delete(key);
+      }
+    }
   }
 
   async listPublicProjects(): Promise<Project[]> {
@@ -225,6 +277,10 @@ export class MemoryRepository implements Repository {
     return null;
   }
 
+  async getModelById(id: string): Promise<Model | null> {
+    return this.models.get(id) ?? null;
+  }
+
   async listModels(projectId: string): Promise<Model[]> {
     return [...this.models.values()].filter((m) => m.projectId === projectId);
   }
@@ -298,6 +354,7 @@ export class MemoryRepository implements Repository {
       blobKeys.push(...(await this.deleteModel(model.id)));
     }
     this.members = this.members.filter((m) => m.projectId !== projectId);
+    this.dropExternalLinks("project", projectId);
     this.folders.delete(projectId);
     for (const issue of [...this.issues.values()]) {
       if (issue.projectId === projectId) {

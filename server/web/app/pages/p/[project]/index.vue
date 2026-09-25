@@ -1210,6 +1210,37 @@ const deleteError = ref<string | null>(null);
 const settingsError = ref<string | null>(null);
 const settingsNotice = ref<string | null>(null);
 
+// Verknüpfung mit einem OpenProject-Projekt (Plugin "IFC Hub").
+const openprojectLink = ref<{ linked: boolean; openprojectProjectId: string | null } | null>(null);
+const openprojectError = ref<string | null>(null);
+
+async function loadOpenprojectLink(): Promise<void> {
+  try {
+    openprojectLink.value = await api(`/projects/${slug}/integrations/openproject`);
+  } catch {
+    openprojectLink.value = null;
+  }
+}
+onMounted(loadOpenprojectLink);
+
+async function unlinkOpenproject(): Promise<void> {
+  if (
+    !window.confirm(
+      "Verknüpfung mit OpenProject lösen? Modelle und Historie bleiben erhalten. " +
+        "Beim nächsten Öffnen aus OpenProject muss ein Projektadministrator neu einrichten.",
+    )
+  ) {
+    return;
+  }
+  openprojectError.value = null;
+  try {
+    await api(`/projects/${slug}/integrations/openproject`, { method: "DELETE" });
+    await loadOpenprojectLink();
+  } catch (e) {
+    openprojectError.value = apiErrorMessage(e);
+  }
+}
+
 async function patchProject(
   visibility: "private" | "public",
 ): Promise<void> {
@@ -2424,6 +2455,24 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
               </select>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div v-if="isAdmin && openprojectLink" class="card">
+        <div class="card-header"><h2>OpenProject</h2></div>
+        <div class="card-body">
+          <div v-if="openprojectError" class="alert error">{{ openprojectError }}</div>
+          <template v-if="openprojectLink.linked">
+            <p class="muted small" style="margin-top: 0">
+              Verknüpft mit OpenProject-Projekt #{{ openprojectLink.openprojectProjectId }}.
+              Mitglieder und Rollen kommen von dort (Modul „IFC Hub“).
+            </p>
+            <button @click="unlinkOpenproject">Verknüpfung lösen</button>
+          </template>
+          <p v-else class="muted small" style="margin: 0">
+            Nicht verknüpft. Ein OpenProject-Projektadministrator kann dieses Projekt beim
+            ersten Öffnen des Menüpunkts „IFC Hub“ auswählen.
+          </p>
         </div>
       </div>
 
