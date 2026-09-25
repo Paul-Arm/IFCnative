@@ -80,10 +80,11 @@ Voraussetzung: Im Projekt sind die Module **„IFC Hub“ und „BCF“** aktiv 
 
 ## Installation (Docker)
 
-Siehe `deploy/openproject-local/Dockerfile`. Es dient zugleich als Vorlage für den Server:
+Siehe `deploy/openproject-local/Dockerfile`:
 
-- **Ziel `plugin`:** nur Ruby, baut in Sekunden. Einbettung und Speicher funktionieren, nur der Upload aus OpenProject fehlt.
-- **Ziel `full`:** zusätzlich wird OpenProjects Angular-Frontend mit dem Plugin neu gebaut. Das dauert 15 bis 30 Minuten und braucht **mehrere GB RAM**; bei Docker Desktop den WSL-Speicher erhöhen.
+- **Ziel `plugin`:** all-in-one-Image, nur Ruby, baut in Sekunden. Einbettung und Speicher funktionieren, nur der Upload aus OpenProject fehlt.
+- **Ziel `full`:** all-in-one-Image, zusätzlich wird OpenProjects Angular-Frontend mit dem Plugin neu gebaut. Das braucht **mehrere GB RAM** in Docker. Dieses Ziel nutzt die lokale Testumgebung.
+- **Ziel `server`:** Basis `-slim-bim` für das offizielle Compose-Setup; das Frontend kommt aus `full`. Bauen, prüfen und ausrollen beschreibt `deploy/openproject-server/README.md` (lokaler Build, Übertragung per Datei oder Registry).
 
 **Bei jedem OpenProject-Update** muss das Image mit der neuen Basisversion neu gebaut werden. Das Plugin nutzt interne OpenProject-Schnittstellen (Menüs, Rechte, CSP, Storage-Adapter, Upload-Service), die sich zwischen Versionen ändern können.
 

@@ -354,7 +354,8 @@ BCF-Issues in beide Richtungen ab.
 
 Die Zuordnung OpenProject-Benutzer/-Projekt ↔ Hub liegt in der Tabelle
 `external_links`. Lokale Testumgebung: `deploy/openproject-local/`
-(OpenProject in Docker, Hub per `npm run dev:openproject`).
+(OpenProject in Docker, Hub per `npm run dev:openproject`). Image für den
+Server bauen und ausrollen: `deploy/openproject-server/README.md`.
 
 ## Editor-Integration
 

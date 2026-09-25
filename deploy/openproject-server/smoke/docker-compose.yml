@@ -1,0 +1,54 @@
+# Rauchtest für das Server-Image — aufgebaut wie das offizielle Compose
+# (eigene Datenbank, Seeder mit Migrationen, Web, Worker), ohne Proxy und
+# ohne Daten zu behalten. Wird von ../smoke-test.ps1 gestartet.
+name: ifc-hub-op-smoke
+
+x-app: &app
+  image: ${IFC_HUB_OPENPROJECT_IMAGE:?Image angeben}
+  pull_policy: never
+  environment:
+    DATABASE_URL: postgres://postgres:smoke@db/openproject?pool=10&encoding=unicode&reconnect=true
+    SECRET_KEY_BASE: ${SMOKE_SECRET_KEY_BASE:?}
+    OPENPROJECT_HTTPS: "false"
+    OPENPROJECT_HOST__NAME: localhost:${SMOKE_PORT:-8090}
+    OPENPROJECT_DEFAULT__LANGUAGE: de
+    IFC_HUB_URL: http://localhost:8787
+    IFC_HUB_SHARED_SECRET: ${SMOKE_SHARED_SECRET:?}
+    OPENPROJECT_SSRF_PROTECTION_IP_ALLOWLIST: 192.168.65.254
+
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_PASSWORD: smoke
+      POSTGRES_DB: openproject
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "openproject"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  seeder:
+    <<: *app
+    command: ./docker/prod/seeder
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    <<: *app
+    command: ./docker/prod/web
+    ports:
+      - "${SMOKE_PORT:-8090}:8080"
+    depends_on:
+      seeder:
+        condition: service_completed_successfully
+
+  worker:
+    <<: *app
+    command: ./docker/prod/worker
+    depends_on:
+      seeder:
+        condition: service_completed_successfully

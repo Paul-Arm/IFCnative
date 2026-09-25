@@ -1,0 +1,10 @@
+# Build-Kontext des Dockerfiles daneben ist das Repo-Root. Das Image braucht
+# nur das Plugin und Gemfile.plugins — alles andere (node_modules, .env mit
+# Secrets, Daten) bleibt draußen.
+*
+!openproject-plugin
+!deploy/openproject-local/Gemfile.plugins
+# Doku ändert nichts am Image — und löst so keinen neuen Angular-Build aus.
+openproject-plugin/README.md
+openproject-plugin/**/node_modules
+openproject-plugin/**/.DS_Store
