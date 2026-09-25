@@ -16,6 +16,9 @@ module Storages
               Input::Strategy.build(key: :bearer_token, token: OpenProject::IfcHub::StorageToken.issue(user:))
             })
           end
+          namespace("commands") do
+            register(:create_folder, Commands::CreateFolderCommand)
+          end
           namespace("components") do
             namespace("forms") do
               register(:general_information, ::Storages::Admin::Forms::IfcHubGeneralInfoFormComponent)

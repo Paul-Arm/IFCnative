@@ -51,6 +51,8 @@ module Storages
               Failure(error.with(code: :forbidden))
             in { status: 404 }
               Failure(error.with(code: :not_found))
+            in { status: 409 }
+              Failure(error.with(code: :conflict))
             else
               Failure(error.with(code: :error))
             end

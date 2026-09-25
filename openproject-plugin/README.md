@@ -26,7 +26,7 @@ OpenProject-Plugin (Rails-Engine) mit zwei Teilen:
 - **Struktur.** Die oberste Ebene sind die Hub-Projekte des Benutzers, darunter Ordner und Modelle. IFC- und Markdown-Modelle erscheinen mit Endung (`Turm.ifc`).
 - **Anmeldung.** Kein OAuth: Pro Anfrage signiert das Plugin ein 5-Minuten-Token für den jeweiligen Benutzer. Es gelten dessen Hub-Rechte.
 - **Öffnen.** Ist das Hub-Projekt verknüpft, öffnet die Datei im eingebetteten Hub des OpenProject-Projekts, sonst direkt im Hub.
-- **Download und Upload** laufen direkt zwischen Browser und Hub über signierte Links (5 bzw. 15 min).
+- **Download und Upload** laufen direkt zwischen Browser und Hub über signierte Links (5 bzw. 15 min). „Neuer Ordner“ in der Ordnerauswahl legt den Ordner im Hub-Projekt an.
 - **Upload bei gleichem Namen.** „Ersetzen“ committet eine neue Version desselben Modells. „Beide behalten“ legt ein weiteres Modell mit Zähler an.
 - **Commit-Nachricht.** Vor jedem Upload fragt ein Dialog die Nachricht ab, vorbelegt mit dem Bezug zum Arbeitspaket („Hochgeladen aus OpenProject (Arbeitspaket #77)“). Der Dialog hat bewusst kein „Abbrechen“, weil OpenProjects Upload-Toast sonst hängen bleibt. Abbrechen geht vorher in der Datei- bzw. Ordnerauswahl.
 - **Automatisch aktiviert.** Beim Öffnen des Menüpunkts „IFC Hub“ und direkt nach dem Verknüpfen fragt das Plugin den Hub, welches Hub-Projekt dazugehört. Es aktiviert dann den Speicher im Projekt, mit diesem Hub-Projekt als Projektordner. Ein bewusst auf „inaktiv“ gestellter Projektordner bleibt unverändert.

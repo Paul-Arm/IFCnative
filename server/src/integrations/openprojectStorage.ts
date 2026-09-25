@@ -130,7 +130,7 @@ function modelLocation(project: Project, model: Model): string {
 
 class StorageError extends Error {
   constructor(
-    readonly status: 400 | 401 | 403 | 404,
+    readonly status: 400 | 401 | 403 | 404 | 409,
     message: string,
   ) {
     super(message);
@@ -434,6 +434,38 @@ export function registerOpenProjectStorageRoutes(app: FastifyInstance, ctx: Stor
       const project = localId ? await repo.getProjectById(localId) : null;
       if (!project) throw new StorageError(404, "Nicht verknüpft");
       return reply.send({ slug: project.slug, name: project.name, location: `/${project.slug}` });
+    }),
+  );
+
+  // "Neuer Ordner" in der Ordnerauswahl von OpenProject.
+  app.post(
+    `${PREFIX}/folders`,
+    handler(async (request, reply) => {
+      const principal = await principalOf(request);
+      if (principal.kind !== "user") throw new StorageError(403, "Ordner anlegen nur als Benutzer");
+      const body = (request.body ?? {}) as { parentLocation?: unknown; name?: unknown };
+      const name = String(body.name ?? "").trim();
+      const invalid =
+        !name ||
+        name.length > 64 ||
+        name === "." ||
+        name === ".." ||
+        [...name].some((ch) => "/\\<>".includes(ch) || ch.charCodeAt(0) < 32);
+      if (invalid) throw new StorageError(400, "Ungültiger Ordnername");
+      const parsed = parseLocation(String(body.parentLocation ?? "/"));
+      if (!parsed) throw new StorageError(400, "Ordner nur innerhalb eines Projekts möglich");
+      const { project, role } = await readableProject(principal, parsed.slug);
+      if (!WRITE_ROLES.has(role)) throw new StorageError(403, "Keine Schreibrechte im Hub-Projekt");
+      const folders = await ctx.collectFolders(project.id);
+      if (parsed.folder && !folders.includes(parsed.folder)) throw new StorageError(404, "Ordner nicht gefunden");
+      const path = parsed.folder ? `${parsed.folder}/${name}` : name;
+      if (folders.some((existing) => existing.toLowerCase() === path.toLowerCase())) {
+        throw new StorageError(409, "Ordner existiert bereits");
+      }
+      if (path.split("/").length > 10) throw new StorageError(400, "Zu tief verschachtelt");
+      await repo.addFolder(project.id, path);
+      ctx.onProjectChanged?.(project.id);
+      return reply.code(201).send(folderFile(joinLocation(project.slug, path), name, role));
     }),
   );
 

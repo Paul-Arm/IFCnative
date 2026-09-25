@@ -1,4 +1,9 @@
 de:
+  services:
+    errors:
+      models:
+        create_folder_service:
+          conflict: "Ein Ordner mit diesem Namen existiert bereits."
   label_ifc_hub: "IFC Hub"
   project_module_ifc_hub: "IFC Hub"
   permission_view_ifc_hub: "IFC Hub ansehen"

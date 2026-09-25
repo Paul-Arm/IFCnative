@@ -260,6 +260,25 @@ test("Speicher: Rechte — Leser, Dienst, fremde Projekte, ohne Token", async ()
   assert.equal((await get(app, `${BASE}/files?location=/acme/../geheim`)).statusCode, 400);
 });
 
+test("Speicher: Ordner anlegen", async () => {
+  const { app, repo } = await setup();
+  const created = await post(app, `${BASE}/folders`, { parentLocation: "/acme/Fachmodelle", name: "Neu 2026" });
+  assert.equal(created.statusCode, 201, created.body);
+  const folder = JSON.parse(created.body);
+  assert.equal(folder.id, "/acme/Fachmodelle/Neu 2026");
+  assert.equal(folder.mimeType, "application/x-op-directory");
+  const project = await repo.getProjectBySlug("acme");
+  assert.ok((await repo.listFolders(project!.id)).includes("Fachmodelle/Neu 2026"));
+  // Doppelt, ungültig, außerhalb eines Projekts, ohne Schreibrecht.
+  assert.equal((await post(app, `${BASE}/folders`, { parentLocation: "/acme/Fachmodelle", name: "neu 2026" })).statusCode, 409);
+  assert.equal((await post(app, `${BASE}/folders`, { parentLocation: "/acme", name: "a/b" })).statusCode, 400);
+  assert.equal((await post(app, `${BASE}/folders`, { parentLocation: "/", name: "x" })).statusCode, 400);
+  const eve = await repo.createUser({ email: "eve@example.com", name: "Eve", passwordHash: "x", isAdmin: false });
+  await repo.addMember({ projectId: project!.id, userId: eve.id, role: "viewer" });
+  const asEve = await post(app, `${BASE}/folders`, { parentLocation: "/acme", name: "x" }, { id: "99", email: "eve@example.com", name: "Eve" });
+  assert.equal(asEve.statusCode, 403);
+});
+
 test("Speicher: Hub-Projekt zu einem OpenProject-Projekt", async () => {
   const { app, repo } = await setup();
   const project = await repo.getProjectBySlug("acme");

@@ -49,6 +49,11 @@ module OpenProject::IfcHub
         registry.import(::Storages::Adapters::Providers::IfcHub::IfcHubRegistry)
       end
 
+      # "Neuer Ordner" in der Ordnerauswahl auch für den IFC Hub.
+      unless ::Storages::CreateFolderService.ancestors.include?(OpenProject::IfcHub::CreateFolderServicePatch)
+        ::Storages::CreateFolderService.prepend(OpenProject::IfcHub::CreateFolderServicePatch)
+      end
+
       # Abgleich mit dem Hub: neue/ersetzte IFC-Datei im BCF-Modul.
       unless ::Bim::IfcModels::IfcModel.include?(OpenProject::IfcHub::IfcModelSyncTrigger)
         ::Bim::IfcModels::IfcModel.include(OpenProject::IfcHub::IfcModelSyncTrigger)
