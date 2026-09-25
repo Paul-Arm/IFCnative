@@ -224,6 +224,17 @@ create table if not exists action_runs (
 create index if not exists action_runs_project_idx on action_runs(project_id);
 create index if not exists action_runs_commit_idx on action_runs(commit_id);
 
+create table if not exists access_tokens (
+  id uuid primary key,
+  user_id uuid not null references users(id),
+  name text not null,
+  token_hash text unique not null,
+  prefix text not null,
+  created_at text not null,
+  last_used_at text
+);
+create index if not exists access_tokens_user_idx on access_tokens(user_id);
+
 create table if not exists external_links (
   system text not null,
   kind text not null,

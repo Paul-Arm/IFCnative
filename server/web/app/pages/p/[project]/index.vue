@@ -1211,7 +1211,12 @@ const settingsError = ref<string | null>(null);
 const settingsNotice = ref<string | null>(null);
 
 // Verknüpfung mit einem OpenProject-Projekt (Plugin "IFC Hub").
-const openprojectLink = ref<{ linked: boolean; openprojectProjectId: string | null } | null>(null);
+const openprojectLink = ref<{
+  linked: boolean;
+  openprojectProjectId: string | null;
+  openprojectProjectUrl: string | null;
+} | null>(null);
+const { embed } = useEmbed();
 const openprojectError = ref<string | null>(null);
 
 async function loadOpenprojectLink(): Promise<void> {
@@ -1299,6 +1304,17 @@ const dateFmt = new Intl.DateTimeFormat("de-DE", {
       <span>/</span>
       <strong>{{ projectData.project.name }}</strong>
       <span v-if="projectData.role" class="badge accent">{{ projectData.role }}</span>
+      <span class="topbar-spacer" />
+      <a
+        v-if="openprojectLink?.openprojectProjectUrl && !embed"
+        :href="openprojectLink.openprojectProjectUrl"
+        class="link small"
+        target="_blank"
+        rel="noopener"
+      >In OpenProject öffnen</a>
+      <NuxtLink v-if="embed" to="/account" class="link small" title="Zugangstoken für den IFC-Editor">
+        Editor-Zugang
+      </NuxtLink>
     </nav>
 
     <nav class="gh-tabs">

@@ -21,6 +21,7 @@ import type {
   ActionRunStatus,
   Branch,
   LibraryFile,
+  AccessToken,
   Commit,
   ExternalLink,
   ExternalLinkKind,
@@ -132,6 +133,28 @@ function toUser(row: UserRow): User {
     isAdmin: Boolean(row.is_admin),
   };
 }
+interface AccessTokenRow {
+  id: string;
+  user_id: string;
+  name: string;
+  token_hash: string;
+  prefix: string;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+function toAccessToken(row: AccessTokenRow): AccessToken {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    name: row.name,
+    tokenHash: row.token_hash,
+    prefix: row.prefix,
+    createdAt: row.created_at,
+    lastUsedAt: row.last_used_at,
+  };
+}
+
 function toProject(row: ProjectRow): Project {
   return {
     id: row.id,
@@ -410,6 +433,7 @@ export class SqlRepository implements Repository {
         `delete from external_links where kind = 'user' and local_id = $1`,
         [userId],
       );
+      await this.sql.query(`delete from access_tokens where user_id = $1`, [userId]);
       await this.sql.query(`delete from users where id = $1`, [userId]);
     });
   }
@@ -419,6 +443,44 @@ export class SqlRepository implements Repository {
       `select * from projects order by created_at desc`,
     );
     return rows.map(toProject);
+  }
+
+  // ---- Persönliche Zugangstokens --------------------------------------
+
+  async createAccessToken(
+    input: Omit<AccessToken, "id" | "createdAt" | "lastUsedAt">,
+  ): Promise<AccessToken> {
+    const token: AccessToken = { ...input, id: randomUUID(), createdAt: this.now(), lastUsedAt: null };
+    await this.sql.query(
+      `insert into access_tokens (id, user_id, name, token_hash, prefix, created_at, last_used_at)
+       values ($1, $2, $3, $4, $5, $6, null)`,
+      [token.id, token.userId, token.name, token.tokenHash, token.prefix, token.createdAt],
+    );
+    return token;
+  }
+
+  async listAccessTokens(userId: string): Promise<AccessToken[]> {
+    const { rows } = await this.sql.query<AccessTokenRow>(
+      `select * from access_tokens where user_id = $1 order by created_at`,
+      [userId],
+    );
+    return rows.map(toAccessToken);
+  }
+
+  async getAccessTokenByHash(tokenHash: string): Promise<AccessToken | null> {
+    const { rows } = await this.sql.query<AccessTokenRow>(
+      `select * from access_tokens where token_hash = $1`,
+      [tokenHash],
+    );
+    return rows[0] ? toAccessToken(rows[0]) : null;
+  }
+
+  async touchAccessToken(id: string, usedAt: string): Promise<void> {
+    await this.sql.query(`update access_tokens set last_used_at = $2 where id = $1`, [id, usedAt]);
+  }
+
+  async deleteAccessToken(id: string): Promise<void> {
+    await this.sql.query(`delete from access_tokens where id = $1`, [id]);
   }
 
   // ---- Verknüpfungen mit Fremdsystemen --------------------------------

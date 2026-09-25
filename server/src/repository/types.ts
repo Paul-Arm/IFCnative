@@ -40,6 +40,21 @@ export interface User {
   isAdmin: boolean;
 }
 
+/**
+ * Persönliches Zugangstoken (z. B. für den Editor): Anmeldung ohne Passwort,
+ * einzeln widerrufbar. Gespeichert wird nur der SHA-256-Hash.
+ */
+export interface AccessToken {
+  id: string;
+  userId: string;
+  name: string;
+  tokenHash: string;
+  /** Erste Zeichen des Tokens zur Wiedererkennung ("ifch_ab12…"). */
+  prefix: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+
 export interface Project {
   id: string;
   slug: string;
@@ -309,6 +324,13 @@ export interface Repository {
   /** Hat der Benutzer Inhalte verfasst (Commits, Issues, Kommentare)? */
   userHasContent(userId: string): Promise<boolean>;
   listAllProjects(): Promise<Project[]>;
+
+  // Persönliche Zugangstokens
+  createAccessToken(input: Omit<AccessToken, "id" | "createdAt" | "lastUsedAt">): Promise<AccessToken>;
+  listAccessTokens(userId: string): Promise<AccessToken[]>;
+  getAccessTokenByHash(tokenHash: string): Promise<AccessToken | null>;
+  touchAccessToken(id: string, usedAt: string): Promise<void>;
+  deleteAccessToken(id: string): Promise<void>;
 
   // Verknüpfungen mit Fremdsystemen (OpenProject)
   /** Lokale Id zu (system, kind, externalId) oder null. */

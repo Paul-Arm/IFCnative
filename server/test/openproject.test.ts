@@ -246,7 +246,11 @@ test("Verknüpfung lösen: Inhalte bleiben, nächstes Öffnen fragt neu", async 
   const linked = await sessionBody(app, issueTicket({ role: "maintainer" }));
   const auth = { authorization: `Bearer ${linked.token}` };
   const status = await app.inject({ method: "GET", url: "/api/projects/test/integrations/openproject", headers: auth });
-  assert.deepEqual(JSON.parse(status.body), { linked: true, openprojectProjectId: "7" });
+  assert.deepEqual(JSON.parse(status.body), {
+    linked: true,
+    openprojectProjectId: "7",
+    openprojectProjectUrl: `${OP_ORIGIN}/projects/7`,
+  });
 
   const removed = await app.inject({ method: "DELETE", url: "/api/projects/test/integrations/openproject", headers: auth });
   assert.equal(removed.statusCode, 200, removed.body);

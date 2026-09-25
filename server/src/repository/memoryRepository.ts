@@ -12,6 +12,7 @@ import type {
   ActionRun,
   Branch,
   LibraryFile,
+  AccessToken,
   Commit,
   ExternalLink,
   ExternalLinkKind,
@@ -64,6 +65,7 @@ export class MemoryRepository implements Repository {
   protected actionRuns = new Map<string, ActionRun>();
   protected libraryFiles = new Map<string, LibraryFile>();
   protected externalLinks = new Map<string, ExternalLink>();
+  protected accessTokens = new Map<string, AccessToken>();
 
   private now(): string {
     // Tests need determinism-free timestamps; ISO string is fine here.
@@ -131,6 +133,9 @@ export class MemoryRepository implements Repository {
     }
     this.members = this.members.filter((m) => m.userId !== userId);
     this.dropExternalLinks("user", userId);
+    for (const [id, token] of this.accessTokens) {
+      if (token.userId === userId) this.accessTokens.delete(id);
+    }
     this.users.delete(userId);
   }
 
@@ -161,6 +166,33 @@ export class MemoryRepository implements Repository {
 
   async getProjectById(id: string): Promise<Project | null> {
     return this.projects.get(id) ?? null;
+  }
+
+  async createAccessToken(
+    input: Omit<AccessToken, "id" | "createdAt" | "lastUsedAt">,
+  ): Promise<AccessToken> {
+    const token: AccessToken = { ...input, id: randomUUID(), createdAt: this.now(), lastUsedAt: null };
+    this.accessTokens.set(token.id, token);
+    return token;
+  }
+
+  async listAccessTokens(userId: string): Promise<AccessToken[]> {
+    return [...this.accessTokens.values()]
+      .filter((token) => token.userId === userId)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  async getAccessTokenByHash(tokenHash: string): Promise<AccessToken | null> {
+    return [...this.accessTokens.values()].find((token) => token.tokenHash === tokenHash) ?? null;
+  }
+
+  async touchAccessToken(id: string, usedAt: string): Promise<void> {
+    const token = this.accessTokens.get(id);
+    if (token) token.lastUsedAt = usedAt;
+  }
+
+  async deleteAccessToken(id: string): Promise<void> {
+    this.accessTokens.delete(id);
   }
 
   async getExternalLink(

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -64,6 +64,7 @@ import {
   type Action,
   type ActionRun,
   type Commit,
+  type AccessToken,
   type Issue,
   type IssueLinks,
   type Member,
@@ -112,6 +113,13 @@ interface JwtPayload {
   email: string;
   /** Nur Sonder-Token (z. B. Einrichtungs-Berechtigung) tragen einen Typ. */
   typ?: string;
+}
+
+/** Präfix persönlicher Zugangstokens (unterscheidet sie von JWTs). */
+const ACCESS_TOKEN_PREFIX = "ifch_";
+
+function hashAccessToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
 }
 
 /** Einrichtungs-Berechtigung für die OpenProject-Verknüpfung (15 min). */
@@ -279,10 +287,32 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   // ---- auth helpers ----------------------------------------------------
 
+  /**
+   * Persönliches Zugangstoken ("ifch_…") statt JWT? undefined = kein
+   * Zugangstoken im Header, null = unbekannt/widerrufen.
+   */
+  async function userFromAccessToken(request: FastifyRequest): Promise<User | null | undefined> {
+    const header = request.headers.authorization ?? "";
+    if (!header.startsWith(`Bearer ${ACCESS_TOKEN_PREFIX}`)) return undefined;
+    const entry = await repo.getAccessTokenByHash(hashAccessToken(header.slice(7)));
+    if (!entry) return null;
+    // "Zuletzt benutzt" höchstens minütlich schreiben.
+    const now = new Date();
+    if (!entry.lastUsedAt || now.getTime() - Date.parse(entry.lastUsedAt) > 60_000) {
+      await repo.touchAccessToken(entry.id, now.toISOString());
+    }
+    return repo.getUserById(entry.userId);
+  }
+
   async function requireUser(
     request: FastifyRequest,
     reply: FastifyReply,
   ): Promise<User | null> {
+    const viaToken = await userFromAccessToken(request);
+    if (viaToken !== undefined) {
+      if (!viaToken) reply.code(401).send({ error: "Zugangstoken ungültig oder widerrufen" });
+      return viaToken;
+    }
     try {
       const payload = await request.jwtVerify<JwtPayload>();
       // Sonder-Token (Einrichtungs-Berechtigung) sind keine Sitzungen.
@@ -303,6 +333,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   }
 
   async function optionalUser(request: FastifyRequest): Promise<User | null> {
+    const viaToken = await userFromAccessToken(request);
+    if (viaToken !== undefined) return viaToken;
     try {
       const payload = await request.jwtVerify<JwtPayload>();
       if (payload.typ) return null;
@@ -456,6 +488,60 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return reply.send({ user: publicUser(user) });
   });
 
+  // ---- Persönliche Zugangstokens (Editor, Skripte) ----------------------
+
+  function publicToken(token: AccessToken) {
+    return {
+      id: token.id,
+      name: token.name,
+      prefix: token.prefix,
+      createdAt: token.createdAt,
+      lastUsedAt: token.lastUsedAt,
+    };
+  }
+
+  /** Tokens verwalten nur angemeldete Sitzungen — nicht Tokens selbst. */
+  async function requireSessionUser(request: FastifyRequest, reply: FastifyReply): Promise<User | null> {
+    if ((request.headers.authorization ?? "").startsWith(`Bearer ${ACCESS_TOKEN_PREFIX}`)) {
+      reply.code(403).send({ error: "Zugangstokens nur mit einer Anmeldung verwalten" });
+      return null;
+    }
+    return requireUser(request, reply);
+  }
+
+  app.get(`${api}/me/tokens`, async (request, reply) => {
+    const user = await requireSessionUser(request, reply);
+    if (!user) return reply;
+    return reply.send({ tokens: (await repo.listAccessTokens(user.id)).map(publicToken) });
+  });
+
+  app.post(`${api}/me/tokens`, async (request, reply) => {
+    const user = await requireSessionUser(request, reply);
+    if (!user) return reply;
+    const { name } = (request.body ?? {}) as { name?: unknown };
+    const label = typeof name === "string" ? name.trim().slice(0, 80) : "";
+    if (!label) return reply.code(400).send({ error: "name required" });
+    const token = `${ACCESS_TOKEN_PREFIX}${randomBytes(32).toString("base64url")}`;
+    const entry = await repo.createAccessToken({
+      userId: user.id,
+      name: label,
+      tokenHash: hashAccessToken(token),
+      prefix: token.slice(0, ACCESS_TOKEN_PREFIX.length + 4),
+    });
+    // Das Token selbst gibt es nur in dieser Antwort.
+    return reply.code(201).send({ token, entry: publicToken(entry) });
+  });
+
+  app.delete(`${api}/me/tokens/:id`, async (request, reply) => {
+    const user = await requireSessionUser(request, reply);
+    if (!user) return reply;
+    const { id } = request.params as { id: string };
+    const own = (await repo.listAccessTokens(user.id)).some((token) => token.id === id);
+    if (!own) return reply.code(404).send({ error: "Token not found" });
+    await repo.deleteAccessToken(id);
+    return reply.code(204).send();
+  });
+
   // ---- Anmeldung aus OpenProject (Plugin "IFC Hub") ---------------------
 
   const openProjectTickets = new JtiRegistry();
@@ -598,7 +684,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const member = await requireMember(project, await optionalUser(request), reply, "read");
     if (!member) return reply;
     const projectId = await openProjectIdFor(repo, project.id);
-    return reply.send({ linked: projectId !== null, openprojectProjectId: projectId });
+    const origin = deps.openproject?.origin;
+    return reply.send({
+      linked: projectId !== null,
+      openprojectProjectId: projectId,
+      openprojectProjectUrl: projectId && origin ? `${origin}/projects/${projectId}` : null,
+    });
   });
 
   app.delete(`${api}/projects/:slug/integrations/openproject`, async (request, reply) => {

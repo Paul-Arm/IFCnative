@@ -85,6 +85,22 @@ test("metadata round-trips through the SQL repository", async () => {
   assert.equal((await repo.listProjectsForUser(user.id)).length, 1);
 });
 
+test("access tokens: create, lookup by hash, touch, delete with user", async () => {
+  const { db, repo, user } = await setup();
+  const token = await repo.createAccessToken({ userId: user.id, name: "Editor", tokenHash: "h1", prefix: "ifch_abcd" });
+  assert.equal((await repo.getAccessTokenByHash("h1"))?.id, token.id);
+  assert.equal(await repo.getAccessTokenByHash("nope"), null);
+  await repo.touchAccessToken(token.id, "2026-09-25T10:00:00.000Z");
+  assert.equal((await repo.listAccessTokens(user.id))[0]?.lastUsedAt, "2026-09-25T10:00:00.000Z");
+  await repo.deleteAccessToken(token.id);
+  assert.equal((await repo.listAccessTokens(user.id)).length, 0);
+  // Tokens verschwinden mit ihrem Benutzer (ohne eigene Inhalte löschbar).
+  const other = await repo.createUser({ email: "t@b.c", name: "T", passwordHash: "x", isAdmin: false });
+  await repo.createAccessToken({ userId: other.id, name: "Zweites", tokenHash: "h2", prefix: "ifch_efgh" });
+  await repo.deleteUser(other.id);
+  assert.equal(await count(db, "access_tokens"), 0);
+});
+
 test("external links: upsert, reverse lookup, cleanup on delete", async () => {
   const { db, repo, user, project } = await setup();
   assert.deepEqual(await repo.getProjectById(project.id), project);

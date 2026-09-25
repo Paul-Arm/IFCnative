@@ -54,7 +54,7 @@ onMounted(async () => {
           <PhUsersThree :size="15" aria-hidden="true" style="vertical-align: -3px" />
           Verwaltung
         </NuxtLink>
-        <span v-if="user" class="muted small">{{ user.name }}</span>
+        <NuxtLink v-if="user" to="/account" class="link small" title="Konto und Zugangstoken">{{ user.name }}</NuxtLink>
         <button class="link" @click="logout">
           <PhSignOut :size="14" aria-hidden="true" />
           Abmelden
