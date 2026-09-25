@@ -18,7 +18,12 @@ export interface VcsUser {
   name: string;
 }
 
-/** Angemeldete Sitzung: JWT-Bearer-Token + Benutzer. */
+/**
+ * Angemeldete Sitzung: Bearer-Token + Benutzer. Das Token ist entweder ein
+ * JWT aus E-Mail/Passwort (30 Tage) oder ein persönliches Zugangstoken
+ * ("ifch_…", im Hub unter Konto erzeugt) — nötig für Konten, die über
+ * OpenProject angelegt wurden und kein Hub-Passwort haben.
+ */
 export interface VcsAuth {
   token: string;
   user: VcsUser;
@@ -65,6 +70,8 @@ export interface VcsCommit {
   author?: VcsUser | null;
 }
 
+export type VcsModelKind = "ifc" | "md" | "file";
+
 export interface VcsModel {
   id: string;
   projectId: string;
@@ -75,8 +82,11 @@ export interface VcsModel {
   createdAt: string;
   /** Ordnerpfad im Projekt ("" = Wurzel). */
   folder: string;
-  /** "ifc" oder "md" (Markdown-Dokument, für den Editor irrelevant). */
-  kind: "ifc" | "md";
+  /**
+   * "ifc" = IFC-Modell (im Editor öffnen/committen), "md" = Markdown,
+   * "file" = beliebige Datei (PDF, DWG, …) — beide für den Editor nur Info.
+   */
+  kind: VcsModelKind;
   branchCount?: number;
   head?: VcsCommit | null;
 }
@@ -109,6 +119,20 @@ export interface VcsHealth {
   version: string;
   storage: "filesystem" | "azure";
 }
+
+/**
+ * Verknüpfung eines Hub-Projekts mit OpenProject (Plugin "IFC Hub"). BCF-
+ * Issues und IFC-Modelle solcher Projekte gleichen sich mit OpenProjects
+ * BCF-Modul ab — auch Commits und Issues aus dem Editor.
+ */
+export interface VcsOpenProjectLink {
+  linked: boolean;
+  openprojectProjectId: string | null;
+  openprojectProjectUrl: string | null;
+}
+
+/** Präfix persönlicher Zugangstokens. */
+export const VCS_ACCESS_TOKEN_PREFIX = "ifch_";
 
 // ---- Actions (Prüf-Workflows) + Runs -----------------------------------
 
@@ -189,7 +213,7 @@ export interface VcsIssueModelRef {
   slug: string;
   name: string;
   folder: string;
-  kind: "ifc" | "md";
+  kind: VcsModelKind;
   foundCommitId: string | null;
   fixedCommitId: string | null;
   foundCommit: VcsIssueCommitRef | null;

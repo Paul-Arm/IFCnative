@@ -23,6 +23,7 @@ import type {
   VcsDocumentOrigin,
   VcsIssue,
   VcsModel,
+  VcsOpenProjectLink,
   VcsRunStatus,
   VcsSettings,
 } from "@/vcs/types";
@@ -207,6 +208,29 @@ export function VcsPanel({
     void refreshChecksAndIssues();
   }, [refreshChecksAndIssues]);
 
+  // Mit OpenProject verknüpft? Dann landen Commits (IFC) und BCF-Issues auch
+  // im BCF-Modul von OpenProject — der Hub gleicht selbstständig ab.
+  const [openProject, setOpenProject] = useState<VcsOpenProjectLink | null>(null);
+  useEffect(() => {
+    if (!auth || !projectSlug) {
+      setOpenProject(null);
+      return;
+    }
+    let cancelled = false;
+    client
+      .getOpenProjectLink(projectSlug)
+      .then((link) => {
+        if (!cancelled) setOpenProject(link);
+      })
+      .catch(() => {
+        if (!cancelled) setOpenProject(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [auth, client, projectSlug]);
+  const syncedWithOpenProject = openProject?.linked ?? false;
+
   // Solange Runs laufen, alle 3 s den Stand nachladen.
   useEffect(() => {
     if (!runs.some((run) => run.status === "queued" || run.status === "running")) {
@@ -257,7 +281,8 @@ export function VcsPanel({
         guids: run.failedGuids,
       });
       setNotice(
-        `Issue #${issue.number} angelegt (BCF, ${run.failedGuids.length} Objekte verortet).`,
+        `Issue #${issue.number} angelegt (BCF, ${run.failedGuids.length} Objekte verortet)` +
+          (syncedWithOpenProject ? " — erscheint auch im BCF-Modul von OpenProject." : "."),
       );
       await refreshChecksAndIssues();
     } catch (issueError) {
@@ -465,6 +490,11 @@ export function VcsPanel({
             {origin.projectName} / {origin.modelName}
           </span>
           <Badge tone="neutral">{origin.branch}</Badge>
+          {syncedWithOpenProject ? (
+            <span title="Mit OpenProject verknüpft: Commits (IFC) und BCF-Issues werden mit dem BCF-Modul von OpenProject abgeglichen.">
+              <Badge tone="info">OpenProject</Badge>
+            </span>
+          ) : null}
         </ToolbarGroup>
         <ToolbarGroup>
           <Button

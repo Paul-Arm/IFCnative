@@ -19,6 +19,7 @@ import type {
   VcsIssue,
   VcsIssueInput,
   VcsModel,
+  VcsOpenProjectLink,
   VcsProject,
   VcsSettings,
   VcsUser,
@@ -128,6 +129,22 @@ export class VcsApiClient {
     );
   }
 
+  /** Aktueller Benutzer der Sitzung (prüft zugleich das Token). */
+  async me(): Promise<VcsUser> {
+    const body = await this.request<{ user: VcsUser }>("/me", { headers: this.headers() });
+    return body.user;
+  }
+
+  /**
+   * Anmeldung mit persönlichem Zugangstoken (Hub: Konto → Zugangstoken).
+   * Das Token wird wie ein JWT als Bearer gesendet; hier nur geprüft.
+   */
+  async loginWithToken(token: string): Promise<VcsAuth> {
+    const trimmed = token.trim();
+    const user = await new VcsApiClient(this.settings, { token: trimmed, user: { id: "", email: "", name: "" } }).me();
+    return { token: trimmed, user };
+  }
+
   // ---- Projekte + Modelle ----------------------------------------------
 
   async listProjects(): Promise<VcsProject[]> {
@@ -234,6 +251,22 @@ export class VcsApiClient {
         body: input.ifcText,
       },
     );
+  }
+
+  // ---- OpenProject ------------------------------------------------------
+
+  /** Ist das Projekt mit OpenProject verknüpft? (null = Hub zu alt) */
+  async getOpenProjectLink(project: string): Promise<VcsOpenProjectLink | null> {
+    try {
+      return await this.request<VcsOpenProjectLink>(
+        `/projects/${encodeURIComponent(project)}/integrations/openproject`,
+        { headers: this.headers() },
+      );
+    } catch (error) {
+      // Ältere Hubs kennen den Endpunkt nicht — dann eben ohne Anzeige.
+      if (error instanceof VcsApiError && error.status === 404) return null;
+      throw error;
+    }
   }
 
   // ---- Actions (Prüfungen) + Runs --------------------------------------

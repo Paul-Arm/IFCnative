@@ -3,6 +3,10 @@
  * Zugangsdaten eingegeben werden — das Hub-Panel verlinkt nur noch hierher
  * (zentrale Einstellungen). Der Hub-Browser auf der Startseite bindet dasselbe
  * Formular ein, damit gemerkte Zugangsdaten überall greifen.
+ *
+ * Dritter Weg "Zugangstoken": für Konten aus OpenProject (ohne Hub-Passwort)
+ * und alle, die kein Passwort im Editor hinterlegen wollen. Das Token wird im
+ * Hub unter Konto → Zugangstoken erzeugt und bleibt bis zum Abmelden aktiv.
  */
 
 import { Loader2, LogIn, LogOut, Trash2 } from "lucide-react";
@@ -10,7 +14,7 @@ import { useMemo, useState } from "react";
 
 import { Input } from "@/components/ui/input";
 import { VcsApiClient, VcsApiError } from "@/vcs/client";
-import type { VcsAuth, VcsSettings } from "@/vcs/types";
+import { VCS_ACCESS_TOKEN_PREFIX, type VcsAuth, type VcsSettings } from "@/vcs/types";
 
 import {
   Badge,
@@ -56,13 +60,32 @@ export function HubAuthForm({
   );
 
   const stored = useMemo(() => loadVcsCredentials(), []);
-  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [authMode, setAuthMode] = useState<"login" | "register" | "token">("login");
+  const [accessToken, setAccessToken] = useState("");
   const [email, setEmail] = useState(stored.email);
   const [name, setName] = useState(stored.name);
   const [password, setPassword] = useState(stored.password);
   const [remember, setRemember] = useState(stored.remember);
   const [authBusy, setAuthBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const handleTokenSubmit = async () => {
+    setError(null);
+    const token = accessToken.trim();
+    if (!token.startsWith(VCS_ACCESS_TOKEN_PREFIX)) {
+      setError(`Zugangstokens beginnen mit „${VCS_ACCESS_TOKEN_PREFIX}“ — im Hub unter Konto → Zugangstoken erzeugen.`);
+      return;
+    }
+    setAuthBusy(true);
+    try {
+      onAuthChange(await client.loginWithToken(token));
+      setAccessToken("");
+    } catch (loginError) {
+      setError(errorMessage(loginError));
+    } finally {
+      setAuthBusy(false);
+    }
+  };
 
   const handleSubmit = async () => {
     setError(null);
@@ -111,6 +134,7 @@ export function HubAuthForm({
   };
 
   const busy = externalBusy || authBusy;
+  const usesAccessToken = auth?.token.startsWith(VCS_ACCESS_TOKEN_PREFIX) ?? false;
 
   if (auth) {
     return (
@@ -123,6 +147,7 @@ export function HubAuthForm({
             </span>
             <span className="truncate text-[11px] text-muted-foreground">
               {auth.user.email}
+              {usesAccessToken ? " · mit Zugangstoken" : ""}
             </span>
           </div>
           <Button
@@ -137,12 +162,19 @@ export function HubAuthForm({
             Abmelden
           </Button>
         </div>
-        <CheckboxField
-          checked={remember}
-          description="E-Mail und Passwort für die nächste Anmeldung merken. Das Passwort liegt dabei unverschlüsselt im Browser-Speicher dieses Rechners."
-          label="Zugangsdaten auf diesem Rechner speichern"
-          onCheckedChange={handleRememberChange}
-        />
+        {usesAccessToken ? (
+          <span className="text-[11px] text-muted-foreground">
+            Das Zugangstoken bleibt bis zum Abmelden auf diesem Rechner gespeichert. Widerrufen lässt
+            es sich im Hub unter Konto → Zugangstoken.
+          </span>
+        ) : (
+          <CheckboxField
+            checked={remember}
+            description="E-Mail und Passwort für die nächste Anmeldung merken. Das Passwort liegt dabei unverschlüsselt im Browser-Speicher dieses Rechners."
+            label="Zugangsdaten auf diesem Rechner speichern"
+            onCheckedChange={handleRememberChange}
+          />
+        )}
         <div>
           <Button
             disabled={busy}
@@ -165,10 +197,54 @@ export function HubAuthForm({
         options={[
           { label: "Anmelden", value: "login" },
           { label: "Registrieren", value: "register" },
+          { label: "Zugangstoken", value: "token" },
         ]}
         value={authMode}
-        onChange={(mode) => setAuthMode(mode as "login" | "register")}
+        onChange={(mode) => {
+          setAuthMode(mode as "login" | "register" | "token");
+          setError(null);
+        }}
       />
+      {authMode === "token" ? (
+        <>
+          <label className="grid min-w-0 gap-1.5 text-xs text-muted-foreground">
+            Zugangstoken
+            <Input
+              autoComplete="off"
+              className="font-mono text-foreground"
+              placeholder={`${VCS_ACCESS_TOKEN_PREFIX}…`}
+              type="password"
+              value={accessToken}
+              onChange={(event) => setAccessToken(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && accessToken.trim() && !busy) {
+                  void handleTokenSubmit();
+                }
+              }}
+            />
+          </label>
+          <span className="text-[11px] text-muted-foreground">
+            Für Konten aus OpenProject: im Hub (auch im eingebetteten IFC Hub in OpenProject) unter
+            „Editor-Zugang“ bzw. Konto → Zugangstoken ein Token erzeugen und hier einfügen.
+          </span>
+          {error ? <InlineAlert tone="danger">{error}</InlineAlert> : null}
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              disabled={busy || !accessToken.trim()}
+              variant="default"
+              onClick={() => void handleTokenSubmit()}
+            >
+              {busy ? (
+                <Loader2 aria-hidden className="size-3.5 animate-spin" />
+              ) : (
+                <LogIn aria-hidden className="size-3.5" />
+              )}
+              Mit Token anmelden
+            </Button>
+          </div>
+        </>
+      ) : (
+        <>
       <LabeledInput label="E-Mail" value={email} onChangeText={setEmail} />
       {authMode === "register" ? (
         <LabeledInput label="Name" value={name} onChangeText={setName} />
@@ -221,6 +297,8 @@ export function HubAuthForm({
           </Button>
         ) : null}
       </div>
+        </>
+      )}
     </div>
   );
 }
