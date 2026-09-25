@@ -1,0 +1,45 @@
+<% html_title t(:label_ifc_hub) %>
+<%# Füllt den Inhaltsbereich unterhalb der Kopfzeile vollständig aus. Bei
+    eingeklappter Seitenleiste liegt OpenProjects Aufklapp-Knopf oben links
+    im Inhaltsbereich — dann rückt der Hub daneben. %>
+<style>
+  .ifc-hub-embed { position: absolute; inset: 0; overflow: hidden; }
+  #content.hidden-navigation .ifc-hub-embed { left: 48px; }
+</style>
+<div class="ifc-hub-embed">
+  <iframe src="<%= @hub_src %>"
+          title="<%= t(:label_ifc_hub) %>"
+          allow="fullscreen; clipboard-read; clipboard-write"
+          referrerpolicy="no-referrer"
+          style="display: block; width: 100%; height: 100%; border: 0;"></iframe>
+</div>
+<%# Der Hub meldet seine Seite (Modell, Issue, …) per postMessage; die
+    Adresszeile folgt, damit Neuladen und geteilte Links dort landen. %>
+<%= nonced_javascript_tag do %>
+  (function () {
+    var hubOrigin = <%= json_escape(@hub_origin.to_json).html_safe %>;
+    var basePath = <%= json_escape(@base_path.to_json).html_safe %>;
+    var syncPath = <%= json_escape(@sync_path.to_json).html_safe %>;
+    var allowed = /^(\/[A-Za-z0-9_.-]+)*$/;
+    window.addEventListener("message", function (event) {
+      if (event.origin !== hubOrigin) return;
+      var data = event.data || {};
+      // Gerade verknüpft: Speicher "IFC Hub" im Projekt aktivieren.
+      if (data.type === "ifc-hub:linked") {
+        var token = document.querySelector('meta[name="csrf-token"]');
+        fetch(syncPath, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "X-CSRF-Token": token ? token.content : "", "Accept": "application/json" }
+        });
+        return;
+      }
+      if (data.type !== "ifc-hub:navigate" || typeof data.path !== "string") return;
+      if (!allowed.test(data.path) || data.path.indexOf("..") !== -1) return;
+      var target = basePath + data.path;
+      if (window.location.pathname !== target) {
+        history.replaceState(history.state, "", target);
+      }
+    });
+  })();
+<% end %>

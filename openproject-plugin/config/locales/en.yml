@@ -1,0 +1,44 @@
+en:
+  label_ifc_hub: "IFC Hub"
+  project_module_ifc_hub: "IFC Hub"
+  permission_view_ifc_hub: "View IFC Hub"
+  permission_edit_ifc_hub: "Edit IFC Hub (commits, issues, checks)"
+  permission_manage_ifc_hub: "Manage IFC Hub (settings, delete models)"
+  ifc_hub:
+    not_configured:
+      title: "IFC Hub is not configured"
+      description: "The environment variables IFC_HUB_URL and IFC_HUB_SHARED_SECRET (at least 32 characters) must be set."
+  storages:
+    provider_types:
+      ifc_hub:
+        name: "IFC Hub"
+        name_placeholder: "e.g. IFC Hub"
+    instructions:
+      ifc_hub:
+        provider_configuration: >-
+          Models and files from the IFC Hub can be linked to and uploaded from work packages (new versions
+          are committed in the hub). Enter as host the address under which the OpenProject server reaches
+          the hub. Browsers use %{hub_url} (IFC_HUB_URL); authentication uses the shared secret
+          (IFC_HUB_SHARED_SECRET).
+    health:
+      checks:
+        errors:
+          not_configured: "The configuration is incomplete (name, host or IFC_HUB_SHARED_SECRET missing)."
+          ifc_hub_unauthorized: "The hub rejects the token. Do IFC_HUB_SHARED_SECRET and OPENPROJECT_SHARED_SECRET match?"
+          ifc_hub_forbidden: "The hub denies access."
+          ifc_hub_not_found: "The file API was not found. Is the OpenProject integration enabled in the hub (OPENPROJECT_SHARED_SECRET)?"
+          ifc_hub_request_error: "The hub rejected the request."
+          ifc_hub_error: "The hub is not reachable at the host address."
+  js:
+    ifc_hub:
+      commit_message:
+        header: "New version in IFC Hub"
+        label: "Commit message for “%{fileName}”"
+        hint: "The message appears in the model's version history in IFC Hub."
+        upload: "Upload"
+        default: "Uploaded from OpenProject"
+        default_with_work_package: "Uploaded from OpenProject (work package #%{id})"
+        header_target: "New version of “%{name}”"
+      location_picker:
+        submit_version: "Upload as new version"
+        file_tooltip: "Check: the uploaded file becomes a new version of this model."

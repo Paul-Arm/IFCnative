@@ -1,0 +1,44 @@
+de:
+  label_ifc_hub: "IFC Hub"
+  project_module_ifc_hub: "IFC Hub"
+  permission_view_ifc_hub: "IFC Hub ansehen"
+  permission_edit_ifc_hub: "IFC Hub bearbeiten (Commits, Issues, Prüfungen)"
+  permission_manage_ifc_hub: "IFC Hub verwalten (Einstellungen, Modelle löschen)"
+  ifc_hub:
+    not_configured:
+      title: "IFC Hub ist nicht konfiguriert"
+      description: "Die Umgebungsvariablen IFC_HUB_URL und IFC_HUB_SHARED_SECRET (mindestens 32 Zeichen) müssen gesetzt sein."
+  storages:
+    provider_types:
+      ifc_hub:
+        name: "IFC Hub"
+        name_placeholder: "z. B. IFC Hub"
+    instructions:
+      ifc_hub:
+        provider_configuration: >-
+          Modelle und Dateien aus dem IFC Hub lassen sich an Arbeitspakete verlinken und dorthin hochladen
+          (neue Versionen werden im Hub committet). Als Host die Adresse eintragen, unter der der
+          OpenProject-Server den Hub erreicht. Der Browser nutzt %{hub_url} (IFC_HUB_URL); die Anmeldung
+          läuft über das gemeinsame Secret (IFC_HUB_SHARED_SECRET).
+    health:
+      checks:
+        errors:
+          not_configured: "Die Konfiguration ist unvollständig (Name, Host oder IFC_HUB_SHARED_SECRET fehlt)."
+          ifc_hub_unauthorized: "Der Hub lehnt das Token ab. Stimmen IFC_HUB_SHARED_SECRET und OPENPROJECT_SHARED_SECRET überein?"
+          ifc_hub_forbidden: "Der Hub verweigert den Zugriff."
+          ifc_hub_not_found: "Die Datei-API wurde nicht gefunden. Ist die OpenProject-Integration im Hub aktiv (OPENPROJECT_SHARED_SECRET)?"
+          ifc_hub_request_error: "Der Hub hat die Anfrage abgelehnt."
+          ifc_hub_error: "Der Hub ist unter der Host-Adresse nicht erreichbar."
+  js:
+    ifc_hub:
+      commit_message:
+        header: "Neue Version im IFC Hub"
+        label: "Commit-Nachricht für „%{fileName}“"
+        hint: "Die Nachricht erscheint in der Versionshistorie des Modells im IFC Hub."
+        upload: "Hochladen"
+        default: "Hochgeladen aus OpenProject"
+        default_with_work_package: "Hochgeladen aus OpenProject (Arbeitspaket #%{id})"
+        header_target: "Neue Version von „%{name}“"
+      location_picker:
+        submit_version: "Als neue Version hochladen"
+        file_tooltip: "Anhaken: Die hochgeladene Datei wird eine neue Version dieses Modells."

@@ -1,0 +1,9 @@
+<% html_title t(:label_ifc_hub) %>
+<%= render Primer::OpenProject::PageHeader.new do |header|
+      header.with_title { t(:label_ifc_hub) }
+    end %>
+<%= render Primer::Beta::Blankslate.new(border: true) do |component|
+      component.with_visual_icon(icon: :stack)
+      component.with_heading(tag: :h2).with_content(t("ifc_hub.not_configured.title"))
+      component.with_description { t("ifc_hub.not_configured.description") }
+    end %>
