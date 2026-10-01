@@ -11,6 +11,8 @@ Branch `stable/17`).
 | `smoke-test.ps1`, `smoke/`    | startet das Image mit leerer Datenbank wie auf dem Server und prüft Plugin und Frontend   |
 | `docker-compose.override.yml` | kommt auf den Server neben die `docker-compose.yml`: eigenes Image, Plugin-Konfiguration  |
 | `.env.example`                | die zusätzlichen Einträge für die `.env` auf dem Server                                   |
+| `install-on-server.sh`        | auf dem Server: Prüfsumme, `docker load`, DB-Backup, Override, `.env`-Prüfung, Start, Plugin-Check |
+| `rollback-on-server.sh`       | auf dem Server: Override deaktivieren, zurück aufs offizielle Image                        |
 
 ## Das Image
 
@@ -37,33 +39,38 @@ Branch `stable/17`).
 
   Mit `-Keep` bleibt die Umgebung auf http://localhost:8090 stehen (admin/admin).
 
-## 2. Auf den Server bringen
+## 2. Auf den Server bringen und einspielen
 
-**Als Datei:**
+**Dateien kopieren** (von deinem PC, PowerShell, im Repo-Root):
 
-```bash
-scp dist/openproject-ifc-hub_<tag>.tar.gz* <server>:/tmp/
-ssh <server>
-cd /tmp && sha256sum -c openproject-ifc-hub_<tag>.tar.gz.sha256 && docker load -i openproject-ifc-hub_<tag>.tar.gz
+```powershell
+ssh <server> mkdir -p /tmp/ifc-hub
+scp deploy/openproject-server/dist/openproject-ifc-hub_<tag>.tar.gz* deploy/openproject-server/*.sh deploy/openproject-server/docker-compose.override.yml deploy/openproject-server/.env.example <server>:/tmp/ifc-hub/
 ```
 
-**Aus einer Registry:** In der `.env` `IFC_HUB_PULL_POLICY=missing` setzen, dann holt `docker compose pull` das Image. Die Registry muss vom Server erreichbar sein, bei HTTP-Registries als `insecure-registries` in der Docker-Konfiguration des Servers eingetragen.
+**`.env` im Compose-Ordner ergänzen** (Vorlage `.env.example`, `IFC_HUB_OPENPROJECT_IMAGE` trägt das Skript selbst ein):
+- `IFC_HUB_URL`: die Hub-Adresse aus Sicht des Browsers
+- `IFC_HUB_SHARED_SECRET`: ein neues Secret, z. B. `openssl rand -hex 32`
+- `IFC_HUB_SSRF_ALLOWLIST`: die IP des Hubs
+- falls der Server den Hub-Namen nicht auflöst (z. B. `*.dokploy.local` hinter Traefik): `IFC_HUB_HOSTNAME` und `IFC_HUB_HOST_IP` (fester Hosts-Eintrag in den Containern)
 
-## 3. Einmalig einrichten
+**Einspielen**, auf dem Server als root:
 
-Im Compose-Ordner auf dem Server:
+```bash
+bash /tmp/ifc-hub/install-on-server.sh /tmp/ifc-hub/openproject-ifc-hub_<tag>.tar.gz /opt/openproject
+```
 
-1. **Sichern:**
-   - die Datenbank: `docker compose exec -T db pg_dump -U postgres openproject > openproject-$(date +%F).sql`
-   - das Volume `opdata` (Anhänge).
-2. **`docker-compose.override.yml`** aus diesem Ordner daneben legen.
-3. **`.env` ergänzen** (Vorlage: `.env.example` hier):
-   - `IFC_HUB_OPENPROJECT_IMAGE`: der Tag aus Schritt 1
-   - `IFC_HUB_URL`: die Hub-Adresse aus Sicht des Browsers
-   - `IFC_HUB_SHARED_SECRET`: ein neues Secret, z. B. `openssl rand -hex 32`
-   - `IFC_HUB_SSRF_ALLOWLIST`: die IP des Hubs
-4. **Prüfen:** `docker compose config | grep -E "image:|IFC_HUB"`. Web, Worker, Cron und Seeder sollten das neue Image zeigen.
-5. **Starten:** `docker compose up -d`. Der Seeder führt die Migrationen aus, auch die Tabelle `ifc_hub_sync_links` des Plugins. Kontrolle mit `docker compose logs seeder`.
+Das Skript bricht ab, bevor es etwas ändert, wenn Werte in der `.env` fehlen oder schon ein fremdes `docker-compose.override.yml` existiert. Sonst:
+1. Prüfsumme kontrollieren und Image laden,
+2. Datenbank nach `<compose-ordner>/backups/` sichern, ebenso `.env` und ein vorhandenes Override,
+3. Override einspielen und `docker compose up -d` (der Seeder führt die Migrationen aus),
+4. warten, bis Web gesund ist, und das Plugin prüfen: geladen, konfiguriert, `frame-src`, Tabelle.
+
+Dauer etwa 1,5 Minuten, davon rund eine Minute Ausfall. Zurück: `bash /tmp/ifc-hub/rollback-on-server.sh /opt/openproject`. Beides wurde lokal gegen das offizielle Compose-Setup (`17.7.2-slim-bim`, Caddy-Proxy) durchgespielt.
+
+**Aus einer Registry statt Datei:** In der `.env` `IFC_HUB_PULL_POLICY=missing` setzen, dann holt `docker compose pull` das Image. Die Registry muss vom Server erreichbar sein, bei HTTP-Registries als `insecure-registries` in der Docker-Konfiguration des Servers eingetragen.
+
+## 3. Hub und OpenProject einrichten
 
 Anschließend den **Hub** aktualisieren (Dokploy), mit dem Stand dieses Branches und diesen Umgebungsvariablen:
 
