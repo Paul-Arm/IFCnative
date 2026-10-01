@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Paul Armerling <paul.armerling@marxkrontal.com>
+Date: Thu, 1 Oct 2026 19:12:51 +0200
+Subject: [PATCH 1/4] Allow further storage providers to resolve folder
+ locations
+
+CreateFolderService only knew Nextcloud, OneDrive and SharePoint and
+raised "Unknown Storage Type" otherwise. Providers registered from
+plugins can now add a <provider>.queries.folder_location callable that
+maps a folder id to the location their create_folder command expects.
+---
+ .../app/services/storages/create_folder_service.rb   | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/modules/storages/app/services/storages/create_folder_service.rb b/modules/storages/app/services/storages/create_folder_service.rb
+index 691216c4..c0a573cf 100644
+--- a/modules/storages/app/services/storages/create_folder_service.rb
++++ b/modules/storages/app/services/storages/create_folder_service.rb
+@@ -65,10 +65,20 @@ module Storages
+       when "one_drive", "sharepoint"
+         Success(parent_id)
+       else
+-        raise "Unknown Storage Type"
++        folder_location_from_provider(parent_id, user)
+       end
+     end
+ 
++    # Further providers (e.g. from plugins) may register a
++    # "<provider>.queries.folder_location" callable that maps a folder id to
++    # the location expected by their create_folder command.
++    def folder_location_from_provider(parent_id, user)
++      key = "#{@storage}.queries.folder_location"
++      raise "Unknown Storage Type" unless Adapters::Registry.key?(key)
++
++      Adapters::Registry[key].call(storage: @storage, user:, folder_id: parent_id)
++    end
++
+     def location_from_file_info(parent_id, user)
+       StorageFileService.call(storage: @storage, user:, file_id: parent_id)
+                         .to_monad.fmap { URI.decode_uri_component(it.location) }

@@ -1,0 +1,66 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Paul Armerling <paul.armerling@marxkrontal.com>
+Date: Thu, 1 Oct 2026 19:13:12 +0200
+Subject: [PATCH 2/4] Let storage admin forms work for further providers
+
+The storages admin controller only recognised the parameter keys of the
+built-in providers and re-rendered the generic general information form
+on validation errors and when editing the host. Derive the parameter key
+from the registered provider types and resolve the form from the
+provider's registry entry, which is GeneralInfoFormComponent for all
+built-in providers.
+---
+ .../storages/admin/storages_controller.rb     | 24 +++++++++++--------
+ 1 file changed, 14 insertions(+), 10 deletions(-)
+
+diff --git a/modules/storages/app/controllers/storages/admin/storages_controller.rb b/modules/storages/app/controllers/storages/admin/storages_controller.rb
+index 75afb7b6..b2c2ab3b 100644
+--- a/modules/storages/app/controllers/storages/admin/storages_controller.rb
++++ b/modules/storages/app/controllers/storages/admin/storages_controller.rb
+@@ -100,7 +100,7 @@ module Storages
+ 
+           service_result.on_failure do
+             error "File storage creation failed: #{@storage.errors.full_messages.to_sentence}"
+-            update_via_turbo_stream(component: Forms::GeneralInfoFormComponent.new(@storage))
++            update_via_turbo_stream(component: general_info_form_component(@storage))
+             respond_with_turbo_streams
+           end
+ 
+@@ -120,7 +120,7 @@ module Storages
+ 
+       def edit_host
+         update_via_turbo_stream(
+-          component: Forms::GeneralInfoFormComponent.new(@storage)
++          component: general_info_form_component(@storage)
+         )
+ 
+         respond_with_turbo_streams
+@@ -272,16 +272,20 @@ module Storages
+                         ])
+       end
+ 
++      # Forms are scoped by the provider's model (storages_nextcloud_storage,
++      # storages_one_drive_storage, ...), including providers added by plugins.
+       def storage_provider_parameter_name
+-        if params.key?(:storages_nextcloud_storage)
+-          :storages_nextcloud_storage
+-        elsif params.key?(:storages_one_drive_storage)
+-          :storages_one_drive_storage
+-        elsif params.key?(:storages_sharepoint_storage)
+-          :storages_sharepoint_storage
+-        else
+-          :storages_storage
++        Storage.provider_types.each_value do |provider_type|
++          param_key = provider_type.model_name.param_key.to_sym
++          return param_key if params.key?(param_key)
+         end
++
++        :storages_storage
++      end
++
++      # The general information form registered by the storage's provider.
++      def general_info_form_component(storage)
++        Adapters::Registry.resolve("#{storage}.components.forms.general_information").new(storage)
+       end
+ 
+       def require_ee_token

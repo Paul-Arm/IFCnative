@@ -1,0 +1,109 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Paul Armerling <paul.armerling@marxkrontal.com>
+Date: Thu, 1 Oct 2026 19:14:08 +0200
+Subject: [PATCH 4/4] Let plugins extend the storage location picker
+
+registerLocationPickerExtension() adds provider-specific behaviour for a
+storage type: init when the picker opens, an optional replacement of the
+list item of a file or folder (e.g. to make files selectable) and a hook
+before the chosen location is submitted. refreshList() re-renders the
+list after an extension changed the state of an item.
+---
+ .../location-picker-modal.component.ts        | 51 ++++++++++++++++++-
+ 1 file changed, 49 insertions(+), 2 deletions(-)
+
+diff --git a/frontend/src/app/shared/components/storages/location-picker-modal/location-picker-modal.component.ts b/frontend/src/app/shared/components/storages/location-picker-modal/location-picker-modal.component.ts
+index c4a50695..06e1c66d 100644
+--- a/frontend/src/app/shared/components/storages/location-picker-modal/location-picker-modal.component.ts
++++ b/frontend/src/app/shared/components/storages/location-picker-modal/location-picker-modal.component.ts
+@@ -45,6 +45,34 @@ import {
+ import { Observable } from 'rxjs';
+ import { map } from 'rxjs/operators';
+ 
++/**
++ * Provider-specific behaviour of the location picker for a further storage
++ * type (e.g. from a plugin), registered with registerLocationPickerExtension.
++ */
++export interface LocationPickerExtension {
++  /** Called when the picker opens. */
++  init?(picker:LocationPickerModalComponent):void;
++  /** May replace the list item of a file or folder (e.g. to make files selectable). */
++  listItem?(
++    picker:LocationPickerModalComponent,
++    file:IStorageFile,
++    index:number,
++    item:StorageFileListItem,
++  ):StorageFileListItem;
++  /** Called before the chosen location is submitted. */
++  chooseLocation?(picker:LocationPickerModalComponent):void;
++}
++
++const locationPickerExtensions = new Map<string, LocationPickerExtension>();
++
++/**
++ * Registers location picker behaviour for a storage type, keyed by the
++ * storage type href (`storage._links.type.href`).
++ */
++export function registerLocationPickerExtension(storageType:string, extension:LocationPickerExtension):void {
++  locationPickerExtensions.set(storageType, extension);
++}
++
+ @Component({
+   templateUrl: 'location-picker-modal.component.html',
+   changeDetection: ChangeDetectionStrategy.OnPush,
+@@ -52,7 +80,8 @@ import { map } from 'rxjs/operators';
+ })
+ export class LocationPickerModalComponent extends FilePickerBaseModalComponent {
+   private readonly i18n = inject(I18nService);
+-  private readonly timezoneService = inject(TimezoneService);
++  /** Public for extensions that build their own list items. */
++  public readonly timezoneService = inject(TimezoneService);
+ 
+   public submitted = false;
+ 
+@@ -81,6 +110,17 @@ export class LocationPickerModalComponent extends FilePickerBaseModalComponent {
+     },
+   };
+ 
++  ngOnInit():void {
++    super.ngOnInit();
++    this.extension?.init?.(this);
++  }
++
++  /** Re-renders the file list, e.g. after an extension changed the state of an item. */
++  public refreshList():void {
++    this.storageFiles$.next([...this.storageFiles$.getValue()]);
++    this.cdRef.detectChanges();
++  }
++
+   public get location():IStorageFile {
+     return this.currentDirectory;
+   }
+@@ -132,12 +172,13 @@ export class LocationPickerModalComponent extends FilePickerBaseModalComponent {
+   }
+ 
+   public chooseLocation():void {
++    this.extension?.chooseLocation?.(this);
+     this.submitted = true;
+     this.service.close();
+   }
+ 
+   protected storageFileToListItem(file:IStorageFile, index:number):StorageFileListItem {
+-    return new StorageFileListItem(
++    const item = new StorageFileListItem(
+       this.timezoneService,
+       file,
+       !isDirectory(file),
+@@ -147,6 +188,12 @@ export class LocationPickerModalComponent extends FilePickerBaseModalComponent {
+       this.tooltip(file),
+       undefined,
+     );
++
++    return this.extension?.listItem?.(this, file, index, item) ?? item;
++  }
++
++  private get extension():LocationPickerExtension|undefined {
++    return locationPickerExtensions.get(this.storage?._links?.type?.href);
+   }
+ 
+   private isConstrained(file:IStorageFile):boolean {

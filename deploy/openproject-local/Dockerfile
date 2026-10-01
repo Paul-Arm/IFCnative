@@ -23,18 +23,20 @@ ARG SERVER_BASE_FLAVOR=slim-bim
 FROM openproject/openproject:${OPENPROJECT_VERSION} AS plugin
 ARG OPENPROJECT_VERSION
 
-# OpenProject-Fork (Branch ifc-hub/v<Version>): Erweiterungspunkte, die das
-# Plugin nutzt, als Patch auf die Quellen des offiziellen Images. Passt er
-# nicht (OpenProject geändert), bricht der Build hier ab — siehe
-# patches/README.md. Geänderte Dateien außerhalb von frontend/ landen in
-# /tmp/patched für das slim-Image (dort fehlen git/patch und das Frontend
-# kommt fertig gebaut).
-COPY deploy/openproject-local/patches/openproject-${OPENPROJECT_VERSION}.patch /tmp/openproject.patch
+# Patch-Serie für OpenProject (patches/openproject-<Version>/, Branch
+# ifc-hub/v<Version>): Erweiterungspunkte, die das Plugin nutzt, der Reihe
+# nach auf die Quellen des offiziellen Images. Passt einer nicht (OpenProject
+# geändert), bricht der Build hier ab — siehe patches/README.md. Geänderte
+# Dateien außerhalb von frontend/ landen in /tmp/patched für das slim-Image
+# (dort fehlen git/patch und das Frontend kommt fertig gebaut).
+COPY deploy/openproject-local/patches/openproject-${OPENPROJECT_VERSION}/ /tmp/openproject-patches/
 RUN cd /app \
- && git apply --check /tmp/openproject.patch \
- && git apply /tmp/openproject.patch \
+ && for p in /tmp/openproject-patches/*.patch; do \
+      git apply --check "$p" && git apply "$p" || exit 1; \
+    done \
  && mkdir -p /tmp/patched \
- && git apply --numstat /tmp/openproject.patch | awk '{print $3}' | grep -v '^frontend/' \
+ && for p in /tmp/openproject-patches/*.patch; do git apply --numstat "$p"; done \
+    | awk '{print $3}' | sort -u | grep -v '^frontend/' \
     | xargs -r -I{} cp --parents {} /tmp/patched/
 
 COPY --chown=app:app openproject-plugin /app/vendored-plugins/openproject-ifc_hub

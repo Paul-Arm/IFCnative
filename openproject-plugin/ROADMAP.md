@@ -38,13 +38,13 @@ Jeder Punkt betrifft mehrere Teile gleichzeitig: Editor, Hub (inklusive Port nac
 
 ## OpenProject-Updates absichern
 
-**Umgesetzt (Schritt 1):** Die Laufzeit-Patches sind durch vier Erweiterungspunkte im OpenProject-Fork ersetzt (Branch `ifc-hub/v17.7.2`, als Patch in `deploy/openproject-local/patches/`, Details dort). Im Plugin bleibt nur das Einhängen eines Callbacks in `Bim::IfcModels::IfcModel` (`IfcModelSyncTrigger`). Die Erweiterungspunkte für Upload und Ordnerauswahl liegen genau an der Dateiauswahl, die das Epic [#78519](https://community.openproject.org/work_packages/78519) umbauen will. Beim Rebase fällt eine Änderung dort sofort auf.
+**Umgesetzt (Schritt 1):** Die Laufzeit-Patches sind durch vier Erweiterungspunkte in OpenProject ersetzt. Sie liegen als Patch-Serie in `deploy/openproject-local/patches/openproject-17.7.2/`, Details dort. Statt eines öffentlichen GitHub-Forks gibt es nur die Serie hier im Repo; ein Fork wäre bei GitHub zwangsläufig öffentlich. Im Plugin bleibt nur das Einhängen eines Callbacks in `Bim::IfcModels::IfcModel` (`IfcModelSyncTrigger`). Die Erweiterungspunkte für Upload und Ordnerauswahl liegen genau an der Dateiauswahl, die das Epic [#78519](https://community.openproject.org/work_packages/78519) umbauen will. Beim Einspielen auf eine neue Version (`git am -3`) fällt eine Änderung dort sofort auf.
 
 Plan:
 
-1. **Patch-Fork** von `opf/openproject`, pro Version ein Branch `ifc-hub/vX.Y.Z`: offizieller Tag plus nur unsere Patch-Commits. Die Patches werden dort zu normalem Quellcode, im Idealfall als registrierbarer Erweiterungspunkt.
-   - **Update:** `git rebase --onto vNEU vALT`. Konflikte zeigen genau die geänderten Stellen.
-   - **Build:** weiter auf dem offiziellen `-slim-bim`-Image aufsetzen und nur den Diff des Forks als Patchdatei anwenden, vor dem Frontend-Build. Kein vollständiger Build aus dem Quellcode.
+1. **Patch-Serie** auf dem offiziellen Tag (umgesetzt): nur unsere Commits, als registrierbare Erweiterungspunkte.
+   - **Update:** Neuen Tag flach klonen und `git am -3` mit der alten Serie ausführen. Konflikte zeigen genau die geänderten Stellen.
+   - **Build:** auf dem offiziellen `-slim-bim`-Image, die Serie wird vor dem Frontend-Build angewendet. Kein vollständiger Build aus dem Quellcode.
    - **Plugin:** Additiver Code (Speicheranbieter, Abgleich, Einbettung) bleibt im Plugin.
 2. **Änderungsbericht:** Fingerabdrücke der Upstream-Stellen, von denen wir abhängen, mit dem neuen Image vergleichen. Ergebnis je Stelle: unverändert, geändert (mit Diff) oder fehlt.
 3. **Tests:**

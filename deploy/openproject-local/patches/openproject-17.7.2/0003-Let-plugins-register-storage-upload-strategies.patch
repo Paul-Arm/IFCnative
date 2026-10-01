@@ -1,0 +1,70 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Paul Armerling <paul.armerling@marxkrontal.com>
+Date: Thu, 1 Oct 2026 19:13:32 +0200
+Subject: [PATCH 3/4] Let plugins register storage upload strategies
+
+StorageUploadService only knew the upload strategies of the built-in
+storage types. registerStorageUploadStrategy() adds the strategy of a
+further storage type (keyed by its type href); the factory receives the
+HttpClient and the injector.
+---
+ .../storages/upload/storage-upload.service.ts | 28 +++++++++++++++++--
+ 1 file changed, 25 insertions(+), 3 deletions(-)
+
+diff --git a/frontend/src/app/shared/components/storages/upload/storage-upload.service.ts b/frontend/src/app/shared/components/storages/upload/storage-upload.service.ts
+index c4c0dd64..5d62fbed 100644
+--- a/frontend/src/app/shared/components/storages/upload/storage-upload.service.ts
++++ b/frontend/src/app/shared/components/storages/upload/storage-upload.service.ts
+@@ -28,7 +28,7 @@
+ 
+ import { Observable } from 'rxjs';
+ import { ID } from '@datorama/akita';
+-import { Injectable, inject } from '@angular/core';
++import { Injectable, Injector, inject } from '@angular/core';
+ import { HttpClient, HttpEvent } from '@angular/common/http';
+ 
+ import { IUploadFile, OpUploadService } from 'core-app/core/upload/upload.service';
+@@ -45,10 +45,27 @@ export interface IStorageFileUploadResponse {
+   size:number;
+ }
+ 
++/**
++ * Creates the upload strategy for a storage type registered by a plugin.
++ */
++export type StorageUploadStrategyFactory = (http:HttpClient, injector:Injector) => IUploadStrategy;
++
++const registeredUploadStrategies = new Map<string, StorageUploadStrategyFactory>();
++
++/**
++ * Registers the upload strategy of a further storage provider (e.g. from a
++ * plugin), keyed by the storage type href (`storage._links.type.href`).
++ */
++export function registerStorageUploadStrategy(storageType:string, factory:StorageUploadStrategyFactory):void {
++  registeredUploadStrategies.set(storageType, factory);
++}
++
+ @Injectable()
+ export class StorageUploadService extends OpUploadService {
+   private readonly http = inject(HttpClient);
+ 
++  private readonly injector = inject(Injector);
++
+   private uploadStrategy:IUploadStrategy;
+ 
+   public upload<T>(
+@@ -73,8 +90,13 @@ export class StorageUploadService extends OpUploadService {
+       case sharepoint:
+         this.uploadStrategy = new SharepointUploadStrategy(this.http);
+         break;
+-      default:
+-        throw new Error('unknown storage type');
++      default: {
++        const factory = registeredUploadStrategies.get(storageType);
++        if (!factory) {
++          throw new Error('unknown storage type');
++        }
++        this.uploadStrategy = factory(this.http, this.injector);
++      }
+     }
+   }
+ }
