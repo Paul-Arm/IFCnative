@@ -1,7 +1,5 @@
 <script setup lang="ts">
-import { PhBooks, PhSignOut, PhUsersThree } from "@phosphor-icons/vue";
-
-const { user, token, logout, setSession } = useAuth();
+const { user, token, setSession } = useAuth();
 const { embed } = useEmbed();
 const { api } = useApi();
 const route = useRoute();
@@ -34,35 +32,35 @@ onMounted(async () => {
     // 401 wird bereits von useApi behandelt.
   }
 });
+
+const version = ref<string | null>(null);
+onMounted(async () => {
+  try {
+    const health = await $fetch<{ version: string }>("/api/health");
+    version.value = health.version;
+  } catch {
+    // Fußzeile kommt ohne Version aus.
+  }
+});
+
+const { helpOpen } = useShortcuts();
 </script>
 
 <template>
-  <div>
+  <div class="app">
     <!-- Eingebettet liefert OpenProject Kopfzeile, Benutzer und Abmelden. -->
-    <header v-if="token && !embed" class="topbar">
-      <div class="topbar-inner">
-        <NuxtLink to="/" class="brand">
-          <HubLogo :size="22" node-fill="var(--surface)" />
-          IFC Hub
-        </NuxtLink>
-        <span class="topbar-spacer" />
-        <NuxtLink to="/library" class="link small">
-          <PhBooks :size="15" aria-hidden="true" style="vertical-align: -3px" />
-          Bibliothek
-        </NuxtLink>
-        <NuxtLink v-if="user?.isAdmin" to="/admin" class="link small">
-          <PhUsersThree :size="15" aria-hidden="true" style="vertical-align: -3px" />
-          Verwaltung
-        </NuxtLink>
-        <NuxtLink v-if="user" to="/account" class="link small" title="Konto und Zugangstoken">{{ user.name }}</NuxtLink>
-        <button class="link" @click="logout">
-          <PhSignOut :size="14" aria-hidden="true" />
-          Abmelden
-        </button>
-      </div>
-    </header>
-    <main :class="[token ? 'container' : '', { wide: token && route.meta.wide }]">
+    <AppHeader v-if="token && !embed" />
+    <main class="app-main">
       <slot />
     </main>
+    <footer v-if="token && !embed && !route.meta.fullBleed" class="app-footer">
+      <HubLogo :size="18" muted />
+      <span>IFC Hub<template v-if="version"> · v{{ version }}</template></span>
+      <span class="spacer" />
+      <NuxtLink to="/projects">Projekte</NuxtLink>
+      <NuxtLink to="/library">Bibliothek</NuxtLink>
+      <button type="button" class="link-btn muted" @click="helpOpen = true">Tastenkürzel</button>
+      <a href="/api/health" target="_blank" rel="noopener">API-Status</a>
+    </footer>
   </div>
 </template>

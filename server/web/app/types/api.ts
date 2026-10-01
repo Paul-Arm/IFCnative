@@ -1,4 +1,4 @@
-// Mirrors the REST API response shapes of the IFC-VCS server (server/src).
+// Mirrors the REST API response shapes of the IFC Hub server (server/src).
 
 export type Role = "owner" | "maintainer" | "contributor" | "viewer";
 
@@ -17,6 +17,8 @@ export interface Project {
   id: string;
   slug: string;
   name: string;
+  /** Kurzbeschreibung („About“), "" = keine. */
+  description?: string;
   ownerId: string;
   createdAt: string;
   visibility: "private" | "public";
@@ -24,6 +26,10 @@ export interface Project {
   modelCount?: number;
   /** Ob ein Projektbild (Szenen-Screenshot) hinterlegt ist. */
   hasImage?: boolean;
+  memberCount?: number;
+  openIssueCount?: number;
+  /** Letzte Aktivität (Commit, Issue) — für die Sortierung im Dashboard. */
+  lastActivityAt?: string;
 }
 
 export interface Member {
@@ -31,6 +37,14 @@ export interface Member {
   userId: string;
   role: Role;
   user: ApiUser | null;
+}
+
+/** Antwort von GET /projects/:slug */
+export interface ProjectDetail {
+  project: Project;
+  members: Member[];
+  role: Role | null;
+  folders: string[];
 }
 
 export interface Commit {
@@ -84,6 +98,9 @@ export interface Label {
   projectId: string;
   name: string;
   color: string;
+  description?: string;
+  /** Nur in GET …/labels: Zahl der offenen Issues mit diesem Label. */
+  issueCount?: number;
 }
 
 export type IssueState = "open" | "closed";
@@ -144,6 +161,8 @@ export interface Issue {
   labels: Label[];
   /** Betroffene IFC-GlobalIds — verorten das Issue im 3D-Viewer. */
   guids: string[];
+  /** Zahl der Kommentare (Listenanzeige). */
+  commentCount?: number;
 }
 
 export interface IssueComment {
@@ -153,6 +172,49 @@ export interface IssueComment {
   body: string;
   createdAt: string;
   author: ApiUser | null;
+}
+
+// ---- Issue-Verlauf (Timeline-Ereignisse) --------------------------------
+
+export type IssueEventKind =
+  | "closed"
+  | "reopened"
+  | "renamed"
+  | "labeled"
+  | "unlabeled"
+  | "assigned"
+  | "unassigned"
+  | "linked_model"
+  | "unlinked_model"
+  | "parent_changed"
+  | "kind_changed";
+
+export interface IssueEventData {
+  from?: string;
+  to?: string;
+  labels?: { id: string; name: string; color: string }[];
+  users?: { id: string; name: string }[];
+  models?: { id: string; slug: string; name: string }[];
+  parent?: { number: number; title: string } | null;
+}
+
+export interface IssueEvent {
+  id: string;
+  issueId: string;
+  projectId: string;
+  actorId: string;
+  kind: IssueEventKind;
+  data: IssueEventData;
+  createdAt: string;
+  actor: ApiUser | null;
+}
+
+/** Antwort von GET /projects/:slug/issues/:number */
+export interface IssueDetail {
+  issue: Issue;
+  comments: IssueComment[];
+  subIssues: Issue[];
+  events?: IssueEvent[];
 }
 
 // ---- Actions (Prüf-Workflows) -----------------------------------------
@@ -236,6 +298,148 @@ export interface ActionRun {
   /** Nur im Run-Detail (/runs/:id) enthalten. */
   log?: string;
 }
+
+// ---- Aktivität, Beiträge, Suche, Statistik ------------------------------
+
+export type ActivityType =
+  | "commit"
+  | "issue_opened"
+  | "issue_closed"
+  | "issue_reopened"
+  | "comment"
+  | "run"
+  | "project_created";
+
+export interface ActivityEvent {
+  id: string;
+  type: ActivityType;
+  at: string;
+  actor: ApiUser | null;
+  project: { slug: string; name: string };
+  model?: { slug: string; name: string; kind: ModelKind; folder: string };
+  commit?: {
+    id: string;
+    message: string;
+    branchName: string;
+    added: number;
+    removed: number;
+    modified: number;
+    schema: string;
+  };
+  issue?: { number: number; title: string; state: IssueState; kind: IssueKind };
+  comment?: { id: string; excerpt: string };
+  run?: {
+    id: string;
+    number: number;
+    status: ActionRunStatus;
+    summary: string;
+    actionName: string;
+    commitId: string;
+  };
+}
+
+export interface ActivityPage {
+  events: ActivityEvent[];
+  nextBefore: string | null;
+}
+
+export interface ContributionDay {
+  date: string;
+  commits: number;
+  issues: number;
+  comments: number;
+  total: number;
+}
+
+export interface Contributions {
+  days: ContributionDay[];
+  total: number;
+  from: string;
+  to: string;
+}
+
+export interface SearchResults {
+  projects: Project[];
+  models: {
+    id: string;
+    slug: string;
+    name: string;
+    kind: ModelKind;
+    folder: string;
+    project: { slug: string; name: string };
+  }[];
+  issues: {
+    id: string;
+    number: number;
+    title: string;
+    state: IssueState;
+    kind: IssueKind;
+    createdAt: string;
+    project: { slug: string; name: string };
+  }[];
+}
+
+export interface ProjectStats {
+  commitCount: number;
+  branchCount: number;
+  contributors: { user: ApiUser | null; commits: number }[];
+  kinds: { kind: ModelKind; extension: string; count: number }[];
+  issues: { open: number; closed: number };
+  runs: {
+    total: number;
+    success: number;
+    failed: number;
+    error: number;
+    running: number;
+    queued: number;
+    cancelled: number;
+  };
+  lastCommit:
+    | (Commit & {
+        author: ApiUser | null;
+        model: { slug: string; name: string; kind: ModelKind; folder: string };
+      })
+    | null;
+  entityCount: number;
+  modelCount: number;
+  folderCount: number;
+  memberCount: number;
+}
+
+export interface MyIssue {
+  id: string;
+  number: number;
+  title: string;
+  state: IssueState;
+  kind: IssueKind;
+  createdAt: string;
+  updatedAt: string;
+  project: { slug: string; name: string };
+  labels: Label[];
+  commentCount: number;
+  subIssueCount: number;
+}
+
+export interface SystemInfo {
+  version: string;
+  storage: "filesystem" | "azure";
+  database: "sqlite" | "postgres" | "memory";
+  node: string;
+  uptimeSec: number;
+  memory: { rss: number; heapUsed: number; heapTotal: number };
+  workers: number;
+  runner: { queued: number; running: number };
+  counts: {
+    users: number;
+    projects: number;
+    models: number;
+    commits: number;
+    issues: number;
+    runs: number;
+  };
+}
+
+// ---- Diffs --------------------------------------------------------------
 
 export type GuidChangeStatus = "added" | "removed" | "modified";
 

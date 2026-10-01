@@ -245,10 +245,37 @@ setzen.
 
 ## Web-UI (`web/`, Nuxt)
 
-Single-Page-App: Login/Registrierung, Projekte (+ Mitgliederverwaltung),
-Modelle, Commit-Historie je Branch, IFC-Upload mit Commit-Nachricht,
-Commit-Detail mit semantischem Diff (wählbare Vergleichsbasis, Feld-Detail
-pro Entity), .ifc-Download.
+Single-Page-App im Stil von GitHub (Redesign 2026-09):
+
+- **Dashboard** — Begrüßung, eigener Beitragskalender (Raster oder
+  isometrische „Skyline“), Aktivitäts-Feed aller Projekte (Commits, Issues,
+  Kommentare, Prüf-Runs), zugewiesene Issues, zuletzt Besuchtes.
+- **Projekt** (`/p/:slug`) — Titelband mit Tabs *Dateien · Issues · Actions ·
+  3D · Aktivität · Einstellungen*. Dateien: Ordner-Browser mit letztem
+  Commit je Zeile, Prüfstatus (✓/✗), Datei-Finder (`t`), Drag & Drop auf die
+  Liste, Mehrfach-Upload (gleichnamige Dateien werden neue Version),
+  README, Info-Leiste mit Beschreibung, Kennzahlen, Dateiarten-Leiste und
+  Mitwirkenden.
+- **Modell/Datei** (`/p/:slug/m/:model`) — 3D, Vorschau bzw. Markdown,
+  Branch-Menü (Branch direkt anlegen), Verlauf nach Tagen mit Branch-Graph
+  und Diffstat, ältere Stände per `?at=<commit>`, Einstellungen.
+- **Commit** — Kopf mit Autor/Vorgänger/Prüfstatus, objektzentrierter Diff
+  mit 3D-Vergleich, Prüfungen mit Live-Protokoll.
+- **Issues** — Filterzeile mit Qualifiern (`is:open label:"…" assignee:…
+  no:assignee model:… kind:bcf sort:updated`, teilbar per `?q=`),
+  Timeline mit Ereignissen (geschlossen, Labels, Zuweisungen …),
+  „Mit Kommentar schließen“, Vorlagen (Befund/Frage/Aufgabe), BCF.
+- **Actions** — Workflows links, Runs rechts (Filter, aufklappbares
+  Protokoll, `?run=<id>`), Anlegen per Dialog.
+- **Einstellungen** — Name/Beschreibung/Sichtbarkeit/Projektbild,
+  Mitglieder, Label-Verwaltung, Gefahrenzone mit Tipp-Bestätigung.
+- **Befehlspalette** (`Strg+K` oder `/`) — Projekte, Dateien, Issues und
+  Befehle; Tastenkürzel wie bei GitHub (`g i`, `g a`, `c`, `?`).
+- **Hell/Dunkel/System** im Benutzermenü (auch der 3D-Viewer folgt).
+
+Gestaltung: Design-Tokens nur in `web/app/assets/tokens.css` (Farben als
+`light-dark()`-Paare, Schriften Mona Sans / Hubot Sans / Monaspace Neon —
+lokal gebündelt, kein CDN). Für ein Re-Branding reicht diese Datei.
 
 Markdown wird überall (md-Dateien, Issue-Beschreibungen, Kommentare) mit
 einem **WYSIWYG-Editor** bearbeitet (`components/MarkdownEditor.vue`,
@@ -266,7 +293,8 @@ npm run build:web      # = npm --prefix web run generate + Sync nach public/
 ```
 
 - UI-Entwicklung mit Hot-Reload: `cd web && npm install && npm run dev`
-  (Port 3000, proxied `/api` auf 8787).
+  (Port 3000, proxied `/api` auf 8787 — anderer API-Server per
+  `HUB_API_URL=http://127.0.0.1:8790`).
 
 ## REST-API (`/api`, JSON)
 
@@ -278,20 +306,24 @@ Auth: `Authorization: Bearer <JWT>` aus `/api/auth/login`. Fehler kommen als
 | GET          | `/api/health`                                                                 | `{status, version, storage}`                                                                                                                                                                                                                                                                                                                       |
 | POST         | `/api/auth/register`, `/api/auth/login`                                       | → `{ token, user }`                                                                                                                                                                                                                                                                                                                                |
 | GET          | `/api/me`                                                                     | aktueller Benutzer (inkl. `isAdmin`)                                                                                                                                                                                                                                                                                                               |
+| GET          | `/api/me/issues`                                                              | eigene offene Issues aus allen zugänglichen Projekten → `{assigned, created}` (je max. 30, neueste Aktivität zuerst; mit `project`, `labels`, `commentCount`, `subIssueCount`)                                                                                                                                                                     |
 | GET/POST     | `/api/admin/users`                                                            | Benutzer auflisten / anlegen `{email, password, name?, isAdmin?}` (nur Admin)                                                                                                                                                                                                                                                                      |
 | PATCH/DELETE | `/api/admin/users/:id`                                                        | Name/Admin-Status/Passwort ändern bzw. löschen (nur Admin; Selbst-Aussperrung und Löschen mit Inhalten blockiert)                                                                                                                                                                                                                                  |
-| GET/POST     | `/api/projects`                                                               | eigene + öffentliche Projekte (mit Rolle) / anlegen `{name, slug?, visibility?}` (Default: public)                                                                                                                                                                                                                                                 |
-| GET/PATCH    | `/api/projects/:slug`                                                         | Projekt + Mitglieder + `folders` (private nur für Mitglieder) / Einstellungen `{name?, visibility?}` (admin)                                                                                                                                                                                                                                       |
+| GET          | `/api/admin/system`                                                           | Systemübersicht (nur Admin): Version, Speicher- und DB-Modus, Node-Version, Laufzeit, Speicherverbrauch, Worker, Run-Warteschlange, Mengen (Benutzer, Projekte, Modelle, Commits, Issues, Runs)                                                                                                                                                    |
+| GET/POST     | `/api/projects`                                                               | eigene + öffentliche Projekte (mit Rolle, `description`, `memberCount`, `modelCount`, `openIssueCount` inkl. Unter-Issues, `lastActivityAt` = jüngster Commit/Issue-Änderung/Anlage, `hasImage`) / anlegen `{name, slug?, visibility?, description?}` (Default: public; Beschreibung max. 500 Zeichen)                                             |
+| GET/PATCH    | `/api/projects/:slug`                                                         | Projekt + Mitglieder + `folders` (private nur für Mitglieder) / Einstellungen `{name?, visibility?, description?}` (admin; `description: ""` löscht die Beschreibung)                                                                                                                                                                              |
+| GET          | `/api/projects/:slug/stats`                                                   | Kennzahlen der Projektübersicht: `{commitCount, branchCount, contributors: [{user, commits}], kinds: [{kind, extension, count}], issues: {open, closed}, runs: {total, success, failed, error, running, queued, cancelled}, lastCommit (mit `author`, `model`), entityCount (Head-Stände der IFC-Modelle), modelCount, folderCount, memberCount}` (Leserecht) |
 | POST         | `/api/projects/:slug/folders`                                                 | Ordner anlegen `{path}` (write)                                                                                                                                                                                                                                                                                                                    |
 | DELETE       | `/api/projects/:slug/folders?path=`                                           | leeren Ordner löschen (409 wenn Modelle darin)                                                                                                                                                                                                                                                                                                     |
 | DELETE       | `/api/projects/:slug`                                                         | Projekt löschen (nur Owner; inkl. Blobs)                                                                                                                                                                                                                                                                                                           |
 | PUT/GET      | `/api/projects/:slug/image`                                                   | Projektbild (PNG, z. B. Szenen-Screenshot aus dem 3D-Tab) setzen (write) / abrufen (Mitglied)                                                                                                                                                                                                                                                      |
-| GET/POST     | `/api/projects/:slug/labels`                                                  | Labels auflisten / anlegen `{name, color}` (write)                                                                                                                                                                                                                                                                                                 |
+| GET/POST     | `/api/projects/:slug/labels`                                                  | Labels auflisten (je Label `issueCount` = offene Issues) / anlegen `{name, color, description?}` (write; Beschreibung max. 100 Zeichen)                                                                                                                                                                                                            |
+| PATCH/DELETE | `/api/projects/:slug/labels/:id`                                              | Label ändern `{name?, color?, description?}` (409 bei doppeltem Namen) bzw. löschen — entfernt es von allen Issues (write)                                                                                                                                                                                                                         |
 | GET/POST     | `/api/projects/:slug/issues`                                                  | Issues (`?state=open\|closed`, mit Zählern) / eröffnen `{title, body?, kind?: "virtual"\|"bcf", parentId?, assigneeIds?, modelLinks?: [{modelId, foundCommitId?, fixedCommitId?}], labelIds?, guids?}` — `modelLinks` trägt den Versionsbezug (in welchem Commit aufgefallen/behoben), `parentId` macht das Issue zum Unter-Issue (jedes Mitglied) |
 | GET          | `/api/projects/:slug/issues/bcf`                                              | alle BCF-Issues als `.bcfzip` (BCF 2.1)                                                                                                                                                                                                                                                                                                            |
 | POST         | `/api/projects/:slug/issues/bcf`                                              | `.bcfzip` importieren (Body = Zip, `application/zip`, `?name=` Dateiname für den Titel des Sammel-Issues) → `{imported, skipped, located, parent}` — Topics werden Unter-Issues eines virtuellen Sammel-Issues (write)                                                                                                                             |
 | GET          | `/api/projects/:slug/issues/:number/bcf`                                      | einzelnes BCF-Issue als `.bcfzip` (400 bei virtuellen Issues)                                                                                                                                                                                                                                                                                      |
-| GET/PATCH    | `/api/projects/:slug/issues/:number`                                          | Issue-Detail (inkl. `comments`, `subIssues`) / ändern (Titel, Body, State, `parentId`, Zuordnungen — Autor oder write-Rolle)                                                                                                                                                                                                                       |
+| GET/PATCH    | `/api/projects/:slug/issues/:number`                                          | Issue-Detail (inkl. `comments`, `subIssues`, `events` = Zeitleiste mit `actor`) / ändern (Titel, Body, State, `parentId`, Zuordnungen — Autor oder write-Rolle); jede tatsächliche Änderung von Status, Titel, Art, Eltern-Issue, Labels, Bearbeitern und Modellen wird als Ereignis protokolliert (Namen als Schnappschuss). Issues tragen `commentCount` |
 | POST/DELETE  | `/api/projects/:slug/issues/:number/comments(/:id)`                           | kommentieren (jedes Mitglied) / löschen (Autor oder write-Rolle)                                                                                                                                                                                                                                                                                   |
 | POST         | `/api/projects/:slug/members`                                                 | Mitglied hinzufügen/Rolle ändern `{email, role}` (admin)                                                                                                                                                                                                                                                                                           |
 | DELETE       | `/api/projects/:slug/members/:userId`                                         | Mitglied entfernen (admin; Owner geschützt)                                                                                                                                                                                                                                                                                                        |
@@ -324,6 +356,9 @@ Auth: `Authorization: Bearer <JWT>` aus `/api/auth/login`. Fehler kommen als
 | GET/POST     | `/api/library`                                                                | zentrale Bibliothek auflisten (mit `usageCount`, `owner`) / Datei ablegen `{name, kind, content, fileName?}` (jeder Angemeldete)                                                                                                                                                                                                                   |
 | PATCH/DELETE | `/api/library/:id`                                                            | Name/Inhalt aktualisieren bzw. löschen (Eigentümer/Admin; DELETE 409 solange referenziert)                                                                                                                                                                                                                                                         |
 | GET          | `/api/library/:id/file`                                                       | Bibliotheksdatei herunterladen                                                                                                                                                                                                                                                                                                                     |
+| GET          | `/api/activity?project=&user=&limit=&before=`                                 | Aktivitäts-Feed der zugänglichen Projekte (Commits, eröffnete/geschlossene/wiedereröffnete Issues, Kommentare mit Auszug, Runs, neue Projekte), neueste zuerst → `{events, nextBefore}`; `user=me` oder Benutzer-Id, `limit` 1–100 (Standard 40), blättern mit `before=nextBefore`                                                                 |
+| GET          | `/api/contributions?user=&project=&days=`                                     | Beiträge je UTC-Tag (Commits, eröffnete Issues, Kommentare) für die Heatmap → `{days: [{date, commits, issues, comments, total}], total, from, to}`; lückenlos bis heute, `days` 7–400 (Standard 371)                                                                                                                                              |
+| GET          | `/api/search?q=&limit=`                                                       | Befehlspalette: Projekte (Name/Slug/Beschreibung, Form wie `/api/projects`), Modelle (Name/Slug/Ordner), Issues (Titel oder `#12`/`12`) — ohne Groß-/Kleinschreibung, Präfix-Treffer zuerst; `limit` 1–20 je Kategorie (Standard 8)                                                                                                                |
 
 CORS ist offen (Bearer-Auth, keine Cookies) — Editor (Vite/Tauri) und
 Nuxt-Dev-Server können direkt zugreifen.

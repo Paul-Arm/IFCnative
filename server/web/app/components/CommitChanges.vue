@@ -416,8 +416,8 @@ function onViewerSelect(pick: ViewerPick | null): void {
         ist der Diff sofort da.
       </span>
     </LoadingState>
-    <div v-else-if="overviewError && !overview" class="card-body">
-      <div class="alert error" style="margin: 0">
+    <div v-else-if="overviewError && !overview" class="box-body">
+      <div class="flash flash-danger" style="margin: 0">
         Änderungen konnten nicht geladen werden:
         {{ apiErrorMessage(overviewError) }}
       </div>
@@ -426,10 +426,10 @@ function onViewerSelect(pick: ViewerPick | null): void {
     <template v-else-if="overview">
       <!-- ---- Zusammenfassung ---- -->
       <div class="chg-summary">
-        <div v-if="overview.identical" class="alert success" style="margin: 0">
+        <div v-if="overview.identical" class="flash flash-success" style="margin: 0">
           Beide Stände sind inhaltlich identisch — ein Re-Export ohne Änderung.
         </div>
-        <div v-else-if="!changedTotal" class="alert" style="margin: 0">
+        <div v-else-if="!changedTotal" class="flash" style="margin: 0">
           Keine Änderungen an Objekten. Die Dateien unterscheiden sich nur
           technisch (z. B. Zeitstempel oder Entity-Nummerierung).
         </div>
@@ -532,7 +532,7 @@ function onViewerSelect(pick: ViewerPick | null): void {
             ({{ numberFmt.format(option.count) }})
           </option>
         </select>
-        <button v-if="hasFilter" class="link small" type="button" @click="resetFilters">
+        <button v-if="hasFilter" class="btn btn-invisible btn-sm" type="button" @click="resetFilters">
           <PhX :size="12" aria-hidden="true" />
           Filter zurücksetzen
         </button>
@@ -540,7 +540,7 @@ function onViewerSelect(pick: ViewerPick | null): void {
         <button
           v-if="fromId"
           class="btn"
-          :class="{ primary: show3d }"
+          :class="{ 'btn-accent': show3d }"
           type="button"
           :aria-pressed="show3d"
           @click="toggle3d"
@@ -563,7 +563,7 @@ function onViewerSelect(pick: ViewerPick | null): void {
               </template>
             </template>
           </div>
-          <div v-if="listError" class="alert error">{{ listError }}</div>
+          <div v-if="listError" class="flash flash-danger flash-sm">{{ listError }}</div>
           <SkeletonRows v-if="listLoading && !items.length" :rows="6" />
           <div v-else-if="!items.length && !listLoading" class="empty">
             <template v-if="search && /^[0-9A-Za-z_$]{22}$/.test(search)">
@@ -589,7 +589,8 @@ function onViewerSelect(pick: ViewerPick | null): void {
             <LoadingState v-if="listLoading && items.length" text="Lade weitere …" />
             <button
               v-else-if="items.length < total"
-              class="btn small"
+              class="btn btn-sm"
+              style="margin: 0 auto; display: flex"
               type="button"
               @click="loadPage(false)"
             >
@@ -626,7 +627,7 @@ function onViewerSelect(pick: ViewerPick | null): void {
               Unverändertes abblenden
             </label>
             <button
-              class="link small"
+              class="btn btn-invisible btn-xs"
               type="button"
               :disabled="!viewerReady"
               @click="viewer?.fitToColored()"

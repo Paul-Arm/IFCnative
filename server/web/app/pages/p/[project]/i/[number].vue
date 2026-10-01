@@ -1,68 +1,269 @@
 <script setup lang="ts">
 import {
+  PhArrowsLeftRight,
   PhCheckCircle,
+  PhCube,
+  PhCubeTransparent,
+  PhDotsThree,
+  PhDownloadSimple,
+  PhLink,
   PhPencilSimple,
+  PhPlus,
   PhRecord,
+  PhTag,
   PhTrash,
+  PhTreeStructure,
+  PhUser,
+  PhWarningCircle,
 } from "@phosphor-icons/vue";
 
 import type {
   Commit,
   Issue,
   IssueComment,
+  IssueDetail,
+  IssueEvent,
   Label,
-  Member,
-  Model,
-  Project,
-  Role,
 } from "~/types/api";
+import type { PickerItem } from "~/types/ui";
 
+/**
+ * Issue-Detail wie bei GitHub: Titelzeile, Unterhaltung als Timeline
+ * (Beschreibung, Kommentare und Ereignisse), Kommentarfeld mit
+ * „Mit Kommentar schließen“, Seitenleiste mit Zuordnungen. Sammel-Issues
+ * zeigen den Unter-Issue-Explorer, verortete Issues einen 3D-Viewer.
+ */
 const route = useRoute();
+const project = useProject();
+const { slug, detail, models, canWrite } = project;
 const { api } = useApi();
-const { user } = useAuth();
-const slug = route.params.project as string;
+const { user, token } = useAuth();
+const toast = useToast();
+const { confirm } = useConfirm();
+const { track } = useRecent();
 const number = Number(route.params.number);
 
-// Issue lädt "lazy" mit Platzhalter; Projekt/Modelle/Labels parallel dazu.
 const {
   data: issueData,
   refresh,
   status: issueStatus,
   error: issueError,
-} = useAsyncData(
-  `issue-${slug}-${number}`,
-  () =>
-    api<{ issue: Issue; comments: IssueComment[]; subIssues: Issue[] }>(
-      `/projects/${slug}/issues/${number}`,
-    ),
-  { lazy: true },
-);
-const { data: projectData } = useAsyncData(
-  `project-role-${slug}`,
-  () =>
-    api<{
-      project: Project;
-      members: Member[];
-      role: Role | null;
-      folders: string[];
-    }>(`/projects/${slug}`),
-  { lazy: true },
-);
-const { data: modelsData } = useAsyncData(
-  `models-${slug}`,
-  () => api<{ models: Model[] }>(`/projects/${slug}/models`),
-  { lazy: true },
-);
+} = useAsyncData(`issue-${slug}-${number}`, () => api<IssueDetail>(`/projects/${slug}/issues/${number}`), {
+  lazy: true,
+});
 const { data: labelsData, refresh: refreshLabels } = useAsyncData(
   `labels-${slug}`,
   () => api<{ labels: Label[] }>(`/projects/${slug}/labels`),
   { lazy: true },
 );
+const { data: allIssues } = useAsyncData(
+  `issues-${slug}`,
+  () => api<{ issues: Issue[] }>(`/projects/${slug}/issues`),
+  { lazy: true },
+);
 
-async function createProjectLabel(
-  name: string,
-  color: string,
-): Promise<Label | null> {
+const issue = computed(() => issueData.value?.issue ?? null);
+const comments = computed(() => issueData.value?.comments ?? []);
+const events = computed(() => issueData.value?.events ?? []);
+const subIssues = computed(() => issueData.value?.subIssues ?? []);
+
+watch(
+  issue,
+  (value) => {
+    if (value) {
+      track({
+        type: "issue",
+        title: value.title,
+        subtitle: `${detail.value?.project.name ?? slug} #${value.number}`,
+        to: `/p/${slug}/i/${value.number}`,
+        state: value.state,
+      });
+    }
+  },
+  { immediate: true },
+);
+useHead({ title: computed(() => (issue.value ? `${issue.value.title} · #${number}` : `Issue #${number}`)) });
+
+const canEdit = computed(() => canWrite.value || issue.value?.authorId === user.value?.id);
+
+/** Neu rendern, damit Selects nach einer abgelehnten Änderung den echten Stand zeigen. */
+const sideKey = ref(0);
+
+async function patch(body: Record<string, unknown>, success?: string): Promise<boolean> {
+  try {
+    await api(`/projects/${slug}/issues/${number}`, { method: "PATCH", body });
+    await refresh();
+    void project.refreshStats();
+    if (success) toast.success(success);
+    return true;
+  } catch (e) {
+    sideKey.value += 1;
+    toast.error(apiErrorMessage(e));
+    return false;
+  }
+}
+
+// ---- Titel + Beschreibung bearbeiten ---------------------------------------------
+
+const editingTitle = ref(false);
+const titleDraft = ref("");
+function startTitleEdit(): void {
+  titleDraft.value = issue.value?.title ?? "";
+  editingTitle.value = true;
+}
+async function saveTitle(): Promise<void> {
+  if (!titleDraft.value.trim()) return;
+  if (await patch({ title: titleDraft.value.trim() })) editingTitle.value = false;
+}
+
+const editingBody = ref(false);
+const bodyDraft = ref("");
+function startBodyEdit(): void {
+  bodyDraft.value = issue.value?.body ?? "";
+  editingBody.value = true;
+}
+async function saveBody(): Promise<void> {
+  if (await patch({ body: bodyDraft.value })) editingBody.value = false;
+}
+
+const bodyHtml = computed(() => (issue.value?.body ? renderMarkdown(issue.value.body) : null));
+
+// ---- Timeline -------------------------------------------------------------------
+
+type TimelineItem =
+  | { type: "comment"; at: string; comment: IssueComment }
+  | { type: "event"; at: string; event: IssueEvent };
+
+const timeline = computed<TimelineItem[]>(() =>
+  [
+    ...comments.value.map((comment) => ({ type: "comment" as const, at: comment.createdAt, comment })),
+    ...events.value.map((event) => ({ type: "event" as const, at: event.createdAt, event })),
+  ].sort((a, b) => a.at.localeCompare(b.at)),
+);
+
+const participants = computed(() => {
+  const map = new Map<string, { id: string; name: string }>();
+  const add = (entry: { id: string; name: string } | null | undefined) => {
+    if (entry) map.set(entry.id, entry);
+  };
+  add(issue.value?.author);
+  for (const comment of comments.value) add(comment.author);
+  for (const event of events.value) add(event.actor);
+  return [...map.values()];
+});
+
+function eventIcon(event: IssueEvent) {
+  switch (event.kind) {
+    case "closed":
+      return PhCheckCircle;
+    case "reopened":
+      return PhRecord;
+    case "renamed":
+      return PhPencilSimple;
+    case "labeled":
+    case "unlabeled":
+      return PhTag;
+    case "assigned":
+    case "unassigned":
+      return PhUser;
+    case "linked_model":
+    case "unlinked_model":
+      return PhCube;
+    case "parent_changed":
+      return PhTreeStructure;
+    default:
+      return PhArrowsLeftRight;
+  }
+}
+
+function eventBadge(event: IssueEvent): string {
+  if (event.kind === "closed") return "done";
+  if (event.kind === "reopened") return "success";
+  return "";
+}
+
+function namesOf(users: { id: string; name: string }[] | undefined, actorId: string): string {
+  const list = users ?? [];
+  if (list.length === 1 && list[0]!.id === actorId) return "sich selbst";
+  return list.map((entry) => entry.name).join(", ");
+}
+
+// ---- Kommentare ----------------------------------------------------------------------
+
+const draft = ref("");
+const commenting = ref(false);
+
+async function submitComment(close = false): Promise<void> {
+  if (commenting.value) return;
+  const text = draft.value.trim();
+  if (!text && !close) return;
+  commenting.value = true;
+  try {
+    if (text) {
+      await api(`/projects/${slug}/issues/${number}/comments`, { method: "POST", body: { body: text } });
+      draft.value = "";
+    }
+    if (close && issue.value) {
+      await api(`/projects/${slug}/issues/${number}`, {
+        method: "PATCH",
+        body: { state: issue.value.state === "open" ? "closed" : "open" },
+      });
+      void project.refreshStats();
+    }
+    await refresh();
+  } catch (e) {
+    toast.error(apiErrorMessage(e));
+  } finally {
+    commenting.value = false;
+  }
+}
+
+function canDelete(comment: IssueComment): boolean {
+  return canWrite.value || comment.authorId === user.value?.id;
+}
+
+async function deleteComment(comment: IssueComment): Promise<void> {
+  const ok = await confirm({
+    title: "Kommentar löschen?",
+    message: "Der Kommentar wird endgültig entfernt.",
+    confirmLabel: "Löschen",
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await api(`/projects/${slug}/issues/${number}/comments/${comment.id}`, { method: "DELETE" });
+    await refresh();
+  } catch (e) {
+    toast.error(apiErrorMessage(e));
+  }
+}
+
+async function copyLink(id: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(`${location.origin}/p/${slug}/i/${number}#${id}`);
+    toast.info("Link kopiert.");
+  } catch {
+    // Zwischenablage nicht verfügbar
+  }
+}
+
+// ---- Seitenleiste ------------------------------------------------------------------------
+
+const memberItems = computed<PickerItem[]>(() =>
+  (detail.value?.members ?? [])
+    .filter((member) => member.user)
+    .map((member) => ({ id: member.userId, label: member.user!.name, sub: member.user!.email, user: member.user })),
+);
+const modelItems = computed<PickerItem[]>(() =>
+  (models.value ?? []).map((model) => ({
+    id: model.id,
+    label: model.name,
+    sub: model.folder || undefined,
+    model: { kind: model.kind, name: model.name },
+  })),
+);
+
+async function createLabel(name: string, color: string): Promise<Label | null> {
   try {
     const { label } = await api<{ label: Label }>(`/projects/${slug}/labels`, {
       method: "POST",
@@ -71,147 +272,74 @@ async function createProjectLabel(
     await refreshLabels();
     return label;
   } catch (e) {
-    error.value = apiErrorMessage(e);
+    toast.error(apiErrorMessage(e));
     return null;
   }
 }
 
-const issue = computed(() => issueData.value?.issue ?? null);
-const comments = computed(() => issueData.value?.comments ?? []);
-/** Direkte Unter-Issues (z. B. die Topics eines BCF-Imports). */
-const subIssues = computed(() => issueData.value?.subIssues ?? []);
-
-// ---- Übergeordnetes Issue (Sidebar) ------------------------------------
-
-/** Alle Issues des Projekts — Kandidaten für "Übergeordnetes Issue". */
-const { data: allIssuesData } = useAsyncData(
-  `issues-${slug}`,
-  () =>
-    api<{ issues: Issue[]; openCount: number; closedCount: number }>(
-      `/projects/${slug}/issues`,
-    ),
-  { lazy: true },
-);
-/** Weder das Issue selbst noch eines seiner Unter-Issues (Zyklus). */
-const parentCandidates = computed(() => {
-  const childIds = new Set(subIssues.value.map((sub) => sub.id));
-  return (allIssuesData.value?.issues ?? [])
-    .filter((entry) => entry.id !== issue.value?.id && !childIds.has(entry.id))
-    .sort((a, b) => a.number - b.number);
-});
-
-const hasWriteRole = computed(() => {
-  const role = projectData.value?.role;
-  return role === "owner" || role === "maintainer" || role === "contributor";
-});
-const canEdit = computed(
-  () => hasWriteRole.value || issue.value?.authorId === user.value?.id,
-);
-
-const bodyHtml = computed(() =>
-  issue.value?.body ? renderMarkdown(issue.value.body) : null,
-);
-
-const error = ref<string | null>(null);
-
-async function patchIssue(patch: Record<string, unknown>): Promise<void> {
-  error.value = null;
-  try {
-    await api(`/projects/${slug}/issues/${number}`, {
-      method: "PATCH",
-      body: patch,
-    });
-    await refresh();
-  } catch (e) {
-    error.value = apiErrorMessage(e);
-  }
+function setModels(ids: string[]): void {
+  const current = issue.value?.models ?? [];
+  void patch({
+    modelLinks: ids.map((id) => {
+      const known = current.find((model) => model.id === id);
+      return {
+        modelId: id,
+        foundCommitId: known?.foundCommitId ?? null,
+        fixedCommitId: known?.fixedCommitId ?? null,
+      };
+    }),
+  });
 }
 
-// ---- Titel/Body bearbeiten --------------------------------------------
-
-const editing = ref(false);
-const editTitle = ref("");
-const editBody = ref("");
-
-function startEdit(): void {
-  editTitle.value = issue.value?.title ?? "";
-  editBody.value = issue.value?.body ?? "";
-  editing.value = true;
-}
-
-async function saveEdit(): Promise<void> {
-  await patchIssue({ title: editTitle.value, body: editBody.value });
-  editing.value = false;
-}
-
-// ---- Versionsbezug (aufgefallen/behoben in Commit) ---------------------
-
-/** Commits je verknüpftem Modell (für die Auswahl in der Sidebar). */
-const commitsByModel = reactive(new Map<string, Commit[]>());
-watchEffect(() => {
-  for (const model of issue.value?.models ?? []) {
-    if (commitsByModel.has(model.id)) continue;
-    commitsByModel.set(model.id, []);
-    void api<{ commits: Commit[] }>(
-      `/projects/${slug}/models/${model.slug}/commits`,
-    )
-      .then((result) => commitsByModel.set(model.id, result.commits))
-      .catch(() => commitsByModel.delete(model.id));
-  }
-});
-
-const commitShort = (commit: { id: string; message: string; createdAt: string }) =>
-  `${commit.id.slice(0, 8)} · ${commit.message || "(ohne Nachricht)"} · ${new Date(commit.createdAt).toLocaleDateString("de-DE")}`;
-
-/** Modell an-/abwählen — bestehende Commit-Bezüge bleiben erhalten. */
-async function toggleLinkedModel(modelId: string, on: boolean): Promise<void> {
-  const modelLinks = (issue.value?.models ?? [])
-    .filter((model) => model.id !== modelId)
-    .map((model) => ({
+function setModelCommit(modelId: string, field: "found" | "fixed", commitId: string): void {
+  void patch({
+    modelLinks: (issue.value?.models ?? []).map((model) => ({
       modelId: model.id,
-      foundCommitId: model.foundCommitId,
-      fixedCommitId: model.fixedCommitId,
-    }));
-  if (on) {
-    modelLinks.push({ modelId, foundCommitId: null, fixedCommitId: null });
+      foundCommitId: model.id === modelId && field === "found" ? commitId || null : model.foundCommitId,
+      fixedCommitId: model.id === modelId && field === "fixed" ? commitId || null : model.fixedCommitId,
+    })),
+  });
+}
+
+const commitsByModel = reactive(new Map<string, Commit[]>());
+watch(
+  () => issue.value?.models,
+  (list) => {
+    for (const model of list ?? []) {
+      if (commitsByModel.has(model.id)) continue;
+      commitsByModel.set(model.id, []);
+      void api<{ commits: Commit[] }>(`/projects/${slug}/models/${model.slug}/commits`)
+        .then((result) => commitsByModel.set(model.id, result.commits))
+        .catch(() => commitsByModel.delete(model.id));
+    }
+  },
+  { immediate: true },
+);
+
+/** Das Issue selbst und alle (auch indirekten) Unter-Issues scheiden aus — der Server lehnt Zyklen ab. */
+const parentCandidates = computed(() => {
+  const list = allIssues.value?.issues ?? [];
+  const excluded = new Set(subIssues.value.map((sub) => sub.id));
+  if (issue.value) excluded.add(issue.value.id);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const entry of list) {
+      if (entry.parentId && excluded.has(entry.parentId) && !excluded.has(entry.id)) {
+        excluded.add(entry.id);
+        grew = true;
+      }
+    }
   }
-  await patchIssue({ modelLinks });
-}
-
-/** Aufgefallen-/Behoben-Commit eines verknüpften Modells setzen ("" = keiner). */
-async function setModelCommit(
-  modelId: string,
-  field: "found" | "fixed",
-  commitId: string,
-): Promise<void> {
-  const modelLinks = (issue.value?.models ?? []).map((model) => ({
-    modelId: model.id,
-    foundCommitId:
-      model.id === modelId && field === "found"
-        ? commitId || null
-        : model.foundCommitId,
-    fixedCommitId:
-      model.id === modelId && field === "fixed"
-        ? commitId || null
-        : model.fixedCommitId,
-  }));
-  await patchIssue({ modelLinks });
-}
-
-// ---- BCF-Export --------------------------------------------------------
-
-const { token } = useAuth();
+  return list.filter((entry) => !excluded.has(entry.id)).sort((a, b) => b.number - a.number);
+});
 
 async function downloadBcf(): Promise<void> {
-  error.value = null;
   try {
-    const blob = await $fetch<Blob>(
-      `/api/projects/${slug}/issues/${number}/bcf`,
-      {
-        responseType: "blob",
-        headers: token.value ? { authorization: `Bearer ${token.value}` } : {},
-      },
-    );
+    const blob = await $fetch<Blob>(`/api/projects/${slug}/issues/${number}/bcf`, {
+      responseType: "blob",
+      headers: token.value ? { authorization: `Bearer ${token.value}` } : {},
+    });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -219,16 +347,11 @@ async function downloadBcf(): Promise<void> {
     a.click();
     URL.revokeObjectURL(url);
   } catch (e) {
-    error.value = apiErrorMessage(e);
+    toast.error(apiErrorMessage(e));
   }
 }
 
-// ---- 3D-Verortung (betroffene GlobalIds im ThatOpen-Viewer) ------------
-//
-// Ein Eltern-Issue (z. B. Sammel-Issue eines BCF-Imports) zeigt die
-// Objekte ALLER Unter-Issues; je Unter-Issue ein Chip, der nur dessen
-// Objekte hervorhebt. Optional werden die markierten Objekte isoliert
-// (ThatOpen Hider), damit sie in dichten Modellen nicht untergehen.
+// ---- 3D-Verortung -------------------------------------------------------------------------
 
 interface ViewerHandle {
   highlightGuids(guids: string[], zoom?: boolean): Promise<number>;
@@ -238,24 +361,17 @@ interface ViewerHandle {
 
 const viewerRef = ref<ViewerHandle | null>(null);
 const show3d = ref(false);
-/** Wie viele der markierten GUIDs im geladenen Stand gefunden wurden. */
 const foundCount = ref<number | null>(null);
 const activeGuid = ref<string | null>(null);
-/** Nur die markierten Objekte zeigen (Rest ausblenden). */
 const isolateOnly = ref(false);
-/** Zuletzt markierte GUIDs — für das Umschalten der Isolation. */
 let currentGuids: string[] = [];
 
-/** GUIDs des Issues plus die aller Unter-Issues (dedupliziert). */
 const allGuids = computed(() => {
   const set = new Set(issue.value?.guids ?? []);
-  for (const sub of subIssues.value) {
-    for (const guid of sub.guids) set.add(guid);
-  }
+  for (const sub of subIssues.value) for (const guid of sub.guids) set.add(guid);
   return [...set];
 });
 
-/** Verknüpfte IFC-Modelle (Issue + Unter-Issues) mit Head als Viewer-Quellen. */
 const viewerSources = computed(() => {
   const linked = new Set(
     [issue.value, ...subIssues.value]
@@ -263,7 +379,7 @@ const viewerSources = computed(() => {
       .filter((model) => model.kind === "ifc")
       .map((model) => model.id),
   );
-  return (modelsData.value?.models ?? [])
+  return (models.value ?? [])
     .filter((model) => linked.has(model.id) && model.head)
     .map((model) => ({
       key: model.id,
@@ -272,34 +388,19 @@ const viewerSources = computed(() => {
     }));
 });
 
-/**
- * Eigene 3D-Karte nur für Issues OHNE Unter-Issues; ein Eltern-Issue zeigt
- * stattdessen den Unter-Issue-Explorer (Liste + Viewer, skaliert auf
- * hunderte Einträge).
- */
-const canLocate = computed(() =>
-  Boolean(
-    !subIssues.value.length &&
-      allGuids.value.length &&
-      viewerSources.value.length,
-  ),
+const canLocate = computed(
+  () => !subIssues.value.length && allGuids.value.length > 0 && viewerSources.value.length > 0,
 );
-/** GUID-Chips: nur eine Handvoll direkt, der Rest auf Klick. */
 const GUID_PREVIEW = 12;
 const showAllGuids = ref(false);
 const guidChips = computed(() =>
-  showAllGuids.value
-    ? (issue.value?.guids ?? [])
-    : (issue.value?.guids ?? []).slice(0, GUID_PREVIEW),
+  showAllGuids.value ? (issue.value?.guids ?? []) : (issue.value?.guids ?? []).slice(0, GUID_PREVIEW),
 );
 
 async function applyIsolation(): Promise<void> {
   if (!viewerRef.value) return;
-  if (isolateOnly.value && currentGuids.length) {
-    await viewerRef.value.isolateGuids(currentGuids);
-  } else {
-    await viewerRef.value.showAll();
-  }
+  if (isolateOnly.value && currentGuids.length) await viewerRef.value.isolateGuids(currentGuids);
+  else await viewerRef.value.showAll();
 }
 
 async function mark(guids: string[]): Promise<number> {
@@ -314,514 +415,400 @@ async function markAll(): Promise<void> {
   foundCount.value = await mark(allGuids.value);
 }
 
+async function markOne(guid: string): Promise<void> {
+  activeGuid.value = guid;
+  if (!(await mark([guid]))) await markAll();
+}
+
+watch(isolateOnly, () => void applyIsolation());
+
 /** Erst-Markierung nach dem Laden: kurz warten, bis die Szene steht. */
 function onViewerReady(): void {
   setTimeout(() => void markAll(), 400);
 }
 
-async function markOne(guid: string): Promise<void> {
-  activeGuid.value = guid;
-  const found = await mark([guid]);
-  if (!found) {
-    // Objekt existiert im aktuellen Stand nicht (mehr) — alle markieren.
-    await markAll();
-  }
-}
-
-watch(isolateOnly, () => void applyIsolation());
-
-// ---- Kommentare --------------------------------------------------------
-
-const commentDraft = ref("");
-const commentBusy = ref(false);
-
-async function submitComment(): Promise<void> {
-  if (!commentDraft.value.trim()) return;
-  error.value = null;
-  commentBusy.value = true;
-  try {
-    await api(`/projects/${slug}/issues/${number}/comments`, {
-      method: "POST",
-      body: { body: commentDraft.value },
-    });
-    commentDraft.value = "";
-    await refresh();
-  } catch (e) {
-    error.value = apiErrorMessage(e);
-  } finally {
-    commentBusy.value = false;
-  }
-}
-
-function canDeleteComment(comment: IssueComment): boolean {
-  return hasWriteRole.value || comment.authorId === user.value?.id;
-}
-
-async function deleteComment(comment: IssueComment): Promise<void> {
-  if (!window.confirm("Kommentar löschen?")) return;
-  error.value = null;
-  try {
-    await api(`/projects/${slug}/issues/${number}/comments/${comment.id}`, {
-      method: "DELETE",
-    });
-    await refresh();
-  } catch (e) {
-    error.value = apiErrorMessage(e);
-  }
-}
-
-// ---- Zuordnungen (Sidebar, sofort speichern) ---------------------------
-
-function idsWithToggle(current: string[], id: string, on: boolean): string[] {
-  const set = new Set(current);
-  if (on) {
-    set.add(id);
-  } else {
-    set.delete(id);
-  }
-  return [...set];
-}
-
-const dateFmt = new Intl.DateTimeFormat("de-DE", {
-  dateStyle: "medium",
-  timeStyle: "short",
-});
+const openedAt = computed(() => issue.value?.createdAt ?? "");
 </script>
 
 <template>
-  <div v-if="issueError" class="alert error">
-    Issue konnte nicht geladen werden: {{ apiErrorMessage(issueError) }}
-  </div>
-  <div v-else-if="!issue && (issueStatus === 'pending' || issueStatus === 'idle')" class="card">
-    <div class="card-header">
-      <span class="skeleton" style="width: 45%; height: 1.2em" />
-    </div>
-    <SkeletonRows :rows="5" />
-  </div>
-  <div v-else-if="issue">
-    <nav class="breadcrumbs">
-      <NuxtLink to="/">Projekte</NuxtLink>
-      <span>/</span>
-      <NuxtLink :to="`/p/${slug}`">
-        {{ projectData?.project.name ?? slug }}
-      </NuxtLink>
-      <span>/</span>
-      <NuxtLink :to="{ path: `/p/${slug}`, query: { tab: 'issues' } }">
-        Issues
-      </NuxtLink>
-      <template v-if="issue.parent">
-        <span>/</span>
-        <NuxtLink
-          :to="`/p/${slug}/i/${issue.parent.number}`"
-          :title="issue.parent.title"
-        >
-          #{{ issue.parent.number }}
-        </NuxtLink>
+  <div v-if="issueError" class="box">
+    <Blankslate :icon="PhWarningCircle" :title="`Issue #${number} nicht gefunden`">
+      {{ apiErrorMessage(issueError) }}
+      <template #actions>
+        <NuxtLink :to="`/p/${slug}/issues`" class="btn">Alle Issues</NuxtLink>
       </template>
-      <span>/</span>
-      <strong>#{{ issue.number }}</strong>
-    </nav>
+    </Blankslate>
+  </div>
 
-    <div v-if="error" class="alert error">{{ error }}</div>
+  <div v-else-if="!issue && (issueStatus === 'pending' || issueStatus === 'idle')" class="issue-page">
+    <span class="skeleton" style="width: 50%; height: 30px" />
+    <SkeletonRows :rows="5" class="box" style="margin-top: 24px" />
+  </div>
 
-    <!-- Titelzeile über beiden Spalten -->
-    <div class="issue-title-row">
-      <h1 class="issue-title">
-        {{ issue.title }}
-        <span class="muted">#{{ issue.number }}</span>
-      </h1>
-      <span class="topbar-spacer" />
-      <button v-if="canEdit && !editing" @click="startEdit">
-        <PhPencilSimple :size="14" aria-hidden="true" />
-        Bearbeiten
-      </button>
-      <button
-        v-if="canEdit"
-        @click="patchIssue({ state: issue.state === 'open' ? 'closed' : 'open' })"
-      >
-        {{ issue.state === "open" ? "Schließen" : "Wieder öffnen" }}
-      </button>
-    </div>
-    <div class="issue-title-meta">
-      <span class="issue-state-badge" :class="issue.state">
-        <PhRecord v-if="issue.state === 'open'" :size="14" />
-        <PhCheckCircle v-else :size="14" weight="fill" />
-        {{ issue.state === "open" ? "Offen" : "Geschlossen" }}
-      </span>
-      <span
-        v-if="issue.kind === 'bcf'"
-        class="badge accent"
-        title="Echtes IFC-Issue — als BCF exportierbar"
-      >BCF</span>
-      <span class="muted small">
-        <strong>{{ issue.author?.name ?? "?" }}</strong> eröffnete am
-        {{ dateFmt.format(new Date(issue.createdAt)) }}
-        · {{ comments.length }}
-        {{ comments.length === 1 ? "Kommentar" : "Kommentare" }}
-        <template v-if="issue.parent">
-          · Unter-Issue von
-          <NuxtLink :to="`/p/${slug}/i/${issue.parent.number}`">
-            #{{ issue.parent.number }} {{ issue.parent.title }}
+  <div v-else-if="issue" class="issue-page">
+    <!-- ============ Titel ============ -->
+    <header class="issue-header">
+      <div class="issue-header-top">
+        <form v-if="editingTitle" class="issue-title-edit" @submit.prevent="saveTitle">
+          <input v-model="titleDraft" type="text" class="input-lg" maxlength="200" autofocus />
+          <button type="submit" class="btn">Speichern</button>
+          <button type="button" class="btn btn-invisible" @click="editingTitle = false">Abbrechen</button>
+        </form>
+        <h1 v-else class="issue-h1">
+          {{ issue.title }} <span class="issue-number">#{{ issue.number }}</span>
+        </h1>
+        <div v-if="!editingTitle" class="issue-header-actions">
+          <button v-if="canEdit" type="button" class="btn btn-sm" @click="startTitleEdit">Bearbeiten</button>
+          <NuxtLink :to="`/p/${slug}/issues/new`" class="btn btn-sm btn-primary">
+            <PhPlus :size="14" /> Neues Issue
           </NuxtLink>
-        </template>
-        <template v-else-if="issue.subIssueCount">
-          · {{ issue.subIssueCount - issue.openSubIssueCount }} von
-          {{ issue.subIssueCount }} Unter-Issues erledigt
-        </template>
-      </span>
-    </div>
+        </div>
+      </div>
+      <div class="issue-header-meta">
+        <span class="state" :class="issue.state === 'open' ? 'state-open' : 'state-closed'">
+          <PhRecord v-if="issue.state === 'open'" :size="16" weight="bold" />
+          <PhCheckCircle v-else :size="16" weight="fill" />
+          {{ issue.state === "open" ? "Offen" : "Geschlossen" }}
+        </span>
+        <span v-if="issue.kind === 'bcf'" class="tag tag-accent tag-lg" title="Echtes IFC-Issue — als BCF exportierbar">BCF</span>
+        <span class="muted">
+          <strong class="text">{{ issue.author?.name ?? "?" }}</strong> eröffnete dieses Issue
+          <RelTime :date="openedAt" /> · {{ plural(comments.length, "Kommentar", "Kommentare") }}
+        </span>
+        <span v-if="issue.parent" class="muted">
+          · Teil von
+          <NuxtLink :to="`/p/${slug}/i/${issue.parent.number}`">#{{ issue.parent.number }} {{ issue.parent.title }}</NuxtLink>
+        </span>
+      </div>
+    </header>
 
     <!-- ============ Unter-Issue-Explorer (Sammel-Issue) ============ -->
-    <SubIssueExplorer
-      v-if="subIssues.length"
-      :slug="slug"
-      :sub-issues="subIssues"
-      :sources="viewerSources"
-    />
+    <SubIssueExplorer v-if="subIssues.length" :slug="slug" :sub-issues="subIssues" :sources="viewerSources" />
 
-    <div class="issue-layout">
-      <!-- ============ Hauptspalte: Body + Kommentare ============ -->
-      <div class="issue-main">
-        <div class="card comment-card">
-          <div class="comment-head">
-            <strong>{{ issue.author?.name ?? "?" }}</strong>
-            <span class="muted small">
-              {{ dateFmt.format(new Date(issue.createdAt)) }}
-            </span>
-          </div>
-          <div class="card-body">
-            <template v-if="!editing">
-              <div v-if="bodyHtml" class="markdown-body" v-html="bodyHtml"></div>
-              <p v-else class="muted" style="margin: 0">Keine Beschreibung.</p>
-            </template>
-            <template v-else>
-              <div class="form-row">
-                <label for="edit-title">Titel</label>
-                <input id="edit-title" v-model="editTitle" type="text" required />
+    <div class="layout issue-layout">
+      <div class="layout-main">
+        <div class="discussion">
+          <!-- Beschreibung als erster Beitrag -->
+          <div id="beschreibung" class="comment" :class="{ self: issue.authorId === user?.id }">
+            <UserAvatar :user="issue.author" :size="40" />
+            <div class="comment-box">
+              <div class="comment-head">
+                <span class="author">{{ issue.author?.name ?? "?" }}</span>
+                eröffnete <RelTime :date="issue.createdAt" />
+                <span class="spacer" />
+                <span class="tag">Autor</span>
+                <button
+                  v-if="canEdit && !editingBody"
+                  type="button"
+                  class="btn btn-invisible btn-xs btn-icon"
+                  aria-label="Beschreibung bearbeiten"
+                  data-tip="Bearbeiten"
+                  @click="startBodyEdit"
+                >
+                  <PhPencilSimple :size="14" />
+                </button>
               </div>
-              <div class="form-row">
-                <label>Beschreibung (Markdown)</label>
-                <MarkdownEditor v-model="editBody" min-height="10rem" />
+              <div v-if="editingBody" class="comment-body compose-edit">
+                <MarkdownEditor v-model="bodyDraft" min-height="10rem" />
+                <div class="form-actions">
+                  <button type="button" class="btn" @click="editingBody = false">Abbrechen</button>
+                  <button type="button" class="btn btn-primary" @click="saveBody">Speichern</button>
+                </div>
               </div>
-              <div class="form-inline">
-                <button class="primary" @click="saveEdit">Speichern</button>
-                <button @click="editing = false">Abbrechen</button>
-              </div>
-            </template>
-          </div>
-        </div>
-
-        <!-- ============ 3D-Verortung (betroffene Objekte) ============ -->
-        <div v-if="canLocate" class="card">
-          <div class="card-header">
-            <h2 style="margin: 0">3D-Verortung</h2>
-            <span class="badge accent">
-              {{ allGuids.length }}
-              {{ allGuids.length === 1 ? "Objekt" : "Objekte" }}
-            </span>
-            <span v-if="foundCount !== null" class="muted small">
-              · {{ foundCount }} im aktuellen Stand gefunden
-            </span>
-            <span class="topbar-spacer" />
-            <label
-              v-if="show3d"
-              class="muted small"
-              style="display: inline-flex; align-items: center; gap: 0.35rem; white-space: nowrap"
-            >
-              <input v-model="isolateOnly" type="checkbox" />
-              Nur betroffene Objekte
-            </label>
-            <button @click="show3d = !show3d">
-              {{ show3d ? "3D ausblenden" : "In 3D anzeigen" }}
-            </button>
-          </div>
-          <template v-if="show3d">
-            <div class="issue-guid-bar">
-              <button class="btn small" @click="markAll">Alle markieren</button>
-              <button
-                v-for="guid in guidChips"
-                :key="guid"
-                class="guid-chip"
-                :class="{ active: activeGuid === guid }"
-                :title="`Objekt ${guid} markieren und anfahren`"
-                @click="markOne(guid)"
-              >
-                {{ guid }}
-              </button>
-              <button
-                v-if="issue!.guids.length > GUID_PREVIEW"
-                class="guid-chip"
-                @click="showAllGuids = !showAllGuids"
-              >
-                {{ showAllGuids ? "weniger" : `+${issue!.guids.length - GUID_PREVIEW} weitere` }}
-              </button>
+              <div v-else-if="bodyHtml" class="comment-body markdown-body" v-html="bodyHtml" />
+              <div v-else class="comment-body muted"><em>Keine Beschreibung.</em></div>
             </div>
-            <ModelViewer
-              ref="viewerRef"
-              :sources="viewerSources"
-              @ready="onViewerReady"
-            />
+          </div>
+
+          <!-- 3D-Verortung -->
+          <div v-if="canLocate" class="comment locate">
+            <span class="tl-badge accent locate-badge"><PhCubeTransparent :size="16" /></span>
+            <div class="box locate-box">
+              <div class="box-header">
+                <PhCube :size="16" class="color-accent" />
+                <span class="box-title">3D-Verortung</span>
+                <span class="counter">{{ allGuids.length }}</span>
+                <span v-if="foundCount !== null" class="muted small">· {{ foundCount }} im aktuellen Stand gefunden</span>
+                <span class="spacer" />
+                <label v-if="show3d" class="switch small">
+                  <input v-model="isolateOnly" type="checkbox" />
+                  <span class="switch-track" />
+                  Nur betroffene
+                </label>
+                <button type="button" class="btn btn-sm" :class="{ 'btn-accent': !show3d }" @click="show3d = !show3d">
+                  {{ show3d ? "3D ausblenden" : "In 3D anzeigen" }}
+                </button>
+              </div>
+              <template v-if="show3d">
+                <div class="guid-bar">
+                  <button type="button" class="btn btn-xs" @click="markAll">Alle markieren</button>
+                  <button
+                    v-for="guid in guidChips"
+                    :key="guid"
+                    type="button"
+                    class="guid-chip"
+                    :class="{ active: activeGuid === guid }"
+                    :title="`Objekt ${guid} markieren und anfahren`"
+                    @click="markOne(guid)"
+                  >
+                    {{ guid }}
+                  </button>
+                  <button
+                    v-if="issue.guids.length > GUID_PREVIEW"
+                    type="button"
+                    class="guid-chip"
+                    @click="showAllGuids = !showAllGuids"
+                  >
+                    {{ showAllGuids ? "weniger" : `+${issue.guids.length - GUID_PREVIEW} weitere` }}
+                  </button>
+                </div>
+                <ModelViewer ref="viewerRef" :sources="viewerSources" @ready="onViewerReady" />
+              </template>
+            </div>
+          </div>
+
+          <!-- Kommentare + Ereignisse -->
+          <template v-for="item in timeline" :key="item.type === 'comment' ? item.comment.id : item.event.id">
+            <div
+              v-if="item.type === 'comment'"
+              :id="`comment-${item.comment.id}`"
+              class="comment"
+              :class="{ self: item.comment.authorId === user?.id }"
+            >
+              <UserAvatar :user="item.comment.author" :size="40" />
+              <div class="comment-box">
+                <div class="comment-head">
+                  <span class="author">{{ item.comment.author?.name ?? "?" }}</span>
+                  kommentierte
+                  <a :href="`#comment-${item.comment.id}`" class="muted"><RelTime :date="item.comment.createdAt" /></a>
+                  <span class="spacer" />
+                  <span v-if="item.comment.authorId === issue.authorId" class="tag">Autor</span>
+                  <UiMenu align="right">
+                    <template #trigger="{ toggle }">
+                      <button type="button" class="btn btn-invisible btn-xs btn-icon" aria-label="Kommentar-Aktionen" @click="toggle">
+                        <PhDotsThree :size="16" weight="bold" />
+                      </button>
+                    </template>
+                    <button type="button" class="menu-item" @click="copyLink(`comment-${item.comment.id}`)">
+                      <PhLink :size="16" /> Link kopieren
+                    </button>
+                    <button
+                      v-if="canDelete(item.comment)"
+                      type="button"
+                      class="menu-item danger"
+                      @click="deleteComment(item.comment)"
+                    >
+                      <PhTrash :size="16" /> Löschen
+                    </button>
+                  </UiMenu>
+                </div>
+                <div class="comment-body markdown-body" v-html="renderMarkdown(item.comment.body)" />
+              </div>
+            </div>
+
+            <div v-else class="tl-event">
+              <span class="tl-badge" :class="eventBadge(item.event)">
+                <component :is="eventIcon(item.event)" :size="16" :weight="item.event.kind === 'closed' ? 'fill' : 'regular'" />
+              </span>
+              <UserAvatar :user="item.event.actor" :size="20" />
+              <span class="tl-text">
+                <span class="author">{{ item.event.actor?.name ?? "Jemand" }}</span>
+                <template v-if="item.event.kind === 'closed'"> hat dieses Issue geschlossen</template>
+                <template v-else-if="item.event.kind === 'reopened'"> hat dieses Issue wieder geöffnet</template>
+                <template v-else-if="item.event.kind === 'renamed'">
+                  hat den Titel geändert: <del>{{ item.event.data.from }}</del> → <strong class="text">{{ item.event.data.to }}</strong>
+                </template>
+                <template v-else-if="item.event.kind === 'labeled' || item.event.kind === 'unlabeled'">
+                  hat
+                  <LabelChip v-for="label in item.event.data.labels ?? []" :key="label.id" :label="label" />
+                  {{ item.event.kind === "labeled" ? "hinzugefügt" : "entfernt" }}
+                </template>
+                <template v-else-if="item.event.kind === 'assigned'">
+                  hat {{ namesOf(item.event.data.users, item.event.actorId) }} zugewiesen
+                </template>
+                <template v-else-if="item.event.kind === 'unassigned'">
+                  hat die Zuweisung von {{ namesOf(item.event.data.users, item.event.actorId) }} entfernt
+                </template>
+                <template v-else-if="item.event.kind === 'linked_model' || item.event.kind === 'unlinked_model'">
+                  hat
+                  <template v-for="(model, index) in item.event.data.models ?? []" :key="model.id">
+                    <template v-if="index">, </template>
+                    <NuxtLink :to="`/p/${slug}/m/${model.slug}`" class="text strong">{{ model.name }}</NuxtLink>
+                  </template>
+                  {{ item.event.kind === "linked_model" ? "verknüpft" : "entknüpft" }}
+                </template>
+                <template v-else-if="item.event.kind === 'parent_changed'">
+                  <template v-if="item.event.data.parent">
+                    hat dieses Issue #{{ item.event.data.parent.number }} {{ item.event.data.parent.title }} untergeordnet
+                  </template>
+                  <template v-else> hat die Zuordnung zum übergeordneten Issue entfernt</template>
+                </template>
+                <template v-else-if="item.event.kind === 'kind_changed'">
+                  hat die Art auf <strong class="text">{{ item.event.data.to === "bcf" ? "IFC-Issue (BCF)" : "Virtuell" }}</strong> geändert
+                </template>
+                · <RelTime :date="item.event.createdAt" />
+              </span>
+            </div>
           </template>
-        </div>
 
-        <div
-          v-for="comment in comments"
-          :key="comment.id"
-          class="card comment-card"
-        >
-          <div class="comment-head">
-            <strong>{{ comment.author?.name ?? "?" }}</strong>
-            <span class="muted small">
-              {{ dateFmt.format(new Date(comment.createdAt)) }}
-            </span>
-            <span class="topbar-spacer" />
-            <button
-              v-if="canDeleteComment(comment)"
-              class="link danger comment-delete"
-              title="Kommentar löschen"
-              @click="deleteComment(comment)"
-            >
-              <PhTrash :size="14" aria-hidden="true" />
-            </button>
-          </div>
-          <div
-            class="card-body markdown-body"
-            v-html="renderMarkdown(comment.body)"
-          ></div>
-        </div>
+          <div class="tl-break" />
 
-        <div class="card">
-          <div class="card-body">
-            <div class="form-row">
-              <label>Kommentar (Markdown)</label>
-              <MarkdownEditor
-                v-model="commentDraft"
-                placeholder="Antworten …"
-                min-height="6rem"
-              />
+          <!-- Kommentieren -->
+          <div class="comment compose-comment">
+            <UserAvatar :user="user" :size="40" />
+            <div class="comment-box">
+              <div class="comment-head">
+                <span class="author">Kommentar schreiben</span>
+              </div>
+              <div class="comment-body">
+                <MarkdownEditor v-model="draft" placeholder="Antworten … (Markdown)" min-height="7rem" />
+                <div class="form-actions">
+                  <button
+                    v-if="canEdit"
+                    type="button"
+                    class="btn"
+                    :disabled="commenting"
+                    @click="submitComment(true)"
+                  >
+                    <template v-if="issue.state === 'open'">
+                      <PhCheckCircle :size="16" class="color-done" />
+                      {{ draft.trim() ? "Mit Kommentar schließen" : "Issue schließen" }}
+                    </template>
+                    <template v-else>
+                      <PhRecord :size="16" class="color-success" />
+                      {{ draft.trim() ? "Mit Kommentar wieder öffnen" : "Wieder öffnen" }}
+                    </template>
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-primary"
+                    :disabled="commenting || !draft.trim()"
+                    @click="submitComment(false)"
+                  >
+                    <span v-if="commenting" class="spinner" />
+                    Kommentieren
+                  </button>
+                </div>
+              </div>
             </div>
-            <button
-              class="primary"
-              :disabled="commentBusy || !commentDraft.trim()"
-              @click="submitComment"
-            >
-              Kommentieren
-            </button>
           </div>
         </div>
       </div>
 
-      <!-- ============ Sidebar: Metadaten ============ -->
-      <aside class="issue-side">
-        <section class="issue-side-section">
-          <h4>Issue-Art</h4>
-          <select
-            v-if="canEdit"
-            :value="issue.kind"
-            title="Virtuelle Issues leben nur im Server; IFC-Issues sind als BCF exportierbar"
-            @change="
-              patchIssue({
-                kind: ($event.target as HTMLSelectElement).value,
-              })
-            "
-          >
-            <option value="virtual">Virtuell (nur Server)</option>
-            <option value="bcf">IFC-Issue (BCF)</option>
-          </select>
-          <p v-else class="muted small" style="margin: 0">
-            {{ issue.kind === "bcf" ? "IFC-Issue (BCF)" : "Virtuell (nur Server)" }}
-          </p>
-          <button
-            v-if="issue.kind === 'bcf'"
-            class="btn small"
-            style="margin-top: 0.5rem"
-            title="Als BCF 2.1 (.bcfzip) exportieren — inkl. Kommentaren und Viewpoint mit den verorteten Objekten"
-            @click="downloadBcf"
-          >
-            Als BCF exportieren
+      <!-- ============ Seitenleiste ============ -->
+      <aside class="layout-side issue-side">
+        <SidePicker
+          title="Zugewiesen"
+          :items="memberItems"
+          :selected="issue.assignees.map((a) => a.id)"
+          :editable="canEdit"
+          empty-text="Niemand"
+          @update="(ids) => patch({ assigneeIds: ids })"
+        />
+        <LabelPicker
+          :labels="labelsData?.labels ?? []"
+          :selected-ids="issue.labels.map((l) => l.id)"
+          :editable="canEdit"
+          :create-label="canWrite ? createLabel : undefined"
+          @update="(ids) => patch({ labelIds: ids })"
+        />
+        <SidePicker
+          title="Modelle"
+          :items="modelItems"
+          :selected="issue.models.map((m) => m.id)"
+          :editable="canEdit"
+          empty-text="Keine"
+          @update="setModels"
+        >
+          <div v-for="linked in issue.models" :key="`v-${linked.id}`" class="side-version">
+            <div class="side-version-title">
+              <ModelIcon :kind="linked.kind" :name="linked.name" :size="14" />
+              <NuxtLink :to="`/p/${slug}/m/${linked.slug}`" class="truncate">{{ linked.name }}</NuxtLink>
+            </div>
+            <div class="side-version-row">
+              <span class="muted small">Aufgefallen in</span>
+              <select
+                v-if="canEdit"
+                :key="`found-${sideKey}`"
+                class="input-sm"
+                :value="linked.foundCommitId ?? ''"
+                @change="setModelCommit(linked.id, 'found', ($event.target as HTMLSelectElement).value)"
+              >
+                <option value="">—</option>
+                <option v-for="commit in commitsByModel.get(linked.id) ?? []" :key="commit.id" :value="commit.id">
+                  {{ shortSha(commit.id) }} · {{ commit.message || "(ohne Nachricht)" }}
+                </option>
+              </select>
+              <NuxtLink
+                v-else-if="linked.foundCommit"
+                class="sha"
+                :to="`/p/${slug}/m/${linked.slug}/c/${linked.foundCommit.id}`"
+              >{{ shortSha(linked.foundCommit.id) }}</NuxtLink>
+            </div>
+            <div class="side-version-row">
+              <span class="muted small">Behoben in</span>
+              <select
+                v-if="canEdit"
+                :key="`fixed-${sideKey}`"
+                class="input-sm"
+                :value="linked.fixedCommitId ?? ''"
+                @change="setModelCommit(linked.id, 'fixed', ($event.target as HTMLSelectElement).value)"
+              >
+                <option value="">—</option>
+                <option v-for="commit in commitsByModel.get(linked.id) ?? []" :key="commit.id" :value="commit.id">
+                  {{ shortSha(commit.id) }} · {{ commit.message || "(ohne Nachricht)" }}
+                </option>
+              </select>
+              <NuxtLink
+                v-else-if="linked.fixedCommit"
+                class="sha"
+                :to="`/p/${slug}/m/${linked.slug}/c/${linked.fixedCommit.id}`"
+              >{{ shortSha(linked.fixedCommit.id) }}</NuxtLink>
+            </div>
+          </div>
+        </SidePicker>
+
+        <section class="side-section">
+          <div class="side-head"><span>Art</span></div>
+          <div v-if="canEdit" class="seg side-seg">
+            <button type="button" :class="{ active: issue.kind === 'virtual' }" @click="issue.kind !== 'virtual' && patch({ kind: 'virtual' })">
+              Virtuell
+            </button>
+            <button type="button" :class="{ active: issue.kind === 'bcf' }" @click="issue.kind !== 'bcf' && patch({ kind: 'bcf' })">
+              IFC-Issue (BCF)
+            </button>
+          </div>
+          <p v-else class="side-empty">{{ issue.kind === "bcf" ? "IFC-Issue (BCF)" : "Virtuell" }}</p>
+          <button v-if="issue.kind === 'bcf'" type="button" class="btn btn-sm side-bcf" @click="downloadBcf">
+            <PhDownloadSimple :size="14" /> Als BCF exportieren
           </button>
         </section>
 
-        <section class="issue-side-section">
-          <h4>Übergeordnetes Issue</h4>
+        <section class="side-section">
+          <div class="side-head"><span>Übergeordnetes Issue</span></div>
           <select
             v-if="canEdit"
+            :key="`parent-${sideKey}`"
+            class="input-sm"
             :value="issue.parentId ?? ''"
-            title="Dieses Issue einem anderen Issue unterordnen (Unter-Issue)"
-            @change="
-              patchIssue({
-                parentId:
-                  ($event.target as HTMLSelectElement).value || null,
-              })
-            "
+            @change="patch({ parentId: ($event.target as HTMLSelectElement).value || null })"
           >
-            <option value="">— keines (Top-Level) —</option>
-            <option
-              v-for="candidate in parentCandidates"
-              :key="candidate.id"
-              :value="candidate.id"
-            >
+            <option value="">— keines —</option>
+            <option v-for="candidate in parentCandidates" :key="candidate.id" :value="candidate.id">
               #{{ candidate.number }} {{ candidate.title }}
             </option>
           </select>
-          <p v-if="issue.parent" class="small" style="margin: 0.35rem 0 0">
-            <NuxtLink :to="`/p/${slug}/i/${issue.parent.number}`">
-              #{{ issue.parent.number }} {{ issue.parent.title }}
-            </NuxtLink>
+          <p v-else-if="issue.parent" class="side-empty">
+            <NuxtLink :to="`/p/${slug}/i/${issue.parent.number}`">#{{ issue.parent.number }} {{ issue.parent.title }}</NuxtLink>
           </p>
-          <p v-else-if="!canEdit" class="muted small" style="margin: 0">
-            Keines
-          </p>
+          <p v-else class="side-empty">Keines</p>
         </section>
 
-        <section class="issue-side-section">
-          <h4>Zugewiesen an</h4>
-          <p v-if="!issue.assignees.length && !canEdit" class="muted small">
-            Niemand
-          </p>
-          <label
-            v-for="member in projectData?.members ?? []"
-            :key="member.userId"
-            class="pv-item"
-            :class="{
-              'side-hidden':
-                !canEdit &&
-                !issue.assignees.some((a) => a.id === member.userId),
-            }"
-          >
-            <input
-              v-if="canEdit"
-              type="checkbox"
-              :checked="issue.assignees.some((a) => a.id === member.userId)"
-              @change="
-                patchIssue({
-                  assigneeIds: idsWithToggle(
-                    issue.assignees.map((a) => a.id),
-                    member.userId,
-                    ($event.target as HTMLInputElement).checked,
-                  ),
-                })
-              "
-            />
-            <span class="pv-label">{{ member.user?.name ?? member.userId }}</span>
-          </label>
-        </section>
-
-        <section class="issue-side-section">
-          <h4>Modelle</h4>
-          <p v-if="!issue.models.length && !canEdit" class="muted small">
-            Keine
-          </p>
-          <label
-            v-for="model in modelsData?.models ?? []"
-            :key="model.id"
-            class="pv-item"
-            :class="{
-              'side-hidden':
-                !canEdit && !issue.models.some((m) => m.id === model.id),
-            }"
-          >
-            <input
-              v-if="canEdit"
-              type="checkbox"
-              :checked="issue.models.some((m) => m.id === model.id)"
-              @change="
-                toggleLinkedModel(
-                  model.id,
-                  ($event.target as HTMLInputElement).checked,
-                )
-              "
-            />
-            <span class="pv-label">
-              <NuxtLink :to="`/p/${slug}/m/${model.slug}`">
-                {{ model.folder ? `${model.folder}/` : "" }}{{ model.name }}
-              </NuxtLink>
-            </span>
-          </label>
-
-          <!-- Versionsbezug je verknüpftem Modell -->
-          <div
-            v-for="linked in issue.models"
-            :key="`version-${linked.id}`"
-            class="issue-version"
-          >
-            <div class="small" style="font-weight: 600">{{ linked.name }}</div>
-
-            <span class="muted small">Aufgefallen in</span>
-            <select
-              v-if="canEdit"
-              :value="linked.foundCommitId ?? ''"
-              title="In welchem Versionsstand ist der Fehler aufgefallen?"
-              @change="
-                setModelCommit(
-                  linked.id,
-                  'found',
-                  ($event.target as HTMLSelectElement).value,
-                )
-              "
-            >
-              <option value="">— kein Commit —</option>
-              <option
-                v-for="commit in commitsByModel.get(linked.id) ?? []"
-                :key="commit.id"
-                :value="commit.id"
-              >
-                {{ commitShort(commit) }}
-              </option>
-            </select>
-            <NuxtLink
-              v-if="linked.foundCommit"
-              class="small mono"
-              :to="`/p/${slug}/m/${linked.slug}/c/${linked.foundCommit.id}`"
-            >
-              {{ linked.foundCommit.id.slice(0, 8) }} ·
-              {{ new Date(linked.foundCommit.createdAt).toLocaleDateString("de-DE") }}
-            </NuxtLink>
-            <span v-else-if="!canEdit" class="muted small">—</span>
-
-            <span class="muted small">Behoben in</span>
-            <select
-              v-if="canEdit"
-              :value="linked.fixedCommitId ?? ''"
-              title="Mit welchem Versionsstand wurde der Fehler behoben?"
-              @change="
-                setModelCommit(
-                  linked.id,
-                  'fixed',
-                  ($event.target as HTMLSelectElement).value,
-                )
-              "
-            >
-              <option value="">— kein Commit —</option>
-              <option
-                v-for="commit in commitsByModel.get(linked.id) ?? []"
-                :key="commit.id"
-                :value="commit.id"
-              >
-                {{ commitShort(commit) }}
-              </option>
-            </select>
-            <NuxtLink
-              v-if="linked.fixedCommit"
-              class="small mono"
-              :to="`/p/${slug}/m/${linked.slug}/c/${linked.fixedCommit.id}`"
-            >
-              {{ linked.fixedCommit.id.slice(0, 8) }} ·
-              {{ new Date(linked.fixedCommit.createdAt).toLocaleDateString("de-DE") }}
-            </NuxtLink>
-            <span v-else-if="!canEdit" class="muted small">—</span>
+        <section v-if="participants.length" class="side-section">
+          <div class="side-head"><span>{{ plural(participants.length, "Beteiligte Person", "Beteiligte") }}</span></div>
+          <div class="side-people">
+            <UserAvatar v-for="person in participants" :key="person.id" :user="person" :size="26" />
           </div>
-        </section>
-
-        <section class="issue-side-section">
-          <h4>Labels</h4>
-          <LabelPicker
-            :labels="labelsData?.labels ?? []"
-            :selected-ids="issue.labels.map((l) => l.id)"
-            :editable="canEdit"
-            :create-label="hasWriteRole ? createProjectLabel : undefined"
-            @update="(ids) => patchIssue({ labelIds: ids })"
-          />
         </section>
       </aside>
     </div>

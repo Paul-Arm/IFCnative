@@ -311,8 +311,8 @@ const buttons: ToolButton[][] = [
         @keydown.enter.prevent="applyLink"
         @keydown.esc.prevent="linkOpen = false"
       />
-      <button class="primary" type="button" @click="applyLink">Übernehmen</button>
-      <button type="button" @click="removeLink">Entfernen</button>
+      <button class="btn btn-sm btn-primary" type="button" @click="applyLink">Übernehmen</button>
+      <button class="btn btn-sm" type="button" @click="removeLink">Entfernen</button>
     </div>
     <textarea
       v-if="raw"

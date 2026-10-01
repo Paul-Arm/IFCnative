@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { PhCopy, PhKey, PhTrash } from "@phosphor-icons/vue";
+import { PhArrowLeft, PhCopy, PhKey, PhTrash } from "@phosphor-icons/vue";
 
 // Konto: persönliche Zugangstokens (z. B. für den IFC-Editor). Wichtig für
 // Konten aus OpenProject — die haben kein Hub-Passwort.
@@ -15,6 +15,8 @@ interface AccessTokenEntry {
 const { api } = useApi();
 const { user } = useAuth();
 const { embed } = useEmbed();
+const { confirm } = useConfirm();
+const toast = useToast();
 
 const { data, refresh, status } = useAsyncData(
   "access-tokens",
@@ -59,13 +61,19 @@ async function copyToken(): Promise<void> {
 }
 
 async function revoke(entry: AccessTokenEntry): Promise<void> {
-  if (!window.confirm(`Zugangstoken „${entry.name}" widerrufen? Programme, die es nutzen, verlieren den Zugang.`)) {
-    return;
-  }
+  // window.confirm ist in eingebetteten Browsern (OpenProject-iframe) blockiert.
+  const ok = await confirm({
+    title: `Zugangstoken „${entry.name}“ widerrufen?`,
+    message: "Programme, die es nutzen, verlieren den Zugang.",
+    confirmLabel: "Widerrufen",
+    danger: true,
+  });
+  if (!ok) return;
   error.value = null;
   try {
     await api(`/me/tokens/${entry.id}`, { method: "DELETE" });
     await refresh();
+    toast.success(`Zugangstoken „${entry.name}“ widerrufen.`);
   } catch (e) {
     error.value = apiErrorMessage(e);
   }
@@ -73,91 +81,106 @@ async function revoke(entry: AccessTokenEntry): Promise<void> {
 </script>
 
 <template>
-  <div>
-    <nav class="breadcrumbs">
-      <NuxtLink :to="embed ? `/p/${embed.projectSlug}` : '/'">
-        {{ embed ? "Zurück zum Projekt" : "Projekte" }}
-      </NuxtLink>
-      <span>/</span>
-      <strong>Konto</strong>
-    </nav>
+  <div class="page">
+    <NuxtLink v-if="embed" :to="`/p/${embed.projectSlug}`" class="btn btn-sm btn-invisible">
+      <PhArrowLeft :size="16" /> Zurück zum Projekt
+    </NuxtLink>
 
-    <div class="card">
-      <div class="card-header"><h2>{{ user?.name }}</h2></div>
-      <div class="card-body muted small">{{ user?.email }}</div>
+    <div class="page-head">
+      <UserAvatar :user="user ?? null" :size="40" :titled="false" />
+      <h1>{{ user?.name ?? "Konto" }}</h1>
+      <p class="page-sub">{{ user?.email }}</p>
     </div>
 
-    <div v-if="error" class="alert error">{{ error }}</div>
+    <div class="section-head">
+      <h2><PhKey :size="18" style="vertical-align: -3px" /> Zugangstoken</h2>
+    </div>
+    <p class="muted small" style="max-width: 720px">
+      Anmeldung im IFC-Editor und für Skripte, ohne Passwort. Im Editor unter
+      <em>IFC Hub → Anmelden → Zugangstoken</em> einfügen. Konten, die über OpenProject angelegt
+      wurden, melden sich im Editor nur so an. Ein Token hat dieselben Rechte wie dein Konto —
+      nicht weitergeben, bei Verlust hier widerrufen.
+    </p>
 
-    <div class="card">
-      <div class="card-header">
-        <PhKey :size="18" aria-hidden="true" style="color: var(--text-muted)" />
-        <h2>Zugangstoken</h2>
-        <span class="topbar-spacer" />
-        <span class="muted small">Anmeldung im IFC-Editor und für Skripte, ohne Passwort</span>
+    <div v-if="error" class="flash flash-danger">{{ error }}</div>
+
+    <div v-if="created" class="flash flash-success account-created">
+      <div>
+        Token „{{ created.name }}“ erzeugt. <strong>Jetzt kopieren</strong> — es wird nur einmal angezeigt.
       </div>
-      <div class="card-body">
-        <p class="muted small" style="margin-top: 0">
-          Im Editor unter <em>IFC Hub → Anmelden → Zugangstoken</em> einfügen. Konten, die über
-          OpenProject angelegt wurden, melden sich im Editor nur so an. Ein Token hat dieselben
-          Rechte wie dein Konto — nicht weitergeben, bei Verlust hier widerrufen.
-        </p>
+      <div class="account-token-row">
+        <code class="mono small account-token">{{ created.token }}</code>
+        <button type="button" class="btn btn-sm" @click="copyToken">
+          <PhCopy :size="14" />
+          {{ copied ? "Kopiert ✓" : "Kopieren" }}
+        </button>
+      </div>
+    </div>
 
-        <div v-if="created" class="alert success">
-          <div style="margin-bottom: 0.4rem">
-            Token „{{ created.name }}" erzeugt. <strong>Jetzt kopieren</strong> — es wird nur einmal angezeigt.
+    <form class="form-row account-form" @submit.prevent="createToken">
+      <div class="form-group">
+        <label class="form-label" for="token-name">Bezeichnung</label>
+        <input id="token-name" v-model="newName" maxlength="80" placeholder="z. B. Editor Laptop" />
+      </div>
+      <div class="shrink">
+        <button class="btn btn-primary" type="submit" :disabled="busy || !newName.trim()">Token erzeugen</button>
+      </div>
+    </form>
+
+    <div class="box">
+      <SkeletonRows v-if="pending" :rows="2" dots />
+      <div v-else-if="!data?.tokens.length" class="box-row muted small">Noch keine Zugangstokens.</div>
+      <template v-else>
+        <div v-for="entry in data.tokens" :key="entry.id" class="box-row account-token-entry">
+          <PhKey :size="18" class="muted" />
+          <div class="account-token-main">
+            <strong>{{ entry.name }}</strong>
+            <span class="mono small muted">{{ entry.prefix }}…</span>
+            <div class="muted small">
+              erzeugt {{ dateFmt.format(new Date(entry.createdAt)) }} ·
+              zuletzt benutzt {{ entry.lastUsedAt ? dateFmt.format(new Date(entry.lastUsedAt)) : "nie" }}
+            </div>
           </div>
-          <div style="display: flex; gap: 0.5rem; align-items: center">
-            <code class="mono small" style="word-break: break-all; flex: 1">{{ created.token }}</code>
-            <button type="button" @click="copyToken">
-              <PhCopy :size="14" aria-hidden="true" />
-              {{ copied ? "Kopiert ✓" : "Kopieren" }}
-            </button>
-          </div>
+          <button type="button" class="btn btn-sm btn-danger" @click="revoke(entry)">
+            <PhTrash :size="14" /> Widerrufen
+          </button>
         </div>
-
-        <form class="form-inline" @submit.prevent="createToken">
-          <div>
-            <label for="token-name">Bezeichnung</label>
-            <input id="token-name" v-model="newName" maxlength="80" placeholder="z. B. Editor Laptop" />
-          </div>
-          <div class="shrink">
-            <button class="primary" type="submit" :disabled="busy || !newName.trim()">Token erzeugen</button>
-          </div>
-        </form>
-      </div>
-
-      <SkeletonRows v-if="pending" :rows="2" />
-      <div v-else-if="!data?.tokens.length" class="empty">Noch keine Zugangstokens.</div>
-      <div v-else class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Bezeichnung</th>
-              <th>Token</th>
-              <th>Erzeugt</th>
-              <th>Zuletzt benutzt</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="entry in data.tokens" :key="entry.id">
-              <td><strong>{{ entry.name }}</strong></td>
-              <td class="small mono">{{ entry.prefix }}…</td>
-              <td class="small muted">{{ dateFmt.format(new Date(entry.createdAt)) }}</td>
-              <td class="small muted">
-                {{ entry.lastUsedAt ? dateFmt.format(new Date(entry.lastUsedAt)) : "nie" }}
-              </td>
-              <td style="text-align: right">
-                <button type="button" class="danger" @click="revoke(entry)">
-                  <PhTrash :size="14" aria-hidden="true" />
-                  Widerrufen
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      </template>
     </div>
   </div>
 </template>
+
+<style scoped>
+.account-created {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+.account-token-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.account-token {
+  flex: 1;
+  word-break: break-all;
+}
+.account-form {
+  max-width: 560px;
+  margin: 12px 0 16px;
+  align-items: flex-end;
+}
+.account-token-entry {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.account-token-main {
+  flex: 1;
+  min-width: 0;
+}
+.account-token-main strong {
+  margin-right: 8px;
+}
+</style>

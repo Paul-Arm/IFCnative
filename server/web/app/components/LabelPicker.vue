@@ -1,133 +1,128 @@
 <script setup lang="ts">
-// Label-Auswahl wie bei GitHub: gewählte Labels als Chips, Dropdown zum
-// An-/Abwählen; wer Schreibrecht hat, legt neue Labels direkt im Dropdown an.
-import { PhCaretDown, PhCheck, PhPlus, PhTag, PhX } from "@phosphor-icons/vue";
+// Label-Auswahl wie bei GitHub: Abschnitt mit Zahnrad, Menü mit Filter und
+// Häkchen; wer Schreibrecht hat, legt neue Labels direkt im Menü an.
+import { PhCheck, PhGear, PhPlus } from "@phosphor-icons/vue";
 
 import type { Label } from "~/types/api";
 
-const props = defineProps<{
-  labels: Label[];
-  selectedIds: string[];
-  editable: boolean;
-  /** Wenn gesetzt: neue Labels dürfen angelegt werden (write-Rolle). */
-  createLabel?: (name: string, color: string) => Promise<Label | null>;
-}>();
+const props = withDefaults(
+  defineProps<{
+    labels: Label[];
+    selectedIds: string[];
+    editable: boolean;
+    /** Wenn gesetzt: neue Labels dürfen angelegt werden (write-Rolle). */
+    createLabel?: (name: string, color: string) => Promise<Label | null>;
+    title?: string;
+  }>(),
+  { createLabel: undefined, title: "Labels" },
+);
 
 const emit = defineEmits<{ update: [ids: string[]] }>();
 
-const selected = computed(() =>
-  props.labels.filter((label) => props.selectedIds.includes(label.id)),
+const filter = ref("");
+const draft = ref<Set<string>>(new Set());
+const creating = ref(false);
+const newColor = ref(randomLabelColor());
+
+const selected = computed(() => props.labels.filter((label) => props.selectedIds.includes(label.id)));
+const visible = computed(() => {
+  const needle = filter.value.trim().toLowerCase();
+  return props.labels.filter((label) => !needle || label.name.toLowerCase().includes(needle));
+});
+const canCreate = computed(
+  () =>
+    Boolean(props.createLabel) &&
+    filter.value.trim().length > 0 &&
+    !props.labels.some((label) => label.name.toLowerCase() === filter.value.trim().toLowerCase()),
 );
 
-function toggle(labelId: string): void {
-  const set = new Set(props.selectedIds);
-  if (set.has(labelId)) {
-    set.delete(labelId);
-  } else {
-    set.add(labelId);
-  }
-  emit("update", [...set]);
+function onOpen(): void {
+  draft.value = new Set(props.selectedIds);
+  filter.value = "";
+  newColor.value = randomLabelColor();
 }
 
-const newName = ref("");
-const newColor = ref("#d73a4a");
-const creating = ref(false);
+function toggle(id: string): void {
+  const next = new Set(draft.value);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  draft.value = next;
+}
+
+function onClose(): void {
+  const next = [...draft.value];
+  const changed =
+    next.length !== props.selectedIds.length || next.some((id) => !props.selectedIds.includes(id));
+  if (changed) emit("update", next);
+}
 
 async function create(): Promise<void> {
-  if (!props.createLabel || !newName.value.trim() || creating.value) return;
+  if (!props.createLabel || !canCreate.value || creating.value) return;
   creating.value = true;
   try {
-    const label = await props.createLabel(newName.value.trim(), newColor.value);
+    const label = await props.createLabel(filter.value.trim(), newColor.value);
     if (label) {
-      newName.value = "";
-      // Neu angelegte Labels direkt auswählen.
-      emit("update", [...new Set([...props.selectedIds, label.id])]);
+      draft.value = new Set([...draft.value, label.id]);
+      filter.value = "";
+      newColor.value = randomLabelColor();
     }
   } finally {
     creating.value = false;
   }
 }
-
-function labelTextColor(hex: string): string {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return 0.299 * r + 0.587 * g + 0.114 * b > 150 ? "#1f2328" : "#ffffff";
-}
 </script>
 
 <template>
-  <div class="label-picker">
-    <div v-if="selected.length" class="label-picker-chips">
-      <span
-        v-for="label in selected"
+  <section class="side-section">
+    <UiMenu v-if="editable" align="right" wide :close-on-click="false" @open="onOpen" @close="onClose">
+      <template #trigger="{ toggle: open }">
+        <button type="button" class="side-head side-head-btn" @click="open">
+          <span>{{ title }}</span>
+          <PhGear :size="16" />
+        </button>
+      </template>
+      <div class="menu-heading">Labels anwenden</div>
+      <div class="menu-filter">
+        <input
+          v-model="filter"
+          type="text"
+          :placeholder="createLabel ? 'Filtern oder neues Label …' : 'Filtern …'"
+          @keydown.enter.prevent="canCreate ? create() : visible[0] && toggle(visible[0].id)"
+        />
+      </div>
+      <button
+        v-for="label in visible"
         :key="label.id"
-        class="label-chip"
-        :style="{
-          backgroundColor: label.color,
-          color: labelTextColor(label.color),
-        }"
+        type="button"
+        class="menu-item"
+        @click="toggle(label.id)"
       >
-        {{ label.name }}
-        <button
-          v-if="editable"
-          type="button"
-          class="chip-x"
-          :style="{ color: labelTextColor(label.color) }"
-          :title="`${label.name} entfernen`"
-          @click="toggle(label.id)"
-        >
-          <PhX :size="10" weight="bold" />
-        </button>
-      </span>
-    </div>
-    <p v-else-if="!editable" class="muted small" style="margin: 0">Keine</p>
-
-    <details v-if="editable" class="menu label-menu">
-      <summary class="btn">
-        <PhTag :size="14" aria-hidden="true" />
-        Labels
-        <PhCaretDown :size="12" aria-hidden="true" />
-      </summary>
-      <div class="menu-list">
-        <button
-          v-for="label in labels"
-          :key="label.id"
-          type="button"
-          class="menu-item"
-          @click="toggle(label.id)"
-        >
-          <span class="label-dot" :style="{ backgroundColor: label.color }" />
-          <span class="label-menu-name">{{ label.name }}</span>
-          <PhCheck
-            v-if="selectedIds.includes(label.id)"
-            :size="14"
-            weight="bold"
-            style="margin-left: auto"
-          />
-        </button>
-        <div v-if="!labels.length" class="muted small label-menu-empty">
-          Noch keine Labels.
-        </div>
-        <div v-if="createLabel" class="issue-new-label label-menu-create">
-          <input
-            v-model="newName"
-            type="text"
-            placeholder="Neues Label"
-            @keydown.enter.prevent="create"
-            @click.stop
-          />
-          <input v-model="newColor" type="color" @click.stop />
-          <button
-            type="button"
-            class="link"
-            :disabled="creating || !newName.trim()"
-            @click="create"
-          >
-            <PhPlus :size="14" aria-hidden="true" />
+        <PhCheck :size="14" :style="{ visibility: draft.has(label.id) ? 'visible' : 'hidden' }" />
+        <span class="label-dot" :style="{ '--lc': label.color }" />
+        <span class="truncate" style="flex: 1">
+          {{ label.name }}
+          <span v-if="label.description" class="menu-item-desc truncate">{{ label.description }}</span>
+        </span>
+      </button>
+      <div v-if="!visible.length && !canCreate" class="menu-empty">
+        {{ labels.length ? "Kein Label gefunden." : "Noch keine Labels." }}
+      </div>
+      <template v-if="canCreate">
+        <div class="menu-sep" />
+        <div class="menu-item" data-keep-open style="cursor: default">
+          <input v-model="newColor" type="color" aria-label="Farbe" @click.stop />
+          <button type="button" class="btn btn-sm" :disabled="creating" style="flex: 1" @click="create">
+            <PhPlus :size="14" />
+            Label „{{ filter.trim() }}“ anlegen
           </button>
         </div>
-      </div>
-    </details>
-  </div>
+      </template>
+    </UiMenu>
+    <div v-else class="side-head"><span>{{ title }}</span></div>
+
+    <div v-if="selected.length" class="side-labels">
+      <LabelChip v-for="label in selected" :key="label.id" :label="label" />
+    </div>
+    <p v-else class="side-empty">Keine</p>
+  </section>
 </template>

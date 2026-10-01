@@ -1,12 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
-  <rect width="256" height="256" rx="52" fill="#0969da"/>
-  <g transform="translate(38.4 38.4) scale(0.7)">
-    <path d="M128 28 214.6 78 214.6 178 128 228 41.4 178 41.4 78 Z" fill="none" stroke="#ffffff" stroke-width="14" stroke-linejoin="round"/>
-    <path d="M128 228 128 128 214.6 78" fill="none" stroke="#ffffff" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M128 128 41.4 78" fill="none" stroke="#7ee787" stroke-width="14" stroke-linecap="round"/>
-    <circle cx="128" cy="228" r="17" fill="#0969da" stroke="#ffffff" stroke-width="13"/>
-    <circle cx="214.6" cy="78" r="17" fill="#0969da" stroke="#ffffff" stroke-width="13"/>
-    <circle cx="128" cy="128" r="17" fill="#0969da" stroke="#ffffff" stroke-width="13"/>
-    <circle cx="41.4" cy="78" r="17" fill="#0969da" stroke="#7ee787" stroke-width="13"/>
+  <!-- IFC-Hub-Logo (siehe components/HubLogo.vue), für 16–32 px mit kräftigeren Linien -->
+  <style>
+    .r { fill: #0a3069; stroke: #0a3069; }
+    @media (prefers-color-scheme: dark) { .r { fill: #1f4f99; stroke: #1f4f99; } }
+  </style>
+  <defs>
+    <linearGradient id="roof" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#56d364"/>
+      <stop offset="1" stop-color="#2da44e"/>
+    </linearGradient>
+  </defs>
+  <g stroke-linejoin="round" stroke-width="14">
+    <polygon points="128 24 218.07 76 128 128 37.93 76" fill="url(#roof)" stroke="url(#roof)"/>
+    <polygon points="37.93 76 128 128 128 232 37.93 180" fill="#0969da" stroke="#0969da"/>
+    <polygon class="r" points="128 128 218.07 76 218.07 180 128 232"/>
   </g>
+  <path d="M128 205V128L194.8 89.4M128 128 61.2 89.4" fill="none" stroke="#fff" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="128" cy="128" r="30" fill="#fff"/>
+  <circle cx="128" cy="128" r="15" fill="#2da44e"/>
 </svg>

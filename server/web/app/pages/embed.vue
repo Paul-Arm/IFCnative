@@ -134,87 +134,79 @@ async function submitSetup(): Promise<void> {
 </script>
 
 <template>
-  <div class="login-page">
-    <div class="card login-card" :style="chooser ? 'max-width: 34rem' : ''">
-      <div class="card-body">
-        <div style="display: flex; justify-content: center">
-          <HubLogo :size="40" node-fill="var(--surface)" />
+  <div class="embed-page">
+    <div class="box embed-card" :class="{ wide: chooser }">
+      <div class="embed-logo"><HubLogo :size="40" /></div>
+
+      <template v-if="chooser">
+        <h1 class="embed-title">IFC Hub einrichten</h1>
+        <p class="muted small embed-center">
+          Das OpenProject-Projekt <strong>{{ chooser.openproject.projectName }}</strong>
+          ist noch mit keinem Hub-Projekt verknüpft.
+        </p>
+        <div class="choice-list">
+          <label class="choice">
+            <input v-model="choice" type="radio" name="hub-project" value="" />
+            <span class="choice-text">
+              <strong>Neues Hub-Projekt anlegen</strong>
+              <span>„{{ chooser.openproject.projectName }}“, privat</span>
+            </span>
+          </label>
+          <label v-for="candidate in chooser.candidates" :key="candidate.slug" class="choice">
+            <input v-model="choice" type="radio" name="hub-project" :value="candidate.slug" />
+            <span class="choice-text">
+              <strong>{{ candidate.name }}</strong>
+              <span>vorhandenes Hub-Projekt ({{ candidate.slug }}) verknüpfen — Modelle und Historie bleiben</span>
+            </span>
+          </label>
         </div>
-
-        <template v-if="chooser">
-          <h1 style="text-align: center; font-size: 1.25rem">IFC Hub einrichten</h1>
-          <p class="muted small" style="text-align: center">
-            Das OpenProject-Projekt <strong>{{ chooser.openproject.projectName }}</strong>
-            ist noch mit keinem Hub-Projekt verknüpft.
-          </p>
-          <div class="embed-choices">
-            <label class="embed-choice">
-              <input v-model="choice" type="radio" name="hub-project" value="" />
-              <span>
-                <strong>Neues Hub-Projekt anlegen</strong>
-                <span class="muted small">„{{ chooser.openproject.projectName }}“, privat</span>
-              </span>
-            </label>
-            <label v-for="candidate in chooser.candidates" :key="candidate.slug" class="embed-choice">
-              <input v-model="choice" type="radio" name="hub-project" :value="candidate.slug" />
-              <span>
-                <strong>{{ candidate.name }}</strong>
-                <span class="muted small">
-                  vorhandenes Hub-Projekt ({{ candidate.slug }}) verknüpfen — Modelle und Historie bleiben
-                </span>
-              </span>
-            </label>
-          </div>
-          <p v-if="!chooser.candidates.length" class="muted small">
-            Es gibt keine Hub-Projekte, die du verwaltest und die noch frei sind.
-          </p>
-          <div v-if="error" class="alert error">{{ error }}</div>
-          <button class="primary" style="width: 100%" :disabled="busy" @click="submitSetup">
-            {{ choice ? "Verknüpfen" : "Anlegen" }}
-          </button>
-        </template>
-
-        <p v-else-if="notSetUp" class="muted" style="text-align: center; margin-top: 1rem">
-          Der IFC Hub ist für <strong>{{ notSetUp.projectName }}</strong> noch nicht eingerichtet.
-          Ein Projektadministrator (Recht „IFC Hub verwalten“) muss ihn einmal öffnen.
+        <p v-if="!chooser.candidates.length" class="muted small">
+          Es gibt keine Hub-Projekte, die du verwaltest und die noch frei sind.
         </p>
-        <div v-else-if="error" class="alert error" style="margin-top: 1rem">{{ error }}</div>
-        <p v-else class="muted" style="text-align: center; margin-top: 1rem">
-          Anmeldung über OpenProject …
-        </p>
-      </div>
+        <div v-if="error" class="flash flash-danger flash-sm">{{ error }}</div>
+        <button type="button" class="btn btn-primary btn-block" :disabled="busy" @click="submitSetup">
+          {{ choice ? "Verknüpfen" : "Anlegen" }}
+        </button>
+      </template>
+
+      <p v-else-if="notSetUp" class="muted embed-center">
+        Der IFC Hub ist für <strong>{{ notSetUp.projectName }}</strong> noch nicht eingerichtet.
+        Ein Projektadministrator (Recht „IFC Hub verwalten“) muss ihn einmal öffnen.
+      </p>
+      <div v-else-if="error" class="flash flash-danger flash-sm">{{ error }}</div>
+      <p v-else class="muted embed-center">Anmeldung über OpenProject …</p>
     </div>
   </div>
 </template>
 
 <style scoped>
-.embed-choices {
+.embed-page {
+  display: flex;
+  justify-content: center;
+  padding: 48px 16px;
+}
+.embed-card {
+  width: 100%;
+  max-width: 400px;
+  padding: 24px;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  margin: 1rem 0;
+  gap: 12px;
 }
-.embed-choice {
+.embed-card.wide {
+  max-width: 560px;
+}
+.embed-logo {
   display: flex;
-  gap: 0.6rem;
-  align-items: flex-start;
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  cursor: pointer;
+  justify-content: center;
 }
-/* Globale Formularregeln (width: 100 %) gelten nicht für Radios. */
-.embed-choice input {
-  width: auto;
-  flex: none;
-  margin: 0.2rem 0 0;
+.embed-title {
+  margin: 0;
+  text-align: center;
+  font-size: 1.25rem;
 }
-.embed-choice > span {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-}
-.embed-choice:has(input:checked) {
-  border-color: var(--accent);
+.embed-center {
+  margin: 0;
+  text-align: center;
 }
 </style>

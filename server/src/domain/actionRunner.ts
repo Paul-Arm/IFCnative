@@ -106,6 +106,16 @@ export class ActionRunner extends EventEmitter {
     }
   }
 
+  /** Eingereihte, noch nicht gestartete Runs (Systemübersicht). */
+  get queueLength(): number {
+    return this.queue.length;
+  }
+
+  /** Wird gerade ein Run ausgeführt? */
+  get isRunning(): boolean {
+    return this.activeRunId !== null;
+  }
+
   /** Für Tests: wartet, bis alle eingereihten Runs abgearbeitet sind. */
   async idle(): Promise<void> {
     while (this.active) {
@@ -405,7 +415,14 @@ export class ActionRunner extends EventEmitter {
     return new Promise((resolve) => {
       const child = spawn(this.pythonBin, [scriptPath, ifcPath], {
         cwd,
-        env: { ...process.env, IFC_PATH: ifcPath, PYTHONUNBUFFERED: "1" },
+        // UTF-8 erzwingen: unter Windows schreibt Python in Pipes sonst
+        // cp1252 — Umlaute im Protokoll würden zu „St�tzen“.
+        env: {
+          ...process.env,
+          IFC_PATH: ifcPath,
+          PYTHONUNBUFFERED: "1",
+          PYTHONIOENCODING: "utf-8",
+        },
         stdio: ["ignore", "pipe", "pipe"],
       });
       this.activeChild = child;
