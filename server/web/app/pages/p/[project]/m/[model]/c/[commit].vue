@@ -2,6 +2,7 @@
 import {
     PhCheckCircle,
     PhCopy,
+    PhDesktop,
     PhDownloadSimple,
     PhGitCommit,
     PhGitDiff,
@@ -103,6 +104,7 @@ const isIfc = computed(() => {
   return schema !== "markdown" && schema !== "file";
 });
 const isFile = computed(() => commitData.value?.commit.schema === "file");
+const editorLink = useEditorLink();
 const downloadExtension = computed(() => {
   if (isIfc.value) return "ifc";
   if (!isFile.value) return "md";
@@ -401,6 +403,15 @@ function initials(name: string | undefined): string {
               </option>
             </select>
           </div>
+          <a
+            v-if="isIfc"
+            class="btn"
+            :href="editorLink({ project: slug, model: modelSlug, branch: commitData.commit.branchName, commit: commitId })"
+            :title="EDITOR_LINK_TITLE"
+          >
+            <PhDesktop :size="15" aria-hidden="true" />
+            Im Editor öffnen
+          </a>
           <button :disabled="downloadBusy" @click="download">
             <span v-if="downloadBusy" class="spinner" aria-hidden="true" />
             <PhDownloadSimple v-else :size="15" aria-hidden="true" />

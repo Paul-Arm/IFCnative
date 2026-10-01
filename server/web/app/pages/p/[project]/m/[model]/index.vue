@@ -3,6 +3,7 @@ import {
     PhBookOpen,
     PhCheckCircle,
     PhCubeTransparent,
+    PhDesktop,
     PhEye,
     PhGear,
     PhGitBranch,
@@ -66,6 +67,11 @@ const canWrite = computed(
 const isMd = computed(() => modelData.value?.model.kind === "md");
 const isFile = computed(() => modelData.value?.model.kind === "file");
 const isIfc = computed(() => !isMd.value && !isFile.value);
+
+// "Im Editor öffnen": aktueller Stand des gewählten Branches (ohne Auswahl
+// "alle": Standard-Branch) bzw. ein bestimmter Commit.
+const editorLink = useEditorLink();
+const hasCommits = computed(() => modelData.value?.branches.some((b) => b.headCommitId) ?? false);
 
 /** Endung des Modellnamens ("" ohne Punkt) — legt bei Datei-Modellen die Dateiart fest. */
 const modelExtension = computed(() => {
@@ -584,6 +590,17 @@ const numberFmt = new Intl.NumberFormat("de-DE");
       </span>
       <span v-if="isMd" class="badge">Markdown</span>
       <span v-else-if="isFile" class="badge">Datei</span>
+      <template v-if="isIfc && hasCommits">
+        <span class="topbar-spacer" />
+        <a
+          class="btn"
+          :href="editorLink({ project: slug, model: modelSlug, branch: selectedBranch })"
+          :title="EDITOR_LINK_TITLE"
+        >
+          <PhDesktop :size="15" aria-hidden="true" />
+          Im Editor öffnen
+        </a>
+      </template>
     </nav>
 
     <nav class="gh-tabs">
@@ -818,6 +835,12 @@ const numberFmt = new Intl.NumberFormat("de-DE");
             <span v-if="isIfc" class="muted small cg-entities">
               {{ numberFmt.format(row.commit.entityCount) }} Entities
             </span>
+            <a
+              v-if="isIfc"
+              class="link"
+              :href="editorLink({ project: slug, model: modelSlug, branch: row.commit.branchName, commit: row.commit.id })"
+              :title="EDITOR_LINK_TITLE"
+            >Editor</a>
             <button class="link" @click="downloadCommit(row.commit)">
               .{{ downloadExtension }}
             </button>

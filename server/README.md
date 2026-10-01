@@ -366,6 +366,19 @@ Diff-Zusammenfassung als Antwort). Client-Code in `editor/src/vcs/`
 (`client.ts`, `types.ts`); unter Tauri läuft HTTP über das Tauri-Plugin
 (Host-Freigabe in `src-tauri/capabilities/default.json`).
 
+**„Im Editor öffnen“** öffnet ein Modell direkt im Desktop-Editor (ab 1.5.0).
+Die Links stehen auf der Modellseite (oben und je Commit) und auf der
+Commit-Seite, auch im in OpenProject eingebetteten Hub:
+
+```
+ifcnative://open?hub=<Hub-URL>&project=<Slug>&model=<Slug>[&branch=<Name>][&commit=<Id>]
+```
+
+- **Registrierung:** Der Editor-Installer registriert das Protokoll für den Benutzer.
+- **Was geladen wird:** Ohne `commit` lädt der Editor den aktuellen Stand des Branches, ohne `branch` den des Standard-Branches.
+- **Anmeldung:** Ist der Editor noch nicht angemeldet, fragt er danach. Seine Anmeldung schickt er nur an den eingestellten Hub; zeigt ein Link auf einen anderen Hub, muss der Benutzer den Wechsel bestätigen.
+- **Umsetzung:** Links erzeugt `web/app/composables/useEditorLink.ts`. Geprüft und geladen werden sie in `editor/src/desktop/editorLink.ts` und `editor/src/vcs/openFromLink.ts`.
+
 ## Tests
 
 ```bash
