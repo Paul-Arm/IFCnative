@@ -1,0 +1,2 @@
+# Patches müssen byte-genau bleiben (git apply/am gegen LF-Quellen).
+*.patch text eol=lf
