@@ -20,6 +20,13 @@ x-ifc-hub-image: &ifc_hub_image
   # überspringt diese Dienste. missing/always: Image aus einer Registry.
   pull_policy: ${IFC_HUB_PULL_POLICY:-never}
 
+# Hub-Hostname ohne DNS auf dem OpenProject-Server (z. B. *.dokploy.local
+# hinter Traefik): fester Hosts-Eintrag in den Containern. Ohne Angaben
+# ein wirkungsloser Platzhalter.
+x-ifc-hub-hosts: &ifc_hub_hosts
+  extra_hosts:
+    - "${IFC_HUB_HOSTNAME:-ifc-hub.invalid}:${IFC_HUB_HOST_IP:-127.0.0.1}"
+
 x-ifc-hub-env: &ifc_hub_env
   # Adresse des Hubs, wie der BROWSER sie öffnet (Einbettung, Links).
   IFC_HUB_URL: ${IFC_HUB_URL:?IFC_HUB_URL in .env setzen}
@@ -31,16 +38,16 @@ x-ifc-hub-env: &ifc_hub_env
 
 services:
   web:
-    <<: *ifc_hub_image
+    <<: [*ifc_hub_image, *ifc_hub_hosts]
     environment: *ifc_hub_env
   # Abgleich-Jobs (GoodJob, inkl. 5-Minuten-Cron) laufen im Worker.
   worker:
-    <<: *ifc_hub_image
+    <<: [*ifc_hub_image, *ifc_hub_hosts]
     environment: *ifc_hub_env
   cron:
-    <<: *ifc_hub_image
+    <<: [*ifc_hub_image, *ifc_hub_hosts]
     environment: *ifc_hub_env
   # Führt beim Start die Migrationen aus, auch die des Plugins.
   seeder:
-    <<: *ifc_hub_image
+    <<: [*ifc_hub_image, *ifc_hub_hosts]
     environment: *ifc_hub_env
