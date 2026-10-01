@@ -76,6 +76,7 @@ Voraussetzung: Im Projekt sind die Module **„IFC Hub“ und „BCF“** aktiv 
 
 **Hinweise:**
 - **Browser-Speicher.** Der Hub speichert seine Sitzung im `localStorage`. Am einfachsten laufen Hub und OpenProject auf demselben Host, andere Ports genügen. Dann gelten sie als „same-site“, und der Browser partitioniert den Speicher im iframe nicht.
+- **CSP.** Das Plugin ergänzt `frame-src` auf allen Seiten um die Hub-Adresse und `ifcnative:`. Über dieses Schema startet „Im Editor öffnen“ im eingebetteten Hub den Desktop-Editor. Fehlt es, ersetzt der Browser den Hub durch „Dieser Inhalt ist blockiert“.
 - **HTTP.** OpenProject verlangt für Upload-Ziele eigentlich HTTPS. Das Plugin lässt auch HTTP zu, für interne Hubs ohne TLS. Läuft OpenProject per HTTPS, muss auch der Hub HTTPS haben, sonst sperrt der Browser den Upload (Mixed Content).
 
 ## Installation (Docker)

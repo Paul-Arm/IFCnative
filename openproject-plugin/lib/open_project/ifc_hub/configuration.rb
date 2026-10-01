@@ -9,6 +9,12 @@ module OpenProject::IfcHub
   module Configuration
     MIN_SECRET_LENGTH = 32
 
+    # "Im Editor öffnen" im eingebetteten Hub navigiert das iframe zu
+    # ifcnative://… (Desktop-Editor). frame-src der OpenProject-Seite muss
+    # das Schema erlauben, sonst ersetzt der Browser den Hub durch "Dieser
+    # Inhalt ist blockiert". Erlaubt nur den Start des Editors, kein Laden.
+    EDITOR_LINK_SCHEME = "ifcnative:".freeze
+
     module_function
 
     def hub_url
@@ -32,6 +38,11 @@ module OpenProject::IfcHub
       "#{uri.scheme}://#{uri.host}#{port}"
     rescue URI::InvalidURIError
       nil
+    end
+
+    # Quellen für frame-src: der Hub selbst und Links aus ihm in den Editor.
+    def frame_sources
+      [hub_origin, EDITOR_LINK_SCHEME].compact
     end
 
     # Das Ticket steht im Fragment (#…): Fragmente schickt der Browser nicht

@@ -23,7 +23,7 @@ module IfcHub
       # Speicher "IFC Hub" im Projekt aktivieren, falls schon verknüpft.
       OpenProject::IfcHub::StorageSync.call(@project)
 
-      append_content_security_policy_directives(frame_src: [config.hub_origin])
+      append_content_security_policy_directives(frame_src: config.frame_sources)
       ticket = OpenProject::IfcHub::Ticket.issue(user: User.current, project: @project, role: hub_role)
       @hub_src = config.embed_url(ticket:, path: hub_path)
       @hub_origin = config.hub_origin
