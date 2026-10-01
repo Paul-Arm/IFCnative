@@ -43,6 +43,16 @@ Browser keinen freien Zugriff auf lokale Dateipfade erlaubt.
 `npm run test:desktop` prüft Pfaderhalt, Abbruch, fehlende Dateien und die
 Migration alter Einträge.
 
+## Aus dem IFC Hub öffnen
+
+**„Im Editor öffnen“** im IFC Hub, auch im in OpenProject eingebetteten Hub, startet den
+Editor über das Protokoll `ifcnative://open?hub=…&project=…&model=…[&branch=…][&commit=…]`.
+
+- **Registrierung:** Der Installer trägt das Protokoll für den Benutzer ein (`build/nsis-hooks.nsh`). Windows übergibt den Link als Argument; wie bei `.ifc`-Dateien startet dabei ein neues Editor-Fenster.
+- **Prüfen und laden:** `src/desktop/editorLink.ts` prüft den Link, `src/vcs/openFromLink.ts` lädt den Stand.
+- **Nach dem Laden:** Der Stand öffnet sich als Tab mit Hub-Herkunft; „Auf den Hub committen“ funktioniert danach wie gewohnt.
+- **Anmeldung:** Ist der Editor nicht angemeldet, fragt der Dialog danach. Die Anmeldung geht nur an den eingestellten Hub, ein Link auf einen anderen Hub braucht eine Bestätigung. Der Hub muss außerdem in `src-tauri/capabilities/default.json` freigegeben sein.
+
 ## Fehlerberichte, Installationen und Updates mit Sentry
 
 Die optionale Desktop-Telemetrie läuft auf einem Rust-Worker; im Web-Build läuft

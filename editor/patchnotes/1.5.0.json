@@ -1,0 +1,11 @@
+{
+  "version": "1.5.0",
+  "title": "Modelle direkt aus dem IFC Hub und OpenProject öffnen",
+  "publishedAt": "2026-09-25T14:00:00.000Z",
+  "changes": [
+    "Neu: „Im Editor öffnen“ im IFC Hub – auch im in OpenProject eingebetteten Hub – startet den Editor und lädt das Modell. Geöffnet wird der aktuelle Stand oder ein bestimmter Commit, danach lässt sich wie gewohnt auf den Hub committen.",
+    "Ist der Editor noch nicht am Hub angemeldet, fragt er vor dem Laden nach. Links auf einen anderen als den eingestellten Hub werden erst nach Bestätigung geöffnet; die Anmeldung wird nie an einen fremden Hub geschickt.",
+    "Anmeldung am IFC Hub per Zugangstoken (im Hub unter Konto → Zugangstoken erzeugen) – nötig für Konten, die über OpenProject angelegt wurden und kein Hub-Passwort haben.",
+    "Hub-Projekte, die mit OpenProject verknüpft sind, sind im Hub-Panel gekennzeichnet. Commits und BCF-Issues aus dem Editor erscheinen dort auch im BCF-Modul von OpenProject."
+  ]
+}

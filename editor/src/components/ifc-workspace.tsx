@@ -52,6 +52,10 @@ import {
     readDesktopIfcAsset,
     readDesktopStartupIfcAssets,
 } from "@/desktop/startupIfc";
+import {
+    readDesktopStartupEditorLink,
+    type EditorOpenRequest,
+} from "@/desktop/editorLink";
 import { createMinimalIfcProjectWithFreshGuids } from "@/ifc/builder";
 import { canAssignNativeMaterial, createNativeMaterial, updateNativeMaterial, type NativeMaterialDraft } from "@/ifc/nativeDocument";
 import { assignMaterialWithAppearance, saveMaterialProperty, updateMaterialAppearance, type MaterialAppearanceDraft, type MaterialPropertyDraft } from "@/ifc/materialEditing";
@@ -339,6 +343,11 @@ const HubAddDialog = lazy(() =>
     default: module.HubAddDialog,
   })),
 );
+const HubLinkDialog = lazy(() =>
+  import("./ifc-workspace/HubLinkDialog").then((module) => ({
+    default: module.HubLinkDialog,
+  })),
+);
 const GroupManagerDialog = lazy(() =>
   import("./ifc-workspace/GroupManagerDialog").then((module) => ({
     default: module.GroupManagerDialog,
@@ -526,6 +535,9 @@ export default function IfcWorkspace() {
   const saveInFlight = useRef(false);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [hubAddOpen, setHubAddOpen] = useState(false);
+  /** Editor-Link aus dem Hub ("Im Editor öffnen"), der noch geladen wird. */
+  const [editorLinkRequest, setEditorLinkRequest] =
+    useState<EditorOpenRequest | null>(null);
   const [structureDialogOpen, setStructureDialogOpen] = useState(false);
   // Zentrale Einstellungen (Modal): ersetzt die früheren Einstellungs-Panels.
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -1378,6 +1390,14 @@ export default function IfcWorkspace() {
       return;
     }
     startupIfcHandledRef.current = true;
+    // Start über "Im Editor öffnen" im Hub (ifcnative://open?…).
+    void readDesktopStartupEditorLink()
+      .then((request) => {
+        if (request) setEditorLinkRequest(request);
+      })
+      .catch((error) => {
+        reportFailure("Editor-Link konnte nicht gelesen werden", error);
+      });
     void readDesktopStartupIfcAssets()
       .then(async (assets) => {
         const asset = assets[0];
@@ -1757,6 +1777,18 @@ export default function IfcWorkspace() {
       );
     } finally {
       setLoadingIfcName("");
+    }
+  };
+
+  // "Im Editor öffnen" im Hub: der Dialog hat den Stand geladen. Er wird
+  // vor dem Öffnen geschlossen — sonst hängt er beim Wechsel von der
+  // Startseite in den Editor neu ein und lädt ein zweites Mal.
+  const openLinkedHubDocument = async (linked: StartPageHubDocument) => {
+    setEditorLinkRequest(null);
+    try {
+      await loadHubDocuments([linked], documentSessions.length > 0);
+    } catch (error) {
+      reportFailure(`${linked.fileName} konnte nicht geöffnet werden`, error);
     }
   };
 
@@ -4631,6 +4663,20 @@ export default function IfcWorkspace() {
     </div>
   ) : null;
 
+  const hubLinkDialog = editorLinkRequest ? (
+    <Suspense fallback={null}>
+      <HubLinkDialog
+        auth={vcsAuth}
+        request={editorLinkRequest}
+        settings={vcsSettings}
+        onAuthChange={setVcsAuth}
+        onClose={() => setEditorLinkRequest(null)}
+        onOpenDocument={openLinkedHubDocument}
+        onSettingsChange={setVcsSettings}
+      />
+    </Suspense>
+  ) : null;
+
   const statusAlertBar = statusAlert ? (
     <div
       className={`flex shrink-0 items-center gap-2 border-b px-3 py-1.5 text-xs ${
@@ -4703,6 +4749,7 @@ export default function IfcWorkspace() {
           onOpenRecentFile={(entry) => void openRecentIfcFile(entry)}
           onSettingsChange={setVcsSettings}
         />
+        {hubLinkDialog}
       </div>
     );
   }
@@ -5009,6 +5056,8 @@ export default function IfcWorkspace() {
         onAttributionSettingsChange={setAttributionSettings}
         onVcsSettingsChange={setVcsSettings}
       />
+
+      {hubLinkDialog}
 
       {hubAddOpen ? (
         <Suspense fallback={null}>

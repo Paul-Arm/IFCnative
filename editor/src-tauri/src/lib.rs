@@ -1,6 +1,8 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::{
-    env, fs,
+    env,
+    ffi::OsString,
+    fs,
     path::{Path, PathBuf},
 };
 
@@ -44,6 +46,31 @@ fn startup_ifc_paths() -> Vec<String> {
         }
     }
     paths
+}
+
+/// Präfix der Editor-Links ("Im Editor öffnen" im IFC Hub). Der Installer
+/// registriert das Protokoll (build/nsis-hooks.nsh); Windows startet den
+/// Editor dann mit dem Link als Argument.
+const EDITOR_LINK_PREFIX: &str = "ifcnative:";
+const EDITOR_LINK_MAX_LENGTH: usize = 2048;
+
+fn editor_link_from_args<I: IntoIterator<Item = OsString>>(arguments: I) -> Option<String> {
+    arguments
+        .into_iter()
+        .filter_map(|argument| argument.into_string().ok())
+        .find(|argument| {
+            argument.len() <= EDITOR_LINK_MAX_LENGTH
+                && argument
+                    .get(..EDITOR_LINK_PREFIX.len())
+                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case(EDITOR_LINK_PREFIX))
+        })
+}
+
+/// Editor-Link, mit dem der Editor gestartet wurde. Nur herausgesucht —
+/// Inhalt und Ziel prüft das Frontend (src/desktop/editorLink.ts).
+#[tauri::command]
+fn startup_editor_link() -> Option<String> {
+    editor_link_from_args(env::args_os().skip(1))
 }
 
 #[tauri::command]
@@ -124,8 +151,8 @@ async fn save_ifc_file(
 
 #[cfg(test)]
 mod tests {
-    use super::{validated_ifc_path, write_ifc_atomically};
-    use std::{env, fs, process};
+    use super::{editor_link_from_args, validated_ifc_path, write_ifc_atomically};
+    use std::{env, ffi::OsString, fs, process};
 
     #[test]
     fn desktop_open_accepts_an_existing_ifc_file_case_insensitively() {
@@ -141,6 +168,24 @@ mod tests {
         let path = env::temp_dir().join("ifcnative-desktop-open.txt");
         let error = validated_ifc_path(&path).expect_err("reject non-IFC path");
         assert!(error.contains(".ifc-Dateien"));
+    }
+
+    #[test]
+    fn editor_link_is_taken_from_the_arguments_case_insensitively() {
+        let link = "IFCnative://open?hub=http%3A%2F%2Fhub&project=p&model=m";
+        let arguments = [OsString::from("--flag"), OsString::from(link)];
+        assert_eq!(editor_link_from_args(arguments).as_deref(), Some(link));
+    }
+
+    #[test]
+    fn editor_link_ignores_files_other_schemes_and_oversized_arguments() {
+        let oversized = format!("ifcnative://open?{}", "a".repeat(3000));
+        let arguments = [
+            OsString::from(r"C:\Modelle\ifcnative.ifc"),
+            OsString::from("https://example.com/ifcnative:"),
+            OsString::from(oversized),
+        ];
+        assert_eq!(editor_link_from_args(arguments), None);
     }
 
     #[test]
@@ -165,6 +210,7 @@ pub fn run() {
         .manage(telemetry::Telemetry::start())
         .invoke_handler(tauri::generate_handler![
             startup_ifc_paths,
+            startup_editor_link,
             read_ifc_file,
             pick_ifc_files,
             save_ifc_file,

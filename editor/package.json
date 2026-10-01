@@ -1,6 +1,6 @@
 {
   "name": "ifcnative",
-  "version": "1.4.16",
+  "version": "1.5.0",
   "description": "Desktop IFC builder and viewer built with Vite, React, and Tauri.",
   "engines": {
     "node": ">=22.13.0",
@@ -26,7 +26,7 @@
     "schema:identities": "node scripts/generate-identity-attributes.js",
     "test:updates": "tsx --test tests/updates.test.ts tests/update-release.test.mjs",
     "test:telemetry": "tsx --test tests/telemetry.test.ts",
-    "test:desktop": "tsx --test tests/desktop-files.test.ts",
+    "test:desktop": "tsx --test tests/desktop-files.test.ts tests/editor-link.test.ts",
     "release:prepare": "node scripts/prepare-update.mjs"
   },
   "dependencies": {

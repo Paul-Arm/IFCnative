@@ -163,6 +163,14 @@ export class VcsApiClient {
     return body.project;
   }
 
+  async getProject(project: string): Promise<VcsProject> {
+    const body = await this.request<{ project: VcsProject; role?: VcsProject["role"] }>(
+      `/projects/${encodeURIComponent(project)}`,
+      { headers: this.headers() },
+    );
+    return { ...body.project, role: body.role ?? null };
+  }
+
   /** Explizit angelegte Ordnerpfade eines Projekts (auch leere Ordner). */
   async listFolders(project: string): Promise<string[]> {
     const body = await this.request<{ folders?: string[] }>(

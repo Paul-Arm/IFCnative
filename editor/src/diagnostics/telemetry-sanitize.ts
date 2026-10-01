@@ -4,7 +4,7 @@ export function sanitizeTelemetryText(value: string): string {
     .replace(/(?:https?|file):\/\/[^\s<>"']+/gi, "[url]")
     .replace(/(?:[a-z]:[\\/]|\\\\)[^\r\n<>"']+/gi, "[path]")
     .replace(/(?:sig|token|password|authorization|secret|api[_-]?key|sas)["']?\s*[:=]\s*(?:Bearer\s+)?["']?[^\s&,;]+/gi, "[credential]")
-    .replace(/Bearer\s+[A-Za-z0-9._~+\/-]+=*/gi, "[credential]");
+    .replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, "[credential]");
 }
 
 export function telemetryFileNames(names: string[]): string[] {
