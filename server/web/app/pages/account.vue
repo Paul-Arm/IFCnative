@@ -117,14 +117,12 @@ async function revoke(entry: AccessTokenEntry): Promise<void> {
       </div>
     </div>
 
-    <form class="form-row account-form" @submit.prevent="createToken">
+    <form class="account-form" @submit.prevent="createToken">
       <div class="form-group">
         <label class="form-label" for="token-name">Bezeichnung</label>
-        <input id="token-name" v-model="newName" maxlength="80" placeholder="z. B. Editor Laptop" />
+        <input id="token-name" v-model="newName" type="text" maxlength="80" placeholder="z. B. Editor Laptop" />
       </div>
-      <div class="shrink">
-        <button class="btn btn-primary" type="submit" :disabled="busy || !newName.trim()">Token erzeugen</button>
-      </div>
+      <button class="btn btn-primary" type="submit" :disabled="busy || !newName.trim()">Token erzeugen</button>
     </form>
 
     <div class="box">
@@ -167,9 +165,15 @@ async function revoke(entry: AccessTokenEntry): Promise<void> {
   word-break: break-all;
 }
 .account-form {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
   max-width: 560px;
   margin: 12px 0 16px;
-  align-items: flex-end;
+}
+.account-form .form-group {
+  flex: 1;
+  margin: 0;
 }
 .account-token-entry {
   display: flex;

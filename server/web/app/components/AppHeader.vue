@@ -47,6 +47,7 @@ const pageContext = computed(() => {
   if (route.path.startsWith("/projects")) return "Projekte";
   if (route.path.startsWith("/new")) return "Neues Projekt";
   if (route.path.startsWith("/u/")) return "Profil";
+  if (route.path.startsWith("/account")) return "Konto";
   return "Dashboard";
 });
 
