@@ -1,5 +1,7 @@
 # openproject-ifc_hub: IFC Hub in OpenProject
 
+Roadmap (BCF im Editor, weitere Anbindung, Absicherung von OpenProject-Updates): [ROADMAP.md](ROADMAP.md).
+
 OpenProject-Plugin (Rails-Engine) mit zwei Teilen:
 
 1. **Projektmodul „IFC Hub“.** Die Hub-Oberfläche wird ganzseitig im Projekt eingebettet (iframe), mit automatischer Anmeldung.
