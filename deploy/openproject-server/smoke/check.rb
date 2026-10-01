@@ -22,6 +22,13 @@ checks["BIM-Edition"] = ENV["OPENPROJECT_EDITION"] == "bim"
 checks["IFC-Konverter (IfcConvert, xeokit-metadata)"] =
   %w[IfcConvert xeokit-metadata].all? { |tool| system("command -v #{tool} > /dev/null") }
 
+# Admin-Formular: OpenProjects Controller erwartet storages_storage[…] und
+# rendert bei Fehlern/Bearbeiten fest GeneralInfoFormComponent.
+form = Storages::Admin::Forms::GeneralInfoFormComponent.new(Storages::IfcHubStorage.new(name: "x", host: "http://x"))
+form_html = ApplicationController.render(form, layout: false)
+checks["Admin-Formular mit Adresse (storages_storage[host])"] =
+  form.is_a?(Storages::Admin::Forms::IfcHubGeneralInfoFormComponent) && form_html.include?('name="storages_storage[host]"')
+
 manifest = JSON.parse(Rails.root.join("config/frontend_assets.manifest.json").read)
 main_js = Rails.public_path.join("assets/frontend", manifest.fetch("main.js"))
 checks["Frontend-Bundle #{main_js.basename} mit Plugin-Teil"] =
