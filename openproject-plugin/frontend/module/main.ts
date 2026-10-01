@@ -2,11 +2,11 @@
 // `openproject:plugins:register_frontend` in OpenProjects Angular-App
 // eingebunden — siehe deploy/openproject-local/Dockerfile).
 //
-// OpenProjects Upload in externe Speicher kennt nur Nextcloud, OneDrive und
-// SharePoint (StorageUploadService#setUploadStrategy wirft sonst "unknown
-// storage type"). Der Service wird pro Komponente bereitgestellt und lässt
-// sich daher nicht per DI ersetzen — dieses Modul ergänzt die Methode um den
-// Speichertyp "IFC Hub" und reicht alle anderen Typen unverändert durch.
+// Meldet den Speichertyp "IFC Hub" an zwei Erweiterungspunkten an, die der
+// OpenProject-Fork bereitstellt (deploy/openproject-local/patches/):
+// registerStorageUploadStrategy (Upload in den Hub) und
+// registerLocationPickerExtension (Datei in der Ordnerauswahl als Ziel einer
+// neuen Version anhaken).
 //
 // Vor jedem Upload fragt ein Dialog die Commit-Nachricht ab: Im Hub wird
 // jeder Upload ein Commit (neue Version bzw. neues Modell).
@@ -22,9 +22,7 @@ import { defer, Observable } from 'rxjs';
 import { map, share, switchMap, take } from 'rxjs/operators';
 
 import { I18nService } from 'core-app/core/i18n/i18n.service';
-import { TimezoneService } from 'core-app/core/datetime/timezone.service';
 import { IStorageFile } from 'core-app/core/state/storage-files/storage-file.model';
-import { IStorage } from 'core-app/core/state/storages/storage.model';
 import { IUploadFile } from 'core-app/core/upload/upload.service';
 import convertHttpEvent from 'core-app/core/upload/convert-http-event';
 import { EXTERNAL_REQUEST_HEADER } from 'core-app/features/hal/http/openproject-header-interceptor';
@@ -33,10 +31,11 @@ import { OpModalService } from 'core-app/shared/components/modal/modal.service';
 import { isDirectory } from 'core-app/shared/components/storages/functions/storages.functions';
 import {
   LocationPickerModalComponent,
+  registerLocationPickerExtension,
 } from 'core-app/shared/components/storages/location-picker-modal/location-picker-modal.component';
 import { StorageFileListItem } from 'core-app/shared/components/storages/storage-file-list-item/storage-file-list-item';
 import { IUploadStrategy } from 'core-app/shared/components/storages/upload/upload-strategy';
-import { StorageUploadService } from 'core-app/shared/components/storages/upload/storage-upload.service';
+import { registerStorageUploadStrategy } from 'core-app/shared/components/storages/upload/storage-upload.service';
 
 /** `_links.type.href` des Speichers (Storages::IfcHubStorage hat keine URN). */
 export const IFC_HUB_STORAGE_TYPE = 'Storages::IfcHubStorage';
@@ -210,130 +209,85 @@ export class IfcHubUploadStrategy implements IUploadStrategy {
   }
 }
 
-/** Die privaten Felder von StorageUploadService, die wir setzen. */
-interface StorageUploadServiceInternals {
-  http:HttpClient;
-  uploadStrategy:IUploadStrategy;
-}
-
-let patched = false;
-
-function registerIfcHubUploadStrategy(injector:Injector):void {
-  if (patched) {
-    return;
-  }
-  patched = true;
-
-  const original = StorageUploadService.prototype.setUploadStrategy;
-  StorageUploadService.prototype.setUploadStrategy = function setUploadStrategy(
-    this:StorageUploadService,
-    storageType:string,
-  ):void {
-    if (storageType === IFC_HUB_STORAGE_TYPE) {
-      const internals = this as unknown as StorageUploadServiceInternals;
-      internals.uploadStrategy = new IfcHubUploadStrategy(internals.http, injector);
-      return;
-    }
-    original.call(this, storageType);
-  };
-}
-
 // ---- Ordnerauswahl: Datei als Ziel einer neuen Version anhaken ----------
 
-/** Die (privaten) Teile von LocationPickerModalComponent, die wir nutzen. */
-interface LocationPickerInternals {
-  storage:IStorage;
-  timezoneService:TimezoneService;
-  storageFiles$:{ getValue():IStorageFile[]; next(files:IStorageFile[]):void };
-  cdRef:{ detectChanges():void };
-  text:{ buttons:{ submit:string } };
-  filesAtLocation:IStorageFile[];
-  ngOnInit():void;
-  chooseLocation():void;
-  storageFileToListItem(file:IStorageFile, index:number):StorageFileListItem;
-  ifcHubTarget?:IStorageFile|null;
-  ifcHubSubmitLabel?:string;
+/** Zustand je geöffneter Ordnerauswahl. */
+interface PickerState {
+  target:IStorageFile|null;
+  /** Ursprüngliche Beschriftung des Bestätigen-Knopfs. */
+  submitLabel:string;
 }
 
-function isIfcHubPicker(picker:LocationPickerInternals):boolean {
-  return picker.storage?._links?.type?.href === IFC_HUB_STORAGE_TYPE;
+const pickerStates = new WeakMap<LocationPickerModalComponent, PickerState>();
+
+function stateOf(picker:LocationPickerModalComponent):PickerState {
+  let state = pickerStates.get(picker);
+  if (!state) {
+    state = { target: null, submitLabel: picker.text.buttons.submit };
+    pickerStates.set(picker, state);
+  }
+  return state;
 }
 
 /** Zielauswahl setzen/aufheben und Liste + Knopf neu zeichnen. */
-function selectTarget(picker:LocationPickerInternals, file:IStorageFile|null, i18n:I18nService):void {
-  picker.ifcHubTarget = file;
-  picker.ifcHubSubmitLabel ??= picker.text.buttons.submit;
+function selectTarget(picker:LocationPickerModalComponent, file:IStorageFile|null, i18n:I18nService):void {
+  const state = stateOf(picker);
+  state.target = file;
   picker.text.buttons.submit = file
     ? i18n.t('js.ifc_hub.location_picker.submit_version', { defaultValue: 'Als neue Version hochladen' })
-    : picker.ifcHubSubmitLabel;
-  picker.storageFiles$.next([...picker.storageFiles$.getValue()]);
-  picker.cdRef.detectChanges();
+    : state.submitLabel;
+  picker.refreshList();
 }
 
-function registerIfcHubLocationPicker(injector:Injector):void {
-  const proto = LocationPickerModalComponent.prototype as unknown as LocationPickerInternals;
+function registerIfcHub(injector:Injector):void {
   const i18n = () => injector.get(I18nService);
 
-  const originalInit = proto.ngOnInit;
-  proto.ngOnInit = function ngOnInit(this:LocationPickerInternals):void {
-    pendingTarget = null;
-    this.ifcHubTarget = null;
-    originalInit.call(this);
-  };
+  registerStorageUploadStrategy(IFC_HUB_STORAGE_TYPE, (http) => new IfcHubUploadStrategy(http, injector));
 
-  const originalItem = proto.storageFileToListItem;
-  proto.storageFileToListItem = function storageFileToListItem(
-    this:LocationPickerInternals,
-    file:IStorageFile,
-    index:number,
-  ):StorageFileListItem {
-    const item = originalItem.call(this, file, index);
-    if (!isIfcHubPicker(this)) {
-      return item;
-    }
-    // Ordner gewechselt: Auswahl aus dem vorherigen Ordner verwerfen.
-    if (index === 0 && this.ifcHubTarget
-      && !this.storageFiles$.getValue().some((f) => f.id === this.ifcHubTarget?.id)) {
-      this.ifcHubTarget = null;
-      if (this.ifcHubSubmitLabel) {
-        this.text.buttons.submit = this.ifcHubSubmitLabel;
+  registerLocationPickerExtension(IFC_HUB_STORAGE_TYPE, {
+    init(picker) {
+      pendingTarget = null;
+      stateOf(picker).target = null;
+    },
+
+    listItem(picker, file, index, item) {
+      const state = stateOf(picker);
+      // Ordner gewechselt: Auswahl aus dem vorherigen Ordner verwerfen.
+      if (index === 0 && state.target && !picker.filesAtLocation.some((f) => f.id === state.target?.id)) {
+        state.target = null;
+        picker.text.buttons.submit = state.submitLabel;
       }
-    }
-    if (isDirectory(file) || !file.permissions.includes('writeable')) {
-      return item;
-    }
+      if (isDirectory(file) || !file.permissions.includes('writeable')) {
+        return item;
+      }
 
-    const picker = this;
-    return new StorageFileListItem(
-      this.timezoneService,
-      file,
-      false,
-      index === 0,
-      item.enterDirectory,
-      false,
-      i18n().t('js.ifc_hub.location_picker.file_tooltip', {
-        defaultValue: 'Anhaken: Die hochgeladene Datei wird eine neue Version dieses Modells.',
-      }),
-      {
-        get selected() {
-          return picker.ifcHubTarget?.id === file.id;
+      return new StorageFileListItem(
+        picker.timezoneService,
+        file,
+        false,
+        index === 0,
+        item.enterDirectory,
+        false,
+        i18n().t('js.ifc_hub.location_picker.file_tooltip', {
+          defaultValue: 'Anhaken: Die hochgeladene Datei wird eine neue Version dieses Modells.',
+        }),
+        {
+          get selected() {
+            return stateOf(picker).target?.id === file.id;
+          },
+          changeSelection: () => {
+            const next = stateOf(picker).target?.id === file.id ? null : file;
+            selectTarget(picker, next, i18n());
+          },
         },
-        changeSelection: () => {
-          const next = picker.ifcHubTarget?.id === file.id ? null : file;
-          selectTarget(picker, next, i18n());
-        },
-      },
-    );
-  };
+      );
+    },
 
-  const originalChoose = proto.chooseLocation;
-  proto.chooseLocation = function chooseLocation(this:LocationPickerInternals):void {
-    const target = this.ifcHubTarget;
-    pendingTarget = isIfcHubPicker(this) && target && this.filesAtLocation.some((f) => f.id === target.id)
-      ? target
-      : null;
-    originalChoose.call(this);
-  };
+    chooseLocation(picker) {
+      const target = stateOf(picker).target;
+      pendingTarget = target && picker.filesAtLocation.some((f) => f.id === target.id) ? target : null;
+    },
+  });
 }
 
 @NgModule({
@@ -341,8 +295,6 @@ function registerIfcHubLocationPicker(injector:Injector):void {
 })
 export class PluginModule {
   constructor() {
-    const injector = inject(Injector);
-    registerIfcHubUploadStrategy(injector);
-    registerIfcHubLocationPicker(injector);
+    registerIfcHub(inject(Injector));
   }
 }

@@ -3,9 +3,6 @@
     render(Primer::Beta::Text.new(tag: :div, test_selector: "storage-general-info-form")) do
       primer_form_with(
         model:,
-        # Der Controller kennt nur die Parameternamen der eingebauten Anbieter
-        # (storages_nextcloud_storage …) und sonst storages_storage.
-        scope: :storages_storage,
         url: form_url,
         method: form_method,
         data: { "turbo-frame": "page-content" }

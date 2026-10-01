@@ -16,6 +16,7 @@ Der Abgleich mit OpenProject überträgt Titel, Beschreibung, Status, betroffene
 
 ## Ausbau, nach Nutzen sortiert
 
+0. **Mitglieder automatisch abgleichen** (Lücke, gefunden 2026-10-01): Im Hub wird man heute erst Mitglied, wenn man in OpenProject den Menüpunkt „IFC Hub“ öffnet (Rolle per Ticket). Wer das noch nie getan hat, bekommt beim Hochladen aus einem Arbeitspaket in der Ordnerauswahl „Keine Speicher-Verbindung“, denn der Hub findet für ihn das private Projekt nicht. Lösung: Der 5-Minuten-Abgleich (`SyncProjectJob`) überträgt die Projektmitglieder samt Rolle (über die Rechte `view`/`edit`/`manage_ifc_hub`) in das verknüpfte Hub-Projekt. Aufwand klein bis mittel.
 1. **Echte Viewpoints in beide Richtungen** (größter Alltagsnutzen; Aufwand mittel bis groß):
    - Editor und Hub-Viewer speichern beim Anlegen Kamera, Auswahl und Screenshot.
    - OpenProject zeigt das Vorschaubild, und sein BCF-Viewer springt an die Stelle.
@@ -37,18 +38,9 @@ Jeder Punkt betrifft mehrere Teile gleichzeitig: Editor, Hub (inklusive Port nac
 
 ## OpenProject-Updates absichern
 
-Das Plugin greift an fünf Stellen in OpenProject-Interna ein:
-- **Ruby:**
-  - `CreateFolderServicePatch`
-  - `IfcModelSyncTrigger`
-  - `GeneralInfoFormPatch`
-- **Angular** (prototype-Patches in `frontend/module/main.ts`):
-  - `StorageUploadService.setUploadStrategy`
-  - `LocationPickerModalComponent`
+**Umgesetzt (Schritt 1):** Die Laufzeit-Patches sind durch vier Erweiterungspunkte im OpenProject-Fork ersetzt (Branch `ifc-hub/v17.7.2`, als Patch in `deploy/openproject-local/patches/`, Details dort). Im Plugin bleibt nur das Einhängen eines Callbacks in `Bim::IfcModels::IfcModel` (`IfcModelSyncTrigger`). Die Erweiterungspunkte für Upload und Ordnerauswahl liegen genau an der Dateiauswahl, die das Epic [#78519](https://community.openproject.org/work_packages/78519) umbauen will. Beim Rebase fällt eine Änderung dort sofort auf.
 
-Die Angular-Patches können **leise** brechen. Das Epic [#78519](https://community.openproject.org/work_packages/78519) plant einen Umbau genau dieser Dateiauswahl.
-
-Vereinbarter Plan:
+Plan:
 
 1. **Patch-Fork** von `opf/openproject`, pro Version ein Branch `ifc-hub/vX.Y.Z`: offizieller Tag plus nur unsere Patch-Commits. Die Patches werden dort zu normalem Quellcode, im Idealfall als registrierbarer Erweiterungspunkt.
    - **Update:** `git rebase --onto vNEU vALT`. Konflikte zeigen genau die geänderten Stellen.

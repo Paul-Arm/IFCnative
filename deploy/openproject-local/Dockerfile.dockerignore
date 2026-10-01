@@ -4,6 +4,7 @@
 *
 !openproject-plugin
 !deploy/openproject-local/Gemfile.plugins
+!deploy/openproject-local/patches
 # Doku ändert nichts am Image — und löst so keinen neuen Angular-Build aus.
 openproject-plugin/README.md
 openproject-plugin/**/node_modules

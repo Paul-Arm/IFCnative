@@ -31,6 +31,8 @@ module Storages
             register(:general_information, IfcHubContract)
           end
           namespace("queries") do
+            # "Neuer Ordner" (CreateFolderService): Ordner-Id ist bereits der Pfad.
+            register(:folder_location, ->(folder_id:, **) { Dry::Monads::Result::Success.new(folder_id) })
             register(:download_link, Queries::DownloadLinkQuery)
             register(:file_info, Queries::FileInfoQuery)
             register(:file_path_to_id_map, Queries::FilePathToIdMapQuery)

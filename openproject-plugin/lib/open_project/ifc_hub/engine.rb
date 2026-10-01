@@ -49,17 +49,6 @@ module OpenProject::IfcHub
         registry.import(::Storages::Adapters::Providers::IfcHub::IfcHubRegistry)
       end
 
-      # "Neuer Ordner" in der Ordnerauswahl auch für den IFC Hub.
-      unless ::Storages::CreateFolderService.ancestors.include?(OpenProject::IfcHub::CreateFolderServicePatch)
-        ::Storages::CreateFolderService.prepend(OpenProject::IfcHub::CreateFolderServicePatch)
-      end
-
-      # Admin-Formular "Grunddaten" auch bei Fehlern/Bearbeiten mit Adressfeld.
-      form = ::Storages::Admin::Forms::GeneralInfoFormComponent
-      unless form.singleton_class.ancestors.include?(OpenProject::IfcHub::GeneralInfoFormPatch)
-        form.singleton_class.prepend(OpenProject::IfcHub::GeneralInfoFormPatch)
-      end
-
       # Abgleich mit dem Hub: neue/ersetzte IFC-Datei im BCF-Modul.
       unless ::Bim::IfcModels::IfcModel.include?(OpenProject::IfcHub::IfcModelSyncTrigger)
         ::Bim::IfcModels::IfcModel.include(OpenProject::IfcHub::IfcModelSyncTrigger)

@@ -21,6 +21,21 @@ ARG OPENPROJECT_VERSION=17.7.2
 ARG SERVER_BASE_FLAVOR=slim-bim
 
 FROM openproject/openproject:${OPENPROJECT_VERSION} AS plugin
+ARG OPENPROJECT_VERSION
+
+# OpenProject-Fork (Branch ifc-hub/v<Version>): Erweiterungspunkte, die das
+# Plugin nutzt, als Patch auf die Quellen des offiziellen Images. Passt er
+# nicht (OpenProject geändert), bricht der Build hier ab — siehe
+# patches/README.md. Geänderte Dateien außerhalb von frontend/ landen in
+# /tmp/patched für das slim-Image (dort fehlen git/patch und das Frontend
+# kommt fertig gebaut).
+COPY deploy/openproject-local/patches/openproject-${OPENPROJECT_VERSION}.patch /tmp/openproject.patch
+RUN cd /app \
+ && git apply --check /tmp/openproject.patch \
+ && git apply /tmp/openproject.patch \
+ && mkdir -p /tmp/patched \
+ && git apply --numstat /tmp/openproject.patch | awk '{print $3}' | grep -v '^frontend/' \
+    | xargs -r -I{} cp --parents {} /tmp/patched/
 
 COPY --chown=app:app openproject-plugin /app/vendored-plugins/openproject-ifc_hub
 COPY --chown=app:app deploy/openproject-local/Gemfile.plugins /app/Gemfile.plugins
@@ -68,6 +83,9 @@ FROM openproject/openproject:${OPENPROJECT_VERSION}-${SERVER_BASE_FLAVOR} AS ser
 COPY --chown=app:app openproject-plugin /app/vendored-plugins/openproject-ifc_hub
 COPY --chown=app:app deploy/openproject-local/Gemfile.plugins /app/Gemfile.plugins
 COPY --from=full --chown=app:app /app/Gemfile.lock /app/Gemfile.lock
+
+# Vom Fork-Patch geänderte Ruby-Dateien (siehe Stufe "plugin").
+COPY --from=full --chown=app:app /tmp/patched/ /app/
 
 # Das in "full" gebaute Frontend (inkl. Frontend-Teil des Plugins und der
 # exportierten JS-Übersetzungen).

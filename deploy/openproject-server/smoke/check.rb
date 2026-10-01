@@ -22,12 +22,17 @@ checks["BIM-Edition"] = ENV["OPENPROJECT_EDITION"] == "bim"
 checks["IFC-Konverter (IfcConvert, xeokit-metadata)"] =
   %w[IfcConvert xeokit-metadata].all? { |tool| system("command -v #{tool} > /dev/null") }
 
-# Admin-Formular: OpenProjects Controller erwartet storages_storage[…] und
-# rendert bei Fehlern/Bearbeiten fest GeneralInfoFormComponent.
-form = Storages::Admin::Forms::GeneralInfoFormComponent.new(Storages::IfcHubStorage.new(name: "x", host: "http://x"))
-form_html = ApplicationController.render(form, layout: false)
-checks["Admin-Formular mit Adresse (storages_storage[host])"] =
-  form.is_a?(Storages::Admin::Forms::IfcHubGeneralInfoFormComponent) && form_html.include?('name="storages_storage[host]"')
+# Fork-Patch (deploy/openproject-local/patches): Erweiterungspunkte im Image.
+checks["Fork-Patch: Ordnerauflösung weiterer Anbieter"] =
+  Storages::CreateFolderService.private_method_defined?(:folder_location_from_provider)
+checks["Fork-Patch: Admin-Controller für weitere Anbieter"] =
+  Storages::Admin::StoragesController.private_method_defined?(:general_info_form_component)
+
+# Admin-Formular "IFC Hub" mit Adressfeld, Parametername des Speichertyps.
+form = Storages::Adapters::Registry.resolve("ifc_hub.components.forms.general_information")
+form_html = ApplicationController.render(form.new(Storages::IfcHubStorage.new(name: "x", host: "http://x")), layout: false)
+checks["Admin-Formular mit Adresse (storages_ifc_hub_storage[host])"] =
+  form_html.include?('name="storages_ifc_hub_storage[host]"')
 
 manifest = JSON.parse(Rails.root.join("config/frontend_assets.manifest.json").read)
 main_js = Rails.public_path.join("assets/frontend", manifest.fetch("main.js"))

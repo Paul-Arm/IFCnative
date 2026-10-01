@@ -100,7 +100,6 @@ lib/open_project/ifc_hub/ticket.rb           HS256-Ticket (Einbettung)
 lib/open_project/ifc_hub/storage_token.rb    HS256-Token (Datei-API)
 lib/open_project/ifc_hub/storage_sync.rb     Speicher im Projekt automatisch aktivieren
 lib/open_project/ifc_hub/frame_src_hook.rb   CSP frame-src auf allen Seiten (Turbo)
-lib/open_project/ifc_hub/general_info_form_patch.rb  Admin-Formular "Grunddaten" mit Adressfeld (auch bei Fehlern/Bearbeiten)
 lib/open_project/ifc_hub/project_sync.rb     Abgleich IFC-Modelle + BCF-Themen (beide Richtungen)
 lib/open_project/ifc_hub/hub_client.rb       HTTP-Client für die Sync-API des Hubs
 lib/open_project/ifc_hub/sync_triggers.rb    Auslöser (IFC-Modell, Journal) -> Job
