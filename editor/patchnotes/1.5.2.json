@@ -1,0 +1,9 @@
+{
+  "version": "1.5.2",
+  "title": "Körper-Builder: Einordnung und Platzierung getrennt",
+  "publishedAt": "2026-10-02T10:00:00.000Z",
+  "changes": [
+    "Im Körper-Builder wählt ein Umschalter, ob der neue Körper als Kind oder am Parent der Auswahl eingeordnet wird. Erstellt wird über „An Position“ (X/Y/Z) oder „Auf Fläche“ (Platzierung per Klick im 3D-Viewer).",
+    "„Auf Fläche“ übernimmt die gewählte Einordnung. Beim Setzen mehrerer Körper hintereinander bleibt die Auswahl stehen, alle Körper landen unter demselben Element."
+  ]
+}
