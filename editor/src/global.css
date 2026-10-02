@@ -1780,3 +1780,653 @@ body,
   visibility: hidden;
   width: 640px;
 }
+
+/* --- Mess-Werkzeug und Flächen-Platzierung ------------------------------ */
+.ifcnative-thatopen-viewport.is-measuring canvas,
+.ifcnative-thatopen-viewport.is-surface-placing canvas {
+  cursor: crosshair;
+}
+
+/* Mess-Labels (DOM aus viewer-measure.ts / viewer-surface-placement.ts).
+   Ausnahmen von der Token-Policy, weil sie Farben aus three.js spiegeln:
+   --measure-accent = MEASURE_COLOR (Messlinien), Achsfarben X/Y/Z =
+   AXIS_COLORS / Koordinatenkreuz. */
+.ifcnative-measure-overlay {
+  --measure-accent: oklch(0.705 0.19 48);
+  --measure-axis-x: #ef4444;
+  --measure-axis-y: #16a34a;
+  --measure-axis-z: #2563eb;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  position: absolute;
+  z-index: 4;
+}
+
+.dark .ifcnative-measure-overlay {
+  --measure-axis-x: color-mix(in oklab, #ef4444 78%, var(--foreground));
+  --measure-axis-y: color-mix(in oklab, #16a34a 72%, var(--foreground));
+  --measure-axis-z: color-mix(in oklab, #2563eb 62%, var(--foreground));
+}
+
+.ifcnative-measure-label {
+  backface-visibility: hidden;
+  will-change: transform;
+  align-items: center;
+  background: color-mix(in oklab, var(--popover) 92%, transparent);
+  border: 1px solid color-mix(in oklab, var(--measure-accent) 38%, var(--border));
+  border-radius: var(--radius-sm);
+  box-shadow:
+    inset 2px 0 0 var(--measure-accent),
+    0 1px 2px oklch(0.145 0 0 / 10%),
+    0 6px 16px oklch(0.145 0 0 / 14%);
+  color: var(--popover-foreground);
+  display: inline-flex;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  gap: 4px;
+  left: 0;
+  letter-spacing: -0.005em;
+  line-height: 1.2;
+  padding: 2px 2px 2px 8px;
+  pointer-events: auto;
+  position: absolute;
+  top: 0;
+  white-space: nowrap;
+}
+
+.ifcnative-measure-label > span {
+  align-items: flex-start;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 1px 0;
+}
+
+/* Achs-Deltas: eine Zeile, farbiger Achsbuchstabe + Betrag, dezent. */
+.ifcnative-measure-label .deltas,
+.ifcnative-measure-cursor-label .deltas {
+  color: var(--muted-foreground);
+  display: inline-flex;
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  gap: 7px;
+  letter-spacing: 0;
+  line-height: 1.2;
+}
+
+.ifcnative-measure-label .deltas > span,
+.ifcnative-measure-cursor-label .deltas > span {
+  align-items: baseline;
+  display: inline-flex;
+  gap: 2px;
+}
+
+.ifcnative-measure-label .deltas i,
+.ifcnative-measure-cursor-label .deltas i {
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.ifcnative-measure-overlay .deltas .ax {
+  color: var(--measure-axis-x);
+}
+
+.ifcnative-measure-overlay .deltas .ay {
+  color: var(--measure-axis-y);
+}
+
+.ifcnative-measure-overlay .deltas .az {
+  color: var(--measure-axis-z);
+}
+
+.ifcnative-measure-label > button {
+  align-items: center;
+  align-self: stretch;
+  background: transparent;
+  border: none;
+  border-radius: calc(var(--radius-sm) - 2px);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 500;
+  justify-content: center;
+  line-height: 1;
+  min-height: 18px;
+  opacity: 0.7;
+  padding: 0;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    opacity 120ms ease;
+  width: 16px;
+}
+
+.ifcnative-measure-label:hover > button {
+  opacity: 1;
+}
+
+.ifcnative-measure-label > button:hover {
+  background: color-mix(in oklab, var(--destructive) 12%, transparent);
+  color: var(--destructive);
+}
+
+.ifcnative-measure-label > button:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--ring);
+  outline-offset: 0;
+}
+
+/* Cursor-Label: Fang-Chip + Wert in Zeile 1, Deltas in Zeile 2. */
+.ifcnative-measure-cursor-label,
+.ifcnative-surface-placement-hint {
+  /* Kein Backdrop-Blur: bewegte Labels würden bei jeder Kamerafahrt den
+     Hintergrund neu filtern (Flackern) — stattdessen fast deckender Grund. */
+  background: color-mix(in oklab, var(--popover) 96%, transparent);
+  backface-visibility: hidden;
+  will-change: transform;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow:
+    0 1px 2px oklch(0.145 0 0 / 10%),
+    0 6px 16px oklch(0.145 0 0 / 14%);
+  color: var(--popover-foreground);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  left: 0;
+  letter-spacing: -0.005em;
+  line-height: 1.25;
+  padding: 3px 7px 3px 4px;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  white-space: nowrap;
+  z-index: 4;
+}
+
+.ifcnative-measure-cursor-label {
+  backface-visibility: hidden;
+  will-change: transform;
+  align-items: center;
+  column-gap: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  row-gap: 1px;
+}
+
+.ifcnative-surface-placement-hint {
+  padding: 3px 7px;
+}
+
+.ifcnative-measure-cursor-label .snap {
+  background: color-mix(in oklab, var(--primary) 14%, transparent);
+  border-radius: calc(var(--radius-sm) - 2px);
+  color: var(--primary);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  padding: 3px 4px 2px;
+  text-transform: uppercase;
+}
+
+.ifcnative-measure-cursor-label .deltas {
+  flex-basis: 100%;
+  padding-left: 2px;
+}
+
+/* --- Messleiste ---------------------------------------------------------- */
+.ifcnative-thatopen-measure-bar {
+  -webkit-backdrop-filter: blur(8px);
+  align-items: center;
+  backdrop-filter: blur(8px);
+  background: color-mix(in oklab, var(--popover) 90%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 10px 28px oklch(0.145 0 0 / 18%);
+  color: var(--popover-foreground);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 11px;
+  gap: 4px 6px;
+  left: 56px;
+  max-width: calc(100% - 68px);
+  padding: 4px;
+  position: absolute;
+  top: 12px;
+  z-index: 5;
+}
+
+.ifcnative-thatopen-measure-bar button {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-weight: 600;
+  gap: 5px;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    color 120ms ease;
+  white-space: nowrap;
+}
+
+/* Platzsparende Stufen (per ResizeObserver auf der Viewer-Breite gesetzt):
+   compact < 900 px: Icon-Segmente, keine Beschriftung „Fang“, keine
+   Tastenhinweise, „Löschen“ nur als Icon. mini < 600 px: zusätzlich
+   Kurz-Chips (Anfangsbuchstabe) und engere Abstände. */
+.ifcnative-thatopen-measure-bar .measure-chip-short {
+  display: none;
+}
+
+.ifcnative-thatopen-measure-bar.is-compact,
+.ifcnative-thatopen-measure-bar.is-mini {
+  gap: 3px 4px;
+  padding: 3px;
+}
+
+.ifcnative-thatopen-measure-bar.is-compact .measure-segment-label,
+.ifcnative-thatopen-measure-bar.is-mini .measure-segment-label,
+.ifcnative-thatopen-measure-bar.is-compact .measure-caption,
+.ifcnative-thatopen-measure-bar.is-mini .measure-caption,
+.ifcnative-thatopen-measure-bar.is-compact .measure-keys,
+.ifcnative-thatopen-measure-bar.is-mini .measure-keys,
+.ifcnative-thatopen-measure-bar.is-compact .measure-action-label,
+.ifcnative-thatopen-measure-bar.is-mini .measure-action-label {
+  display: none;
+}
+
+.ifcnative-thatopen-measure-bar.is-compact .measure-segment,
+.ifcnative-thatopen-measure-bar.is-mini .measure-segment {
+  padding: 0 7px;
+}
+
+/* Schmal: der Schritt-Hinweis steht ohnehin im Cursor-Label neben der Maus;
+   in der Leiste entfällt er samt Trenner, damit sie einzeilig bleibt. */
+.ifcnative-thatopen-measure-bar.is-compact .measure-status,
+.ifcnative-thatopen-measure-bar.is-mini .measure-status,
+.ifcnative-thatopen-measure-bar.is-compact .measure-status + .measure-actions::before,
+.ifcnative-thatopen-measure-bar.is-compact .measure-snaps + .measure-sep,
+.ifcnative-thatopen-measure-bar.is-mini .measure-snaps + .measure-sep {
+  display: none;
+}
+
+.ifcnative-thatopen-measure-bar.is-compact .measure-actions,
+.ifcnative-thatopen-measure-bar.is-mini .measure-actions {
+  margin-left: 2px;
+}
+
+.ifcnative-thatopen-measure-bar.is-compact .measure-action.is-clear,
+.ifcnative-thatopen-measure-bar.is-mini .measure-action.is-clear {
+  padding: 0 6px;
+}
+
+.ifcnative-thatopen-measure-bar.is-mini .measure-chip-label {
+  display: none;
+}
+
+.ifcnative-thatopen-measure-bar.is-mini .measure-chip-short {
+  display: inline;
+}
+
+.ifcnative-thatopen-measure-bar.is-mini {
+  gap: 2px 3px;
+}
+
+.ifcnative-thatopen-measure-bar.is-mini .measure-segment {
+  padding: 0 6px;
+}
+
+.ifcnative-thatopen-measure-bar.is-mini .measure-chip {
+  gap: 3px;
+  padding: 0 6px 0 5px;
+}
+
+.ifcnative-thatopen-measure-bar.is-mini .measure-action {
+  padding: 0 5px;
+}
+
+.ifcnative-thatopen-measure-bar.is-mini .measure-status {
+  padding-left: 6px;
+}
+
+.ifcnative-thatopen-measure-bar.is-mini .measure-sep {
+  margin: 0 1px;
+}
+
+.ifcnative-thatopen-measure-bar button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+.ifcnative-thatopen-measure-bar button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.ifcnative-thatopen-measure-bar .measure-sep {
+  align-self: stretch;
+  background: var(--border);
+  margin: 4px 0;
+  width: 1px;
+}
+
+/* Modus: Segmented Control. Spur leicht abgesetzt, das aktive Segment hebt
+   sich als helle Fläche mit Schatten und Primärfarbe heraus. */
+.ifcnative-thatopen-measure-bar .measure-segmented {
+  background: color-mix(in oklab, var(--foreground) 6%, transparent);
+  border-radius: var(--radius-md);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--foreground) 4%, transparent);
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+}
+
+.ifcnative-thatopen-measure-bar .measure-segment {
+  border-radius: calc(var(--radius-md) - 2px);
+  height: 24px;
+  padding: 0 9px 0 7px;
+}
+
+.ifcnative-thatopen-measure-bar .measure-segment:hover:not(.is-active) {
+  background: color-mix(in oklab, var(--foreground) 6%, transparent);
+  color: var(--foreground);
+}
+
+.ifcnative-thatopen-measure-bar .measure-segment.is-active {
+  background: var(--popover);
+  box-shadow:
+    0 1px 2px oklch(0.145 0 0 / 14%),
+    0 0 0 1px color-mix(in oklab, var(--foreground) 8%, transparent);
+  color: var(--primary);
+}
+
+.dark .ifcnative-thatopen-measure-bar .measure-segment.is-active {
+  background: color-mix(in oklab, var(--foreground) 13%, var(--popover));
+  box-shadow:
+    0 1px 2px oklch(0 0 0 / 40%),
+    0 0 0 1px color-mix(in oklab, var(--foreground) 10%, transparent);
+}
+
+/* Fang-Optionen: Pill-Chips mit Status-Punkt. */
+.ifcnative-thatopen-measure-bar .measure-snaps {
+  align-items: center;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.ifcnative-thatopen-measure-bar .measure-caption {
+  color: var(--muted-foreground);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  margin: 0 3px 0 2px;
+  opacity: 0.85;
+  text-transform: uppercase;
+}
+
+.ifcnative-thatopen-measure-bar .measure-chip {
+  border-color: var(--border);
+  border-radius: 999px;
+  font-size: 10.5px;
+  gap: 5px;
+  height: 22px;
+  padding: 0 9px 0 7px;
+}
+
+.ifcnative-thatopen-measure-bar .measure-chip:hover {
+  background: color-mix(in oklab, var(--foreground) 5%, transparent);
+  border-color: color-mix(in oklab, var(--foreground) 18%, var(--border));
+  color: var(--foreground);
+}
+
+.ifcnative-thatopen-measure-bar .measure-chip-dot {
+  background: transparent;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1.5px color-mix(in oklab, var(--muted-foreground) 70%, transparent);
+  flex: none;
+  height: 7px;
+  transition:
+    background-color 120ms ease,
+    box-shadow 120ms ease;
+  width: 7px;
+}
+
+.ifcnative-thatopen-measure-bar .measure-chip-icon {
+  flex: none;
+  margin: 0 -1px 0 -2px;
+}
+
+.ifcnative-thatopen-measure-bar .measure-chip.is-active {
+  background: color-mix(in oklab, var(--primary) 11%, transparent);
+  border-color: color-mix(in oklab, var(--primary) 42%, var(--border));
+  color: var(--foreground);
+}
+
+.ifcnative-thatopen-measure-bar .measure-chip.is-active:hover {
+  background: color-mix(in oklab, var(--primary) 16%, transparent);
+}
+
+.ifcnative-thatopen-measure-bar .measure-chip.is-active .measure-chip-dot {
+  background: var(--primary);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--primary) 24%, transparent);
+}
+
+.ifcnative-thatopen-measure-bar .measure-chip.is-active .measure-chip-icon {
+  color: var(--primary);
+}
+
+/* Ortho ist eine Einschränkung, kein Fangziel: durch Abstand abgesetzt. */
+.ifcnative-thatopen-measure-bar .measure-chip.is-ortho {
+  margin-left: 4px;
+}
+
+/* Status: aktueller Schritt fett, Tastenhinweise klein darunter. */
+.ifcnative-thatopen-measure-bar .measure-status {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  justify-content: center;
+  min-width: 0;
+  padding: 0 4px;
+}
+
+.ifcnative-thatopen-measure-bar .measure-step {
+  align-items: center;
+  color: var(--foreground);
+  display: flex;
+  font-size: 11px;
+  font-weight: 650;
+  gap: 6px;
+  line-height: 1.15;
+  min-width: 0;
+}
+
+.ifcnative-thatopen-measure-bar .measure-step-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ifcnative-thatopen-measure-bar .measure-step-index {
+  background: color-mix(in oklab, var(--primary) 14%, transparent);
+  border-radius: 999px;
+  color: var(--primary);
+  flex: none;
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  line-height: 1;
+  padding: 2px 5px;
+}
+
+.ifcnative-thatopen-measure-bar .measure-keys {
+  align-items: center;
+  color: var(--muted-foreground);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 9.5px;
+  font-weight: 500;
+  gap: 2px 8px;
+  line-height: 1.15;
+}
+
+.ifcnative-thatopen-measure-bar .measure-keys > span {
+  align-items: center;
+  display: inline-flex;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+.ifcnative-thatopen-measure-bar kbd,
+.ifcnative-thatopen-surface-hint kbd {
+  background: color-mix(in oklab, var(--foreground) 5%, var(--popover));
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  color: var(--foreground);
+  font-family: inherit;
+  font-size: 8.5px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 1px 3px 0;
+}
+
+/* Aktionen rechts. */
+.ifcnative-thatopen-measure-bar .measure-actions {
+  align-items: center;
+  display: inline-flex;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.ifcnative-thatopen-measure-bar .measure-action {
+  border-radius: var(--radius-md);
+  height: 26px;
+  padding: 0 8px;
+}
+
+.ifcnative-thatopen-measure-bar .measure-action.is-icon {
+  padding: 0;
+  width: 26px;
+}
+
+.ifcnative-thatopen-measure-bar .measure-action:hover:not(:disabled) {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.ifcnative-thatopen-measure-bar .measure-action.is-clear:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--destructive) 10%, transparent);
+  color: var(--destructive);
+}
+
+.ifcnative-thatopen-measure-bar .measure-count {
+  background: color-mix(in oklab, var(--foreground) 10%, transparent);
+  border-radius: 999px;
+  color: var(--foreground);
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  line-height: 1;
+  min-width: 16px;
+  padding: 3px 4px;
+  text-align: center;
+}
+
+.ifcnative-thatopen-measure-bar .measure-action.is-clear:hover:not(:disabled) .measure-count {
+  background: color-mix(in oklab, var(--destructive) 16%, transparent);
+  color: var(--destructive);
+}
+
+/* --- Hinweis „Auf Fläche setzen“ ----------------------------------------- */
+.ifcnative-thatopen-surface-hint {
+  -webkit-backdrop-filter: blur(8px);
+  align-items: center;
+  backdrop-filter: blur(8px);
+  background: color-mix(in oklab, var(--popover) 90%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 10px 28px oklch(0.145 0 0 / 18%);
+  color: var(--popover-foreground);
+  display: flex;
+  font-size: 11px;
+  gap: 10px;
+  left: 56px;
+  max-width: calc(100% - 68px);
+  padding: 5px 5px 5px 10px;
+  position: absolute;
+  top: 12px;
+  z-index: 3;
+}
+
+.ifcnative-thatopen-surface-hint .surface-hint-dot {
+  background: var(--primary);
+  border-radius: 999px;
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary) 22%, transparent);
+  flex: none;
+  height: 7px;
+  width: 7px;
+}
+
+.ifcnative-thatopen-surface-hint .surface-hint-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.15;
+  min-width: 0;
+}
+
+.ifcnative-thatopen-surface-hint strong {
+  color: var(--foreground);
+  font-weight: 650;
+}
+
+.ifcnative-thatopen-surface-hint .surface-hint-text > span {
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.ifcnative-thatopen-surface-hint button {
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--foreground);
+  cursor: pointer;
+  display: inline-flex;
+  flex: none;
+  font: inherit;
+  font-weight: 600;
+  gap: 6px;
+  height: 26px;
+  padding: 0 6px 0 9px;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.ifcnative-thatopen-surface-hint button:hover {
+  background: var(--muted);
+  border-color: color-mix(in oklab, var(--foreground) 18%, var(--border));
+}
+
+.ifcnative-thatopen-surface-hint button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}

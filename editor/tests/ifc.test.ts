@@ -4892,3 +4892,74 @@ for (const [name, helper] of [
     worker.once("exit", (code) => reject(new Error(`Fragment verification exited before completion (${code}).`)));
   });
 });
+
+import { surfaceNormalToPlacementAxes } from "../src/ifc/surfacePlacement";
+
+test("surface normal yields orthogonal placement axes (floor keeps world X, wall keeps horizontal width)", () => {
+  const floor = surfaceNormalToPlacementAxes({ x: 0, y: 0, z: 1 });
+  assert.ok(floor);
+  assert.deepEqual(floor.axis, { x: 0, y: 0, z: 1 });
+  assert.deepEqual(floor.refDirection, { x: 1, y: 0, z: 0 });
+
+  const ceiling = surfaceNormalToPlacementAxes({ x: 0, y: 0, z: -2 });
+  assert.ok(ceiling);
+  assert.deepEqual(ceiling.axis, { x: 0, y: 0, z: -1 });
+  assert.deepEqual(ceiling.refDirection, { x: 1, y: 0, z: 0 });
+
+  const wall = surfaceNormalToPlacementAxes({ x: 1, y: 0, z: 0 });
+  assert.ok(wall);
+  assert.deepEqual(wall.axis, { x: 1, y: 0, z: 0 });
+  // Profil-X liegt horizontal in der Wandebene, Profil-Y = Z x X zeigt nach oben.
+  assert.deepEqual(wall.refDirection, { x: 0, y: 1, z: 0 });
+  const dot = wall.axis.x * wall.refDirection.x + wall.axis.y * wall.refDirection.y + wall.axis.z * wall.refDirection.z;
+  assert.equal(dot, 0);
+
+  const slanted = surfaceNormalToPlacementAxes({ x: 1, y: 1, z: 1 });
+  assert.ok(slanted);
+  const slantedDot = slanted.axis.x * slanted.refDirection.x + slanted.axis.y * slanted.refDirection.y + slanted.axis.z * slanted.refDirection.z;
+  assert.ok(Math.abs(slantedDot) < 1e-12);
+  assert.ok(Math.abs(Math.hypot(slanted.refDirection.x, slanted.refDirection.y, slanted.refDirection.z) - 1) < 1e-12);
+  assert.equal(slanted.refDirection.z, 0);
+
+  assert.equal(surfaceNormalToPlacementAxes({ x: 0, y: 0, z: 0 }), undefined);
+});
+
+import {
+  getNextNativeEntityId as nextIdForSurfaceTest,
+  nativeWorldDirectionInPlacementParentFrame as toParentFrameForSurfaceTest,
+} from "../src/ifc/nativeDocument";
+
+test("body spawned orthogonal to a wall face extrudes along the face normal", () => {
+  const sample = createNativeSampleDocument();
+  const storey = sample.entities.find((entity) => entity.type === "IFCBUILDINGSTOREY");
+  assert.ok(storey);
+  const bodyId = nextIdForSurfaceTest(sample);
+  let next = addNativeBodyElement(sample, {
+    depth: "1",
+    height: "2",
+    name: "Wall mounted",
+    parentId: storey.id,
+    placementMode: "world",
+    type: "IFCBUILDINGELEMENTPROXY",
+    width: "1",
+    x: "3",
+    y: "0",
+    z: "1",
+  });
+  // Wand mit Normale +X (IFC-Weltachsen)
+  const axes = surfaceNormalToPlacementAxes({ x: 1, y: 0, z: 0 });
+  assert.ok(axes);
+  const axis = toParentFrameForSurfaceTest(next, bodyId, axes.axis);
+  const refDirection = toParentFrameForSurfaceTest(next, bodyId, axes.refDirection);
+  assert.ok(axis && refDirection);
+  next = updateNativePlacementRotation(next, bodyId, { axis, refDirection });
+  const frame = getNativePlacementWorldFrame(next, bodyId);
+  assert.ok(frame);
+  const near = (a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }) =>
+    Math.abs(a.x - b.x) < 1e-6 && Math.abs(a.y - b.y) < 1e-6 && Math.abs(a.z - b.z) < 1e-6;
+  // Extrusionsachse (lokale Z) zeigt entlang der Wandnormale, Profil-X horizontal in der Wandebene.
+  assert.ok(near(frame.zAxis, { x: 1, y: 0, z: 0 }), `zAxis ${JSON.stringify(frame.zAxis)}`);
+  assert.ok(near(frame.xAxis, { x: 0, y: 1, z: 0 }), `xAxis ${JSON.stringify(frame.xAxis)}`);
+  assert.ok(near(frame.yAxis, { x: 0, y: 0, z: 1 }), `yAxis ${JSON.stringify(frame.yAxis)}`);
+  assert.ok(near(frame.origin, { x: 3, y: 0, z: 1 }), `origin ${JSON.stringify(frame.origin)}`);
+});

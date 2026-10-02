@@ -74,6 +74,7 @@ import {
     viewerWorldDirectionToIfcPlacementDirection,
     viewerWorldPointToIfcPlacementPoint,
 } from "@/ifc/coordinateMapping";
+import { surfaceNormalToPlacementAxes } from "@/ifc/surfacePlacement";
 import {
     applyDiagnosticObjectInfo,
     applyDiagnosticProcedureFromCatalog,
@@ -284,6 +285,7 @@ import type {
     ViewerMirrorResult,
     ViewerRotationChange,
 } from "./that-open-viewer.types";
+import type { ViewerSurfacePlacementRequest } from "./that-open-viewer.types";
 const PsetBatchPanel = lazy(() =>
   import("./ifc-workspace/PsetBatchPanel").then((module) => ({
     default: module.PsetBatchPanel,
@@ -492,6 +494,15 @@ export default function IfcWorkspace() {
   const [vcsAuth, setVcsAuth] = useState(loadVcsAuth);
   const [coordinateClipboard, setCoordinateClipboard] =
     useState<CoordinateClipboard | null>(null);
+  // Körper-Builder: Rotary-"Hier hinzufügen" dreht neue Körper orthogonal zur
+  // getroffenen Fläche (Höhe entlang der Normale).
+  const [orthogonalSpawn, setOrthogonalSpawn] = useState(true);
+  // "Auf Fläche setzen": aktiver Platzierungsentwurf (Panel-Felder) samt der
+  // Ghost-Beschreibung für den Viewer; null = Modus aus.
+  const [surfacePlacement, setSurfacePlacement] = useState<{
+    draft: BodyElementDraft;
+    request: ViewerSurfacePlacementRequest;
+  } | null>(null);
   const [groupManagerEntityId, setGroupManagerEntityId] = useState<
     number | null
   >(null);
@@ -2310,7 +2321,7 @@ export default function IfcWorkspace() {
       },
       scale,
     );
-    const next = addNativeBodyElement(document, {
+    let next = addNativeBodyElement(document, {
       ...options,
       parentId,
       positionInModelUnits: true,
@@ -2318,6 +2329,38 @@ export default function IfcWorkspace() {
       y: formatCoordinate(ifcPoint.y),
       z: formatCoordinate(ifcPoint.z),
     });
+    // Orthogonal zur Fläche: Extrusionsachse (lokale Z) = Flächennormale,
+    // Profil-X horizontal. Die Richtungen werden wie beim Rotations-Gizmo in
+    // das Parent-Frame der neuen Platzierung projiziert.
+    let oriented = false;
+    if (options.surfaceNormal) {
+      const axes = surfaceNormalToPlacementAxes(
+        viewerWorldDirectionToIfcPlacementDirection(options.surfaceNormal),
+      );
+      const axis = axes
+        ? nativeWorldDirectionInPlacementParentFrame(next, addedId, axes.axis)
+        : undefined;
+      const refDirection = axes
+        ? nativeWorldDirectionInPlacementParentFrame(
+            next,
+            addedId,
+            axes.refDirection,
+          )
+        : undefined;
+      if (axis && refDirection) {
+        const rotated = updateNativePlacementRotation(next, addedId, {
+          axis,
+          refDirection,
+        });
+        oriented = rotated !== next;
+        next = rotated;
+      }
+      if (!oriented) {
+        logAction(
+          `builder.orientToSurface.skip({ id: ${addedId}, reason: 'degenerate-normal' });`,
+        );
+      }
+    }
     const createdWorld = getNativePlacementWorld(next, addedId);
     // Instant-Anzeige: exakte IFC-Geometrie des neuen Körpers als Mini-IFC
     // rekonvertieren statt einer Fragments-Näherung — kein manueller Refresh.
@@ -2325,8 +2368,8 @@ export default function IfcWorkspace() {
     commitDocument(
       next,
       addedId,
-      `Create ${options.type} '${options.name}' under #${parentId}`,
-      `builder.createBodyElement({ class: '${options.type}', name: ${JSON.stringify(options.name)}, parentId: ${parentId}, id: ${addedId}, profile: '${options.profile ?? "rectangle"}', width: ${options.width}, depth: ${options.depth}, height: ${options.height} });`,
+      `Create ${options.type} '${options.name}' under #${parentId}${oriented ? " (orthogonal to surface)" : ""}`,
+      `builder.createBodyElement({ class: '${options.type}', name: ${JSON.stringify(options.name)}, parentId: ${parentId}, id: ${addedId}, profile: '${options.profile ?? "rectangle"}', width: ${options.width}, depth: ${options.depth}, height: ${options.height}${options.surfaceNormal ? `, surfaceNormal: { x: ${formatCoordinate(options.surfaceNormal.x)}, y: ${formatCoordinate(options.surfaceNormal.y)}, z: ${formatCoordinate(options.surfaceNormal.z)} }` : ""} });`,
       undefined,
       {
         pendingKey: `body:${addedId}`,
@@ -2436,10 +2479,21 @@ export default function IfcWorkspace() {
   // Rotary-Menü: neuen Körper am Rechtsklick-Punkt anlegen — räumlich im
   // Container des getroffenen Elements, platziert relativ zu dessen
   // (georeferenzierter) Kette.
-  const addBodyAtViewerPoint = (
-    profile: NativeBodyProfile,
-    target: ViewerContextMenuTarget,
-  ) => {
+  // Trifft der Raycast ein Element eines ANDEREN geöffneten Dokuments (die
+  // Modelle liegen im selben Viewer), darf dessen Id weder als Bezug für die
+  // Platzierungskette noch für die räumliche Einordnung dienen.
+  const viewerTargetInActiveDocument = (target: ViewerContextMenuTarget) =>
+    target.documentId === activeSession.id &&
+    document.entityById.has(target.entityId);
+
+  // Räumlicher Container des getroffenen Elements (sonst erstes Geschoss,
+  // sonst die Auswahl) — gemeinsam für Rotary-Add und "Auf Fläche setzen".
+  const spatialParentForViewerTarget = (target: ViewerContextMenuTarget) => {
+    if (!viewerTargetInActiveDocument(target)) {
+      return (
+        document.entitiesByType.get("IFCBUILDINGSTOREY")?.[0]?.id ?? selectedId
+      );
+    }
     const containment = document.relationshipsByEntity
       .get(target.entityId)
       ?.find(
@@ -2447,10 +2501,56 @@ export default function IfcWorkspace() {
           relationship.type === "IFCRELCONTAINEDINSPATIALSTRUCTURE" &&
           relationship.targetIds.includes(target.entityId),
       );
-    const parentId =
+    return (
       containment?.sourceIds[0] ??
       document.entitiesByType.get("IFCBUILDINGSTOREY")?.[0]?.id ??
-      selectedId;
+      selectedId
+    );
+  };
+
+  // Körper-Builder "Auf Fläche setzen": Klick auf eine Fläche im Viewer legt
+  // den Panel-Entwurf am Trefferpunkt an — orthogonal zur Fläche, sofern
+  // eingeschaltet. Der Modus bleibt aktiv (mehrere Körper hintereinander).
+  const placeBodyOnSurface = (target: ViewerContextMenuTarget) => {
+    const placement = surfacePlacement;
+    if (!placement) {
+      return;
+    }
+    addBodyElement({
+      ...placement.draft,
+      parentId: spatialParentForViewerTarget(target),
+      placementMode: "world",
+      placementRelativeToId: viewerTargetInActiveDocument(target)
+        ? target.entityId
+        : undefined,
+      surfaceNormal: orthogonalSpawn ? target.normal : undefined,
+      x: String(target.point.x),
+      y: String(target.point.y),
+      z: String(target.point.z),
+    });
+  };
+
+  const startSurfacePlacement = (draft: BodyElementDraft | null) => {
+    if (!draft) {
+      setSurfacePlacement(null);
+      return;
+    }
+    setSurfacePlacement({
+      draft,
+      request: {
+        depth: Math.max(readBodyCoordinate(draft.depth), 0.01),
+        height: Math.max(readBodyCoordinate(draft.height), 0.01),
+        profile: draft.profile ?? "rectangle",
+        width: Math.max(readBodyCoordinate(draft.width), 0.01),
+      },
+    });
+  };
+
+  const addBodyAtViewerPoint = (
+    profile: NativeBodyProfile,
+    target: ViewerContextMenuTarget,
+  ) => {
+    const parentId = spatialParentForViewerTarget(target);
     const labels: Record<NativeBodyProfile, string> = {
       cylinder: "Zylinder",
       ellipse: "Ellipse",
@@ -2464,8 +2564,11 @@ export default function IfcWorkspace() {
       name: `${labels[profile]} ${getNextNativeEntityId(document)}`,
       parentId,
       placementMode: "world",
-      placementRelativeToId: target.entityId,
+      placementRelativeToId: viewerTargetInActiveDocument(target)
+        ? target.entityId
+        : undefined,
       profile,
+      surfaceNormal: orthogonalSpawn ? target.normal : undefined,
       type: "IFCBUILDINGELEMENTPROXY",
       width: "1",
       x: String(target.point.x),
@@ -4276,6 +4379,10 @@ export default function IfcWorkspace() {
               onLoadSystemCoordinates={loadSystemCoordinateClipboard}
               onRemoveBodyFromSelected={removeBodyFromSelected}
               onSplitSelected={splitSelectedBody}
+              orthogonalSpawn={orthogonalSpawn}
+              surfacePlacementActive={surfacePlacement !== null}
+              onOrthogonalSpawnChange={setOrthogonalSpawn}
+              onSurfacePlacementChange={startSurfacePlacement}
             />
           </TileContent>
         );
@@ -4868,11 +4975,14 @@ export default function IfcWorkspace() {
             onMirrorApplied={applyViewerMirrorResult}
             onMoveSelected={nudgeSelectedPlacement}
             onPickCoordinates={storePickedCoordinates}
+            onPlaceBodyOnSurface={placeBodyOnSurface}
             onRecalculateModel={recalculateViewerModel}
             onRotateSelected={rotateSelectedPlacement}
             onViewerMounted={recalculateStaleViewerSessions}
             onSelect={selectEntity}
             onSplitSelected={splitSelectedBody}
+            onSurfacePlacementCancel={() => setSurfacePlacement(null)}
+            surfacePlacement={surfacePlacement?.request ?? null}
           />
         </Suspense>,
         viewerHost.element,

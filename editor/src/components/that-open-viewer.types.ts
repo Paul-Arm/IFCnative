@@ -25,6 +25,23 @@ export interface ViewerContextMenuTarget {
   fileName?: string;
   globalId?: string;
   point: { x: number; y: number; z: number };
+  /**
+   * Normale der getroffenen Fläche (Viewer-Achsen, Y-up, Einheitsvektor), zum
+   * Betrachter hin orientiert. Fehlt, wenn der Raycast keine Normale liefert.
+   */
+  normal?: { x: number; y: number; z: number };
+}
+
+/**
+ * Builder-Modus "Auf Fläche setzen": solange gesetzt, zeigt der Viewer unter
+ * dem Zeiger einen Ghost des geplanten Körpers orthogonal zur getroffenen
+ * Fläche; ein Klick meldet den Treffer über onPlaceBodyOnSurface.
+ */
+export interface ViewerSurfacePlacementRequest {
+  depth: number;
+  height: number;
+  profile: NativeBodyProfile;
+  width: number;
 }
 
 export interface ThatOpenViewerModel {
@@ -79,6 +96,10 @@ export interface ThatOpenViewerProps {
   ): void;
   /** Rotary-Menü: Mehrfachauswahl zu einem IFC-Objekt kombinieren. */
   onCombineSelected?(): void;
+  /** "Auf Fläche setzen": Klick auf eine Fläche im Platzierungsmodus. */
+  onPlaceBodyOnSurface?(target: ViewerContextMenuTarget): void;
+  /** Platzierungsmodus per Esc/Werkzeugwechsel im Viewer beendet. */
+  onSurfacePlacementCancel?(): void;
   onChangeMaterial?(): void;
   onCutPlaneActiveChange?(active: boolean): void;
   /** Rotary-Menü/Zerteilen: Schnittebenen-Achse zyklisch drehen (Y→X→Z). */
@@ -119,6 +140,8 @@ export interface ThatOpenViewerProps {
    * mit "Modell neu berechnen" in das Fragments-Modell übernommen werden.
    */
   pendingViewerChanges?: string[];
+  /** Aktiver Flächen-Platzierungsmodus des Körper-Builders (null = aus). */
+  surfacePlacement?: ViewerSurfacePlacementRequest | null;
 }
 
 export type ViewerCutPlaneMode = "translate" | "rotate";

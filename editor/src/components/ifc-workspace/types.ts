@@ -54,6 +54,11 @@ export interface BodyElementDraft {
   y: string;
   z: string;
   tag?: string;
+  /**
+   * Flächennormale (Viewer-Achsen, Y-up) am Platzierungspunkt: der Körper
+   * wird orthogonal zur Fläche gedreht (Höhe entlang der Normale).
+   */
+  surfaceNormal?: { x: number; y: number; z: number };
 }
 
 export interface CoordinateClipboard {

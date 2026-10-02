@@ -1,4 +1,5 @@
 import {
+    ArrowDownToLine,
     Box,
     Check,
     Circle,
@@ -8,8 +9,10 @@ import {
     Cylinder,
     Eraser,
     LocateFixed,
+    Magnet,
     MapPin,
     Maximize,
+    Minus,
     MousePointer2,
     Move,
     Plus,
@@ -17,6 +20,7 @@ import {
     RefreshCw,
     Rotate3d,
     RotateCw,
+    Ruler,
     Settings,
     Slice,
     Square,
@@ -57,6 +61,15 @@ import type {
     ViewerTransformCommitReceipt,
 } from "./that-open-viewer.types";
 import {
+    createMeasureTool,
+    type MeasureMode,
+    type MeasureToolState,
+} from "./viewer-measure";
+import {
+    createSurfacePlacementTool,
+    type SurfacePlacementHit,
+} from "./viewer-surface-placement";
+import {
     ViewerRotaryMenu,
     type RotaryMenuChild,
     type RotaryMenuItem,
@@ -96,10 +109,13 @@ export default function ThatOpenViewer({
   onRecalculateModel,
   onRotateSelected,
   onPickCoordinates,
+  onPlaceBodyOnSurface,
   onSelect,
   onSplitSelected,
+  onSurfacePlacementCancel,
   pendingViewerChanges,
   selectedEntityIds,
+  surfacePlacement,
 }: ThatOpenViewerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const runtimeRef = useRef<ViewerRuntime | null>(null);
@@ -121,6 +137,7 @@ export default function ThatOpenViewer({
   const onMoveSelectedRef = useRef(onMoveSelected);
   const onRotateSelectedRef = useRef(onRotateSelected);
   const onPickCoordinatesRef = useRef(onPickCoordinates);
+  const onPlaceBodyOnSurfaceRef = useRef(onPlaceBodyOnSurface);
   const onSelectRef = useRef(onSelect);
   const onViewerMountedRef = useRef(onViewerMounted);
   const handledFocusNonceRef = useRef<number | undefined>(undefined);
@@ -139,6 +156,18 @@ export default function ThatOpenViewer({
   const [contextTarget, setContextTarget] =
     useState<ViewerContextMenuTarget | null>(null);
   const [copyStatus, setCopyStatus] = useState("");
+  // Messleiste: Dichte-Stufe nach Viewer-Breite (schmale Tiles bekommen
+  // Icon-Segmente, Kurz-Chips und keine Tastenhinweise, damit die Leiste
+  // einzeilig bleibt und die Szene nicht verdeckt).
+  const [measureBarDensity, setMeasureBarDensity] = useState<
+    "full" | "compact" | "mini"
+  >("full");
+  const [measureState, setMeasureState] = useState<MeasureToolState>({
+    count: 0,
+    mode: null,
+    snap: { edges: true, faces: true, ortho: false, points: true },
+    step: 0,
+  });
   const [loadProgress, setLoadProgress] = useState<{
     fileName: string;
     percent: number;
@@ -179,6 +208,7 @@ export default function ThatOpenViewer({
   onMoveSelectedRef.current = onMoveSelected;
   onRotateSelectedRef.current = onRotateSelected;
   onPickCoordinatesRef.current = onPickCoordinates;
+  onPlaceBodyOnSurfaceRef.current = onPlaceBodyOnSurface;
   onSelectRef.current = onSelect;
   onViewerMountedRef.current = onViewerMounted;
   pickerActiveRef.current = pickerActive;
@@ -245,6 +275,9 @@ export default function ThatOpenViewer({
         showSelectionBox: () => showSelectionBoxRef.current,
         onCoordinatePickerUsed: () => setPickerActive(false),
         onContextTarget: (target) => setContextTarget(target),
+        onMeasureState: setMeasureState,
+        onPlaceBodyOnSurface: (target) =>
+          onPlaceBodyOnSurfaceRef.current?.(target),
         onProgress: (progress) => setLoadProgress(progress),
         onSelect: (id, source, globalId, documentId, additive) =>
           onSelectRef.current(id, source, globalId, documentId, additive),
@@ -412,6 +445,68 @@ export default function ThatOpenViewer({
     runtime.setMoveGizmoMode(moveGizmoMode);
   }, [moveGizmoMode, runtimeReady]);
 
+  // Körper-Builder "Auf Fläche setzen": Ghost-Vorschau im Viewer an/aus. Der
+  // Modus schließt Messen, Picker und Gizmo aus.
+  useEffect(() => {
+    const runtime = runtimeRef.current;
+    if (!runtime || !runtimeReady) {
+      return;
+    }
+    runtime.setSurfacePlacement(surfacePlacement ?? null);
+    if (surfacePlacement) {
+      runtime.measure.setMode(null);
+      setPickerActive(false);
+      setMoveGizmoActive(false);
+    }
+  }, [runtimeReady, surfacePlacement]);
+
+  // Messen und Picker/Gizmo/Schnittebene schließen sich gegenseitig aus.
+  useEffect(() => {
+    if (
+      measureState.mode &&
+      (pickerActive || moveGizmoActive || cutPlane?.active)
+    ) {
+      runtimeRef.current?.measure.setMode(null);
+    }
+  }, [cutPlane?.active, measureState.mode, moveGizmoActive, pickerActive]);
+
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element) {
+      return;
+    }
+    const apply = (width: number) => {
+      setMeasureBarDensity(
+        width < 600 ? "mini" : width < 900 ? "compact" : "full",
+      );
+    };
+    apply(element.clientWidth);
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? element.clientWidth;
+      apply(width);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  const toggleMeasure = (mode: MeasureMode = "distance") => {
+    const runtime = runtimeRef.current;
+    if (!runtime) {
+      return;
+    }
+    if (runtime.measure.getState().mode === mode) {
+      runtime.measure.setMode(null);
+      return;
+    }
+    onCutPlaneActiveChange?.(false);
+    setMoveGizmoActive(false);
+    setPickerActive(false);
+    if (surfacePlacement) {
+      onSurfacePlacementCancel?.();
+    }
+    runtime.measure.setMode(mode);
+  };
+
   useEffect(() => {
     const runtime = runtimeRef.current;
     if (!runtime || !runtimeReady || !modelReady) {
@@ -445,6 +540,14 @@ export default function ThatOpenViewer({
         return;
       }
       if (event.key === "Escape") {
+        // Erst die laufende Messung verwerfen, dann den Messmodus beenden.
+        if (runtimeRef.current?.measure.cancel()) {
+          return;
+        }
+        if (surfacePlacement) {
+          onSurfacePlacementCancel?.();
+          return;
+        }
         if (cutPlane?.active) {
           onCutPlaneActiveChange?.(false);
         }
@@ -452,7 +555,18 @@ export default function ThatOpenViewer({
         setPickerActive(false);
         return;
       }
+      const measuring = Boolean(runtimeRef.current?.measure.getState().mode);
+      if (measuring && (event.key === "Delete" || event.key === "Backspace")) {
+        event.preventDefault();
+        runtimeRef.current?.measure.removeLast();
+        return;
+      }
       const key = event.key.toLowerCase();
+      if (key === "m") {
+        event.preventDefault();
+        toggleMeasure();
+        return;
+      }
       if (cutPlane?.active && (key === "w" || key === "r")) {
         event.preventDefault();
         onCutPlaneModeChange?.(key === "w" ? "translate" : "rotate");
@@ -472,12 +586,15 @@ export default function ThatOpenViewer({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
+    // toggleMeasure liest nur Refs/Props, die hier ebenfalls Abhängigkeiten sind.
   }, [
     cutPlane?.active,
     editCapabilities.canMove,
     editCapabilities.canRotate,
     onCutPlaneActiveChange,
     onCutPlaneModeChange,
+    onSurfacePlacementCancel,
+    surfacePlacement,
   ]);
 
   useEffect(() => {
@@ -699,6 +816,16 @@ export default function ThatOpenViewer({
             <LocateFixed aria-hidden size={16} />
           </button>
           <button
+            aria-label="Messen"
+            className={`ifcnative-thatopen-tool${measureState.mode ? " is-active" : ""}`}
+            disabled={!hasVisibleModels}
+            title="Messen · M"
+            type="button"
+            onClick={() => toggleMeasure()}
+          >
+            <Ruler aria-hidden size={16} />
+          </button>
+          <button
             aria-label="Auf Modell zoomen"
             className="ifcnative-thatopen-tool"
             disabled={!hasVisibleModels}
@@ -773,6 +900,118 @@ export default function ThatOpenViewer({
         {pickerActive ? (
           <div className="ifcnative-thatopen-picker-hint">
             Punkt im Modell anklicken
+          </div>
+        ) : null}
+        {measureState.mode ? (
+          <div
+            aria-label="Messwerkzeug"
+            className={`ifcnative-thatopen-measure-bar is-${measureBarDensity}`}
+            role="toolbar"
+          >
+            <div
+              aria-label="Messart"
+              className="measure-segmented"
+              role="group"
+            >
+              {MEASURE_MODES.map((entry) => {
+                const Icon = entry.icon;
+                const active = measureState.mode === entry.id;
+                return (
+                  <button
+                    key={entry.id}
+                    aria-pressed={active}
+                    className={`measure-segment${active ? " is-active" : ""}`}
+                    title={entry.title}
+                    type="button"
+                    onClick={() => runtimeRef.current?.measure.setMode(entry.id)}
+                  >
+                    <Icon aria-hidden size={13} strokeWidth={2.25} />
+                    <span className="measure-segment-label">{entry.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div aria-hidden className="measure-sep" />
+            <div aria-label="Fangen" className="measure-snaps" role="group">
+              <span aria-hidden className="measure-caption">
+                Fang
+              </span>
+              {MEASURE_SNAP_OPTIONS.map((entry) => {
+                const active = measureState.snap[entry.key];
+                return (
+                  <button
+                    key={entry.key}
+                    aria-pressed={active}
+                    className={`measure-chip${active ? " is-active" : ""}${entry.key === "ortho" ? " is-ortho" : ""}`}
+                    title={entry.title}
+                    type="button"
+                    onClick={() =>
+                      runtimeRef.current?.measure.setSnap({
+                        [entry.key]: !measureState.snap[entry.key],
+                      })
+                    }
+                  >
+                    {entry.key === "ortho" ? (
+                      <Magnet aria-hidden className="measure-chip-icon" size={12} />
+                    ) : (
+                      <span aria-hidden className="measure-chip-dot" />
+                    )}
+                    <span className="measure-chip-label">{entry.label}</span>
+                    <span aria-hidden className="measure-chip-short">
+                      {entry.label.charAt(0)}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <div aria-hidden className="measure-sep" />
+            <MeasureStepStatus state={measureState} />
+            <div className="measure-actions">
+              <button
+                aria-label={
+                  measureState.count
+                    ? `Alle ${measureState.count} Messungen löschen`
+                    : "Alle Messungen löschen"
+                }
+                className="measure-action is-clear"
+                disabled={!measureState.count}
+                title="Alle Messungen entfernen"
+                type="button"
+                onClick={() => runtimeRef.current?.measure.clearAll()}
+              >
+                <Trash2 aria-hidden size={13} />
+                <span className="measure-action-label">Löschen</span>
+                {measureState.count ? (
+                  <span aria-hidden className="measure-count">
+                    {measureState.count > 99 ? "99+" : measureState.count}
+                  </span>
+                ) : null}
+              </button>
+              <button
+                aria-label="Messen beenden"
+                className="measure-action is-icon"
+                title="Messen beenden · Esc"
+                type="button"
+                onClick={() => runtimeRef.current?.measure.setMode(null)}
+              >
+                <X aria-hidden size={14} />
+              </button>
+            </div>
+          </div>
+        ) : null}
+        {surfacePlacement && !measureState.mode ? (
+          <div className="ifcnative-thatopen-surface-hint" role="status">
+            <span className="surface-hint-dot" aria-hidden />
+            <span className="surface-hint-text">
+              <strong>Auf Fläche setzen</strong>
+              <span>
+                Fläche im Modell anklicken – der Körper steht orthogonal zur
+                Fläche
+              </span>
+            </span>
+            <button type="button" onClick={() => onSurfacePlacementCancel?.()}>
+              Abbrechen <kbd>Esc</kbd>
+            </button>
           </div>
         ) : null}
         {cutPlane?.active ? (
@@ -874,6 +1113,123 @@ export default function ThatOpenViewer({
   );
 }
 
+const MEASURE_MODES: {
+  icon: typeof Ruler;
+  id: MeasureMode;
+  label: string;
+  title: string;
+}[] = [
+  {
+    icon: Ruler,
+    id: "distance",
+    label: "Strecke",
+    title: "Strecke zwischen zwei Punkten (mit ΔX/ΔY/ΔZ)",
+  },
+  { icon: Minus, id: "edge", label: "Kante", title: "Länge einer Kante" },
+  {
+    icon: Triangle,
+    id: "angle",
+    label: "Winkel",
+    title: "Winkel aus drei Punkten (Scheitel in der Mitte)",
+  },
+  {
+    icon: ArrowDownToLine,
+    id: "perpendicular",
+    label: "Lot",
+    title: "Senkrechter Abstand eines Punktes zu einer Fläche",
+  },
+];
+
+const MEASURE_SNAP_OPTIONS: {
+  key: keyof MeasureToolState["snap"];
+  label: string;
+  title: string;
+}[] = [
+  { key: "points", label: "Ecken", title: "An Ecken fangen" },
+  {
+    key: "edges",
+    label: "Kanten",
+    title: "An Kanten fangen (Kantenverlängerung als Fanglinie)",
+  },
+  { key: "faces", label: "Flächen", title: "Auf Flächen messen" },
+  {
+    key: "ortho",
+    label: "Ortho",
+    title: "Orthogonal messen: Achsen-Lock (auch mit gehaltener Umschalttaste)",
+  },
+];
+
+interface MeasureStepDescription {
+  /** Anweisung für den aktuellen Klick. */
+  text: string;
+  /** 1-basierter Schritt innerhalb der Messung. */
+  index: number;
+  total: number;
+  keys: { key: string; label: string }[];
+}
+
+function describeMeasureStep(state: MeasureToolState): MeasureStepDescription {
+  const keys = [
+    { key: "Esc", label: "beenden" },
+    { key: "Entf", label: "letzte löschen" },
+  ];
+  switch (state.mode) {
+    case "distance":
+      return state.step === 0
+        ? { text: "Startpunkt wählen", index: 1, total: 2, keys }
+        : {
+            text: "Endpunkt wählen",
+            index: 2,
+            total: 2,
+            keys: [{ key: "Umschalt", label: "orthogonal" }, ...keys],
+          };
+    case "edge":
+      return { text: "Kante anklicken", index: 1, total: 1, keys };
+    case "angle": {
+      const steps = [
+        "Ersten Schenkelpunkt wählen",
+        "Scheitelpunkt wählen",
+        "Zweiten Schenkelpunkt wählen",
+      ];
+      const index = Math.min(Math.max(state.step, 0), steps.length - 1);
+      return { text: steps[index], index: index + 1, total: steps.length, keys };
+    }
+    case "perpendicular":
+      return state.step === 0
+        ? { text: "Bezugsfläche anklicken", index: 1, total: 2, keys }
+        : { text: "Punkt wählen", index: 2, total: 2, keys };
+    default:
+      return { text: "", index: 0, total: 0, keys };
+  }
+}
+
+function MeasureStepStatus({ state }: { state: MeasureToolState }) {
+  const step = describeMeasureStep(state);
+  return (
+    <div aria-live="polite" className="measure-status" role="status">
+      <span className="measure-step">
+        {step.total > 1 ? (
+          <span
+            aria-label={`Schritt ${step.index} von ${step.total}`}
+            className="measure-step-index"
+          >
+            {step.index}/{step.total}
+          </span>
+        ) : null}
+        <span className="measure-step-text">{step.text}</span>
+      </span>
+      <span className="measure-keys">
+        {step.keys.map((entry) => (
+          <span key={entry.key}>
+            <kbd>{entry.key}</kbd>
+            {entry.label}
+          </span>
+        ))}
+      </span>
+    </div>
+  );
+}
+
 function formatFragmentConversionProgress(
   progress: ConvertIfcToFragmentsProgress,
 ) {
@@ -895,6 +1251,8 @@ async function createThatOpenRuntime(
     onError(message: string): void;
     onCoordinatePickerUsed(): void;
     onContextTarget(target: ViewerContextMenuTarget): void;
+    onMeasureState(state: MeasureToolState): void;
+    onPlaceBodyOnSurface(target: ViewerContextMenuTarget): void;
     onLog(line: string): void;
     onCutPlaneChange(change: ViewerCutPlaneChange): void;
     onMoveSelected(
@@ -1582,8 +1940,101 @@ async function createThatOpenRuntime(
   }
 
   let loadCounter = 0;
+  const canvas = world.renderer.three.domElement;
+
+  // Messwerkzeug und Flächen-Platzierung: eigene Overlays/Linien im
+  // Szenenraum, Snapping über den Fragments-Raycast (Punkt/Kante/Fläche).
+  // Fang-Kandidaten aller Modelle: Fragments' Vertex-/Kantenfang kennt keine
+  // Abstandsgrenze (FragmentsManager.raycast nimmt blind das erste Ergebnis),
+  // deshalb sammelt der Viewer alle Treffer und das Messwerkzeug wählt nach
+  // Bildschirm-Toleranz. Der einfache Raycast liefert den Flächentreffer.
+  const raycastSnapCandidates = async (
+    mouse: { x: number; y: number },
+    snappingClasses: import("@thatopen/fragments").SnappingClass[],
+  ) => {
+    const results: import("@thatopen/fragments").RaycastResult[] = [];
+    const data = {
+      camera: world.camera.three,
+      dom: canvas,
+      mouse: new THREE.Vector2(mouse.x, mouse.y),
+    };
+    const reportError = (reason: unknown) => {
+      callbacks.onLog(
+        `viewer.measure.raycastError(${JSON.stringify(stringifyError(reason))});`,
+      );
+      return null;
+    };
+    for (const model of fragments.core.models.list.values()) {
+      const face = await model.raycast(data).catch(reportError);
+      if (face) {
+        results.push(face);
+      }
+      if (snappingClasses.length) {
+        const snapped = await model
+          .raycastWithSnapping({ ...data, snappingClasses })
+          .catch(reportError);
+        if (snapped) {
+          results.push(...snapped);
+        }
+      }
+    }
+    return results;
+  };
+  const raycastFace = (mouse: { x: number; y: number }) =>
+    fragments.raycast({
+      camera: world.camera.three,
+      dom: canvas,
+      mouse: new THREE.Vector2(mouse.x, mouse.y),
+    });
+  const measureTool = createMeasureTool(
+    THREE,
+    {
+      camera: world.camera.three,
+      canvas,
+      container,
+      scene: world.scene.three,
+      snappingClasses: {
+        FACE: FRAGS.SnappingClass.FACE,
+        LINE: FRAGS.SnappingClass.LINE,
+        POINT: FRAGS.SnappingClass.POINT,
+      },
+    },
+    {
+      onLog: callbacks.onLog,
+      onStateChange: callbacks.onMeasureState,
+      raycastCandidates: raycastSnapCandidates,
+      requestRender: () => undefined,
+    },
+  );
+  const surfaceTool = createSurfacePlacementTool(
+    THREE,
+    {
+      camera: world.camera.three,
+      canvas,
+      container,
+      scene: world.scene.three,
+    },
+    {
+      onLog: callbacks.onLog,
+      onPlace: (hit) => {
+        void placeOnSurface(hit).catch((reason) => {
+          callbacks.onLog(
+            `viewer.surfacePlacement.error(${JSON.stringify(String(reason))});`,
+          );
+        });
+      },
+      raycastFace,
+      requestRender: () => undefined,
+    },
+  );
+  // Labels NACH dem Rendern nachführen: das controls-"update"-Event feuert vor
+  // dem Frame mit noch alten Kameramatrizen — die HTML-Labels hinkten dann
+  // sichtbar hinter der Geometrie her.
+  world.renderer.onAfterUpdate.add(measureTool.updateLabels);
+
   const resizeObserver = new ResizeObserver(() => {
     world.renderer?.resize();
+    measureTool.updateLabels();
   });
   resizeObserver.observe(container);
 
@@ -1592,8 +2043,6 @@ async function createThatOpenRuntime(
   const trackPointerDown = (event: PointerEvent) => {
     pointerDown = { x: event.clientX, y: event.clientY };
   };
-
-  const canvas = world.renderer.three.domElement;
 
   // Nach längerer Hintergrundlaufzeit kann Windows/WebView2 den GPU-Prozess
   // recyceln — der WebGL-Kontext geht verloren. three.js schluckt danach jeden
@@ -1623,6 +2072,10 @@ async function createThatOpenRuntime(
       return;
     }
     if (moveGizmo.isDragging() || cutPlaneGizmo.isDragging()) {
+      return;
+    }
+    // Mess-/Platzierungsklicks ändern die Auswahl nicht.
+    if (measureTool.isActive() || surfaceTool.isActive()) {
       return;
     }
     if (pointerDown) {
@@ -1759,6 +2212,10 @@ async function createThatOpenRuntime(
     if (moveGizmo.isDragging() || cutPlaneGizmo.isDragging()) {
       return;
     }
+    // Mess-/Platzierungsklicks ändern die Auswahl nicht.
+    if (measureTool.isActive() || surfaceTool.isActive()) {
+      return;
+    }
     // Wie beim Linksklick: nach einer Drag-Bewegung (Kamera-Pan mit rechter
     // Taste) kein Menü öffnen — contextmenu feuert unter Windows erst beim
     // Loslassen der Taste.
@@ -1807,6 +2264,7 @@ async function createThatOpenRuntime(
     const mappedEntityId = loadedModel.mirrorEntityIdByLocalId.get(localId);
     const resolvedEntityId = mappedEntityId ?? entityId ?? localId;
     const ifcPoint = sceneToIfcWorldPoint(loadedModel, result.point);
+    const normal = hitNormalToIfcWorld(loadedModel, result);
     // "thatopen-context": eine bestehende Mehrfachauswahl bleibt erhalten,
     // wenn das Rechtsklick-Ziel dazugehört (sonst wäre "Kombinieren" im
     // Rotary-Menü nie erreichbar, weil der Rechtsklick sie auflösen würde).
@@ -1818,12 +2276,86 @@ async function createThatOpenRuntime(
       entityId: resolvedEntityId,
       fileName: loadedModel.fileName,
       globalId,
+      normal,
       point: { x: ifcPoint.x, y: ifcPoint.y, z: ifcPoint.z },
     });
     callbacks.onLog(
-      `viewer.contextMenu({ file: '${loadedModel.fileName}', id: ${resolvedEntityId}, point: { x: ${formatCoordinate(ifcPoint.x)}, y: ${formatCoordinate(ifcPoint.y)}, z: ${formatCoordinate(ifcPoint.z)} } });`,
+      `viewer.contextMenu({ file: '${loadedModel.fileName}', id: ${resolvedEntityId}, point: { x: ${formatCoordinate(ifcPoint.x)}, y: ${formatCoordinate(ifcPoint.y)}, z: ${formatCoordinate(ifcPoint.z)} }${normal ? `, normal: { x: ${formatCoordinate(normal.x)}, y: ${formatCoordinate(normal.y)}, z: ${formatCoordinate(normal.z)} }` : ""} });`,
     );
   };
+
+  /**
+   * Flächennormale eines Raycast-Treffers in IFC-Weltrichtung (Viewer-Achsen,
+   * Y-up), zum Betrachter hin orientiert — der neue Körper soll aus der
+   * Fläche herauswachsen, nicht in das Bauteil hinein.
+   */
+  function hitNormalToIfcWorld(
+    loaded: LoadedViewerModel,
+    result: import("@thatopen/fragments").RaycastResult,
+  ) {
+    if (!result.normal || result.normal.lengthSq() < 1e-10) {
+      return undefined;
+    }
+    const sceneNormal = result.normal.clone().normalize();
+    const rayDirection =
+      result.ray?.direction ??
+      result.point.clone().sub(world.camera.three.position);
+    if (sceneNormal.dot(rayDirection) > 0) {
+      sceneNormal.negate();
+    }
+    const normal = sceneToIfcWorldDirection(loaded, sceneNormal);
+    return { x: normal.x, y: normal.y, z: normal.z };
+  }
+
+  // "Auf Fläche setzen": Treffer auflösen (Dokument, Entität, IFC-Weltpunkt
+  // und -Normale) und an den Workspace melden, der den Körper anlegt.
+  async function placeOnSurface(hit: SurfacePlacementHit) {
+    const result = hit.result;
+    const localId = result.localId;
+    if (!localId || !Number.isFinite(localId)) {
+      return;
+    }
+    const hitModel = fragments.list.get(result.fragments.modelId);
+    const modelId = hitModel?.parentModelId ?? result.fragments.modelId;
+    const documentId = documentIdByModelId.get(modelId);
+    const loadedModel = documentId
+      ? modelsByDocumentId.get(documentId)
+      : undefined;
+    if (!documentId || !loadedModel) {
+      return;
+    }
+    const itemData = await readItemData(fragments, modelId, localId);
+    const entityId = readNumericAttribute(itemData, [
+      "expressID",
+      "ExpressID",
+      "expressId",
+      "_localId",
+      "localId",
+    ]);
+    const globalId = readStringAttribute(itemData, [
+      "GlobalId",
+      "GlobalID",
+      "globalId",
+      "guid",
+    ]);
+    const mappedEntityId = loadedModel.mirrorEntityIdByLocalId.get(localId);
+    const resolvedEntityId = mappedEntityId ?? entityId ?? localId;
+    const ifcPoint = sceneToIfcWorldPoint(loadedModel, hit.point);
+    const normal = sceneToIfcWorldDirection(loadedModel, hit.normal);
+    callbacks.onPlaceBodyOnSurface({
+      clientX: hit.clientX,
+      clientY: hit.clientY,
+      documentId,
+      entityId: resolvedEntityId,
+      fileName: loadedModel.fileName,
+      globalId,
+      normal: { x: normal.x, y: normal.y, z: normal.z },
+      point: { x: ifcPoint.x, y: ifcPoint.y, z: ifcPoint.z },
+    });
+    callbacks.onLog(
+      `viewer.surfacePlacement.place({ file: '${loadedModel.fileName}', id: ${resolvedEntityId}, point: { x: ${formatCoordinate(ifcPoint.x)}, y: ${formatCoordinate(ifcPoint.y)}, z: ${formatCoordinate(ifcPoint.z)} }, normal: { x: ${formatCoordinate(normal.x)}, y: ${formatCoordinate(normal.y)}, z: ${formatCoordinate(normal.z)} } });`,
+    );
+  }
   const handleContextMenu = (event: MouseEvent) => {
     void openContextFromPointer(event).catch((reason) => {
       callbacks.onLog(
@@ -2570,6 +3102,9 @@ async function createThatOpenRuntime(
     cutPlaneGizmo.dispose();
     moveGizmo.dispose();
     viewCube.dispose();
+    world.renderer?.onAfterUpdate.remove(measureTool.updateLabels);
+    measureTool.dispose();
+    surfaceTool.dispose();
     coordinateCursor.dispose();
     materialSelectionFrame.removeFromParent();
     materialSelectionFrame.reset();
@@ -2592,8 +3127,17 @@ async function createThatOpenRuntime(
     focusSelected,
     highlight,
     hideCoordinateCursor: coordinateCursor.hide,
+    measure: {
+      cancel: measureTool.cancel,
+      clearAll: measureTool.clearAll,
+      getState: measureTool.getState,
+      removeLast: measureTool.removeLast,
+      setMode: measureTool.setMode,
+      setSnap: measureTool.setSnap,
+    },
     resetCamera,
     setCutPlane,
+    setSurfacePlacement: surfaceTool.setDraft,
     setMoveGizmoEnabled: moveGizmo.setEnabled,
     setMoveGizmoMode: moveGizmo.setMode,
     syncModels,

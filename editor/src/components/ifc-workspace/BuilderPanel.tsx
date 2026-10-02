@@ -3,14 +3,14 @@ import {
   ClipboardPaste,
   Combine,
   Crosshair,
-  MousePointer2,
-  Ruler,
   Scissors,
   Target,
   Trash2,
 } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
     getNativeBodyRepresentation,
     getNativeLengthUnitScale,
@@ -29,12 +29,14 @@ import {
   Badge,
   Button,
   CheckboxField,
+  CollapsibleSection,
   DropdownField,
   InlineAlert,
   LabeledInput,
   PanelHeader,
   PanelShell,
   parseDecimalInput,
+  SegmentedControl,
   shortType,
 } from "./ui";
 
@@ -63,11 +65,18 @@ const ROUND_PROFILES: ReadonlySet<NativeBodyProfile> = new Set([
   "ellipse",
 ]);
 
+const PLACEMENT_MODE_OPTIONS = [
+  { label: "Welt", value: "world" },
+  { label: "Relativ zum Parent", value: "parent" },
+];
+
 const CUT_PLANE_AXIS_OPTIONS = [
   { label: "X", value: "x" },
   { label: "Y (Höhe)", value: "y" },
   { label: "Z", value: "z" },
 ];
+
+type BuilderTool = "combine" | "remove" | "split";
 
 export function BuilderPanel({
   coordinateClipboard,
@@ -82,8 +91,12 @@ export function BuilderPanel({
   onCutPlaneModeChange,
   onCutPlaneReset,
   onLoadSystemCoordinates,
+  onOrthogonalSpawnChange,
   onRemoveBodyFromSelected,
   onSplitSelected,
+  onSurfacePlacementChange,
+  orthogonalSpawn,
+  surfacePlacementActive,
 }: {
   coordinateClipboard: CoordinateClipboard | null;
   cutPlane: ViewerCutPlaneState;
@@ -99,8 +112,14 @@ export function BuilderPanel({
   onCutPlaneModeChange(mode: ViewerCutPlaneMode): void;
   onCutPlaneReset(): void;
   onLoadSystemCoordinates(): Promise<CoordinateClipboard | undefined>;
+  /** Neue Körper (Rotary/„Auf Fläche setzen“) orthogonal zur Fläche drehen. */
+  onOrthogonalSpawnChange(enabled: boolean): void;
   onRemoveBodyFromSelected(): void;
   onSplitSelected(): void;
+  /** Platzierungsmodus im Viewer starten (Entwurf) bzw. beenden (null). */
+  onSurfacePlacementChange(draft: BodyElementDraft | null): void;
+  orthogonalSpawn: boolean;
+  surfacePlacementActive: boolean;
 }) {
   const [bodyType, setBodyType] = useState("IFCBUILTELEMENT");
   const [bodyName, setBodyName] = useState("Neuer 3D-Körper");
@@ -127,11 +146,11 @@ export function BuilderPanel({
   const [planeAngle, setPlaneAngle] = useState("0");
   const [combinedName, setCombinedName] = useState("Kombiniertes Teil");
   const [keepCombineSources, setKeepCombineSources] = useState(false);
+  const [tool, setTool] = useState<BuilderTool>("split");
   const selectedEntity = document.entityById.get(selectedId);
   const selectedParentId = findHierarchyParentId(document, selectedId);
   const selectedBody = getNativeBodyRepresentation(document, selectedId);
   const unitScale = getNativeLengthUnitScale(document);
-  const unitLabel = describeLengthUnit(unitScale);
   const splitSupported =
     selectedBody.hasRepresentation &&
     Boolean(getNativePlacement(document, selectedId));
@@ -142,6 +161,7 @@ export function BuilderPanel({
         getNativeBodyRepresentation(document, id).hasRepresentation &&
         Boolean(getNativePlacement(document, id)),
     );
+  const roundProfile = ROUND_PROFILES.has(bodyProfile);
 
   useEffect(() => {
     if (cutPlane.position) {
@@ -228,48 +248,74 @@ export function BuilderPanel({
     z: bodyZ,
   };
 
-  const coordinateSummary = coordinateClipboard
-    ? describeCoordinateClipboard(coordinateClipboard)
-    : "0, 0, 0";
+  // Solange "Auf Fläche setzen" läuft, folgt der Ghost im Viewer den
+  // Panel-Feldern (Profil/Maße/Name/Klasse) live.
+  useEffect(() => {
+    if (!surfacePlacementActive) {
+      return;
+    }
+    onSurfacePlacementChange({
+      depth: bodyDepth,
+      height: bodyHeight,
+      name: bodyName,
+      placementMode: "world",
+      profile: bodyProfile,
+      tag: bodyTag,
+      type: bodyType,
+      width: bodyWidth,
+      x: bodyX,
+      y: bodyY,
+      z: bodyZ,
+    });
+    // onSurfacePlacementChange ist ein stabiler Workspace-Handler.
+  }, [
+    bodyDepth,
+    bodyHeight,
+    bodyName,
+    bodyProfile,
+    bodyTag,
+    bodyType,
+    bodyWidth,
+    surfacePlacementActive,
+  ]);
+
+  const splitBlockedReason = !selectedBody.hasRepresentation
+    ? `#${selectedId} hat keine Körper-Geometrie`
+    : !splitSupported
+      ? "Auswahl hat keine Produktplatzierung"
+      : !cutPlane.active || !cutPlane.position
+        ? "Erst Schnittebene einblenden"
+        : undefined;
 
   return (
     <PanelShell scroll>
       <PanelHeader
         title="Körper-Builder"
         meta={
-          <Badge tone={selectedBody.hasRepresentation ? "success" : "neutral"}>
-            #{selectedId}{" "}
-            {selectedEntity ? shortType(selectedEntity.type) : "Auswahl"}
-          </Badge>
+          <>
+            <span
+              title={`Ziel: #${selectedId}${selectedEntity ? ` ${selectedEntity.type}` : ""}${selectedEntity?.name ? ` „${selectedEntity.name}“` : ""}`}
+            >
+              <Badge
+                tone={selectedBody.hasRepresentation ? "success" : "neutral"}
+              >
+                #{selectedId}{" "}
+                {selectedEntity ? shortType(selectedEntity.type) : "Auswahl"}
+              </Badge>
+            </span>
+            <span
+              title={`Modelleinheit: ${describeLengthUnit(unitScale)} · Eingaben in Meter`}
+            >
+              <Badge>{shortLengthUnit(unitScale)}</Badge>
+            </span>
+          </>
         }
       />
-      <section className="grid min-w-0 shrink-0 gap-2.5 pb-2">
-        <div className="grid min-w-0 gap-1.5 border-y border-border/60 py-2">
-          <StatusPill
-            icon={<Target aria-hidden className="size-3.5" />}
-            label="Ziel"
-            value={`#${selectedId}${selectedEntity ? ` · ${shortType(selectedEntity.type)}` : ""}`}
-          />
-          <StatusPill
-            icon={<MousePointer2 aria-hidden className="size-3.5" />}
-            label="Punktquelle"
-            value={describeCoordinateSource(coordinateClipboard)}
-          />
-          <StatusPill
-            icon={<Crosshair aria-hidden className="size-3.5" />}
-            label="Position"
-            value={`${bodyX}, ${bodyY}, ${bodyZ}`}
-          />
-          <StatusPill
-            icon={<Ruler aria-hidden className="size-3.5" />}
-            label="Modelleinheit"
-            value={unitLabel}
-          />
-        </div>
 
-        <FormGrid>
+      <Section title="Element">
+        <FieldGrid min="8rem">
           <DropdownField
-            label="Elementklasse"
+            label="Klasse"
             options={ENTITY_TYPES}
             value={bodyType}
             onChange={setBodyType}
@@ -284,9 +330,11 @@ export function BuilderPanel({
             value={bodyTag}
             onChangeText={setBodyTag}
           />
-        </FormGrid>
+        </FieldGrid>
+      </Section>
 
-        <FormGrid>
+      <Section title="Geometrie · m">
+        <FieldGrid min="6.5rem">
           <DropdownField
             label="Profil"
             options={BODY_PROFILE_OPTIONS}
@@ -294,116 +342,109 @@ export function BuilderPanel({
             onChange={(value) => setBodyProfile(value as NativeBodyProfile)}
           />
           <LabeledInput
-            label={
-              ROUND_PROFILES.has(bodyProfile)
-                ? "Durchmesser X (m)"
-                : "Breite X (m)"
-            }
+            label={roundProfile ? "Ø X" : "Breite X"}
             keyboardType="numeric"
             value={bodyWidth}
             onChangeText={setBodyWidth}
           />
           <LabeledInput
-            label={
-              ROUND_PROFILES.has(bodyProfile)
-                ? "Durchmesser Z (m)"
-                : "Tiefe Z (m)"
-            }
+            label={roundProfile ? "Ø Z" : "Tiefe Z"}
             keyboardType="numeric"
             value={bodyDepth}
             onChangeText={setBodyDepth}
           />
           <LabeledInput
-            label="Höhe Y (m)"
+            label="Höhe Y"
             keyboardType="numeric"
             value={bodyHeight}
             onChangeText={setBodyHeight}
           />
-        </FormGrid>
+        </FieldGrid>
+      </Section>
 
-        <FormGrid>
+      <Section
+        title="Position · m"
+        aside={
+          <Button
+            size="xs"
+            title={
+              coordinateClipboard
+                ? `Pick übernehmen: ${describeCoordinateClipboard(coordinateClipboard)}`
+                : "Kein Viewer-Pick gemerkt · Koordinaten aus dem System-Clipboard lesen"
+            }
+            variant={coordinateClipboard ? "secondary" : "ghost"}
+            onClick={() => void loadCoordinateClipboard()}
+          >
+            <ClipboardPaste aria-hidden />
+            {coordinateClipboard ? "Pick übernehmen" : "Aus Clipboard"}
+          </Button>
+        }
+      >
+        <div className="grid min-w-0 grid-cols-3 gap-2">
           <LabeledInput
-            label="X (m)"
+            label="X"
             keyboardType="numeric"
             value={bodyX}
             onChangeText={setBodyX}
           />
           <LabeledInput
-            label="Y (m, Höhe)"
+            label="Y (Höhe)"
             keyboardType="numeric"
             value={bodyY}
             onChangeText={setBodyY}
           />
           <LabeledInput
-            label="Z (m)"
+            label="Z"
             keyboardType="numeric"
             value={bodyZ}
             onChangeText={setBodyZ}
           />
-          <DropdownField
-            label="Position"
-            options={[
-              {
-                detail: "Absolut im Modell (Viewer-Weltpunkt)",
-                label: "Weltposition",
-                value: "world",
-              },
-              {
-                detail: "X/Y/Z als lokaler Versatz zum Parent",
-                label: "Relativ zum Parent",
-                value: "parent",
-              },
-            ]}
-            value={bodyPlacementMode}
-            onChange={(value) =>
-              setBodyPlacementMode(value as "parent" | "world")
-            }
-          />
-        </FormGrid>
-
-        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-md border border-border/60 bg-muted/30 px-2.5 py-2">
-          <div className="min-w-0 flex-1 basis-40">
-            <div className="flex items-center gap-1.5 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-              <Crosshair aria-hidden className="size-3.5 shrink-0" />
-              Koordinaten
-            </div>
-            <p
-              className="mt-0.5 truncate text-xs text-foreground"
-              title={coordinateSummary}
-            >
-              {coordinateSummary}
-            </p>
-          </div>
-          <Button
-            title={
-              coordinateClipboard
-                ? "Gemerkten Punkt in die Positionsfelder übernehmen"
-                : "Koordinaten aus dem System-Clipboard lesen"
-            }
-            variant="outline"
-            onClick={() => void loadCoordinateClipboard()}
-          >
-            <ClipboardPaste aria-hidden className="size-3.5" />
-            {coordinateClipboard ? "Punkt übernehmen" : "Clipboard lesen"}
-          </Button>
         </div>
+        <SegmentedControl
+          options={PLACEMENT_MODE_OPTIONS}
+          value={bodyPlacementMode}
+          onChange={(value) =>
+            setBodyPlacementMode(value as "parent" | "world")
+          }
+        />
+      </Section>
 
-        <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-2">
+      <Section
+        title="Erstellen"
+        aside={
+          <label
+            className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+            title="Höhe entlang der Flächennormale, Grundfläche auf der Fläche – gilt für „Auf Fläche“ und Rechtsklick „Hier hinzufügen“"
+          >
+            <Switch
+              checked={orthogonalSpawn}
+              size="sm"
+              onCheckedChange={(checked) => onOrthogonalSpawnChange(checked)}
+            />
+            Orthogonal zur Fläche
+          </label>
+        }
+      >
+        <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(6.5rem,1fr))] gap-1.5">
           <Button
             className="w-full min-w-0"
-            title="Körper als Kind der Auswahl erstellen"
+            title={`Körper als Kind von #${selectedId} erstellen`}
             variant="default"
             onClick={() =>
               onAddBodyElement({ ...bodyDraft, parentId: selectedId })
             }
           >
-            <Box aria-hidden className="size-3.5" />
-            <span className="truncate">Als Kind der Auswahl erstellen</span>
+            <Box aria-hidden />
+            <span className="truncate">Als Kind</span>
           </Button>
           <Button
             className="w-full min-w-0"
             disabled={selectedParentId == null}
-            title="Körper am Parent der Auswahl erstellen"
+            title={
+              selectedParentId == null
+                ? "Auswahl hat keinen Parent"
+                : `Körper am Parent #${selectedParentId} der Auswahl erstellen`
+            }
             variant="default"
             onClick={() => {
               if (selectedParentId == null) {
@@ -415,88 +456,127 @@ export function BuilderPanel({
               });
             }}
           >
-            <Box aria-hidden className="size-3.5" />
-            <span className="truncate">Am Parent der Auswahl erstellen</span>
+            <Box aria-hidden />
+            <span className="truncate">Am Parent</span>
+          </Button>
+          <Button
+            className="w-full min-w-0"
+            title={
+              surfacePlacementActive
+                ? "Platzierungsmodus beenden (Esc)"
+                : "Fläche im 3D-Viewer anklicken, Körper wird per Raycast dort gesetzt"
+            }
+            variant={surfacePlacementActive ? "secondary" : "default"}
+            onClick={() =>
+              onSurfacePlacementChange(surfacePlacementActive ? null : bodyDraft)
+            }
+          >
+            <Target aria-hidden />
+            <span className="truncate">
+              {surfacePlacementActive ? "Beenden · Esc" : "Auf Fläche"}
+            </span>
           </Button>
         </div>
-        {selectedParentId == null ? (
-          <InlineAlert tone="warning">
-            Die Auswahl hat keinen Parent in der IFC-Struktur.
-          </InlineAlert>
+        {surfacePlacementActive ? (
+          <InlineAlert>Fläche im Viewer anklicken.</InlineAlert>
         ) : null}
+        {selectedParentId == null ? (
+          <InlineAlert tone="warning">Auswahl hat keinen Parent.</InlineAlert>
+        ) : null}
+      </Section>
 
-        <div className="grid min-w-0 gap-3 border-t border-border/60 pt-3">
-          <div className="grid gap-2 rounded-md border border-border/60 bg-muted/20 p-2.5">
-            <div>
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground">
-                Körper teilen
-              </h3>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                Die Ebene wird direkt im 3D-Viewer verschoben oder gedreht und
-                schneidet auch kombinierte Mehrkörperobjekte.
-              </p>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <Button
-                variant={cutPlane.active ? "default" : "outline"}
-                disabled={!splitSupported}
-                onClick={() => onCutPlaneActiveChange(!cutPlane.active)}
-              >
-                <Scissors aria-hidden className="size-3.5" />
-                {cutPlane.active ? "Ebene ausblenden" : "Schnittebene anzeigen"}
-              </Button>
-              <Button
-                disabled={!splitSupported}
-                variant="outline"
-                onClick={onCutPlaneReset}
-              >
-                <Crosshair aria-hidden className="size-3.5" />
-                Auf Auswahl zentrieren
-              </Button>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <Button
-                variant={
-                  cutPlane.active && cutPlane.mode === "translate"
-                    ? "default"
-                    : "outline"
-                }
-                onClick={() => onCutPlaneModeChange("translate")}
-              >
-                Verschieben · W
-              </Button>
-              <Button
-                variant={
-                  cutPlane.active && cutPlane.mode === "rotate"
-                    ? "default"
-                    : "outline"
-                }
-                onClick={() => onCutPlaneModeChange("rotate")}
-              >
-                Rotieren · R
-              </Button>
-            </div>
-            <div className="grid grid-cols-3 gap-2">
+      <Tabs
+        className="min-w-0 shrink-0 gap-2 border-t border-border/60 pt-2.5"
+        value={tool}
+        onValueChange={(value) => setTool(value as BuilderTool)}
+      >
+        <TabsList className="w-full">
+          <TabsTrigger className="text-xs" value="split">
+            <Scissors aria-hidden className="size-3.5" />
+            Teilen
+          </TabsTrigger>
+          <TabsTrigger className="text-xs" value="combine">
+            <Combine aria-hidden className="size-3.5" />
+            Kombinieren
+          </TabsTrigger>
+          <TabsTrigger className="text-xs" value="remove">
+            <Trash2 aria-hidden className="size-3.5" />
+            Entfernen
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent className="grid min-w-0 gap-2" value="split">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <Button
+              className="min-w-0 flex-1 basis-28"
+              disabled={!splitSupported}
+              title={
+                cutPlane.active
+                  ? "Schnittebene ausblenden"
+                  : "Schnittebene im Viewer einblenden"
+              }
+              variant={cutPlane.active ? "default" : "outline"}
+              onClick={() => onCutPlaneActiveChange(!cutPlane.active)}
+            >
+              <Scissors aria-hidden />
+              <span className="truncate">Schnittebene</span>
+            </Button>
+            <Button
+              title="Ebene verschieben (W)"
+              variant={
+                cutPlane.active && cutPlane.mode === "translate"
+                  ? "secondary"
+                  : "ghost"
+              }
+              onClick={() => onCutPlaneModeChange("translate")}
+            >
+              Verschieben
+            </Button>
+            <Button
+              title="Ebene rotieren (R)"
+              variant={
+                cutPlane.active && cutPlane.mode === "rotate"
+                  ? "secondary"
+                  : "ghost"
+              }
+              onClick={() => onCutPlaneModeChange("rotate")}
+            >
+              Rotieren
+            </Button>
+            <Button
+              disabled={!splitSupported}
+              size="icon-sm"
+              title="Ebene auf Auswahl zentrieren"
+              variant="outline"
+              onClick={onCutPlaneReset}
+            >
+              <Crosshair aria-hidden />
+            </Button>
+          </div>
+
+          <CollapsibleSection
+            title="Ebene numerisch"
+            meta={`P ${planeX}; ${planeY}; ${planeZ} · N ${normalX}; ${normalY}; ${normalZ}`}
+          >
+            <div className="grid min-w-0 grid-cols-3 gap-2">
               <LabeledInput
-                label="Punkt X (m)"
+                label="Punkt X"
                 keyboardType="numeric"
                 value={planeX}
                 onChangeText={setPlaneX}
               />
               <LabeledInput
-                label="Punkt Y (m)"
+                label="Punkt Y"
                 keyboardType="numeric"
                 value={planeY}
                 onChangeText={setPlaneY}
               />
               <LabeledInput
-                label="Punkt Z (m)"
+                label="Punkt Z"
                 keyboardType="numeric"
                 value={planeZ}
                 onChangeText={setPlaneZ}
               />
-            </div>
-            <div className="grid grid-cols-3 gap-2">
               <LabeledInput
                 label="Normale X"
                 keyboardType="numeric"
@@ -517,9 +597,9 @@ export function BuilderPanel({
               />
             </div>
             <Button variant="outline" onClick={applyNumericCutPlane}>
-              Punkt und Normale übernehmen
+              Punkt + Normale setzen
             </Button>
-            <div className="grid grid-cols-[1fr_1fr_0.8fr] gap-2">
+            <div className="grid min-w-0 grid-cols-3 gap-2 border-t border-border/60 pt-2">
               <DropdownField
                 label="Ausgangsnormale"
                 options={CUT_PLANE_AXIS_OPTIONS}
@@ -533,75 +613,84 @@ export function BuilderPanel({
                 onChange={setPlaneRotationAxis}
               />
               <LabeledInput
-                label="Winkel (°)"
+                label="Winkel °"
                 keyboardType="numeric"
                 value={planeAngle}
                 onChangeText={setPlaneAngle}
               />
             </div>
             <Button variant="outline" onClick={applyAxisAngleCutPlane}>
-              Achse und Winkel übernehmen
+              Achse + Winkel setzen
             </Button>
-            {!splitSupported && selectedBody.hasRepresentation ? (
-              <InlineAlert tone="warning">
-                Die Auswahl besitzt keine geeignete Produktplatzierung.
-              </InlineAlert>
-            ) : null}
-            <Button
-              disabled={
-                !splitSupported || !cutPlane.active || !cutPlane.position
-              }
-              title="Erzeugt zwei eigenständige IFC-Objekte auf beiden Seiten der Ebene"
-              variant="default"
-              onClick={onSplitSelected}
-            >
-              <Scissors aria-hidden className="size-3.5" />
-              An Schnittebene teilen
-            </Button>
-          </div>
+          </CollapsibleSection>
 
-          <div className="grid gap-2 rounded-md border border-border/60 bg-muted/20 p-2.5">
-            <div>
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground">
-                Körper kombinieren
-              </h3>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                Verbindet die Mehrfachauswahl zu einem IFC-Objekt mit einer
-                gemeinsamen Mehrkörper-Geometrie.
-              </p>
-            </div>
-            <LabeledInput
-              label="Name des neuen Teils"
-              value={combinedName}
-              onChangeText={setCombinedName}
-            />
+          {selectedBody.hasRepresentation && !splitSupported ? (
+            <InlineAlert tone="warning">
+              Auswahl hat keine Produktplatzierung.
+            </InlineAlert>
+          ) : null}
+          {!selectedBody.hasRepresentation ? (
+            <InlineAlert tone="warning">
+              #{selectedId} hat keine Körper-Geometrie.
+            </InlineAlert>
+          ) : null}
+          <Button
+            disabled={splitBlockedReason !== undefined}
+            title={
+              splitBlockedReason ??
+              "Zwei eigenständige IFC-Objekte beidseits der Ebene erzeugen"
+            }
+            variant="default"
+            onClick={onSplitSelected}
+          >
+            <Scissors aria-hidden />
+            An Ebene teilen
+          </Button>
+        </TabsContent>
+
+        <TabsContent className="grid min-w-0 gap-2" value="combine">
+          <LabeledInput
+            label="Name des neuen Teils"
+            value={combinedName}
+            onChangeText={setCombinedName}
+          />
+          <div title="Aus: Quellobjekte werden nach dem Kombinieren entfernt (Undo möglich)">
             <CheckboxField
               checked={keepCombineSources}
-              description="Aus: Die bisherigen Objekte werden nach erfolgreichem Kombinieren entfernt (per Undo rückgängig)."
               label="Quellobjekte behalten"
               onCheckedChange={setKeepCombineSources}
             />
-            <Button
-              disabled={!combineSupported}
-              title={
-                combineSupported
-                  ? `${selectedIds.length} Geometrien zu einem Teil kombinieren`
-                  : "Mindestens zwei platzierte Objekte mit Geometrie per Strg-/Umschalt-Klick auswählen"
-              }
-              variant="default"
-              onClick={() =>
-                onCombineSelected(combinedName, !keepCombineSources)
-              }
-            >
-              <Combine aria-hidden className="size-3.5" />
-              {selectedIds.length >= 2
-                ? `${selectedIds.length} Geometrien kombinieren`
-                : "Mehrfachauswahl kombinieren"}
-            </Button>
           </div>
-        </div>
+          {!combineSupported ? (
+            <p className="text-xs text-muted-foreground">
+              Mind. 2 platzierte Körper wählen (Strg-/Umschalt-Klick).
+            </p>
+          ) : null}
+          <Button
+            disabled={!combineSupported}
+            title={
+              combineSupported
+                ? `${selectedIds.length} Geometrien zu einem Teil mit Mehrkörper-Geometrie kombinieren`
+                : "Mindestens zwei platzierte Objekte mit Geometrie auswählen"
+            }
+            variant="default"
+            onClick={() =>
+              onCombineSelected(combinedName, !keepCombineSources)
+            }
+          >
+            <Combine aria-hidden />
+            {selectedIds.length >= 2
+              ? `${selectedIds.length} Körper kombinieren`
+              : "Kombinieren"}
+          </Button>
+        </TabsContent>
 
-        <div className="border-t border-border/60 pt-2.5">
+        <TabsContent className="grid min-w-0 gap-2" value="remove">
+          {!selectedBody.hasRepresentation ? (
+            <InlineAlert tone="warning">
+              #{selectedId} hat keine Körper-Geometrie.
+            </InlineAlert>
+          ) : null}
           <Button
             className="w-full min-w-0 border-destructive/40 text-destructive hover:border-destructive hover:bg-destructive/10 hover:text-destructive"
             disabled={!selectedBody.hasRepresentation}
@@ -613,13 +702,71 @@ export function BuilderPanel({
             variant="outline"
             onClick={onRemoveBodyFromSelected}
           >
-            <Trash2 aria-hidden className="size-3.5" />
-            <span className="truncate">Ausgewählte Geometrie löschen</span>
+            <Trash2 aria-hidden />
+            <span className="truncate">Körper-Geometrie entfernen</span>
           </Button>
-        </div>
-      </section>
+        </TabsContent>
+      </Tabs>
     </PanelShell>
   );
+}
+
+function Section({
+  aside,
+  children,
+  title,
+}: {
+  aside?: ReactNode;
+  children: ReactNode;
+  title: string;
+}) {
+  return (
+    <section className="grid min-w-0 shrink-0 gap-1.5">
+      <div className="flex min-h-6 min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-1">
+        <h3 className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+          {title}
+        </h3>
+        {aside}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function FieldGrid({ children, min }: { children: ReactNode; min: string }) {
+  return (
+    <div
+      className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(var(--field-min),1fr))] gap-2"
+      style={{ "--field-min": min } as CSSProperties}
+    >
+      {children}
+    </div>
+  );
+}
+
+function shortLengthUnit(metersPerUnit: number) {
+  if (Math.abs(metersPerUnit - 1) < 1e-9) {
+    return "m";
+  }
+  if (Math.abs(metersPerUnit - 0.001) < 1e-9) {
+    return "mm";
+  }
+  if (Math.abs(metersPerUnit - 0.01) < 1e-9) {
+    return "cm";
+  }
+  if (Math.abs(metersPerUnit - 0.3048) < 1e-6) {
+    return "ft";
+  }
+  return `×${metersPerUnit}`;
+}
+
+function describeCoordinateClipboard(clipboard: CoordinateClipboard) {
+  const placement = coordinateClipboardToBodyPlacement(clipboard);
+  const source =
+    clipboard.source === "thatopen"
+      ? `${clipboard.fileName ?? "3D-Viewer"}${clipboard.entityId ? ` / #${clipboard.entityId}` : ""}`
+      : "System-Clipboard";
+  return `X ${placement.x}, Y ${placement.y}, Z ${placement.z} (${source}, ${clipboard.copiedAt})`;
 }
 
 function describeLengthUnit(metersPerUnit: number) {
@@ -656,58 +803,6 @@ function isHierarchyRelationship(type: string) {
     type === "IFCRELCONTAINEDINSPATIALSTRUCTURE"
   );
 }
-
-function FormGrid({ children }: { children: ReactNode }) {
-  return (
-    <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-2">
-      {children}
-    </div>
-  );
-}
-
-function StatusPill({
-  icon,
-  label,
-  value,
-}: {
-  icon: ReactNode;
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="grid min-w-0 grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-2">
-      <span className="flex min-w-0 items-center gap-1.5 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-        <span className="shrink-0">{icon}</span>
-        <span className="truncate">{label}</span>
-      </span>
-      <span className="truncate text-xs text-foreground" title={value}>
-        {value}
-      </span>
-    </div>
-  );
-}
-
-function describeCoordinateClipboard(clipboard: CoordinateClipboard) {
-  const source = clipboard.fileName ?? clipboard.source;
-  const placement = coordinateClipboardToBodyPlacement(clipboard);
-  if (clipboard.source !== "thatopen") {
-    return `X ${clipboard.x}, Y ${clipboard.y}, Z ${clipboard.z} (${source}, ${clipboard.copiedAt})`;
-  }
-  return `Viewer X ${placement.x}, Y ${placement.y}, Z ${placement.z} (${source}, ${clipboard.copiedAt})`;
-}
-
-function describeCoordinateSource(clipboard: CoordinateClipboard | null) {
-  if (!clipboard) {
-    return "Kein Picker-Punkt";
-  }
-  if (clipboard.source === "thatopen") {
-    return clipboard.fileName
-      ? `${clipboard.fileName}${clipboard.entityId ? ` / #${clipboard.entityId}` : ""}`
-      : "3D-Viewer";
-  }
-  return "System-Clipboard";
-}
-
 function coordinateClipboardToBodyPlacement(clipboard: CoordinateClipboard) {
   return {
     x: formatBodyCoordinate(readCoordinateNumber(clipboard.x)),
