@@ -104,6 +104,7 @@ Alle Befehle im Verzeichnis `editor` ausführen:
 > `cargo clean -p ifcnative --release --manifest-path src-tauri/Cargo.toml`.
 > Für `release:prepare` den Schlüssel per `TAURI_SIGNING_PRIVATE_KEY_PATH` auf den
 > Hauptcheckout zeigen lassen, statt ihn zu kopieren.
+
 1. Version in `package.json`, `package-lock.json`, `src-tauri/Cargo.toml` und
    `src-tauri/tauri.conf.json` gemeinsam erhöhen; `Cargo.lock` über Cargo aktualisieren.
 2. `patchnotes/<Version>.json` anlegen (Beispiel: `patchnotes/1.4.14.json`).
@@ -112,15 +113,7 @@ Alle Befehle im Verzeichnis `editor` ausführen:
    `cargo test --manifest-path src-tauri/Cargo.toml --lib` ausführen.
 4. `npm run desktop:installer` bauen. Wenn Windows-Code-Signing auch für die
    App-EXE gewünscht ist, dieses im Tauri-Bundle-Schritt konfigurieren.
-   **Worktree-Builds:** `editor/.env` und `editor/.release-keys/` liegen nur im
-   Hauptcheckout und sind gitignored. Vor dem Build die `.env` in den
-   Worktree-Ordner `editor` kopieren, sonst wird ein leerer SAS-Token
-   eingebaut und die ausgelieferte Version findet keine Updates mehr. Taucht
-   die `.env` erst nach einem Build auf, erkennt Cargo das nicht zuverlässig:
-   dann `cargo clean -p ifcnative --release --manifest-path src-tauri/Cargo.toml`
-   und neu bauen. Prüfung: `src-tauri/target/release/build/ifcnative-*/out/update-sas-token.txt`
-   darf nicht 0 Bytes groß sein. Für `release:prepare` den Schlüssel per
-   `TAURI_SIGNING_PRIVATE_KEY_PATH` aus dem Hauptcheckout referenzieren.
+   Bei einem Worktree-Build den Hinweis oben beachten.
 5. Den fertigen NSIS-Installer mit deinem Windows-Code-Signing-Zertifikat signieren.
 6. **Danach** `npm run release:prepare` ausführen. Das Skript prüft die
    Windows-Signatur und Produktversion, erzeugt die zusätzliche Tauri-Signatur,
