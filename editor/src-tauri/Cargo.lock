@@ -1646,7 +1646,7 @@ dependencies = [
 
 [[package]]
 name = "ifcnative"
-version = "1.4.17"
+version = "1.4.18"
 dependencies = [
  "dotenvy",
  "regex",
