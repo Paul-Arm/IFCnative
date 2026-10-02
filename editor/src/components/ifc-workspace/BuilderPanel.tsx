@@ -70,6 +70,13 @@ const PLACEMENT_MODE_OPTIONS = [
   { label: "Relativ zum Parent", value: "parent" },
 ];
 
+/** Einordnung des neuen Körpers in die IFC-Struktur, bezogen auf die Auswahl. */
+type HierarchyTarget = "child" | "parent";
+const HIERARCHY_TARGET_OPTIONS = [
+  { label: "Als Kind der Auswahl", value: "child" },
+  { label: "Am Parent der Auswahl", value: "parent" },
+];
+
 const CUT_PLANE_AXIS_OPTIONS = [
   { label: "X", value: "x" },
   { label: "Y (Höhe)", value: "y" },
@@ -149,6 +156,10 @@ export function BuilderPanel({
   const [tool, setTool] = useState<BuilderTool>("split");
   const selectedEntity = document.entityById.get(selectedId);
   const selectedParentId = findHierarchyParentId(document, selectedId);
+  const [hierarchyTarget, setHierarchyTarget] =
+    useState<HierarchyTarget>("child");
+  const targetParentId =
+    hierarchyTarget === "child" ? selectedId : selectedParentId;
   const selectedBody = getNativeBodyRepresentation(document, selectedId);
   const unitScale = getNativeLengthUnitScale(document);
   const splitSupported =
@@ -258,6 +269,7 @@ export function BuilderPanel({
       depth: bodyDepth,
       height: bodyHeight,
       name: bodyName,
+      parentId: targetParentId,
       placementMode: "world",
       profile: bodyProfile,
       tag: bodyTag,
@@ -277,6 +289,7 @@ export function BuilderPanel({
     bodyType,
     bodyWidth,
     surfacePlacementActive,
+    targetParentId,
   ]);
 
   const splitBlockedReason = !selectedBody.hasRepresentation
@@ -425,50 +438,51 @@ export function BuilderPanel({
           </label>
         }
       >
-        <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(6.5rem,1fr))] gap-1.5">
+        {/* Einordnung (Toggle) und Platzierungsart (Aktion) sind getrennt:
+            beide Platzierungswege legen den Körper unter dem hier gewählten
+            Struktur-Parent an. */}
+        <SegmentedControl
+          options={HIERARCHY_TARGET_OPTIONS}
+          value={hierarchyTarget}
+          onChange={(value) => setHierarchyTarget(value as HierarchyTarget)}
+        />
+        <div className="grid min-w-0 grid-cols-2 gap-1.5">
           <Button
             className="w-full min-w-0"
-            title={`Körper als Kind von #${selectedId} erstellen`}
-            variant="default"
-            onClick={() =>
-              onAddBodyElement({ ...bodyDraft, parentId: selectedId })
-            }
-          >
-            <Box aria-hidden />
-            <span className="truncate">Als Kind</span>
-          </Button>
-          <Button
-            className="w-full min-w-0"
-            disabled={selectedParentId == null}
+            disabled={targetParentId == null || surfacePlacementActive}
             title={
-              selectedParentId == null
+              targetParentId == null
                 ? "Auswahl hat keinen Parent"
-                : `Körper am Parent #${selectedParentId} der Auswahl erstellen`
+                : `Körper an X/Y/Z unter #${targetParentId} erstellen`
             }
             variant="default"
             onClick={() => {
-              if (selectedParentId == null) {
+              if (targetParentId == null) {
                 return;
               }
-              onAddBodyElement({
-                ...bodyDraft,
-                parentId: selectedParentId,
-              });
+              onAddBodyElement({ ...bodyDraft, parentId: targetParentId });
             }}
           >
             <Box aria-hidden />
-            <span className="truncate">Am Parent</span>
+            <span className="truncate">An Position</span>
           </Button>
           <Button
             className="w-full min-w-0"
+            disabled={targetParentId == null && !surfacePlacementActive}
             title={
               surfacePlacementActive
                 ? "Platzierungsmodus beenden (Esc)"
-                : "Fläche im 3D-Viewer anklicken, Körper wird per Raycast dort gesetzt"
+                : targetParentId == null
+                  ? "Auswahl hat keinen Parent"
+                  : `Fläche im 3D-Viewer anklicken, Körper wird per Raycast dort unter #${targetParentId} gesetzt`
             }
             variant={surfacePlacementActive ? "secondary" : "default"}
             onClick={() =>
-              onSurfacePlacementChange(surfacePlacementActive ? null : bodyDraft)
+              onSurfacePlacementChange(
+                surfacePlacementActive || targetParentId == null
+                  ? null
+                  : { ...bodyDraft, parentId: targetParentId },
+              )
             }
           >
             <Target aria-hidden />
@@ -478,9 +492,10 @@ export function BuilderPanel({
           </Button>
         </div>
         {surfacePlacementActive ? (
-          <InlineAlert>Fläche im Viewer anklicken.</InlineAlert>
-        ) : null}
-        {selectedParentId == null ? (
+          <InlineAlert>
+            Fläche im Viewer anklicken – Körper landet unter #{targetParentId}.
+          </InlineAlert>
+        ) : targetParentId == null ? (
           <InlineAlert tone="warning">Auswahl hat keinen Parent.</InlineAlert>
         ) : null}
       </Section>

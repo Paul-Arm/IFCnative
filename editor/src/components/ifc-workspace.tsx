@@ -2309,7 +2309,10 @@ export default function IfcWorkspace() {
   // Die Projektion in die (georeferenzierte) Platzierungskette des Parents —
   // kleine lokale Koordinaten statt riesiger Absolutwerte — übernimmt
   // addNativeBodyElement.
-  const addBodyElement = (options: BodyElementDraft) => {
+  const addBodyElement = (
+    options: BodyElementDraft,
+    { keepSelection = false }: { keepSelection?: boolean } = {},
+  ) => {
     const parentId = options.parentId ?? selectedId;
     const addedId = getNextNativeEntityId(document);
     const scale = getNativeLengthUnitScale(document);
@@ -2367,7 +2370,9 @@ export default function IfcWorkspace() {
     const subset = extractNativeSubsetIfc(next, [addedId]);
     commitDocument(
       next,
-      addedId,
+      // Serien-Platzierung ("Auf Fläche"): Auswahl stehen lassen, sonst würde
+      // "Als Kind der Auswahl" jeden neuen Körper in den vorherigen schachteln.
+      keepSelection && next.entityById.has(selectedId) ? selectedId : addedId,
       `Create ${options.type} '${options.name}' under #${parentId}${oriented ? " (orthogonal to surface)" : ""}`,
       `builder.createBodyElement({ class: '${options.type}', name: ${JSON.stringify(options.name)}, parentId: ${parentId}, id: ${addedId}, profile: '${options.profile ?? "rectangle"}', width: ${options.width}, depth: ${options.depth}, height: ${options.height}${options.surfaceNormal ? `, surfaceNormal: { x: ${formatCoordinate(options.surfaceNormal.x)}, y: ${formatCoordinate(options.surfaceNormal.y)}, z: ${formatCoordinate(options.surfaceNormal.z)} }` : ""} });`,
       undefined,
@@ -2511,14 +2516,21 @@ export default function IfcWorkspace() {
   // Körper-Builder "Auf Fläche setzen": Klick auf eine Fläche im Viewer legt
   // den Panel-Entwurf am Trefferpunkt an — orthogonal zur Fläche, sofern
   // eingeschaltet. Der Modus bleibt aktiv (mehrere Körper hintereinander).
+  // Struktur-Parent ist die im Panel gewählte Einordnung (Kind/Parent der
+  // Auswahl); nur ohne Vorgabe der räumliche Container des Treffers.
   const placeBodyOnSurface = (target: ViewerContextMenuTarget) => {
     const placement = surfacePlacement;
     if (!placement) {
       return;
     }
+    const draftParentId =
+      placement.draft.parentId != null &&
+      document.entityById.has(placement.draft.parentId)
+        ? placement.draft.parentId
+        : undefined;
     addBodyElement({
       ...placement.draft,
-      parentId: spatialParentForViewerTarget(target),
+      parentId: draftParentId ?? spatialParentForViewerTarget(target),
       placementMode: "world",
       placementRelativeToId: viewerTargetInActiveDocument(target)
         ? target.entityId
@@ -2527,7 +2539,7 @@ export default function IfcWorkspace() {
       x: String(target.point.x),
       y: String(target.point.y),
       z: String(target.point.z),
-    });
+    }, { keepSelection: true });
   };
 
   const startSurfacePlacement = (draft: BodyElementDraft | null) => {
