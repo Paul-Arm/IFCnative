@@ -94,6 +94,16 @@ application/json` und `Cache-Control: no-cache` setzen. Installer:
 
 Alle Befehle im Verzeichnis `editor` ausführen:
 
+> **Build in einem Git-Worktree:** `.env` und `.release-keys/` sind ignoriert und
+> liegen deshalb nur im Hauptcheckout (`editor/` unter dem Repository-Stamm).
+> Vor dem Build die `.env` in den Worktree-Ordner `editor` kopieren, sonst wird der
+> SAS-Token leer eingebaut und die ausgelieferte Version findet keine Updates.
+> Prüfen: `src-tauri/target/release/build/ifcnative-*/out/update-sas-token.txt`
+> muss nach dem Build größer als 0 Bytes sein. Erscheint die `.env` erst nach einem
+> Build, läuft `build.rs` nicht automatisch erneut — vorher
+> `cargo clean -p ifcnative --release --manifest-path src-tauri/Cargo.toml`.
+> Für `release:prepare` den Schlüssel per `TAURI_SIGNING_PRIVATE_KEY_PATH` auf den
+> Hauptcheckout zeigen lassen, statt ihn zu kopieren.
 1. Version in `package.json`, `package-lock.json`, `src-tauri/Cargo.toml` und
    `src-tauri/tauri.conf.json` gemeinsam erhöhen; `Cargo.lock` über Cargo aktualisieren.
 2. `patchnotes/<Version>.json` anlegen (Beispiel: `patchnotes/1.4.14.json`).
