@@ -1,0 +1,12 @@
+{
+  "version": "1.4.17",
+  "title": "Messwerkzeug im 3D-Viewer und Körper auf Flächen setzen",
+  "publishedAt": "2026-10-02T09:00:00.000Z",
+  "changes": [
+    "Neues Messwerkzeug im 3D-Viewer (Taste M): Strecken mit X/Y/Z-Abständen, Kantenlängen, Winkel aus drei Punkten und das Lot von einem Punkt auf eine Fläche.",
+    "Beim Messen fängt der Cursor Ecken, Kanten und Flächen sowie bereits gesetzte Messpunkte. Fanglinien entlang der Achsen und der Kantenverlängerung helfen beim Ausrichten; Umschalt hält die Messung orthogonal.",
+    "Messungen bleiben als Labels in der Szene stehen und lassen sich einzeln oder gesamt entfernen. Die Messleiste passt sich schmalen Viewer-Fenstern an.",
+    "Körper-Builder: Über das Rechtsklickmenü eingefügte Körper stehen orthogonal auf der getroffenen Fläche. Der neue Modus „Auf Fläche setzen“ zeigt den geplanten Körper als Vorschau unter dem Zeiger und platziert ihn per Klick.",
+    "Der Körper-Builder ist aufgeräumt: Element, Geometrie, Position und Erstellen in klaren Gruppen, Teilen, Kombinieren und Entfernen als Werkzeug-Tabs, Erklärtexte als Tooltips."
+  ]
+}
